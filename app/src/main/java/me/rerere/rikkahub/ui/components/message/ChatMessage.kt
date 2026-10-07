@@ -570,19 +570,15 @@ private fun ChatMessageBubble(
 @Composable
 private fun ChatMessageCitations(annotations: List<UIMessageAnnotation>) {
     var expand by remember { mutableStateOf(false) }
-    val urls = remember(annotations) {
-        annotations.map { annotation ->
-            when (annotation) {
-                is UIMessageAnnotation.UrlCitation -> annotation.url
-            }
-        }
-    }
+    val citations = remember(annotations) { annotations.filterIsInstance<UIMessageAnnotation.UrlCitation>() }
+    if (citations.isEmpty()) return
+    val urls = remember(citations) { citations.map { it.url } }
     Column(
         modifier = Modifier.animateContentSize(MaterialTheme.motionScheme.defaultSpatialSpec()),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         ChatMessageFileChip(
-            text = stringResource(R.string.citations_count, annotations.size),
+            text = stringResource(R.string.citations_count, citations.size),
             onClick = { expand = !expand },
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             icon = { FaviconRow(urls = urls, size = 18.dp) },
@@ -601,23 +597,19 @@ private fun ChatMessageCitations(annotations: List<UIMessageAnnotation>) {
                         modifier = Modifier.padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        annotations.fastForEachIndexed { index, annotation ->
-                            when (annotation) {
-                                is UIMessageAnnotation.UrlCitation -> {
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Favicon(annotation.url, modifier = Modifier.size(20.dp))
-                                        Text(
-                                            text = buildAnnotatedString {
-                                                append("${index + 1}. ")
-                                                withLink(LinkAnnotation.Url(annotation.url)) {
-                                                    append(annotation.title.urlDecode())
-                                                }
-                                            }
-                                        )
+                        citations.fastForEachIndexed { index, annotation ->
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Favicon(annotation.url, modifier = Modifier.size(20.dp))
+                                Text(
+                                    text = buildAnnotatedString {
+                                        append("${index + 1}. ")
+                                        withLink(LinkAnnotation.Url(annotation.url)) {
+                                            append(annotation.title.urlDecode())
+                                        }
                                     }
-                                }
+                                )
                             }
                         }
                     }

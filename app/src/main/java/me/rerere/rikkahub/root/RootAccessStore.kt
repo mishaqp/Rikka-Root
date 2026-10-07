@@ -39,10 +39,28 @@ class RootAccessStore(private val directory: File) {
     private val initial = readState()
     private val permissionState = MutableStateFlow(initial.permissions)
     private val history = MutableStateFlow(initial.entries)
+    private val webConversations = MutableStateFlow(initial.webContentConversations)
     val permissions: StateFlow<ToolPermissions> = permissionState.asStateFlow()
     val entries: StateFlow<List<RootCommandLogEntry>> = history.asStateFlow()
+    val webContentConversations: StateFlow<Set<String>> = webConversations.asStateFlow()
 
-    fun isAllowed(toolName: String): Boolean = permissions.value.autoApproveAll || toolName in permissions.value.alwaysAllow
+    fun isWebTainted(conversationId: String?): Boolean = conversationId != null && conversationId in webConversations.value
+
+    fun isAllowed(toolName: String, conversationId: String? = null): Boolean {
+        val snapshot = permissions.value
+        return !isWebTainted(conversationId) && (snapshot.autoApproveAll || toolName in snapshot.alwaysAllow)
+    }
+
+    suspend fun markWebContent(conversationId: String) = mutex.withLock {
+        require(conversationId.isNotBlank() && conversationId.length <= 128)
+        if (conversationId in webConversations.value) return@withLock
+        // Fail closed immediately. A failed durable mark stops generation before any later tool.
+        val next = webConversations.value + conversationId
+        webConversations.value = next
+        withContext(NonCancellable + Dispatchers.IO) {
+            writeState(StoredRootAccess(permissionState.value, history.value, next))
+        }
+    }
 
     suspend fun setAutoApprove(enabled: Boolean) = changePermissions(revoking = !enabled) { it.copy(autoApproveAll = enabled) }
 
@@ -62,7 +80,7 @@ class RootAccessStore(private val directory: File) {
         if (revoking) permissionState.value = next
         withContext(NonCancellable + Dispatchers.IO) {
             try {
-                writeState(StoredRootAccess(next, history.value))
+                writeState(StoredRootAccess(next, history.value, webConversations.value))
                 permissionState.value = next
             } catch (error: IOException) {
                 if (revoking) {
@@ -83,7 +101,7 @@ class RootAccessStore(private val directory: File) {
             command = RootCommandRedactor.redact(command),
         )
         val next = (history.value + entry).takeLast(MAX_ENTRIES)
-        withContext(Dispatchers.IO) { writeState(StoredRootAccess(permissionState.value, next)) }
+        withContext(Dispatchers.IO) { writeState(StoredRootAccess(permissionState.value, next, webConversations.value)) }
         history.value = next
         entry.id
     }
@@ -94,7 +112,7 @@ class RootAccessStore(private val directory: File) {
         val next = history.value.map { if (it.id == id) it.copy(exitCode = exitCode, status = safeStatus) else it }
         // The actual outcome is known even when the final disk write fails.
         history.value = next
-        withContext(Dispatchers.IO) { writeState(StoredRootAccess(permissionState.value, next)) }
+        withContext(Dispatchers.IO) { writeState(StoredRootAccess(permissionState.value, next, webConversations.value)) }
     }
 
     private fun readState(): StoredRootAccess = runCatching {
@@ -153,4 +171,5 @@ private data class StoredRootAccess(
     // Old enabledAssistants is intentionally ignored: assistant consent is not global consent.
     val permissions: ToolPermissions = ToolPermissions(),
     val entries: List<RootCommandLogEntry> = emptyList(),
+    val webContentConversations: Set<String> = emptySet(),
 )

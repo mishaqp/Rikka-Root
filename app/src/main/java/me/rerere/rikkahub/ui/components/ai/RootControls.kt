@@ -39,24 +39,29 @@ import org.koin.compose.koinInject
 
 /** Reads live access state, independently of the conversation's frozen configuration. */
 @Composable
-fun RootAutomaticIndicator() {
+fun RootAutomaticIndicator(conversationId: String) {
     val store = koinInject<RootAccessStore>()
     val permissions by store.permissions.collectAsStateWithLifecycle()
+    val webConversations by store.webContentConversations.collectAsStateWithLifecycle()
+    val webBlocked = conversationId in webConversations
+    val automaticGrants = permissions.autoApproveAll || permissions.alwaysAllow.isNotEmpty()
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
     val errorText by rememberUpdatedState(stringResource(R.string.root_access_save_failed))
     var pending by remember { mutableStateOf(false) }
-    if (!permissions.autoApproveAll && permissions.alwaysAllow.isEmpty()) return
+    if (!automaticGrants && !webBlocked) return
 
     Surface(color = MaterialTheme.colorScheme.errorContainer) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    if (permissions.autoApproveAll) "Автоодобрение инструментов включено" else "Для инструментов включено «Всегда разрешать»",
+                    if (webBlocked) "подтверждения включены из-за веб-контента"
+                    else if (permissions.autoApproveAll) "Автоодобрение инструментов включено"
+                    else "Для инструментов включено «Всегда разрешать»",
                     style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(
+                if (automaticGrants) TextButton(
                     enabled = !pending,
                     onClick = {
                         pending = true
@@ -75,7 +80,8 @@ fun RootAutomaticIndicator() {
                 ) { Text(stringResource(R.string.root_automatic_disable)) }
             }
             Text(
-                stringResource(R.string.root_automatic_disable_hint),
+                if (webBlocked) "В этом разговоре автоматические разрешения не применяются. Глобальные настройки сохранены."
+                else stringResource(R.string.root_automatic_disable_hint),
                 style = MaterialTheme.typography.bodySmall,
             )
         }

@@ -4,6 +4,7 @@ import android.util.Log
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import me.rerere.ai.core.Tool
+import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.rikkahub.data.ai.mcp.McpManager
@@ -42,6 +43,7 @@ class ChatToolFactory(
         assistant: Assistant,
         model: Model,
         workspaceCwd: String? = null,
+        conversationId: String? = null,
     ): List<Tool> = buildList {
         if (assistant.enableMemory) {
             val memoryAssistantId = if (assistant.useGlobalMemory) {
@@ -94,7 +96,13 @@ class ChatToolFactory(
                 )
             )
         }
-    }.map { ToolPermissionPolicy.apply(it, rootAccessStore) }
+    }.map { ToolPermissionPolicy.apply(it, rootAccessStore, conversationId) }
+
+    suspend fun restoreWebContentGuard(conversationId: String, messages: List<UIMessage>) {
+        if (WebContentGuard.hasWebContent(messages)) markWebContent(conversationId)
+    }
+
+    suspend fun markWebContent(conversationId: String) = rootAccessStore.markWebContent(conversationId)
 
     private suspend fun createWorkspaceToolsIfReady(workspaceId: String?, cwd: String?): List<Tool> {
         if (workspaceId.isNullOrBlank()) return emptyList()

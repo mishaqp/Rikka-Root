@@ -41,11 +41,12 @@ object ToolPermissionPolicy {
     fun canGrantAlways(name: String, input: JsonElement): Boolean =
         name != "ask_user" && !mandatoryConfirmation(name, input)
 
-    fun apply(tool: Tool, store: RootAccessStore): Tool = tool.copy(needsApproval = { input ->
+    fun apply(tool: Tool, store: RootAccessStore, conversationId: String? = null): Tool = tool.copy(needsApproval = { input ->
         when {
             tool.name == "ask_user" -> true // Interactive answers must never be auto-filled.
             mandatoryConfirmation(tool.name, input) -> true
-            sideEffect(tool.name, input) || tool.needsApproval(input) -> !store.isAllowed(tool.name)
+            tool.name.startsWith("mcp__") && store.isWebTainted(conversationId) -> true
+            sideEffect(tool.name, input) || tool.needsApproval(input) -> !store.isAllowed(tool.name, conversationId)
             else -> false
         }
     })

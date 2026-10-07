@@ -12,7 +12,10 @@ import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessagePart
 
 /** Approval provenance is trusted coroutine context, never model-controlled JSON. */
-internal class RootInvocation(val automatic: Boolean) : AbstractCoroutineContextElement(Key) {
+internal class RootInvocation(
+    val automatic: Boolean,
+    val automaticAllowed: () -> Boolean = { true },
+) : AbstractCoroutineContextElement(Key) {
     companion object Key : CoroutineContext.Key<RootInvocation>
 }
 
@@ -36,7 +39,7 @@ internal suspend fun executeRootToolOnce(
     persistStarted(started)
     currentCoroutineContext().ensureActive()
     check(authorised()) { "Automatic root permission was revoked before launch. Request a new command with approval." }
-    return withContext(RootInvocation(automatic = tool.approvalState == ToolApprovalState.Auto)) { execute() }
+    return withContext(RootInvocation(automatic = tool.approvalState == ToolApprovalState.Auto, automaticAllowed)) { execute() }
 }
 
 /** Only root uses this path; checkpointed calls remain terminal. */

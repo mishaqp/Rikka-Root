@@ -527,7 +527,10 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
         val groundingMetadata = message["groundingMetadata"]?.jsonObject
         Log.i(TAG, "parseMessage: $groundingMetadata")
-        val annotations = parseSearchGroundingMetadata(groundingMetadata)
+        val annotations = parseSearchGroundingMetadata(groundingMetadata) +
+            if (groundingMetadata != null || message["urlContextMetadata"] != null) {
+                listOf(UIMessageAnnotation.WebContentUsed)
+            } else emptyList()
 
         return UIMessage(
             role = role,

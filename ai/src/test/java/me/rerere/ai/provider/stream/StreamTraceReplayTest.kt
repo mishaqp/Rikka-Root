@@ -38,6 +38,15 @@ import org.junit.Test
 
 class StreamTraceReplayTest {
     @Test
+    fun `metadata only URL context event retains web provenance after text has streamed`() {
+        val decoder = GoogleStreamDecoder("response", "model")
+        decoder.accept(SseEvent(data = """{"candidates":[{"content":{"role":"model","parts":[{"text":"answer"}]}}]}"""))
+        val result = decoder.accept(SseEvent(data = """{"candidates":[{"urlContextMetadata":{"urlMetadata":[]}}]}"""))
+        val annotations = result.chunks.filterIsInstance<StreamChunk.Annotations>().flatMap { it.annotations }
+        assertTrue(UIMessageAnnotation.WebContentUsed in annotations)
+    }
+
+    @Test
     fun `replay DeepSeek Claude mixed tool trace`() {
         assertTrace(
             "generated/claude/deepseek-anthropic-tool",
@@ -406,6 +415,7 @@ class StreamTraceReplayTest {
         putJsonArray("annotations") {
             annotations.forEach { annotation ->
                 when (annotation) {
+                    UIMessageAnnotation.WebContentUsed -> add(buildJsonObject { put("type", "web_content_used") })
                     is UIMessageAnnotation.UrlCitation -> add(buildJsonObject {
                         put("type", "url_citation")
                         put("title", annotation.title)

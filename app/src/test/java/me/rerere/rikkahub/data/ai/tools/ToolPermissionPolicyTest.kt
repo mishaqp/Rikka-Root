@@ -15,6 +15,27 @@ class ToolPermissionPolicyTest {
     @get:Rule val temp = TemporaryFolder()
     private val empty = Json.parseToJsonElement("{}")
 
+    @Test fun webGuardOverridesEveryGrantButKeepsReadOnlyToolsAndOtherChats() = runBlocking {
+        val store = RootAccessStore(temp.newFolder())
+        store.setAutoApprove(true)
+        ToolPermissionPolicy.registry.keys.forEach { store.grantAlways(it) }
+        val original = store.permissions.value
+        store.markWebContent("web-chat")
+        for (name in ToolPermissionPolicy.registry.keys + "mcp__server__write") {
+            val args = if (name == "root_exec") buildJsonObject { put("command", "id") } else empty
+            val originalTool = Tool(name, "test", needsApproval = { true }, execute = { emptyList() })
+            val webTool = ToolPermissionPolicy.apply(originalTool, store, "web-chat")
+            val freshTool = ToolPermissionPolicy.apply(originalTool, store, "new-chat")
+            assertTrue(name, webTool.needsApproval(args))
+            assertFalse(name, freshTool.needsApproval(args))
+            assertEquals(original, store.permissions.value)
+        }
+        val read = ToolPermissionPolicy.apply(Tool("clipboard_tool", "test", execute = { emptyList() }), store, "web-chat")
+        assertFalse(read.needsApproval(buildJsonObject { put("action", "read") }))
+        val preallowedMcp = ToolPermissionPolicy.apply(Tool("mcp__server__opaque", "test", execute = { emptyList() }), store, "web-chat")
+        assertTrue("Opaque MCP preapproval cannot bypass the web guard", preallowedMcp.needsApproval(empty))
+    }
+
     @Test fun defaultRequiresApprovalAndGlobalOrAlwaysAllowsSideEffects() = runBlocking {
         val store = RootAccessStore(temp.newFolder())
         ToolPermissionPolicy.registry.keys.forEach { name ->

@@ -46,7 +46,8 @@ fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = nul
         val timeout = if (timeoutValue == null) 30_000 else (timeoutValue as? JsonPrimitive)?.takeIf { !it.isString }?.intOrNull
         val automaticAtStart = assistantId != null && accessStore?.isAllowed("root_exec") == true
         // Trusted invocation provenance survives revocation between journal acknowledgment and entry.
-        val automaticInvocation = currentCoroutineContext()[RootInvocation]?.automatic ?: automaticAtStart
+        val invocation = currentCoroutineContext()[RootInvocation]
+        val automaticInvocation = invocation?.automatic ?: automaticAtStart
         val result = when {
             command.isNullOrBlank() || timeout == null -> buildJsonObject {
                 put("error", "invalid_arguments")
@@ -67,7 +68,8 @@ fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = nul
                 var journalError = false
                 val executed = try {
                     manager.exec(command, timeout.coerceIn(1_000, 300_000)) {
-                        !automaticInvocation || assistantId != null && accessStore?.isAllowed("root_exec") == true
+                        !automaticInvocation || assistantId != null && accessStore?.isAllowed("root_exec") == true &&
+                            (invocation?.automaticAllowed?.invoke() != false)
                     }.also {
                         exitCode = it.exitCode
                         status = it.error ?: if (it.exitCode == 0) "completed" else "failed"

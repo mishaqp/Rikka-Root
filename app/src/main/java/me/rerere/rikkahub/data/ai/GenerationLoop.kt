@@ -35,6 +35,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.root.executeRootToolOnce
 import me.rerere.rikkahub.root.awaitRootCheckpoint
 import me.rerere.rikkahub.data.ai.tools.ToolPermissionPolicy.canResumeAutomatic
+import me.rerere.rikkahub.data.ai.tools.WebContentGuard
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.MessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
@@ -98,11 +99,13 @@ class GenerationLoop(
         conversationSystemPrompt: String? = null,
         conversationId: Uuid? = null,
         workspaceCwd: String? = null,
+        onWebContentRead: suspend () -> Unit = {},
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
 
         var messages: List<UIMessage> = messages
+        if (WebContentGuard.hasWebContent(messages)) onWebContentRead()
 
         for (stepIndex in 0 until maxSteps) {
             Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
@@ -128,6 +131,7 @@ class GenerationLoop(
                             assistant = assistant,
                             settings = settings
                         )
+                        if (WebContentGuard.hasWebContent(messages)) onWebContentRead()
                         emit(
                             GenerationChunk.Messages(
                                 messages.visualTransforms(
@@ -299,6 +303,8 @@ class GenerationLoop(
                             } else {
                                 toolDef.execute(args)
                             }
+                            // Apply the guard before the next sibling, not after the entire batch.
+                            if (WebContentGuard.isClientReader(tool.toolName)) onWebContentRead()
                             val hasShellAccess = tools.any { it.name == "workspace_shell" }
                             executedTools += tool.copy(
                                 output = maybeTruncateToolOutput(tool, result, hasShellAccess)

@@ -11,6 +11,29 @@ import org.junit.rules.TemporaryFolder
 class RootAccessStoreTest {
     @get:Rule val temp = TemporaryFolder()
 
+    @Test fun webGuardPersistsPerConversationWithoutChangingPermissionsOrJournal() = runBlocking {
+        val directory = temp.newFolder()
+        val store = RootAccessStore(directory)
+        store.setAutoApprove(true)
+        store.grantAlways("root_exec")
+        val original = store.permissions.value
+        store.markWebContent("web-chat")
+        assertEquals(original, store.permissions.value)
+        assertFalse(store.isAllowed("root_exec", "web-chat"))
+        assertTrue(store.isAllowed("root_exec", "fresh-chat"))
+        val id = store.beginCommand("assistant", "id")
+        store.finishCommand(id, 0, "completed")
+        val reopened = RootAccessStore(directory)
+        assertFalse(reopened.isAllowed("root_exec", "web-chat"))
+        assertTrue(reopened.isAllowed("root_exec", "fresh-chat"))
+        assertEquals(original, reopened.permissions.value)
+        assertEquals(1, reopened.entries.value.size)
+        assertTrue(directory.deleteRecursively())
+        val cleared = RootAccessStore(directory)
+        assertTrue(cleared.webContentConversations.value.isEmpty())
+        assertFalse(cleared.isAllowed("root_exec"))
+    }
+
     @Test fun failedDisableSaveStillRevokesInMemoryAndNeverLoadsBackupPermission() = runBlocking {
         val directory = temp.newFolder()
         val store = RootAccessStore(directory)

@@ -47,8 +47,13 @@ internal class GoogleStreamDecoder(
             parseUsage(jsonData["usageMetadata"] as? JsonObject)?.let { add(StreamChunk.Usage(it)) }
             val candidate = jsonData["candidates"]?.jsonArray?.firstOrNull()?.jsonObject ?: return@buildList
             candidate["finishReason"]?.jsonPrimitive?.contentOrNull?.let { finishReason = it }
-            val content = candidate["content"]?.jsonObject ?: return@buildList
-            val message = parseMessage(content, candidate["groundingMetadata"] as? JsonObject)
+            val webUsed = candidate["groundingMetadata"] != null || candidate["urlContextMetadata"] != null
+            val content = candidate["content"] as? JsonObject
+            if (content == null && !webUsed) return@buildList
+            val message = (content?.let { parseMessage(it, candidate["groundingMetadata"] as? JsonObject) }
+                ?: UIMessage(role = MessageRole.ASSISTANT, parts = emptyList())).let {
+                if (webUsed) it.copy(annotations = it.annotations + UIMessageAnnotation.WebContentUsed) else it
+            }
             addAll(streamState.append(message, responseId))
         }
         return DecodeResult(chunks)

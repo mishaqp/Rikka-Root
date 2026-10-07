@@ -147,6 +147,50 @@ class GenerationLoopRootApprovalTest {
     )
 
     @Test(timeout = 15_000)
+    fun `search result in the same batch restores root and workspace approval immediately`() = runBlocking {
+        val response = """{"id":"response-tools","model":"test-chat","choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"tool_calls":[{"id":"search","type":"function","function":{"name":"search_web","arguments":"{}"}},{"id":"ordinary","type":"function","function":{"name":"root_exec","arguments":"{\"command\":\"id -u\"}"}},{"id":"write","type":"function","function":{"name":"workspace_write_file","arguments":"{}"}}]}}]}"""
+        Fixture(folder.newFolder(), response).use { fixture ->
+            val writes = AtomicInteger()
+            val search = Tool("search_web", "test", execute = { listOf(UIMessagePart.Text("external content")) })
+            val workspace = Tool("workspace_write_file", "test", needsApproval = { !fixture.automatic.get() }, execute = {
+                writes.incrementAndGet()
+                listOf(UIMessagePart.Text("saved"))
+            })
+            val tools = listOf(search, workspace)
+            val guard: suspend () -> Unit = { fixture.automatic.set(false) }
+            fixture.collect(listOf(UIMessage.user("search then run")), extraTools = tools, onWebContentRead = guard)
+            assertTrue(fixture.commands.isEmpty())
+            assertEquals(0, writes.get())
+            assertEquals(1, fixture.requests.get())
+            val batch = fixture.latest.last().getTools()
+            assertTrue(batch.single { it.toolCallId == "search" }.isExecuted)
+            assertTrue(batch.single { it.toolCallId == "ordinary" }.isPending)
+            assertTrue(batch.single { it.toolCallId == "write" }.isPending)
+
+            val approved = fixture.latest.dropLast(1) + fixture.latest.last().copy(parts = fixture.latest.last().parts.map {
+                if (it is UIMessagePart.Tool && it.toolCallId == "ordinary") it.copy(approvalState = ToolApprovalState.Approved) else it
+            })
+            fixture.collect(approved, extraTools = tools, onWebContentRead = guard)
+            assertEquals(listOf("id -u"), fixture.commands)
+            assertEquals(0, writes.get())
+            assertEquals(1, fixture.requests.get())
+        }
+    }
+
+    @Test(timeout = 15_000)
+    fun `resumed conversation with web citation asks before fresh automatic root`() = runBlocking {
+        Fixture(folder.newFolder()).use { fixture ->
+            val messages = listOf(UIMessage.assistant("source").copy(
+                annotations = listOf(me.rerere.ai.ui.UIMessageAnnotation.UrlCitation("page", "https://example.test")),
+            ), UIMessage.assistant("").copy(parts = listOf(call("ordinary", "id -u"))))
+            fixture.collect(messages, onWebContentRead = { fixture.automatic.set(false) })
+            assertTrue(fixture.commands.isEmpty())
+            assertEquals(0, fixture.requests.get())
+            assertTrue(fixture.latest.last().getTools().single().isPending)
+        }
+    }
+
+    @Test(timeout = 15_000)
     fun `automatic workspace sibling executes while revoked root waits without replay`() = runBlocking {
         Fixture(folder.newFolder()).use { fixture ->
             fixture.automatic.set(false)
@@ -167,7 +211,7 @@ class GenerationLoopRootApprovalTest {
         }
     }
 
-    private class Fixture(private val directory: File) : Closeable {
+    private class Fixture(private val directory: File, private val firstResponse: String = TOOL_RESPONSE) : Closeable {
         val automatic = AtomicBoolean(true)
         val commands = CopyOnWriteArrayList<String>()
         val persistedCalls = CopyOnWriteArrayList<String>()
@@ -180,7 +224,7 @@ class GenerationLoopRootApprovalTest {
             override fun getFilesDir(): File = directory
         }
         private val client = OkHttpClient.Builder().addInterceptor { chain ->
-            val body = if (requests.incrementAndGet() == 1) TOOL_RESPONSE else FINAL_RESPONSE
+            val body = if (requests.incrementAndGet() == 1) firstResponse else FINAL_RESPONSE
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
                 .code(200).message("OK").body(body.toResponseBody("application/json".toMediaType())).build()
         }.build()
@@ -207,11 +251,13 @@ class GenerationLoopRootApprovalTest {
             messages: List<UIMessage>,
             extraTools: List<Tool> = emptyList(),
             maxSteps: Int = 3,
+            onWebContentRead: suspend () -> Unit = {},
             beforeWrite: suspend (GenerationChunk.RootExecutionCheckpoint) -> Unit = {},
         ) {
             latest = messages
             loop.generateText(settings = settings, model = model, messages = messages,
                 assistant = Assistant(streamOutput = false), tools = listOf(tool) + extraTools, maxSteps = maxSteps,
+                onWebContentRead = onWebContentRead,
             ).collect { chunk ->
                 when (chunk) {
                     is GenerationChunk.Messages -> latest = chunk.messages
@@ -223,7 +269,7 @@ class GenerationLoopRootApprovalTest {
                                 it.fd.sync()
                             }
                             val newCall = chunk.messages.last().getTools().single {
-                                it.isExecuted && it.toolCallId !in persistedCalls
+                                it.toolName == "root_exec" && it.isExecuted && it.toolCallId !in persistedCalls
                             }
                             persistedCalls += newCall.toolCallId
                             latest = chunk.messages

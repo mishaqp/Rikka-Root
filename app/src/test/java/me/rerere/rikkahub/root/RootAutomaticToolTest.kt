@@ -23,6 +23,20 @@ import org.junit.rules.TemporaryFolder
 class RootAutomaticToolTest {
     @get:Rule val temp = TemporaryFolder()
 
+    @Test fun webGuardProvenancePreventsLaunchEvenWhenGlobalPermissionStaysEnabled() = runBlocking {
+        val store = RootAccessStore(temp.newFolder())
+        store.setAutoApprove(true)
+        val tool = buildRootTool(RootShellManager(suExecutable = fakeSu().path), store, "assistant-a")
+        val target = File(temp.root, "web-guard-must-not-launch")
+        store.markWebContent("web-chat")
+        val output = withContext(RootInvocation(automatic = true, automaticAllowed = { !store.isWebTainted("web-chat") })) {
+            tool.execute(buildJsonObject { put("command", "touch '${target.path}'") })
+        }
+        assertFalse(target.exists())
+        assertTrue(output.toString().contains("root_approval_required"))
+        assertTrue(store.permissions.value.autoApproveAll)
+    }
+
     private fun fakeSu(): File {
         val bin = temp.newFolder()
         File(bin, "id").apply { writeText("#!/bin/sh\nprintf '0\\n'\n"); setExecutable(true) }

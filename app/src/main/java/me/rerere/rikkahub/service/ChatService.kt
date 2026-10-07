@@ -710,6 +710,8 @@ class ChatService(
         val useExternalWebSearch = shouldUseExternalWebSearch(assistant, model)
 
         runCatching {
+            // Observe history before repair can remove unresolved tool messages or branches.
+            chatToolFactory.restoreWebContentGuard(conversationId.toString(), initialConversation.messageNodes.flatMap { it.messages })
 
             // reset suggestions
             updateConversation(conversationId, initialConversation.copy(chatSuggestions = emptyList()))
@@ -735,6 +737,7 @@ class ChatService(
                     assistant = assistant,
                     model = model,
                     workspaceCwd = conversation.workspaceCwd,
+                    conversationId = conversationId.toString(),
                 )
             } catch (error: InvalidMcpServerNamesException) {
                 sessionManager.get(conversationId)?.messageQueue?.pause()
@@ -779,6 +782,7 @@ class ChatService(
                 },
                 outputTransformers = outputTransformers,
                 tools = tools,
+                onWebContentRead = { chatToolFactory.markWebContent(conversationId.toString()) },
             ).onCompletion {
                 // 可能被取消了，或者意外结束，兜底更新
                 val updatedConversation = session.finishGeneration { conversation ->
