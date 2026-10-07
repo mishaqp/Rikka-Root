@@ -5,6 +5,22 @@
 set -Eeuo pipefail
 
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+target_branch=ccr-e93188a6-grrqko
+if [[ "$(git -C "$repo_dir" branch --show-current)" != "$target_branch" ]]; then
+    if [[ -n "$(git -C "$repo_dir" status --short)" ]]; then
+        git -C "$repo_dir" status --short
+        printf '[codex-setup] ERROR: refusing to switch branches with a dirty working tree.\n' >&2
+        exit 1
+    fi
+    if git -C "$repo_dir" show-ref --verify --quiet "refs/heads/$target_branch"; then
+        git -C "$repo_dir" switch "$target_branch"
+    elif git -C "$repo_dir" show-ref --verify --quiet "refs/remotes/origin/$target_branch"; then
+        git -C "$repo_dir" switch --track -c "$target_branch" "origin/$target_branch"
+    else
+        printf '[codex-setup] ERROR: target branch is unavailable: %s\n' "$target_branch" >&2
+        exit 1
+    fi
+fi
 setup_dir="${CODEX_SETUP_DIR:-$HOME/.local/share/rikka-root}"
 gradle_dir="${GRADLE_USER_HOME:-$HOME/.gradle}"
 refs_dir=/workspace/refs
