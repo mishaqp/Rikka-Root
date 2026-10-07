@@ -43,6 +43,24 @@ import org.junit.Test
  */
 class ResponseApiRequestMessageTest {
 
+    @Test
+    fun `parallel image results stay inline after all Responses calls without a lifted user message`() {
+        val tools = listOf("one", "two").map { id ->
+            UIMessagePart.Tool(id, "workspace_read_file", "{}", output = listOf(
+                UIMessagePart.Text("result $id"), UIMessagePart.Image("data:image/png;base64,aGVsbG8="),
+            ))
+        }
+        val result = invokeBuildMessages(listOf(UIMessage.assistant("").copy(parts = tools)))
+        assertEquals(listOf("function_call", "function_call", "function_call_output", "function_call_output"),
+            result.map { it.jsonObject["type"]!!.jsonPrimitive.content })
+        assertEquals(listOf("one", "two"), result.drop(2).map {
+            it.jsonObject["call_id"]!!.jsonPrimitive.content
+        })
+        assertTrue(result.drop(2).all { item -> item.jsonObject["output"]!!.jsonArray.any {
+            it.jsonObject["type"]!!.jsonPrimitive.content == "input_image"
+        } })
+    }
+
     private lateinit var api: ResponseAPI
 
     @Before

@@ -31,6 +31,29 @@ import org.junit.Test
  */
 class ChatCompletionsRequestMessageTest {
 
+    @Test
+    fun `parallel image results remain consecutive text tool messages with one image message after the batch`() {
+        val image = "data:image/png;base64,aGVsbG8="
+        val tools = listOf("one", "two").map { id ->
+            UIMessagePart.Tool(id, "workspace_read_file", "{}", output = listOf(
+                UIMessagePart.Text("result $id"), UIMessagePart.Image(image),
+            ))
+        }
+        val result = invokeBuildMessages(listOf(UIMessage.assistant("").copy(parts = tools)))
+        assertEquals(listOf("assistant", "tool", "tool", "user"),
+            result.map { it.jsonObject["role"]!!.jsonPrimitive.content })
+        assertEquals(listOf("one", "two"), result.subList(1, 3).map {
+            it.jsonObject["tool_call_id"]!!.jsonPrimitive.content
+        })
+        for (item in result.subList(1, 3)) {
+            assertTrue("Chat Completions tool content must be a string", item.jsonObject["content"] is JsonPrimitive)
+            assertTrue(item.jsonObject["content"]!!.jsonPrimitive.content.contains("following user message"))
+        }
+        assertEquals(2, result.last().jsonObject["content"]!!.jsonArray.count {
+            it.jsonObject["type"]!!.jsonPrimitive.content == "image_url"
+        })
+    }
+
     private lateinit var api: ChatCompletionsAPI
 
     @Before

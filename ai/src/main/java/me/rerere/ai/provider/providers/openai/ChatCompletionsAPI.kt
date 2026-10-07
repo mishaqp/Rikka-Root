@@ -508,13 +508,40 @@ class ChatCompletionsAPI(
                     contentBuffer.clear()
                     reasoningPart = null // 清空，下一个 group 可能有新的 reasoning
 
-                    // 紧跟 tool 结果消息
+                    // All results of a parallel batch must precede its lifted images.
                     group.tools.forEach { tool ->
                         add(buildJsonObject {
                             put("role", "tool")
                             put("tool_call_id", tool.toolCallId)
                             put("content", tool.toToolResultContent(supportInputModalities))
                         })
+                    }
+                    if (Modality.IMAGE in supportInputModalities) {
+                        val images = group.tools.flatMap { tool ->
+                            tool.output.filterIsInstance<UIMessagePart.Image>().map { tool.toolName to it }
+                        }
+                        if (images.isNotEmpty()) {
+                            add(buildJsonObject {
+                                put("role", "user")
+                                put("content", buildJsonArray {
+                                    images.forEach { (name, image) ->
+                                        add(buildJsonObject {
+                                            put("type", "text")
+                                            put("text", "[Image returned by tool $name]")
+                                        })
+                                        add(buildJsonObject {
+                                            image.encodeBase64().onSuccess { encoded ->
+                                                put("type", "image_url")
+                                                put("image_url", buildJsonObject { put("url", encoded.base64) })
+                                            }.onFailure {
+                                                put("type", "text")
+                                                put("text", "[Tool image could not be encoded]")
+                                            }
+                                        })
+                                    }
+                                })
+                            })
+                        }
                     }
                 }
             }
@@ -665,50 +692,17 @@ class ChatCompletionsAPI(
     }
 
     private fun UIMessagePart.Tool.toToolResultContent(supportInputModalities: List<Modality>): JsonElement {
-        // 只考虑文字和图片;只有模型支持图片输入时,图片才作为多模态内容回传,否则以文本占位,避免发给不支持的模型报错
+        // Chat Completions tool content is text; images are emitted once after the entire batch.
         val supportsImageInput = Modality.IMAGE in supportInputModalities
-        val hasImageToSend = output.any { it is UIMessagePart.Image && supportsImageInput }
-        return if (!hasImageToSend) {
-            JsonPrimitive(output.mapNotNull { part ->
-                when (part) {
-                    is UIMessagePart.Text -> part.text
-                    is UIMessagePart.Image -> "[Image output omitted: current model does not support image input]"
-                    else -> null
-                }
-            }.joinToString("\n"))
-        } else {
-            buildJsonArray {
-                output.forEach { part ->
-                    when (part) {
-                        is UIMessagePart.Text -> {
-                            if (part.text.isNotBlank()) {
-                                add(buildJsonObject {
-                                    put("type", "text")
-                                    put("text", part.text)
-                                })
-                            }
-                        }
-
-                        is UIMessagePart.Image -> {
-                            add(buildJsonObject {
-                                part.encodeBase64().onSuccess { encodedImage ->
-                                    put("type", "image_url")
-                                    put("image_url", buildJsonObject {
-                                        put("url", encodedImage.base64)
-                                    })
-                                }.onFailure {
-                                    Log.w(TAG, "encode tool result image failed: ${part.url}", it)
-                                    put("type", "text")
-                                    put("text", "Error: Failed to encode image to base64")
-                                }
-                            })
-                        }
-
-                        else -> {}
-                    }
-                }
+        return JsonPrimitive(output.mapNotNull { part ->
+            when (part) {
+                is UIMessagePart.Text -> part.text
+                is UIMessagePart.Image -> if (supportsImageInput) {
+                    "[Image output attached in the following user message]"
+                } else "[Image output omitted: current model does not support image input]"
+                else -> null
             }
-        }
+        }.joinToString("\n"))
     }
 
     private fun parseMessage(jsonObject: JsonObject): UIMessage {
