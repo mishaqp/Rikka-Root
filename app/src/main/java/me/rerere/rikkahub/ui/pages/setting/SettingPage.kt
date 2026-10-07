@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -23,6 +24,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -33,6 +35,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -93,6 +96,8 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
     val navController = LocalNavController.current
     val settings by vm.settings.collectAsStateWithLifecycle()
     val filesManager: FilesManager = koinInject()
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    val searchResults = remember(searchQuery) { SettingsSearchIndex.search(searchQuery) }
 
     if (settings.launchCount > 100 && (settings.launchCount - settings.sponsorAlertDismissedAt) >= 50) {
         AlertDialog(
@@ -141,6 +146,25 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
             contentPadding = innerPadding + PaddingValues(8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            item("settingsSearch") {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    label = { Text("Поиск по настройкам") },
+                    leadingIcon = { Icon(HugeIcons.GlobalSearch, null) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                )
+            }
+            if (searchQuery.isNotBlank()) {
+                if (searchResults.isEmpty()) item { Text("Ничего не найдено", Modifier.padding(16.dp)) }
+                items(searchResults, key = { "search:${it.title}" }) { entry ->
+                    Card(onClick = { navController.navigate(entry.route) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                        ListItem(headlineContent = { Text(entry.title) }, supportingContent = { Text(entry.description) })
+                    }
+                }
+                return@LazyColumn
+            }
             if (settings.isNotConfigured()) {
                 item {
                     ProviderConfigWarningCard(navController)
