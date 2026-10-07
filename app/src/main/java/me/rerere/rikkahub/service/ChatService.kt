@@ -161,6 +161,8 @@ internal fun repairIncompleteToolMessages(nodes: List<MessageNode>): List<Messag
         val hasPendingTools = node.currentMessage.getTools().any { !it.isExecuted }
 
         if (hasPendingTools) {
+            // Keep durable start evidence for any tool, even if only a Pending sibling remains.
+            if (node.currentMessage.getTools().any { it.isExecuted }) return@mapIndexed node
             if (node.currentMessage.getTools().any(ToolPermissionPolicy::canResumeAutomatic)) return@mapIndexed node
             // A process interruption must not discard started root evidence or fresh Auto siblings.
             val rootTools = node.currentMessage.getTools().filter { it.toolName == "root_exec" }

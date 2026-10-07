@@ -14,7 +14,7 @@ import me.rerere.rikkahub.root.RootApprovalPolicy
 object ToolPermissionPolicy {
     fun canResumeAutomatic(tool: UIMessagePart.Tool): Boolean =
         !tool.isExecuted && tool.approvalState == ToolApprovalState.Auto &&
-            (tool.toolName in registry || tool.toolName.startsWith("mcp__"))
+            tool.toolName != "ask_user"
 
     val registry: Map<String, String> = linkedMapOf(
         "root_exec" to "root-команды",

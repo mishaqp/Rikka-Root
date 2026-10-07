@@ -18,6 +18,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.Model
@@ -73,7 +74,7 @@ sealed interface GenerationChunk {
         val messages: List<UIMessage>
     ) : GenerationChunk
 
-    // A root command may start only after the collector has awaited its durable Room write.
+    // A tool may start only after the collector has awaited its durable Room write.
     data class RootExecutionCheckpoint(
         val messages: List<UIMessage>,
         val ack: CompletableDeferred<Unit>,
@@ -116,6 +117,8 @@ class GenerationLoop(
             } ?: emptyList()
 
             val toolsToProcess: List<UIMessagePart.Tool>
+
+            if (pendingTools.isEmpty() && messages.lastOrNull()?.getTools()?.any { it.isPending } == true) break
 
             // Skip generation if we have approved/denied tool calls to handle
             if (pendingTools.isEmpty()) {
@@ -284,23 +287,29 @@ class GenerationLoop(
                                 executedTools += tool.copy(approvalState = ToolApprovalState.Pending)
                                 return@forEach
                             }
-                            if (tool.toolName == "root_exec") {
-                                Log.i(TAG, "generateText: executing root tool")
-                            } else {
-                                Log.i(TAG, "generateText: executing tool ${toolDef.name} with args: $args")
+                            Log.i(TAG, "generateText: executing tool ${toolDef.name}")
+                            suspend fun persistStarted(started: UIMessagePart.Tool) {
+                                val last = messages.last()
+                                val checkpoint = messages.dropLast(1) + last.copy(parts = last.parts.map { part ->
+                                    if (part is UIMessagePart.Tool && part.toolCallId == started.toolCallId) started else part
+                                })
+                                awaitRootCheckpoint { ack ->
+                                    emit(GenerationChunk.RootExecutionCheckpoint(checkpoint, ack))
+                                }
+                                messages = checkpoint
                             }
                             val result = if (tool.toolName == "root_exec") {
-                                executeRootToolOnce(tool, persistStarted = { started ->
-                                    val last = messages.last()
-                                    val checkpoint = messages.dropLast(1) + last.copy(parts = last.parts.map { part ->
-                                        if (part is UIMessagePart.Tool && part.toolCallId == started.toolCallId) started else part
-                                    })
-                                    awaitRootCheckpoint { ack ->
-                                        emit(GenerationChunk.RootExecutionCheckpoint(checkpoint, ack))
-                                    }
-                                    messages = checkpoint
-                                }, automaticAllowed = { !toolDef.needsApproval(args) }) { toolDef.execute(args) }
+                                executeRootToolOnce(tool, persistStarted = ::persistStarted,
+                                    automaticAllowed = { !toolDef.needsApproval(args) }) { toolDef.execute(args) }
                             } else {
+                                persistStarted(tool.copy(output = listOf(UIMessagePart.Text(buildJsonObject {
+                                    put("error", "tool_execution_indeterminate")
+                                    put("reason", "This tool was checkpointed before launch. Its effects are unknown if interrupted. This call will not run again; review its effects before requesting a new call.")
+                                }.toString()))))
+                                currentCoroutineContext().ensureActive()
+                                check(tool.approvalState == ToolApprovalState.Approved || !toolDef.needsApproval(args)) {
+                                    "Automatic permission revoked before launch"
+                                }
                                 toolDef.execute(args)
                             }
                             // Apply the guard before the next sibling, not after the entire batch.
@@ -308,6 +317,7 @@ class GenerationLoop(
                             val hasShellAccess = tools.any { it.name == "workspace_shell" }
                             executedTools += tool.copy(
                                 output = maybeTruncateToolOutput(tool, result, hasShellAccess)
+                                    .ifEmpty { listOf(UIMessagePart.Text("Tool completed without output.")) }
                             )
                         }.onFailure {
                             // 取消必须向上传播，否则停止生成会被误报为工具执行错误
@@ -364,9 +374,7 @@ class GenerationLoop(
                     )
                 )
             )
-            if (executedTools.any { it.toolName == "root_exec" } &&
-                messages.last().getTools().any { it.approvalState == ToolApprovalState.Pending && !it.isExecuted }
-            ) {
+            if (messages.last().getTools().any { it.isPending }) {
                 break
             }
         }

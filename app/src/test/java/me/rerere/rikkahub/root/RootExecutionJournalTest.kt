@@ -82,15 +82,27 @@ class RootExecutionJournalTest {
         assertFalse(approved().copy(output = output).canResumeExecution)
     }
 
-    @Test fun `cancelled command leaves checkpoint nonresumable`() = runBlocking {
-        var checkpoint: UIMessagePart.Tool? = null
-        try {
-            executeRootToolOnce(approved(), { checkpoint = it }) { throw CancellationException("stop") }
-            fail("cancellation must propagate")
-        } catch (_: CancellationException) {}
-        assertNotNull(checkpoint)
-        assertTrue(checkpoint!!.isExecuted)
-        assertFalse(checkpoint!!.canResumeExecution)
+    @Test fun `interrupted automatic and approved root commands never replay`() = runBlocking {
+        for (state in listOf(ToolApprovalState.Auto, ToolApprovalState.Approved)) {
+            var checkpoint: UIMessagePart.Tool? = null
+            var launches = 0
+            try {
+                executeRootToolOnce(approved().copy(approvalState = state), { checkpoint = it },
+                    automaticAllowed = { true }) { launches++; throw CancellationException("process loss") }
+                fail("cancellation must propagate")
+            } catch (_: CancellationException) { }
+            assertNotNull(checkpoint)
+            assertTrue(checkpoint!!.isExecuted)
+            assertFalse(checkpoint!!.canResumeExecution)
+            assertFalse(canResumeRootTool(checkpoint!!))
+            try {
+                executeRootToolOnce(checkpoint!!, {}, automaticAllowed = { true }) {
+                    launches++; emptyList()
+                }
+                fail("previously started call must never replay")
+            } catch (_: IllegalStateException) { }
+            assertEquals(1, launches)
+        }
     }
 
     @Test fun `failed durable checkpoint prevents launch`() = runBlocking {

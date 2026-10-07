@@ -8,6 +8,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
@@ -46,6 +47,54 @@ class GenerationLoopRootApprovalTest {
     @get:Rule val folder = TemporaryFolder()
 
     @Test(timeout = 15_000)
+    fun `interrupted automatic or manually approved side effect is durable and never replayed`() = runBlocking {
+        for (state in listOf(ToolApprovalState.Auto, ToolApprovalState.Approved)) {
+            Fixture(folder.newFolder()).use { fixture ->
+                val runs = AtomicInteger()
+                val write = Tool("workspace_write_file", "test", execute = {
+                    runs.incrementAndGet()
+                    throw CancellationException("Simulated process loss after side effect")
+                })
+                try {
+                    fixture.collect(listOf(UIMessage.assistant("").copy(parts = listOf(
+                        UIMessagePart.Tool("write", write.name, "{}", approvalState = state),
+                    ))), extraTools = listOf(write))
+                    fail("Interrupted execution must propagate cancellation")
+                } catch (_: CancellationException) { }
+                assertEquals(1, runs.get())
+                assertTrue("Start marker must be durable before execute", fixture.checkpointFile.exists())
+                val saved = fixture.readCheckpoint()
+                assertTrue(saved.last().getTools().single().isExecuted)
+                fixture.collect(saved, extraTools = listOf(write), maxSteps = 1)
+                assertEquals("Interrupted attempt must not run twice", 1, runs.get())
+            }
+        }
+    }
+
+    @Test(timeout = 15_000)
+    fun `resume includes every fresh automatic sibling and excludes completed siblings`() = runBlocking {
+        Fixture(folder.newFolder()).use { fixture ->
+            val runs = mutableListOf<String>()
+            val tools = listOf("search_web", "workspace_write_file", "read_only_tool").map { name ->
+                Tool(name, "test", execute = { runs += name; listOf(UIMessagePart.Text("done")) })
+            }
+            val batch = listOf(
+                call("ordinary", "id -u").copy(approvalState = ToolApprovalState.Approved),
+                UIMessagePart.Tool("search", "search_web", "{}"),
+                UIMessagePart.Tool("write", "workspace_write_file", "{}"),
+                UIMessagePart.Tool("read", "read_only_tool", "{}"),
+                UIMessagePart.Tool("done", "read_only_tool", "{}", output = listOf(UIMessagePart.Text("old"))),
+                call("dangerous", "reboot").copy(approvalState = ToolApprovalState.Pending),
+            )
+            fixture.collect(listOf(UIMessage.assistant("").copy(parts = batch)), extraTools = tools)
+            assertEquals(listOf("search_web", "workspace_write_file", "read_only_tool"), runs)
+            assertEquals(listOf("id -u"), fixture.commands)
+            assertTrue(fixture.latest.last().getTools().single { it.toolCallId == "dangerous" }.isPending)
+            assertEquals(0, fixture.requests.get())
+        }
+    }
+
+    @Test(timeout = 15_000)
     fun `ordinary root executes before dangerous approval and is not replayed when approval arrives`() = runBlocking {
         Fixture(folder.newFolder()).use { fixture ->
             fixture.collect(listOf(UIMessage.user("Run the two commands")))
@@ -78,7 +127,7 @@ class GenerationLoopRootApprovalTest {
     }
 
     @Test(timeout = 15_000)
-    fun `revoked automatic root becomes pending without executing unrelated automatic tools`() = runBlocking {
+    fun `revoked automatic root becomes pending while fresh unrelated automatic tools resume`() = runBlocking {
         Fixture(folder.newFolder()).use { fixture ->
             fixture.automatic.set(false)
             val unrelatedRuns = AtomicInteger()
@@ -95,13 +144,13 @@ class GenerationLoopRootApprovalTest {
             )
 
             assertTrue(fixture.commands.isEmpty())
-            assertTrue(fixture.persistedCalls.isEmpty())
+            assertEquals(listOf("other"), fixture.persistedCalls)
             assertEquals(0, fixture.requests.get())
-            assertEquals(0, unrelatedRuns.get())
+            assertEquals(1, unrelatedRuns.get())
             val tools = fixture.latest.last().getTools()
             assertEquals(ToolApprovalState.Pending, tools.single { it.toolName == "root_exec" }.approvalState)
             assertEquals(ToolApprovalState.Auto, tools.single { it.toolName == "other_tool" }.approvalState)
-            assertFalse(tools.single { it.toolName == "other_tool" }.isExecuted)
+            assertTrue(tools.single { it.toolName == "other_tool" }.isExecuted)
         }
     }
 
@@ -269,7 +318,7 @@ class GenerationLoopRootApprovalTest {
                                 it.fd.sync()
                             }
                             val newCall = chunk.messages.last().getTools().single {
-                                it.toolName == "root_exec" && it.isExecuted && it.toolCallId !in persistedCalls
+                                it.isExecuted && it.toolCallId !in persistedCalls && it.output.toString().contains("execution_indeterminate")
                             }
                             persistedCalls += newCall.toolCallId
                             latest = chunk.messages
