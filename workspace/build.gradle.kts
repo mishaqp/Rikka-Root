@@ -7,6 +7,10 @@ android {
     namespace = "me.rerere.workspace"
 
     defaultConfig {
+        providers.gradleProperty("rikkarootReleaseAbis").orNull?.split(',')?.let { abis ->
+            require(abis.isNotEmpty() && abis.all { it in setOf("arm64-v8a", "x86_64") })
+            ndk { abiFilters += abis }
+        }
         externalNativeBuild {
             cmake {
                 cppFlags += ""

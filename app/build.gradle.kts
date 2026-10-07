@@ -12,6 +12,11 @@ plugins {
     alias(libs.plugins.baselineprofile)
 }
 
+// CI selects one architecture without changing upstream's local build defaults or signing.
+val releaseAbis = providers.gradleProperty("rikkarootReleaseAbis").orNull
+    ?.split(',')?.also { require(it.isNotEmpty() && it.all { abi -> abi in setOf("arm64-v8a", "x86_64") }) }
+    ?: listOf("arm64-v8a", "x86_64")
+
 android {
     namespace = "me.rerere.rikkahub"
     compileSdk {
@@ -32,7 +37,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
+            abiFilters += releaseAbis
         }
     }
 
@@ -41,10 +46,11 @@ android {
             // AppBundle tasks usually contain "bundle" in their name
             //noinspection WrongGradleMethod
             val isBuildingBundle = gradle.startParameter.taskNames.any { it.lowercase().contains("bundle") }
-            isEnable = !isBuildingBundle
+            // With one ABI, ndk.abiFilters already yields one APK. AGP forbids also splitting it.
+            isEnable = !isBuildingBundle && releaseAbis.size > 1
             reset()
-            include("arm64-v8a", "x86_64")
-            isUniversalApk = true
+            include(*releaseAbis.toTypedArray())
+            isUniversalApk = releaseAbis.size > 1
         }
     }
 

@@ -29,6 +29,14 @@ class ForkReleaseUpdateTest {
         assertEquals("", decodeForkReleaseUpdate(release(body = "null"))!!.changelog)
     }
 
+    @Test fun `CI version hash arm64 asset is accepted for normal releases but not nightly`() {
+        val name = "Rikka-Root-2.5.6-root.2-a1234567-arm64-v8a.apk"
+        val asset = apk.replace("Rikka-Root-arm64.apk", name)
+        assertEquals(name, decodeForkReleaseUpdate(release(assets = asset))!!.downloads.single().name)
+        assertNull(decodeForkReleaseUpdate(release(tag = "nightly", prerelease = true,
+            assets = asset.replace("download/v2.5.6-root.2", "download/nightly"))))
+    }
+
     @Test fun `draft prerelease and unrelated version tags are ignored`() {
         assertNull(decodeForkReleaseUpdate(release(draft = true)))
         assertNull(decodeForkReleaseUpdate(release(prerelease = true)))
