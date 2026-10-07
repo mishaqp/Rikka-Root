@@ -4,6 +4,106 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class RootApprovalPolicyTest {
+    @Test fun combinedBooleanOutputOptionsRecognizeOnlyLiteralDestinations() {
+        listOf(
+            "curl -so /dev/block/by-name/boot https://example.test/image",
+            "curl -sLo/dev/block/by-name/boot https://example.test/image",
+            "wget -qO /dev/block/by-name/boot https://example.test/image",
+            "wget -cqO/dev/block/by-name/boot https://example.test/image",
+            "cp -ft /dev/block/by-name image",
+            "mv -ft/dev/block/by-name image",
+            "install -vt /dev/block/by-name image",
+        ).forEach {
+            assertNotNull("must require approval: $it", RootApprovalPolicy.reason(it))
+        }
+        listOf(
+            "curl -Xo /dev/block/by-name/boot https://example.test/image",
+            "curl -bo /dev/block/by-name/boot https://example.test/image",
+            "wget -UO /dev/block/by-name/boot https://example.test/image",
+            "curl -so \"${'$'}TARGET\" https://example.test/image",
+            "wget -qO\"${'$'}TARGET\" https://example.test/image",
+            "cp -ft /sdcard /dev/block/by-name/boot",
+            "cp -ft \"${'$'}TARGET\" /dev/block/by-name/boot",
+        ).forEach {
+            assertNull("must stay automatic: $it", RootApprovalPolicy.reason(it))
+        }
+    }
+
+    @Test fun copyDestinationsExcludeOuterRedirectionsAndDescriptors() {
+        assertNotNull(RootApprovalPolicy.reason("cp image /dev/block/by-name/boot >/sdcard/log"))
+        assertNotNull(RootApprovalPolicy.reason("cp image /dev/block/by-name/boot 2>&1"))
+        assertNull(RootApprovalPolicy.reason("cp /dev/block/by-name/boot /sdcard/boot.img 2>&1"))
+        assertNull(RootApprovalPolicy.reason("cp image /dev/block/by-name/boot '2'>/sdcard/log"))
+    }
+
+    @Test fun literalCopyMoveInstallBlockDestinationsRequireApproval() {
+        listOf(
+            "cp image /dev/block/by-name/boot",
+            "mv -f image '/dev/block/by-name/boot'",
+            "install -m 600 image /dev/mmcblk0",
+            "cp \"${'$'}SOURCE\" /dev/block/by-name/boot",
+            "cp -t /dev/block/by-name image",
+            "mv -t/dev/block/by-name image",
+            "install --target-directory /dev/block/by-name image",
+            "cp --target-directory='/dev/block/by-name' image",
+            "mv --target-directory=/dev/block/by-name image",
+            "install -t /dev/block/by-name image",
+        ).forEach {
+            assertNotNull("must require approval: $it", RootApprovalPolicy.reason(it))
+        }
+    }
+
+    @Test fun copyingBlockSourcesToOrdinaryOrOpaqueDestinationsStaysAutomatic() {
+        listOf(
+            "cp /dev/block/by-name/boot /sdcard/boot.img",
+            "dd if=/dev/block/by-name/boot of=/sdcard/boot.img",
+            "cp -t /sdcard /dev/block/by-name/boot",
+            "mv --target-directory=/data/local/tmp /dev/block/by-name/boot",
+            "install --target-directory /sdcard /dev/block/by-name/boot",
+            "cp /dev/block/by-name/boot \"${'$'}TARGET\"",
+            "cp -t \"${'$'}TARGET\" /dev/block/by-name/boot",
+            "mv --target-directory=\"${'$'}TARGET\" /dev/block/by-name/boot",
+            "install --target-directory \"${'$'}TARGET\" /dev/block/by-name/boot",
+            "cp image \"${'$'}TARGET\"",
+            "sh -c 'cp image /dev/block/by-name/boot'",
+        ).forEach {
+            assertNull("must stay automatic: $it", RootApprovalPolicy.reason(it))
+        }
+    }
+
+    @Test fun forcedOverwriteRedirectRequiresApprovalButQuotedOperatorIsInert() {
+        assertNotNull(RootApprovalPolicy.reason("printf x >| /dev/block/by-name/boot"))
+        assertNotNull(RootApprovalPolicy.reason("printf x >|'/dev/block/by-name/boot'"))
+        assertNull(RootApprovalPolicy.reason("printf '%s' '>|' '/dev/block/by-name/boot'"))
+        assertNull(RootApprovalPolicy.reason("printf x >| \"${'$'}TARGET\""))
+    }
+
+    @Test fun literalDownloaderOutputPathsRequireApproval() {
+        listOf(
+            "curl -o /dev/block/by-name/boot https://example.test/image",
+            "curl -o/dev/block/by-name/boot https://example.test/image",
+            "curl --output /dev/block/by-name/boot https://example.test/image",
+            "curl --output=/dev/block/by-name/boot https://example.test/image",
+            "wget -O /dev/block/by-name/boot https://example.test/image",
+            "wget -O/dev/block/by-name/boot https://example.test/image",
+            "wget --output-document=/dev/block/by-name/boot https://example.test/image",
+            "wget --output-document /dev/block/by-name/boot https://example.test/image",
+            "wget -o /dev/block/by-name/boot https://example.test/image",
+            "wget --output-file=/dev/block/by-name/boot https://example.test/image",
+        ).forEach {
+            assertNotNull("must require approval: $it", RootApprovalPolicy.reason(it))
+        }
+        listOf(
+            "curl -o /sdcard/image https://example.test/image",
+            "curl -o \"${'$'}TARGET\" https://example.test/image",
+            "wget --output-document=\"${'$'}TARGET\" https://example.test/image",
+            "curl -O https://example.test/dev/block/by-name/boot",
+            "echo 'curl -o /dev/block/by-name/boot'",
+        ).forEach {
+            assertNull("must stay automatic: $it", RootApprovalPolicy.reason(it))
+        }
+    }
+
     @Test fun heredocPayloadIsOpaqueButOuterRedirectionAndFollowingCommandsAreVisible() {
         assertNull(RootApprovalPolicy.reason("sh <<'EOF'\nrm -rf /system\nEOF"))
         assertNotNull(RootApprovalPolicy.reason("cat <<EOF >/dev/block/by-name/boot\nhidden input\nEOF"))

@@ -6,7 +6,7 @@ object RootApprovalPolicy {
     val rules: List<RootApprovalRule> = listOf(
         RootApprovalRule("protected_delete", "Recursively delete an entire protected root/data/system/shared-storage directory.", listOf("rm -rf /", "rm -rf /sdcard/*")),
         RootApprovalRule("filesystem_format", "Format a filesystem.", listOf("mkfs.ext4 /dev/block/by-name/userdata")),
-        RootApprovalRule("block_write", "Write directly to a raw block device.", listOf("dd if=image of=/dev/block/by-name/boot", "echo data > /dev/block/by-name/boot")),
+        RootApprovalRule("block_write", "Write directly to a raw block device.", listOf("dd if=image of=/dev/block/by-name/boot", "cp image /dev/block/by-name/boot", "printf data >| /dev/block/by-name/boot", "curl -o /dev/block/by-name/boot https://example.test/image")),
         RootApprovalRule("bootloader", "Flash, unlock, or switch a boot slot / enter the bootloader.", listOf("fastboot flash boot image", "reboot bootloader")),
         RootApprovalRule("factory_reset", "Factory-reset or wipe device data.", listOf("recovery --wipe_data", "cmd recovery wipe")),
         RootApprovalRule("selinux_disable", "Disable SELinux enforcement.", listOf("setenforce 0")),
@@ -30,7 +30,8 @@ object RootApprovalPolicy {
                     args.any(::isProtectedWhole) -> "protected_delete"
                 name == "mkfs" || name.startsWith("mkfs.") -> "filesystem_format"
                 name == "dd" && args.any { it.startsWith("of=") && isBlock(it.substringAfter("of=")) } ||
-                    name == "tee" && args.any(::isBlock) -> "block_write"
+                    name == "tee" && args.any(::isBlock) ||
+                    visibleCommandBlockWrite(name, effective.drop(1)) -> "block_write"
                 name == "fastboot" && args.any { it in setOf("flash", "flashall", "update", "unlock", "unlock_critical", "lock", "lock_critical", "set_active", "--set-active") || it.startsWith("--set-active=") } ||
                     name == "bootctl" && "set-active-boot-slot" in args ||
                     name == "reboot" && args.any { it in setOf("bootloader", "fastboot") } -> "bootloader"
@@ -50,8 +51,68 @@ object RootApprovalPolicy {
     }
 
     private fun visibleBlockWrite(words: List<RootShellWord>): Boolean = words.indices.any { index ->
-        words[index].operator && words[index].text in setOf(">", ">>") &&
+        words[index].operator && words[index].text in setOf(">", ">>", ">|", ">&") &&
             words.getOrNull(index + 1)?.let { it.literal && isBlock(it.text) } == true
+    }
+
+    private fun visibleCommandBlockWrite(name: String, words: List<RootShellWord>): Boolean {
+        // Redirect operands are shell IO, not cp's final destination or download options.
+        // Keep opaque words in place: dropping them would turn a block source into a destination.
+        val arguments = words.filterIndexed { index, word ->
+            !word.operator && words.getOrNull(index - 1)?.operator != true
+        }
+        return when (name) {
+            "cp", "mv", "install" -> {
+                val booleanOptions = when (name) { "cp" -> "afinprRuv"; "mv" -> "finuv"; else -> "bcCDpsv" }
+                val targets = literalOptionTargets(arguments, setOf("-t"), setOf("--target-directory"), booleanOptions)
+                if (targets != null) targets.any(::isBlock)
+                else arguments.lastOrNull()?.let { it.literal && isBlock(it.text) } == true
+            }
+            "curl" -> literalOptionTargets(arguments, setOf("-o"), setOf("--output"), "fsSLkIvNqigOJRplnajBG0146")?.any(::isBlock) == true
+            "wget" -> literalOptionTargets(arguments, setOf("-o", "-O"), setOf("--output-file", "--output-document"), "qvcNrSkpm")?.any(::isBlock) == true
+            else -> false
+        }
+    }
+
+    /** null means absent; empty means explicitly supplied but opaque/missing. Never guess a path. */
+    private fun literalOptionTargets(words: List<RootShellWord>, short: Set<String>, long: Set<String>, booleanOptions: String): List<String>? {
+        val targets = mutableListOf<String>()
+        var found = false
+        var index = 0
+        while (index < words.size) {
+            val word = words[index]
+            if (word.literal && word.text == "--") break
+            when {
+                word.text in short || word.text in long -> {
+                    found = true
+                    words.getOrNull(index + 1)?.takeIf { it.literal }?.let { targets += it.text }
+                    index++
+                }
+                long.any { word.text.startsWith("$it=") } -> {
+                    found = true
+                    if (word.literal) targets += word.text.substringAfter('=')
+                }
+                else -> shortOutputOffset(word.text, short, booleanOptions)?.let { offset ->
+                    found = true
+                    if (offset == word.text.length) {
+                        words.getOrNull(index + 1)?.takeIf { it.literal }?.let { targets += it.text }
+                        index++
+                    } else if (word.literal) targets += word.text.substring(offset)
+                }
+            }
+            index++
+        }
+        return targets.takeIf { found }
+    }
+
+    private fun shortOutputOffset(text: String, outputOptions: Set<String>, booleanOptions: String): Int? {
+        if (!text.startsWith('-') || text.startsWith("--")) return null
+        for (index in 1 until text.length) {
+            if ("-${text[index]}" in outputOptions) return index + 1
+            // Stop before argument-taking/unknown flags; the remainder is not another option.
+            if (text[index] !in booleanOptions) return null
+        }
+        return null
     }
 
     private fun unwrapLiteralCommands(words: List<RootShellWord>): List<RootShellWord> {
@@ -113,6 +174,7 @@ internal fun visibleRootCommands(command: String): List<List<RootShellWord>> {
     val word = StringBuilder()
     var literal = true
     var present = false
+    var quotedOrEscaped = false
     var quote: Char? = null
     var index = 0
     val heredocs = mutableListOf<Pair<String, Boolean>>()
@@ -126,6 +188,7 @@ internal fun visibleRootCommands(command: String): List<List<RootShellWord>> {
         word.clear()
         literal = true
         present = false
+        quotedOrEscaped = false
     }
     fun endSegment() {
         endWord()
@@ -141,13 +204,14 @@ internal fun visibleRootCommands(command: String): List<List<RootShellWord>> {
         }
         if (char == '"' || char == '\'') {
             if (quote == char) quote = null
-            else if (quote == null) { quote = char; present = true }
+            else if (quote == null) { quote = char; present = true; quotedOrEscaped = true }
             else word.append(char)
             index++
             continue
         }
         if (char == '\\' && index + 1 < command.length) {
             val next = command[index + 1]
+            quotedOrEscaped = true
             if (next != '\n') { word.append(next); present = true }
             index += 2
             continue
@@ -193,10 +257,21 @@ internal fun visibleRootCommands(command: String): List<List<RootShellWord>> {
                 index += if (stripTabs) 3 else 2
             }
             char == '>' || char == '<' -> {
+                // An adjacent unquoted digit word is an IO descriptor, not a file operand.
+                // Quoted/escaped numeric filenames stay ordinary arguments.
+                if (present && literal && !quotedOrEscaped && word.all(Char::isDigit)) {
+                    word.clear()
+                    present = false
+                }
                 endWord()
                 val repeated = command.getOrNull(index + 1) == char
-                words += RootShellWord(if (repeated) "$char$char" else char.toString(), operator = true)
-                index += if (repeated) 2 else 1
+                val forced = char == '>' && command.getOrNull(index + 1) == '|'
+                val duplicate = command.getOrNull(index + 1) == '&'
+                words += RootShellWord(
+                    when { forced -> ">|"; duplicate -> "$char&"; repeated -> "$char$char"; else -> char.toString() },
+                    operator = true,
+                )
+                index += if (repeated || forced || duplicate) 2 else 1
             }
             char in listOf(';', '|', '&', '(', ')', '\n') -> {
                 endSegment()
