@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string translatable="false" name="assistant_page_local_tools_root_title">Root shell</string>
+    <string translatable="false" name="assistant_page_local_tools_root_desc">Run Android commands as root through su. Disabled by default. Every command requires approval. Your device root manager also controls access; disabling this tool does not revoke its grant.</string>
+    <string translatable="false" name="assistant_page_local_tools_root_status_title">Last root verification</string>
+    <string translatable="false" name="assistant_page_local_tools_root_verify">Verify root</string>
+    <string translatable="false" name="assistant_page_local_tools_root_unchecked">Not verified. Tap Verify root to check access; your root manager may ask for permission.</string>
+    <string translatable="false" name="assistant_page_local_tools_root_checking">Verifying root… Review any permission prompt in your device root manager.</string>
+    <string translatable="false" name="assistant_page_local_tools_root_ready">UID 0 verified. Root grants can change; verify again to refresh.</string>
+    <string translatable="false" name="assistant_page_local_tools_root_unavailable">su could not be launched. Check your device root manager. This app cannot root your device.</string>
+    <string translatable="false" name="assistant_page_local_tools_root_denied">Root was denied or verification failed. Review access in your device root manager, then verify again.</string>
+    <string translatable="false" name="assistant_page_local_tools_root_not_root">su did not grant UID 0. ADB or shell access alone is insufficient.</string>
+    <string translatable="false" name="assistant_page_local_tools_root_timeout">Verification timed out. Review access in your device root manager, then verify again.</string>
+</resources>

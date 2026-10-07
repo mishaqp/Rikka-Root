@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.ai
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -31,6 +32,8 @@ import me.rerere.ai.ui.StreamChunkHandler
 import me.rerere.ai.ui.handleTextGenerationResult
 import me.rerere.ai.ui.limitContext
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.root.executeRootToolOnce
+import me.rerere.rikkahub.root.awaitRootCheckpoint
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.MessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
@@ -66,6 +69,12 @@ private class StreamChunkHandlingException(cause: Throwable) : RuntimeException(
 sealed interface GenerationChunk {
     data class Messages(
         val messages: List<UIMessage>
+    ) : GenerationChunk
+
+    // A root command may start only after the collector has awaited its durable Room write.
+    data class RootExecutionCheckpoint(
+        val messages: List<UIMessage>,
+        val ack: CompletableDeferred<Unit>,
     ) : GenerationChunk
 }
 
@@ -264,7 +273,20 @@ class GenerationLoop(
                                 error("Invalid tool arguments JSON for ${tool.toolName}: ${it.message}")
                             }
                             Log.i(TAG, "generateText: executing tool ${toolDef.name} with args: $args")
-                            val result = toolDef.execute(args)
+                            val result = if (tool.toolName == "root_exec") {
+                                executeRootToolOnce(tool, persistStarted = { started ->
+                                    val last = messages.last()
+                                    val checkpoint = messages.dropLast(1) + last.copy(parts = last.parts.map { part ->
+                                        if (part is UIMessagePart.Tool && part.toolCallId == started.toolCallId) started else part
+                                    })
+                                    awaitRootCheckpoint { ack ->
+                                        emit(GenerationChunk.RootExecutionCheckpoint(checkpoint, ack))
+                                    }
+                                    messages = checkpoint
+                                }) { toolDef.execute(args) }
+                            } else {
+                                toolDef.execute(args)
+                            }
                             val hasShellAccess = tools.any { it.name == "workspace_shell" }
                             executedTools += tool.copy(
                                 output = maybeTruncateToolOutput(tool, result, hasShellAccess)

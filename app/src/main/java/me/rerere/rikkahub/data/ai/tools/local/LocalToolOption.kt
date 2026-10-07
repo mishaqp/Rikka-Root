@@ -6,6 +6,10 @@ import kotlinx.serialization.Serializable
 @Serializable
 sealed class LocalToolOption {
     @Serializable
+    @SerialName("root")
+    data object Root : LocalToolOption()
+
+    @Serializable
     @SerialName("javascript_engine")
     data object JavascriptEngine : LocalToolOption()
 

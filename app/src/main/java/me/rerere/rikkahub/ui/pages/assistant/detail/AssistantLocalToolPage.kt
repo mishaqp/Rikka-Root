@@ -13,9 +13,11 @@ import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
@@ -26,6 +28,9 @@ import com.dokar.sonner.ToastType
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.root.RootShellManager
+import me.rerere.rikkahub.root.RootStatus
+import kotlinx.coroutines.launch
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionInfo
@@ -37,6 +42,7 @@ import me.rerere.rikkahub.utils.hasUsageStatsPermission
 import me.rerere.rikkahub.utils.openUsageAccessSettings
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
+import org.koin.compose.koinInject
 
 @Composable
 fun AssistantLocalToolPage(id: String) {
@@ -80,6 +86,9 @@ private fun AssistantLocalToolContent(
 ) {
     val context = LocalContext.current
     val toaster = LocalToaster.current
+    val rootShellManager = koinInject<RootShellManager>()
+    val rootStatus by rootShellManager.status.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
     val permissionRequiredText =
         stringResource(R.string.assistant_page_local_tools_screen_time_permission_required)
 
@@ -128,6 +137,38 @@ private fun AssistantLocalToolContent(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         CardGroup {
+            item(
+                headlineContent = { Text(stringResource(R.string.assistant_page_local_tools_root_title)) },
+                supportingContent = { Text(stringResource(R.string.assistant_page_local_tools_root_desc)) },
+                trailingContent = {
+                    Switch(
+                        checked = assistant.localTools.contains(LocalToolOption.Root),
+                        onCheckedChange = { toggleLocalTool(LocalToolOption.Root, it) },
+                    )
+                },
+            )
+            item(
+                headlineContent = { Text(stringResource(R.string.assistant_page_local_tools_root_status_title)) },
+                supportingContent = {
+                    Text(stringResource(when (rootStatus) {
+                        RootStatus.UNCHECKED -> R.string.assistant_page_local_tools_root_unchecked
+                        RootStatus.CHECKING -> R.string.assistant_page_local_tools_root_checking
+                        RootStatus.READY -> R.string.assistant_page_local_tools_root_ready
+                        RootStatus.UNAVAILABLE -> R.string.assistant_page_local_tools_root_unavailable
+                        RootStatus.DENIED_OR_FAILED -> R.string.assistant_page_local_tools_root_denied
+                        RootStatus.NOT_ROOT -> R.string.assistant_page_local_tools_root_not_root
+                        RootStatus.TIMED_OUT -> R.string.assistant_page_local_tools_root_timeout
+                    }))
+                },
+                trailingContent = {
+                    TextButton(
+                        enabled = rootStatus != RootStatus.CHECKING,
+                        onClick = { scope.launch { rootShellManager.verifyRoot(force = true) } },
+                    ) {
+                        Text(stringResource(R.string.assistant_page_local_tools_root_verify))
+                    }
+                },
+            )
             item(
                 headlineContent = {
                     Text(stringResource(R.string.assistant_page_local_tools_javascript_engine_title))

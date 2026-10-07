@@ -41,6 +41,7 @@ import me.rerere.ai.ui.isEmptyInputMessage
 import me.rerere.common.android.Logging
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.root.persistRootCheckpoint
 import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationLoop
 import me.rerere.rikkahub.data.ai.TranslationHandler
@@ -742,6 +743,14 @@ class ChatService(
                 )
             }.collect { chunk ->
                 when (chunk) {
+                    is GenerationChunk.RootExecutionCheckpoint -> {
+                        persistRootCheckpoint(chunk.ack) {
+                            val checkpoint = getConversationFlow(conversationId).value
+                                .updateCurrentMessages(chunk.messages)
+                            // Ordered after earlier chunks; su cannot launch until this Room write finishes.
+                            saveConversation(conversationId, checkpoint)
+                        }
+                    }
                     is GenerationChunk.Messages -> {
                         val updatedConversation = getConversationFlow(conversationId).value
                             .updateCurrentMessages(chunk.messages)
