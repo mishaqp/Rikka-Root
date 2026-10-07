@@ -15,6 +15,7 @@ import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.workspace.WorkspaceShellStatus
+import me.rerere.rikkahub.root.RootAccessStore
 
 private const val TAG = "ChatToolFactory"
 
@@ -34,6 +35,7 @@ class ChatToolFactory(
     private val mcpManager: McpManager,
     private val skillManager: SkillManager,
     private val workspaceRepository: WorkspaceRepository,
+    private val rootAccessStore: RootAccessStore,
 ) {
     suspend fun createTools(
         settings: Settings,
@@ -92,7 +94,7 @@ class ChatToolFactory(
                 )
             )
         }
-    }
+    }.map { ToolPermissionPolicy.apply(it, rootAccessStore) }
 
     private suspend fun createWorkspaceToolsIfReady(workspaceId: String?, cwd: String?): List<Tool> {
         if (workspaceId.isNullOrBlank()) return emptyList()

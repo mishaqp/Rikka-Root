@@ -19,14 +19,14 @@ import me.rerere.rikkahub.root.RootApprovalPolicy
 import me.rerere.rikkahub.root.RootInvocation
 import me.rerere.rikkahub.root.RootShellManager
 
-/** Ordinary mode retains its consent gate; automatic mode is local to this assistant and device. */
+/** Ordinary mode retains its consent gate; automatic permission is global on this device. */
 fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = null, assistantId: String? = null): Tool = Tool(
     name = "root_exec",
-    description = "Run a non-interactive shell command on the Android device using su, after verified UID 0. Requires a rooted device and a root-manager grant. User approval is required unless automatic root mode is enabled for this assistant on this device; visible protected operations still require approval. Returns bounded stdout/stderr, exit_code, and errors. No Shizuku or Termux fallback. Commands are never retried after execution starts. timeout_ms defaults to 30000 and is limited to 1000–300000.",
+    description = "Run a non-interactive shell command on the Android device using su, after verified UID 0. Requires a rooted device and a root-manager grant. User approval is required unless global auto-approval or Always Allow is enabled on this device; visible protected operations still require approval. Returns bounded stdout/stderr, exit_code, and errors. No Shizuku or Termux fallback. Commands are never retried after execution starts. timeout_ms defaults to 30000 and is limited to 1000–300000.",
     needsApproval = { input ->
         val command = ((input as? JsonObject)?.get("command") as? JsonPrimitive)
             ?.takeIf { it.isString }?.contentOrNull
-        command.isNullOrBlank() || assistantId == null || accessStore?.isAutomatic(assistantId) != true ||
+        command.isNullOrBlank() || assistantId == null || accessStore?.isAllowed("root_exec") != true ||
             RootApprovalPolicy.reason(command) != null
     },
     parameters = {
@@ -44,7 +44,7 @@ fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = nul
         val command = commandValue?.takeIf { it.isString }?.contentOrNull
         val timeoutValue = args?.get("timeout_ms")
         val timeout = if (timeoutValue == null) 30_000 else (timeoutValue as? JsonPrimitive)?.takeIf { !it.isString }?.intOrNull
-        val automaticAtStart = assistantId != null && accessStore?.isAutomatic(assistantId) == true
+        val automaticAtStart = assistantId != null && accessStore?.isAllowed("root_exec") == true
         // Trusted invocation provenance survives revocation between journal acknowledgment and entry.
         val automaticInvocation = currentCoroutineContext()[RootInvocation]?.automatic ?: automaticAtStart
         val result = when {
@@ -67,7 +67,7 @@ fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = nul
                 var journalError = false
                 val executed = try {
                     manager.exec(command, timeout.coerceIn(1_000, 300_000)) {
-                        !automaticInvocation || assistantId != null && accessStore?.isAutomatic(assistantId) == true
+                        !automaticInvocation || assistantId != null && accessStore?.isAllowed("root_exec") == true
                     }.also {
                         exitCode = it.exitCode
                         status = it.error ?: if (it.exitCode == 0) "completed" else "failed"

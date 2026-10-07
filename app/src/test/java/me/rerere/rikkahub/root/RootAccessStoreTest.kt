@@ -14,31 +14,31 @@ class RootAccessStoreTest {
     @Test fun failedDisableSaveStillRevokesInMemoryAndNeverLoadsBackupPermission() = runBlocking {
         val directory = temp.newFolder()
         val store = RootAccessStore(directory)
-        store.setAutomatic("assistant-a", true)
+        store.setAutoApprove(true)
         val file = java.io.File(directory, "root-access.json")
         assertTrue(file.renameTo(java.io.File(temp.root, "old-enabled-state")))
         assertTrue(file.mkdir())
         java.io.File(file, "block replacement").writeText("obstruct atomic replace")
         try {
-            store.setAutomatic("assistant-a", false)
+            store.setAutoApprove(false)
             fail("failed persistent revocation must be reported")
         } catch (_: java.io.IOException) {}
-        assertFalse(store.isAutomatic("assistant-a"))
-        assertTrue(store.enabledAssistants.value.isEmpty())
-        assertFalse(RootAccessStore(directory).isAutomatic("assistant-a"))
+        assertFalse(store.isAllowed("root_exec"))
+        assertFalse(store.permissions.value.autoApproveAll)
+        assertFalse(RootAccessStore(directory).isAllowed("root_exec"))
     }
 
-    @Test fun permissionsAreOffByDefaultAndPersistPerAssistant() = runBlocking {
+    @Test fun permissionsAreOffByDefaultAndApplyGlobally() = runBlocking {
         val directory = temp.newFolder()
         val store = RootAccessStore(directory)
-        assertFalse(store.isAutomatic("assistant-a"))
-        store.setAutomatic("assistant-a", true)
-        assertTrue(store.isAutomatic("assistant-a"))
-        assertFalse(store.isAutomatic("assistant-b"))
-        assertEquals(setOf("assistant-a"), RootAccessStore(directory).enabledAssistants.value)
-        store.setAutomatic("assistant-a", false)
-        assertFalse(RootAccessStore(directory).isAutomatic("assistant-a"))
-        assertTrue(RootAccessStore(temp.newFolder()).enabledAssistants.value.isEmpty())
+        assertFalse(store.isAllowed("root_exec"))
+        store.setAutoApprove(true)
+        assertTrue(store.isAllowed("root_exec"))
+        assertTrue("Explicit device permission applies to every side-effect tool", store.isAllowed("workspace_shell"))
+        assertTrue(RootAccessStore(directory).permissions.value.autoApproveAll)
+        store.setAutoApprove(false)
+        assertFalse(RootAccessStore(directory).isAllowed("root_exec"))
+        assertFalse(RootAccessStore(temp.newFolder()).permissions.value.autoApproveAll)
     }
 
     @Test fun corruptedStateIsAllOff() = runBlocking {
@@ -46,8 +46,23 @@ class RootAccessStoreTest {
         val file = java.io.File(directory, "root-access.json")
         file.writeText("{\"enabledAssistants\":[\"assistant-a\"],broken")
         val reopened = RootAccessStore(directory)
-        assertTrue(reopened.enabledAssistants.value.isEmpty())
+        assertFalse(reopened.permissions.value.autoApproveAll)
         assertTrue(reopened.entries.value.isEmpty())
+    }
+
+    @Test fun oldAssistantGrantsAreIgnoredButJournalSurvives() = runBlocking {
+        val directory = temp.newFolder()
+        java.io.File(directory, "root-access.json").writeText("""{"enabledAssistants":["assistant-a"],"entries":[{"id":"old","assistantId":"assistant-a","timestampMs":1,"command":"id -u","exitCode":0,"status":"completed"}]}""")
+        val store = RootAccessStore(directory)
+        assertFalse(store.isAllowed("root_exec"))
+        assertTrue(store.permissions.value.alwaysAllow.isEmpty())
+        assertEquals("old", store.entries.value.single().id)
+        store.grantAlways("root_exec")
+        assertTrue(RootAccessStore(directory).isAllowed("root_exec"))
+        store.setAutoApprove(true)
+        store.disableAllAutomaticApprovals()
+        assertFalse(RootAccessStore(directory).isAllowed("root_exec"))
+        assertEquals(1, store.entries.value.size)
     }
 
     @Test fun journalMasksArgumentsAndUnknownStatusWithoutOutputFields() = runBlocking {

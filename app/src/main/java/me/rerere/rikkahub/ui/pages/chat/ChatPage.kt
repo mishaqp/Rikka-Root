@@ -330,7 +330,7 @@ private fun ChatPageContent(
                             vm.updateTitle(it)
                         }
                     )
-                    RootAutomaticIndicator(assistantId = conversation.assistantId.toString())
+                    RootAutomaticIndicator()
                 }
             },
             bottomBar = {

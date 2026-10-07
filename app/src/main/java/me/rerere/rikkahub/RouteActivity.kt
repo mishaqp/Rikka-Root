@@ -122,6 +122,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingFilesPage
 import me.rerere.rikkahub.ui.pages.setting.SettingMcpPage
 import me.rerere.rikkahub.ui.pages.setting.SettingModelPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPage
+import me.rerere.rikkahub.ui.pages.setting.SettingToolApprovalsPage
 import me.rerere.rikkahub.ui.pages.setting.SettingProviderDetailPage
 import me.rerere.rikkahub.ui.pages.setting.SettingProviderPage
 import me.rerere.rikkahub.ui.pages.setting.SettingSearchDetailPage
@@ -422,6 +423,10 @@ class RouteActivity : ComponentActivity() {
                                 TranslatorPage()
                             }
 
+                            entry<Screen.SettingToolApprovals> {
+                                SettingToolApprovalsPage()
+                            }
+
                             entry<Screen.Setting> {
                                 SettingPage()
                             }
@@ -679,6 +684,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object Setting : Screen
+
+    @Serializable
+    data object SettingToolApprovals : Screen
 
     @Serializable
     data object Backup : Screen

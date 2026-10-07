@@ -37,6 +37,7 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.canResumeToolExecution
 import me.rerere.rikkahub.root.canResumeRootTool
+import me.rerere.rikkahub.data.ai.tools.ToolPermissionPolicy
 import me.rerere.ai.ui.finishPendingTools
 import me.rerere.ai.ui.isEmptyInputMessage
 import me.rerere.common.android.Logging
@@ -160,6 +161,7 @@ internal fun repairIncompleteToolMessages(nodes: List<MessageNode>): List<Messag
         val hasPendingTools = node.currentMessage.getTools().any { !it.isExecuted }
 
         if (hasPendingTools) {
+            if (node.currentMessage.getTools().any(ToolPermissionPolicy::canResumeAutomatic)) return@mapIndexed node
             // A process interruption must not discard started root evidence or fresh Auto siblings.
             val rootTools = node.currentMessage.getTools().filter { it.toolName == "root_exec" }
             if (rootTools.any { it.isExecuted || canResumeRootTool(it) }) return@mapIndexed node
@@ -1017,7 +1019,7 @@ class ChatService(
             .map { it.currentMessage }
         // 生成循环只从最后一条消息恢复工具调用，待处理的工具被压到检查点之前就再也不会执行。
         check(messagesToCompress.none { message ->
-            message.getTools().any { it.isPending || it.canResumeExecution || canResumeRootTool(it) }
+            message.getTools().any { it.isPending || it.canResumeExecution || ToolPermissionPolicy.canResumeAutomatic(it) }
         }) { context.getString(R.string.chat_page_compress_pending_tools) }
 
         fun splitMessages(messages: List<UIMessage>): List<List<UIMessage>> {

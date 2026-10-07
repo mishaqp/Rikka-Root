@@ -43,6 +43,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.AiMagic
 import me.rerere.hugeicons.stroke.Alert01
 import me.rerere.hugeicons.stroke.Book01
@@ -210,6 +211,12 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     modifier = Modifier.padding(horizontal = 8.dp),
                     title = { Text(stringResource(R.string.setting_page_model_and_services)) },
                 ) {
+                    item(
+                        onClick = { navController.navigate(Screen.SettingToolApprovals) },
+                        leadingContent = { Icon(HugeIcons.Tick01, null) },
+                        headlineContent = { Text("Разрешения инструментов") },
+                        supportingContent = { Text("Автоодобрение и «Всегда разрешать» на этом устройстве") },
+                    )
                     item(
                         onClick = { navController.navigate(Screen.SettingModels) },
                         leadingContent = { Icon(HugeIcons.AiMagic, null) },

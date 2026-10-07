@@ -34,7 +34,7 @@ import me.rerere.ai.ui.limitContext
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.root.executeRootToolOnce
 import me.rerere.rikkahub.root.awaitRootCheckpoint
-import me.rerere.rikkahub.root.canResumeRootTool
+import me.rerere.rikkahub.data.ai.tools.ToolPermissionPolicy.canResumeAutomatic
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.MessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
@@ -109,7 +109,7 @@ class GenerationLoop(
 
             // Check if we have tool calls ready to continue after user interaction.
             val pendingTools = messages.lastOrNull()?.getTools()?.filter {
-                it.canResumeExecution || canResumeRootTool(it)
+                it.canResumeExecution || canResumeAutomatic(it)
             } ?: emptyList()
 
             val toolsToProcess: List<UIMessagePart.Tool>
@@ -214,17 +214,17 @@ class GenerationLoop(
                 }
 
                 // If there are pending approvals, break and wait for user
-                if (hasPendingApproval && updatedTools.none(::canResumeRootTool)) {
+                if (hasPendingApproval && updatedTools.none(::canResumeAutomatic)) {
                     Log.i(TAG, "generateText: waiting for tool approval")
                     break
                 }
 
-                // Automatic root siblings may run while a dangerous sibling waits for approval.
-                toolsToProcess = if (hasPendingApproval) updatedTools.filter(::canResumeRootTool) else updatedTools
+                // Automatic permission-controlled siblings may run while another tool waits for approval.
+                toolsToProcess = if (hasPendingApproval) updatedTools.filter(::canResumeAutomatic) else updatedTools
             } else {
                 // Resuming after user interaction - use the resumable tools directly.
                 Log.i(TAG, "generateText: resuming with ${pendingTools.size} resumable tools")
-                toolsToProcess = messages.last().getTools().filter { it.canResumeExecution || canResumeRootTool(it) }
+                toolsToProcess = messages.last().getTools().filter { it.canResumeExecution || canResumeAutomatic(it) }
             }
 
             // Handle tools (execute approved tools, handle denied tools)
@@ -274,8 +274,7 @@ class GenerationLoop(
                             }.getOrElse {
                                 error("Invalid tool arguments JSON for ${tool.toolName}: ${it.message}")
                             }
-                            if (tool.toolName == "root_exec" &&
-                                tool.approvalState == ToolApprovalState.Auto && toolDef.needsApproval(args)
+                            if (tool.approvalState == ToolApprovalState.Auto && toolDef.needsApproval(args)
                             ) {
                                 // Live revocation must also cover resumed/mixed batches.
                                 executedTools += tool.copy(approvalState = ToolApprovalState.Pending)

@@ -45,9 +45,16 @@ class ChatServiceTest {
 
     @Test fun `root repair keeps ordinary approval and unrelated tool cleanup unchanged`() {
         val pendingRoot = UIMessage.assistant("").copy(parts = listOf(UIMessagePart.Tool("pending", "root_exec", "{}", approvalState = ToolApprovalState.Pending))).toMessageNode()
-        val unstartedOther = UIMessage.assistant("").copy(parts = listOf(UIMessagePart.Tool("auto", "workspace_shell", "{}", approvalState = ToolApprovalState.Auto))).toMessageNode()
+        val unstartedOther = UIMessage.assistant("").copy(parts = listOf(UIMessagePart.Tool("auto", "other_tool", "{}", approvalState = ToolApprovalState.Auto))).toMessageNode()
         val approvedRoot = UIMessage.assistant("").copy(parts = listOf(UIMessagePart.Tool("approved", "root_exec", "{}", approvalState = ToolApprovalState.Approved))).toMessageNode()
         assertEquals(listOf(approvedRoot), repairIncompleteToolMessages(listOf(pendingRoot, unstartedOther, approvedRoot)))
+    }
+
+    @Test fun `repair preserves automatic workspace tool for live permission recheck`() {
+        val node = UIMessage.assistant("").copy(parts = listOf(
+            UIMessagePart.Tool("write", "workspace_write_file", "{}", approvalState = ToolApprovalState.Auto),
+        )).toMessageNode()
+        assertEquals(listOf(node), repairIncompleteToolMessages(listOf(node)))
     }
 
     @Test

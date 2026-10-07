@@ -7,6 +7,9 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentWidth
@@ -30,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,6 +63,11 @@ import me.rerere.rikkahub.ui.components.ui.ChainOfThoughtScope
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.ui.components.DotLoading
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import me.rerere.rikkahub.root.RootAccessStore
+import me.rerere.rikkahub.data.ai.tools.ToolPermissionPolicy
+import org.koin.compose.koinInject
 
 private const val ASK_USER_TOOL_NAME = "ask_user"
 
@@ -129,6 +138,11 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
 
     var showResult by remember { mutableStateOf(false) }
     var showDenyDialog by remember { mutableStateOf(false) }
+    var showApprovalDialog by remember(tool.toolCallId) { mutableStateOf(false) }
+    var savingGrant by remember(tool.toolCallId) { mutableStateOf(false) }
+    var grantError by remember(tool.toolCallId) { mutableStateOf(false) }
+    val approvalStore = koinInject<RootAccessStore>()
+    val approvalScope = rememberCoroutineScope()
     var expanded by remember { mutableStateOf(true) }
     val isPending = tool.isPending
     val isDenied = tool.approvalState is ToolApprovalState.Denied
@@ -180,7 +194,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                         )
                     }
                     FilledTonalIconButton(
-                        onClick = { onToolApproval(tool.toolCallId, true, "") },
+                        onClick = { showApprovalDialog = true },
                         modifier = Modifier.size(28.dp),
                     ) {
                         Icon(
@@ -230,6 +244,49 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
             null
         },
     )
+
+    if (showApprovalDialog && isPending && onToolApproval != null) {
+        AlertDialog(
+            onDismissRequest = { if (!savingGrant) showApprovalDialog = false },
+            title = { Text("Разрешить запуск ${tool.toolName}?") },
+            text = {
+                Column(modifier = Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+                    Text(tool.input)
+                    if (ToolPermissionPolicy.mandatoryConfirmation(tool.toolName, tool.inputAsJson())) {
+                        Text("Эта root-команда всегда требует отдельного подтверждения.", color = MaterialTheme.colorScheme.error)
+                    }
+                    if (grantError) Text("Не удалось сохранить разрешение. Команда не одобрена.", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            confirmButton = {
+                FlowRow {
+                    if (ToolPermissionPolicy.canGrantAlways(tool.toolName, tool.inputAsJson())) {
+                        TextButton(enabled = !savingGrant, onClick = {
+                            savingGrant = true
+                            approvalScope.launch {
+                                try {
+                                    approvalStore.grantAlways(tool.toolName)
+                                    showApprovalDialog = false
+                                    onToolApproval(tool.toolCallId, true, "")
+                                } catch (cancelled: CancellationException) { throw cancelled }
+                                catch (_: Exception) { grantError = true }
+                                finally { savingGrant = false }
+                            }
+                        }) { Text("Всегда разрешать") }
+                    }
+                    TextButton(enabled = !savingGrant, onClick = {
+                        showApprovalDialog = false
+                        onToolApproval(tool.toolCallId, true, "")
+                    }) { Text("Разрешить") }
+                }
+            },
+            dismissButton = {
+                TextButton(enabled = !savingGrant, onClick = { showApprovalDialog = false; showDenyDialog = true }) {
+                    Text("Отклонить")
+                }
+            },
+        )
+    }
 
     if (showDenyDialog && onToolApproval != null) {
         ToolDenyReasonDialog(

@@ -12,7 +12,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -38,37 +37,22 @@ import me.rerere.rikkahub.root.RootAccessStore
 import me.rerere.rikkahub.ui.context.LocalToaster
 import org.koin.compose.koinInject
 
-@Composable
-fun RootAutomaticSwitch(
-    assistantId: String,
-    enabled: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    val store = koinInject<RootAccessStore>()
-    val enabledAssistants by store.enabledAssistants.collectAsStateWithLifecycle()
-    Switch(
-        checked = assistantId in enabledAssistants,
-        enabled = enabled,
-        onCheckedChange = onCheckedChange,
-    )
-}
-
 /** Reads live access state, independently of the conversation's frozen configuration. */
 @Composable
-fun RootAutomaticIndicator(assistantId: String) {
+fun RootAutomaticIndicator() {
     val store = koinInject<RootAccessStore>()
-    val enabledAssistants by store.enabledAssistants.collectAsStateWithLifecycle()
+    val permissions by store.permissions.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
     val errorText by rememberUpdatedState(stringResource(R.string.root_access_save_failed))
-    var pending by remember(assistantId) { mutableStateOf(false) }
-    if (assistantId !in enabledAssistants) return
+    var pending by remember { mutableStateOf(false) }
+    if (!permissions.autoApproveAll && permissions.alwaysAllow.isEmpty()) return
 
     Surface(color = MaterialTheme.colorScheme.errorContainer) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    stringResource(R.string.root_automatic_active),
+                    if (permissions.autoApproveAll) "Автоодобрение инструментов включено" else "Для инструментов включено «Всегда разрешать»",
                     style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.weight(1f),
                 )
@@ -78,7 +62,7 @@ fun RootAutomaticIndicator(assistantId: String) {
                         pending = true
                         scope.launch {
                             try {
-                                store.setAutomatic(assistantId, false)
+                                store.disableAllAutomaticApprovals()
                             } catch (error: CancellationException) {
                                 throw error
                             } catch (_: Exception) {
@@ -99,7 +83,7 @@ fun RootAutomaticIndicator(assistantId: String) {
 }
 
 @Composable
-fun RootCommandJournalButton(assistantId: String) {
+fun RootCommandJournalButton(assistantId: String? = null) {
     var open by remember(assistantId) { mutableStateOf(false) }
     TextButton(onClick = { open = true }) {
         Text(stringResource(R.string.root_command_log_open))
@@ -109,7 +93,7 @@ fun RootCommandJournalButton(assistantId: String) {
     val store = koinInject<RootAccessStore>()
     val entries by store.entries.collectAsStateWithLifecycle()
     val assistantEntries = remember(entries, assistantId) {
-        entries.filter { it.assistantId == assistantId }.sortedByDescending { it.timestampMs }.take(200)
+        entries.filter { assistantId == null || it.assistantId == assistantId }.sortedByDescending { it.timestampMs }.take(200)
     }
     val locale = LocalConfiguration.current.locales[0]
     val dateFormat = remember(locale) {

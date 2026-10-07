@@ -35,28 +35,40 @@ data class RootCommandLogEntry(
 class RootAccessStore(private val directory: File) {
     private val file = File(directory, "root-access.json")
     private val mutex = Mutex()
-    private val json = Json { encodeDefaults = true }
+    private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
     private val initial = readState()
-    private val enabled = MutableStateFlow(initial.enabledAssistants)
+    private val permissionState = MutableStateFlow(initial.permissions)
     private val history = MutableStateFlow(initial.entries)
-    val enabledAssistants: StateFlow<Set<String>> = enabled.asStateFlow()
+    val permissions: StateFlow<ToolPermissions> = permissionState.asStateFlow()
     val entries: StateFlow<List<RootCommandLogEntry>> = history.asStateFlow()
 
-    fun isAutomatic(assistantId: String): Boolean = assistantId in enabled.value
+    fun isAllowed(toolName: String): Boolean = permissions.value.autoApproveAll || toolName in permissions.value.alwaysAllow
 
-    suspend fun setAutomatic(assistantId: String, enabled: Boolean) = mutex.withLock {
-        val next = if (enabled) this.enabled.value + assistantId else this.enabled.value - assistantId
+    suspend fun setAutoApprove(enabled: Boolean) = changePermissions(revoking = !enabled) { it.copy(autoApproveAll = enabled) }
+
+    suspend fun grantAlways(toolName: String) {
+        require(toolName.isNotBlank() && toolName.length <= 256 && toolName.none { it.isISOControl() })
+        changePermissions(revoking = false) { it.copy(alwaysAllow = it.alwaysAllow + toolName) }
+    }
+
+    suspend fun revoke(toolName: String) = changePermissions(revoking = true) { it.copy(alwaysAllow = it.alwaysAllow - toolName) }
+
+    /** The chat shortcut restores approval for every side-effect tool, including persistent grants. */
+    suspend fun disableAllAutomaticApprovals() = changePermissions(revoking = true) { ToolPermissions() }
+
+    private suspend fun changePermissions(revoking: Boolean, change: (ToolPermissions) -> ToolPermissions) = mutex.withLock {
+        val next = change(permissionState.value)
         // Revocation takes effect before disk IO; a failed save must never restore permission.
-        if (!enabled) this.enabled.value = next
+        if (revoking) permissionState.value = next
         withContext(NonCancellable + Dispatchers.IO) {
             try {
                 writeState(StoredRootAccess(next, history.value))
-                this@RootAccessStore.enabled.value = next
+                permissionState.value = next
             } catch (error: IOException) {
-                if (!enabled) {
+                if (revoking) {
                     // No AtomicFile backup is kept that could resurrect the old enabled state.
                     runCatching { Files.deleteIfExists(file.toPath()) }
-                    this@RootAccessStore.enabled.value = emptySet()
+                    permissionState.value = ToolPermissions()
                 }
                 throw error
             }
@@ -71,7 +83,7 @@ class RootAccessStore(private val directory: File) {
             command = RootCommandRedactor.redact(command),
         )
         val next = (history.value + entry).takeLast(MAX_ENTRIES)
-        withContext(Dispatchers.IO) { writeState(StoredRootAccess(enabled.value, next)) }
+        withContext(Dispatchers.IO) { writeState(StoredRootAccess(permissionState.value, next)) }
         history.value = next
         entry.id
     }
@@ -82,7 +94,7 @@ class RootAccessStore(private val directory: File) {
         val next = history.value.map { if (it.id == id) it.copy(exitCode = exitCode, status = safeStatus) else it }
         // The actual outcome is known even when the final disk write fails.
         history.value = next
-        withContext(Dispatchers.IO) { writeState(StoredRootAccess(enabled.value, next)) }
+        withContext(Dispatchers.IO) { writeState(StoredRootAccess(permissionState.value, next)) }
     }
 
     private fun readState(): StoredRootAccess = runCatching {
@@ -131,7 +143,14 @@ class RootAccessStore(private val directory: File) {
 }
 
 @Serializable
+data class ToolPermissions(
+    val autoApproveAll: Boolean = false,
+    val alwaysAllow: Set<String> = emptySet(),
+)
+
+@Serializable
 private data class StoredRootAccess(
-    val enabledAssistants: Set<String> = emptySet(),
+    // Old enabledAssistants is intentionally ignored: assistant consent is not global consent.
+    val permissions: ToolPermissions = ToolPermissions(),
     val entries: List<RootCommandLogEntry> = emptyList(),
 )

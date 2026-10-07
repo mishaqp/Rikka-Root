@@ -146,6 +146,27 @@ class GenerationLoopRootApprovalTest {
         id, "root_exec", buildJsonObject { put("command", command) }.toString(),
     )
 
+    @Test(timeout = 15_000)
+    fun `automatic workspace sibling executes while revoked root waits without replay`() = runBlocking {
+        Fixture(folder.newFolder()).use { fixture ->
+            fixture.automatic.set(false)
+            val runs = AtomicInteger()
+            val workspace = Tool("workspace_write_file", "test", execute = {
+                runs.incrementAndGet()
+                listOf(UIMessagePart.Text("saved"))
+            })
+            fixture.collect(listOf(UIMessage(role = MessageRole.ASSISTANT, parts = listOf(
+                call("ordinary", "id -u"),
+                UIMessagePart.Tool("write", "workspace_write_file", "{}"),
+            ))), extraTools = listOf(workspace))
+            assertEquals(1, runs.get())
+            assertTrue(fixture.commands.isEmpty())
+            assertEquals(0, fixture.requests.get())
+            assertTrue(fixture.latest.last().getTools().single { it.toolCallId == "write" }.isExecuted)
+            assertTrue(fixture.latest.last().getTools().single { it.toolCallId == "ordinary" }.isPending)
+        }
+    }
+
     private class Fixture(private val directory: File) : Closeable {
         val automatic = AtomicBoolean(true)
         val commands = CopyOnWriteArrayList<String>()

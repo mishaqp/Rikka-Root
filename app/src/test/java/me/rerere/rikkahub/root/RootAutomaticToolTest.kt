@@ -35,7 +35,7 @@ class RootAutomaticToolTest {
     @Test fun cancellationWhileDurableBeginReturnsFinishesJournalWithoutLaunching() = runBlocking {
         val directory = temp.newFolder()
         val store = RootAccessStore(directory)
-        store.setAutomatic("assistant-a", true)
+        store.setAutoApprove(true)
         val target = File(temp.root, "cancelled-begin-must-not-launch")
         val tool = buildRootTool(RootShellManager(suExecutable = fakeSu().path), store, "assistant-a")
         val executor = Executors.newSingleThreadExecutor()
@@ -69,11 +69,11 @@ class RootAutomaticToolTest {
 
     @Test fun automaticProvenanceCannotBecomeManualWhenRevokedBeforeToolEntry() = runBlocking {
         val store = RootAccessStore(temp.newFolder())
-        store.setAutomatic("assistant-a", true)
+        store.setAutoApprove(true)
         val target = File(temp.root, "revoked-command-must-not-run")
         val tool = buildRootTool(RootShellManager(suExecutable = fakeSu().path), store, "assistant-a")
         val output = withContext(RootInvocation(automatic = true)) {
-            store.setAutomatic("assistant-a", false)
+            store.setAutoApprove(false)
             tool.execute(buildJsonObject { put("command", "touch '${target.path}'") })
         }
         val result = Json.parseToJsonElement((output.single() as UIMessagePart.Text).text).jsonObject
@@ -83,7 +83,7 @@ class RootAutomaticToolTest {
 
     @Test fun nonzeroExitIsLoggedAsFailedWithoutOutputSecrets() = runBlocking {
         val store = RootAccessStore(temp.newFolder())
-        store.setAutomatic("assistant-a", true)
+        store.setAutoApprove(true)
         val tool = buildRootTool(RootShellManager(suExecutable = fakeSu().path), store, "assistant-a")
         val output = tool.execute(buildJsonObject { put("command", "printf private-failed-output; exit 9") })
         val result = Json.parseToJsonElement((output.single() as UIMessagePart.Text).text).jsonObject
@@ -96,7 +96,7 @@ class RootAutomaticToolTest {
     @Test fun failedFinalJournalWritePreservesActualOutputAndExit() = runBlocking {
         val directory = temp.newFolder()
         val store = RootAccessStore(directory)
-        store.setAutomatic("assistant-a", true)
+        store.setAutoApprove(true)
         val started = File(temp.root, "journal-failure-started")
         val finish = File(temp.root, "journal-failure-finish")
         val tool = buildRootTool(RootShellManager(suExecutable = fakeSu().path), store, "assistant-a")
@@ -123,7 +123,7 @@ class RootAutomaticToolTest {
     @Test fun failedCancellationJournalWriteDoesNotReplaceCancellation() = runBlocking {
         val directory = temp.newFolder()
         val store = RootAccessStore(directory)
-        store.setAutomatic("assistant-a", true)
+        store.setAutoApprove(true)
         val started = File(temp.root, "journal-failure-cancel-started")
         val tool = buildRootTool(RootShellManager(suExecutable = fakeSu().path), store, "assistant-a")
         val job = async {
@@ -144,19 +144,20 @@ class RootAutomaticToolTest {
         }
     }
 
-    @Test fun modeIsLivePerAssistantAndDangerousCallsStillNeedApproval() = runBlocking {
+    @Test fun modeIsGlobalAndLiveAndDangerousCallsStillNeedApproval() = runBlocking {
         val store = RootAccessStore(temp.newFolder())
         val manager = RootShellManager(suExecutable = "/nonexistent/root-su")
         val tool = buildRootTool(manager, store, "assistant-a")
         val args = buildJsonObject { put("command", "id") }
         assertTrue(tool.needsApproval(args))
-        store.setAutomatic("assistant-b", true)
-        assertTrue(tool.needsApproval(args))
-        store.setAutomatic("assistant-a", true)
+        val otherAssistantTool = buildRootTool(manager, store, "assistant-b")
+        assertTrue(otherAssistantTool.needsApproval(args))
+        store.setAutoApprove(true)
         assertFalse(tool.needsApproval(args))
+        assertFalse("Permission is global across assistants", otherAssistantTool.needsApproval(args))
         assertTrue(tool.needsApproval(buildJsonObject { put("command", "rm -rf /system") }))
         assertTrue(tool.needsApproval(JsonNull))
-        store.setAutomatic("assistant-a", false)
+        store.setAutoApprove(false)
         assertTrue(tool.needsApproval(args))
     }
 
@@ -169,7 +170,7 @@ class RootAutomaticToolTest {
         val blocked = Json.parseToJsonElement((tool.execute(args).single() as UIMessagePart.Text).text).jsonObject
         assertEquals("root_command_blocked", blocked["error"]!!.jsonPrimitive.content)
         assertTrue(store.entries.value.isEmpty())
-        store.setAutomatic("assistant-a", true)
+        store.setAutoApprove(true)
         assertFalse(tool.needsApproval(args))
         val executed = Json.parseToJsonElement((tool.execute(args).single() as UIMessagePart.Text).text).jsonObject
         assertTrue(executed["success"]!!.jsonPrimitive.boolean)
@@ -179,7 +180,7 @@ class RootAutomaticToolTest {
     @Test fun cancellationDurablyFinishesRedactedJournal() = runBlocking {
         val directory = temp.newFolder()
         val store = RootAccessStore(directory)
-        store.setAutomatic("assistant-a", true)
+        store.setAutoApprove(true)
         val tool = buildRootTool(RootShellManager(suExecutable = fakeSu().path), store, "assistant-a")
         val started = File(temp.root, "command-started")
         val args = buildJsonObject { put("command", "printf private-output; touch '${started.path}'; sleep 30") }
