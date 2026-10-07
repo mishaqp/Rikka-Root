@@ -213,8 +213,8 @@ class ResponseAPI(
         stream: Boolean
     ): JsonObject {
         val host = providerSetting.baseUrl.toHttpUrl().host
-        val capabilities = resolveResponseProviderCapabilities(host)
-        return buildJsonObject {
+        val capabilities = resolveResponseProviderCapabilities(host, params.model.modelId, params.model.supportedReasoningEfforts)
+        val requestBody = buildJsonObject {
             put("model", params.model.modelId)
             put("stream", stream)
             put("store", false)
@@ -243,7 +243,8 @@ class ResponseAPI(
                     if (capabilities.supportsReasoningSummary) {
                         put("summary", "auto")
                     }
-                    if (level != ReasoningLevel.AUTO) {
+                    if (level != ReasoningLevel.AUTO &&
+                        (level != ReasoningLevel.OFF || capabilities.supportsDisabledReasoning)) {
                         put("effort", level.effort)
                     }
                 })
@@ -301,6 +302,12 @@ class ResponseAPI(
                 }
             }
         }.mergeCustomBody(params.customBody)
+        val sanitized = requestBody.sanitizeReasoningOptions(capabilities)
+        return if (host == "chatgpt.com" && providerSetting.baseUrl.toHttpUrl().encodedPath.startsWith("/backend-api/codex")) {
+            // Codex requires streaming and never stores responses; caller body overrides
+            // must not change the wire format that its SSE decoder expects.
+            JsonObject(sanitized + mapOf("stream" to JsonPrimitive(true), "store" to JsonPrimitive(false)))
+        } else sanitized
     }
 
     internal fun buildMessages(messages: List<UIMessage>) = buildJsonArray {
@@ -716,14 +723,46 @@ private fun List<UIMessagePart>.isOnlyTextPart(): Boolean {
     return gonnaSend == texts && texts == 1
 }
 
+private fun JsonObject.sanitizeReasoningOptions(capabilities: ResponseProviderCapabilities): JsonObject {
+    if (capabilities.supportsReasoningSummary && capabilities.supportsDisabledReasoning) return this
+    val content = toMutableMap()
+    (content["reasoning"] as? JsonObject)?.let { reasoning ->
+        content["reasoning"] = JsonObject(reasoning.filter { (key, value) ->
+            when (key) {
+                "summary" -> capabilities.supportsReasoningSummary
+                "effort" -> capabilities.supportsDisabledReasoning ||
+                    (value as? JsonPrimitive)?.contentOrNull != ReasoningLevel.OFF.effort
+                else -> true
+            }
+        })
+    }
+    if (!capabilities.supportsReasoningSummary) {
+        (content["stream_options"] as? JsonObject)?.let { options ->
+            val sanitized = options.filterKeys { it != "reasoning_summary_delivery" }
+            if (sanitized.isEmpty()) content.remove("stream_options")
+            else content["stream_options"] = JsonObject(sanitized)
+        }
+    }
+    return JsonObject(content)
+}
+
 internal data class ResponseProviderCapabilities(
     val supportsReasoningSummary: Boolean = true,
-    val supportEncryptedContent: Boolean = true
+    val supportEncryptedContent: Boolean = true,
+    val supportsDisabledReasoning: Boolean = true,
 )
 
-internal fun resolveResponseProviderCapabilities(host: String): ResponseProviderCapabilities {
-    return when (host) {
-        "ark.cn-beijing.volces.com" -> ResponseProviderCapabilities(
+internal fun resolveResponseProviderCapabilities(
+    host: String,
+    modelId: String? = null,
+    supportedReasoningEfforts: List<String> = emptyList(),
+): ResponseProviderCapabilities {
+    return when {
+        host == "chatgpt.com" && modelId.equals("gpt-5.3-codex-spark", ignoreCase = true) ->
+            ResponseProviderCapabilities(supportsReasoningSummary = false, supportsDisabledReasoning = false)
+        host == "chatgpt.com" && supportedReasoningEfforts.isNotEmpty() ->
+            ResponseProviderCapabilities(supportsDisabledReasoning = "none" in supportedReasoningEfforts)
+        host == "ark.cn-beijing.volces.com" -> ResponseProviderCapabilities(
             supportsReasoningSummary = false,
             supportEncryptedContent = false
         )

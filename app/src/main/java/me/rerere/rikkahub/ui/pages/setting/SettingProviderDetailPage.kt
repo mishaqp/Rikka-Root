@@ -119,6 +119,8 @@ import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.ui.pages.assistant.detail.CustomBodies
 import me.rerere.rikkahub.ui.pages.assistant.detail.CustomHeaders
+import me.rerere.rikkahub.ui.pages.setting.components.withRefreshedCodexModels
+import me.rerere.rikkahub.ui.pages.setting.components.CodexProviderConfigure
 import me.rerere.rikkahub.ui.pages.setting.components.ProviderConfigure
 import me.rerere.rikkahub.ui.pages.setting.components.ProviderConnectionTester
 import me.rerere.rikkahub.ui.pages.setting.components.SettingProviderBalanceOption
@@ -251,7 +253,11 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                         },
                         onDelete = {
                             onDelete()
-                        }
+                        },
+                        onCodexModelsRefreshed = { models, afterLogin ->
+                            // Read the latest state after network IO to preserve concurrent edits.
+                            vm.updateSettings(vm.settings.value.withRefreshedCodexModels(id, models, afterLogin))
+                        },
                     )
                 }
 
@@ -277,8 +283,22 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
 private fun SettingProviderConfigPage(
     provider: ProviderSetting,
     onEdit: (ProviderSetting) -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onCodexModelsRefreshed: (List<Model>, Boolean) -> Unit,
 ) {
+    if (provider is ProviderSetting.Codex) {
+        Column(
+            modifier = Modifier.fillMaxSize().imePadding()
+                .verticalScroll(rememberScrollState()).padding(16.dp),
+        ) {
+            CodexProviderConfigure(
+                provider = provider, onEdit = onEdit,
+                onModelsRefreshed = onCodexModelsRefreshed,
+            )
+        }
+        return
+    }
+
     var internalProvider by remember(provider) { mutableStateOf(provider) }
     var showDeleteDialog by remember { mutableStateOf(false) }
 

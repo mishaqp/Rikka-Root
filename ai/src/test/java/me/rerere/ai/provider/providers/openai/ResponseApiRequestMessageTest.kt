@@ -11,6 +11,7 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.Tool
+import me.rerere.ai.provider.CustomBody
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
@@ -523,6 +524,76 @@ class ResponseApiRequestMessageTest {
 
         assertEquals(1, items.size)
         assertEquals("user", items.single().jsonObject["role"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `Codex Spark strips unsupported reasoning after custom body merge`() {
+        val body = invokeBuildRequestBody(
+            providerSetting = ProviderSetting.OpenAI(baseUrl = "https://chatgpt.com/backend-api/codex"),
+            params = TextGenerationParams(
+                model = Model(modelId = "gpt-5.3-codex-spark", abilities = listOf(ModelAbility.REASONING)),
+                reasoningLevel = ReasoningLevel.OFF,
+                customBody = listOf(
+                    CustomBody("reasoning", buildJsonObject {
+                        put("summary", "detailed")
+                        put("effort", "none")
+                    }),
+                    CustomBody("stream_options", buildJsonObject {
+                        put("reasoning_summary_delivery", "summary_text.delta")
+                        put("other_option", true)
+                    }),
+                ),
+            ),
+        )
+        val reasoning = body["reasoning"]!!.jsonObject
+        assertFalse(reasoning.containsKey("summary"))
+        assertFalse(reasoning.containsKey("effort"))
+        val streamOptions = body["stream_options"]!!.jsonObject
+        assertFalse(streamOptions.containsKey("reasoning_summary_delivery"))
+        assertEquals("true", streamOptions["other_option"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `Codex Spark retains supported effort while regular models keep reasoning summary`() {
+        fun request(modelId: String) = invokeBuildRequestBody(
+            providerSetting = ProviderSetting.OpenAI(baseUrl = "https://chatgpt.com/backend-api/codex"),
+            params = TextGenerationParams(
+                model = Model(modelId = modelId, abilities = listOf(ModelAbility.REASONING)),
+                reasoningLevel = ReasoningLevel.HIGH,
+            ),
+        )
+        assertEquals("high", request("gpt-5.3-codex-spark")["reasoning"]!!.jsonObject["effort"]!!.jsonPrimitive.content)
+        assertFalse(request("gpt-5.3-codex-spark")["reasoning"]!!.jsonObject.containsKey("summary"))
+        assertEquals("auto", request("gpt-5.4-codex")["reasoning"]!!.jsonObject["summary"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `OAuth catalog restrictions prevent unsupported none effort after custom merge`() {
+        val body = invokeBuildRequestBody(
+            providerSetting = ProviderSetting.OpenAI(baseUrl = "https://chatgpt.com/backend-api/codex"),
+            params = TextGenerationParams(
+                model = Model(modelId = "gpt-6.1-sol", abilities = listOf(ModelAbility.REASONING),
+                    supportedReasoningEfforts = listOf("low", "medium", "high", "xhigh", "max", "ultra")),
+                reasoningLevel = ReasoningLevel.OFF,
+                customBody = listOf(CustomBody("reasoning", buildJsonObject { put("effort", "none") })),
+            ),
+        )
+        val reasoning = body["reasoning"]!!.jsonObject
+        assertFalse(reasoning.containsKey("effort"))
+        assertEquals("auto", reasoning["summary"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `Codex transport contract overrides custom stream and storage flags`() {
+        val body = invokeBuildRequestBody(
+            providerSetting = ProviderSetting.OpenAI(baseUrl = "https://chatgpt.com/backend-api/codex"),
+            params = TextGenerationParams(model = Model(modelId = "gpt-6.1-sol"), customBody = listOf(
+                CustomBody("stream", kotlinx.serialization.json.JsonPrimitive(false)),
+                CustomBody("store", kotlinx.serialization.json.JsonPrimitive(true)),
+            )),
+        )
+        assertEquals("true", body["stream"]!!.jsonPrimitive.content)
+        assertEquals("false", body["store"]!!.jsonPrimitive.content)
     }
 
     // ==================== Helper Functions ====================

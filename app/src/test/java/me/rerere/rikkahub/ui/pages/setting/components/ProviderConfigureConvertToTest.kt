@@ -13,6 +13,26 @@ import kotlin.uuid.Uuid
 
 class ProviderConfigureConvertToTest {
     @Test
+    fun `codex conversion does not export account tokens and retains common configuration`() {
+        val provider = ProviderSetting.Codex(
+            customHeaders = listOf(CustomHeader("X-Test", "value")),
+            models = listOf(Model(modelId = "codex-model")),
+        )
+        val converted = provider.convertTo(ProviderSetting.OpenAI::class) as ProviderSetting.OpenAI
+        assertEquals("", converted.apiKey)
+        assertEquals(provider.models, converted.models)
+        assertEquals(provider.id, converted.id)
+        assertEquals(provider.customHeaders, converted.customHeaders)
+        assertSame(provider, provider.resetBaseUrlToDefault())
+        assertTrue(provider.isUsingDefaultBaseUrl())
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `api key provider cannot become an account provider by conversion`() {
+        ProviderSetting.OpenAI(apiKey = "secret").convertTo(ProviderSetting.Codex::class)
+    }
+
+    @Test
     fun `convertTo should keep common fields and switch official endpoint to target default`() {
         val model = Model(
             id = Uuid.random(),

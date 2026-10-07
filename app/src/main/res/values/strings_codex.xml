@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string translatable="false" name="codex_provider_description">Use your ChatGPT account to chat with Codex models. Sign in in your browser; no API key is required.</string>
+  <string translatable="false" name="codex_sign_in">Sign in with ChatGPT</string>
+  <string translatable="false" name="codex_enable">Enable Codex</string>
+  <string translatable="false" name="codex_round_robin_description">Use enabled accounts in round-robin order.</string>
+  <string translatable="false" name="codex_sign_in_required">Sign in with at least one available account first.</string>
+  <string translatable="false" name="codex_accounts_count">Accounts (%1$d)</string>
+  <string translatable="false" name="codex_check_status">Check status</string>
+  <string translatable="false" name="codex_no_accounts">No Codex accounts are signed in.</string>
+  <string translatable="false" name="codex_oauth_success">OpenAI OAuth sign-in completed</string>
+  <string translatable="false" name="codex_refresh_failed">Failed to refresh account</string>
+  <string translatable="false" name="codex_remove_account_title">Remove Codex account?</string>
+  <string translatable="false" name="codex_remove_account_message">You will need to sign in again to use this account.</string>
+  <string translatable="false" name="codex_remove">Remove</string>
+  <string translatable="false" name="codex_token_available">Token available</string>
+  <string translatable="false" name="codex_token_expired">Token expired</string>
+  <string translatable="false" name="codex_token_unavailable">Token unavailable</string>
+  <string translatable="false" name="codex_token_not_checked">Token status not checked</string>
+  <string translatable="false" name="codex_five_hour_limit">5-hour limit</string>
+  <string translatable="false" name="codex_weekly_limit">Weekly limit</string>
+  <string translatable="false" name="codex_minute_limit">%1$d minute limit</string>
+  <string translatable="false" name="codex_percent_remaining">%1$d%% remaining</string>
+  <string translatable="false" name="codex_resets_at">Resets %1$s</string>
+  <string translatable="false" name="codex_refresh">Refresh</string>
+  <string translatable="false" name="codex_reauthenticate">Re-auth</string>
+  <string translatable="false" name="codex_reasoning_auto_unsupported">Codex does not support automatic reasoning effort. Select Low, Medium, High, or Extra High.</string>
+  <string translatable="false" name="codex_response_failed">The Codex response failed.</string>
+  <string translatable="false" name="codex_monthly_limit">Monthly limit</string>
+  <string translatable="false" name="codex_oauth_ports_unavailable">Codex sign-in cannot start because the local callback ports are in use. Close the app using them and try again.</string>
+  <string translatable="false" name="codex_oauth_success_models_failed">Signed in to ChatGPT. Models could not be loaded; try Refresh models.</string>
+  <string translatable="false" name="codex_oauth_waiting">Finish signing in in your browser, or cancel to close the sign-in session.</string>
+  <string translatable="false" name="codex_refresh_models">Refresh models</string>
+  <string translatable="false" name="codex_models_refresh_failed">Could not load Codex models. Your account remains signed in.</string>
+  <string translatable="false" name="codex_remove_failed">Could not remove the account. Try again.</string>
+  <string translatable="false" name="codex_account_update_failed">Could not update the account. Try again.</string>
+</resources>

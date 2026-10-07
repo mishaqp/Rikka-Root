@@ -10,6 +10,8 @@ import kotlin.coroutines.resumeWithException
 
 suspend fun Call.await(): Response {
     return suspendCancellableCoroutine { continuation ->
+        // Coroutine cancellation (including OAuth timeout) must release the network call.
+        continuation.invokeOnCancellation { cancel() }
         enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 if (continuation.isActive) {

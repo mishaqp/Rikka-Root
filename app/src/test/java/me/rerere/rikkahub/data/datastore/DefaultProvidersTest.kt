@@ -8,6 +8,16 @@ import org.junit.Test
 
 class DefaultProvidersTest {
     @Test
+    fun `codex default is a single disabled built-in account provider`() {
+        val codex = DEFAULT_PROVIDERS.filterIsInstance<ProviderSetting.Codex>().single()
+        assertEquals(DEFAULT_CODEX_PROVIDER_ID, codex.id)
+        assertFalse(codex.enabled)
+        assertTrue(codex.builtIn)
+        assertTrue(codex.models.isEmpty())
+        assertEquals(DEFAULT_PROVIDERS.size, DEFAULT_PROVIDERS.map { it.id }.distinct().size)
+    }
+
+    @Test
     fun `default providers should include vercel ai gateway with expected balance config`() {
         val vercelProviders = DEFAULT_PROVIDERS
             .filterIsInstance<ProviderSetting.OpenAI>()

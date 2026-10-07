@@ -65,6 +65,18 @@
       android:label="@string/title_activity_safe_mode"
       android:theme="@style/Theme.Rikkahub" />
     <activity
+      android:name=".ui.activity.CodexOAuthRedirectActivity"
+      android:exported="true"
+      android:noHistory="true"
+      android:theme="@style/Theme.Rikkahub">
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="rikkaroot" android:host="codex" android:path="/oauth" />
+      </intent-filter>
+    </activity>
+    <activity
       android:name=".RouteActivity"
       android:configChanges="keyboardHidden|orientation|screenSize"
       android:exported="true"

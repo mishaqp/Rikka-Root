@@ -101,6 +101,10 @@ android {
     sourceSets {
         getByName("androidTest").assets.srcDirs("$projectDir/schemas")
     }
+    // Protocol tests exercise real OkHttp/Responses code; Android logging is incidental.
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
     androidResources {
         generateLocaleConfig = true
     }

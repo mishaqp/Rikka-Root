@@ -17,6 +17,7 @@ data class Model(
     val abilities: List<ModelAbility> = emptyList(),
     val tools: Set<BuiltInTools> = emptySet(),
     val providerOverwrite: ProviderSetting? = null,
+    val supportedReasoningEfforts: List<String> = emptyList(),
 )
 
 @Serializable

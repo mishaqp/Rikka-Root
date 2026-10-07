@@ -1,0 +1,366 @@
+package me.rerere.rikkahub.data.codex
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import me.rerere.common.http.await
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.concurrent.TimeUnit
+
+class CodexAccountRepository internal constructor(
+    private val store: CodexCredentialStore,
+    private val client: OkHttpClient,
+    private val json: Json,
+) {
+    private val mutex = Mutex()
+    private val authClient = client.newBuilder().readTimeout(30, TimeUnit.SECONDS)
+        .callTimeout(60, TimeUnit.SECONDS).build()
+    private var state = store.read().let { stored ->
+        stored.copy(
+            accounts = stored.accounts.map { account ->
+                if (
+                    account.tokenStatus != CodexTokenStatus.INVALID &&
+                    account.expiresAt <= System.currentTimeMillis()
+                ) {
+                    account.copy(tokenStatus = CodexTokenStatus.EXPIRED)
+                } else {
+                    account
+                }
+            }
+        )
+    }
+    private val _accounts = MutableStateFlow(state.accounts)
+    val accounts: StateFlow<List<CodexAccount>> = _accounts.asStateFlow()
+
+    suspend fun saveLogin(tokenJson: String): CodexAccount = mutex.withLock {
+        val token = parseCodexTokenResponse(tokenJson, json)
+        val identity = parseCodexIdentity(
+            idToken = token["id_token"]?.jsonPrimitive?.contentOrNull
+                ?: error("Missing ID token"),
+            json = json,
+        )
+        val now = System.currentTimeMillis()
+        val existing = state.accounts.firstOrNull {
+            it.chatgptAccountId == identity.accountId &&
+                if (it.userId.isNotBlank() && identity.userId.isNotBlank()) {
+                    it.userId == identity.userId
+                } else {
+                    it.email == identity.email
+                }
+        }
+        val account = CodexAccount(
+            id = existing?.id ?: "${identity.userId.ifBlank { identity.email }}:${identity.accountId}",
+            userId = identity.userId,
+            name = identity.name,
+            email = identity.email,
+            chatgptAccountId = identity.accountId,
+            accessToken = token["access_token"]?.jsonPrimitive?.contentOrNull
+                ?: error("Missing access token"),
+            refreshToken = token["refresh_token"]?.jsonPrimitive?.contentOrNull
+                ?: existing?.refreshToken
+                ?: error("Missing refresh token"),
+            expiresAt = now + (
+                token["expires_in"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 3600L
+                ) * 1000,
+            enabled = existing?.enabled ?: true,
+            tokenStatus = CodexTokenStatus.AVAILABLE,
+            usage = existing?.usage,
+        )
+        updateState(
+            state.copy(
+                accounts = state.accounts.filterNot { it.id == account.id } + account
+            )
+        )
+        account
+    }
+
+    suspend fun acquireAccount(modelId: String? = null): CodexAccount = mutex.withLock {
+        if (state.accounts.isEmpty()) error("No Codex account is signed in")
+        repeat(state.accounts.size) {
+            val index = selectCodexAccountIndex(
+                accounts = state.accounts,
+                startIndex = state.nextAccountIndex,
+                modelId = modelId,
+            ) ?: error("No available Codex account")
+            val candidate = state.accounts[index]
+            if (!candidate.isAvailable(modelId = modelId)) return@repeat
+            updateState(state.copy(nextAccountIndex = (index + 1) % state.accounts.size))
+            val fresh = try {
+                ensureFreshLocked(candidate)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                return@repeat
+            }
+            return fresh
+        }
+        error("No available Codex account")
+    }
+
+    /**
+     * Acquire an authenticated account for non-generation calls such as model discovery.
+     * Quota exhaustion must not hide metadata: an account with 0% generation quota can still
+     * have a valid OAuth session and is allowed to call endpoints such as /models.
+     */
+    suspend fun acquireAccountForMetadata(): CodexAccount = mutex.withLock {
+        if (state.accounts.isEmpty()) error("No Codex account is signed in")
+        repeat(state.accounts.size) {
+            val index = selectCodexMetadataAccountIndex(
+                accounts = state.accounts,
+                startIndex = state.nextAccountIndex,
+            ) ?: error("No authenticated Codex account")
+            val candidate = state.accounts[index]
+            updateState(state.copy(nextAccountIndex = (index + 1) % state.accounts.size))
+            val fresh = try {
+                ensureFreshLocked(candidate)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                return@repeat
+            }
+            return fresh
+        }
+        error("No authenticated Codex account")
+    }
+
+    suspend fun updateUsage(accountId: String, usage: CodexUsageSnapshot) = mutex.withLock {
+        replaceAccount(accountId) { account ->
+            account.copy(usage = account.usage?.mergeWith(usage) ?: usage)
+        }
+    }
+
+    suspend fun setEnabled(accountId: String, enabled: Boolean) = mutex.withLock {
+        replaceAccount(accountId) { it.copy(enabled = enabled) }
+    }
+
+    suspend fun markInvalid(accountId: String) = mutex.withLock {
+        replaceAccount(accountId) { it.copy(tokenStatus = CodexTokenStatus.INVALID) }
+    }
+
+    suspend fun delete(accountId: String) = mutex.withLock {
+        updateState(
+            state.copy(
+                accounts = state.accounts.filterNot { it.id == accountId },
+                nextAccountIndex = 0,
+            )
+        )
+    }
+
+    suspend fun refreshAccount(accountId: String): CodexAccount = mutex.withLock {
+        val account = state.accounts.firstOrNull { it.id == accountId }
+            ?: error("Codex account not found")
+        val fresh = ensureFreshLocked(account)
+        fetchUsageLocked(fresh)
+    }
+
+    suspend fun refreshAll() {
+        accounts.value.forEach { account ->
+            try {
+                refreshAccount(account.id)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // Leave transient errors available for a later explicit retry.
+            }
+        }
+    }
+
+    private suspend fun ensureFreshLocked(account: CodexAccount): CodexAccount {
+        if (account.expiresAt > System.currentTimeMillis() + REFRESH_MARGIN_MS) return account
+        val response = withContext(Dispatchers.IO) {
+            authClient.newCall(buildCodexRefreshRequest(account.refreshToken)).await()
+        }
+        val requestContext = currentCoroutineContext()
+        // Once a successful response has arrived, cancellation must not lose a rotated
+        // refresh token. Read and commit on IO with bounded auth-client timeouts, then
+        // propagate the original coroutine cancellation to the caller.
+        val updated = withContext(NonCancellable + Dispatchers.IO) {
+            val responseBody = response.use { it.body.string() }
+            if (!response.isSuccessful) {
+                requestContext.ensureActive()
+                if (isCodexRefreshAuthenticationFailure(response.code, responseBody, json)) {
+                    replaceAccount(account.id) { it.copy(tokenStatus = CodexTokenStatus.INVALID) }
+                }
+                error("Token refresh failed: ${response.code}")
+            }
+            val token = parseCodexTokenResponse(responseBody, json)
+            val refreshed = account.copy(
+                accessToken = token["access_token"]?.jsonPrimitive?.contentOrNull
+                    ?: error("Missing refreshed access token"),
+                refreshToken = token["refresh_token"]?.jsonPrimitive?.contentOrNull ?: account.refreshToken,
+                expiresAt = System.currentTimeMillis() + (token["expires_in"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 3600L) * 1000,
+                tokenStatus = CodexTokenStatus.AVAILABLE,
+            )
+            replaceAccount(account.id) { refreshed }
+            refreshed
+        }
+        currentCoroutineContext().ensureActive()
+        return updated
+    }
+
+    private suspend fun fetchUsageLocked(account: CodexAccount): CodexAccount {
+        val response = withContext(Dispatchers.IO) {
+            authClient.newCall(
+                Request.Builder()
+                    .url("$CODEX_BASE_URL/wham/usage")
+                    .codexHeaders(account)
+                    .get()
+                    .build()
+            ).await()
+        }
+        val responseBody = try {
+            withContext(Dispatchers.IO) { response.body.string() }
+        } finally { response.close() }
+        currentCoroutineContext().ensureActive()
+        if (!response.isSuccessful) {
+            if (response.code == 401) {
+                replaceAccount(account.id) { it.copy(tokenStatus = CodexTokenStatus.INVALID) }
+            }
+            error("Failed to fetch Codex usage: ${response.code}")
+        }
+        val usage = parseCodexUsage(json.parseToJsonElement(responseBody).jsonObject)
+        val updated = account.copy(
+            tokenStatus = CodexTokenStatus.AVAILABLE,
+            usage = usage,
+        )
+        replaceAccount(account.id) { updated }
+        return updated
+    }
+
+    private fun Request.Builder.codexHeaders(account: CodexAccount): Request.Builder {
+        return addHeader("Authorization", "Bearer ${account.accessToken}")
+            .addHeader("ChatGPT-Account-Id", account.chatgptAccountId)
+            .addHeader("originator", "codex_cli_rs")
+            .addHeader("Accept", "application/json")
+    }
+
+    private fun replaceAccount(
+        accountId: String,
+        transform: (CodexAccount) -> CodexAccount,
+    ) {
+        updateState(
+            state.copy(
+                accounts = state.accounts.map {
+                    if (it.id == accountId) transform(it) else it
+                }
+            )
+        )
+    }
+
+    private fun updateState(newState: CodexAccountState) {
+        store.write(newState)
+        state = newState
+        _accounts.value = newState.accounts
+    }
+
+    companion object {
+        const val CODEX_BASE_URL = "https://chatgpt.com/backend-api"
+        private const val REFRESH_MARGIN_MS = 30_000L
+    }
+}
+
+private fun parseCodexTokenResponse(body: String, json: Json): kotlinx.serialization.json.JsonObject =
+    try {
+        json.parseToJsonElement(body).jsonObject
+    } catch (_: Exception) {
+        // Decoder errors can embed the token response. Never let it reach UI/logging.
+        error("Invalid OpenAI token response")
+    }
+
+internal fun isCodexRefreshAuthenticationFailure(
+    statusCode: Int,
+    responseBody: String,
+    json: Json,
+): Boolean {
+    if (statusCode == 401) return true
+    val errorCode = runCatching {
+        val payload = json.parseToJsonElement(responseBody).jsonObject
+        val error = payload["error"]
+        when (error) {
+            is kotlinx.serialization.json.JsonObject ->
+                error["code"]?.jsonPrimitive?.contentOrNull
+            is kotlinx.serialization.json.JsonPrimitive -> error.contentOrNull
+            else -> null
+        } ?: payload["code"]?.jsonPrimitive?.contentOrNull
+    }.getOrNull()?.lowercase()
+    return errorCode in setOf(
+        "refresh_token_expired",
+        "refresh_token_reused",
+        "refresh_token_invalidated",
+    ) || (statusCode == 400 && errorCode == "invalid_grant")
+}
+
+internal fun selectCodexAccountIndex(
+    accounts: List<CodexAccount>,
+    startIndex: Int,
+    nowMillis: Long = System.currentTimeMillis(),
+    modelId: String? = null,
+): Int? {
+    if (accounts.isEmpty()) return null
+    repeat(accounts.size) { offset ->
+        val index = (startIndex + offset).mod(accounts.size)
+        if (accounts[index].isAvailable(modelId = modelId, nowMillis = nowMillis)) return index
+    }
+    return null
+}
+
+private fun CodexUsageSnapshot.mergeWith(update: CodexUsageSnapshot): CodexUsageSnapshot = copy(
+    primary = update.primary ?: primary,
+    secondary = update.secondary ?: secondary,
+    additional = additional + update.additional,
+    updatedAt = update.updatedAt,
+)
+
+internal fun buildCodexRefreshBody(refreshToken: String) =
+    buildJsonObject {
+        put("client_id", CodexOAuthManager.CLIENT_ID)
+        put("grant_type", "refresh_token")
+        put("refresh_token", refreshToken)
+    }
+
+// Current Codex sends refresh as JSON without repeating the authorization scope. Keeping the old
+// form request can fail an otherwise healthy login refresh.
+internal fun buildCodexRefreshRequest(
+    refreshToken: String,
+    userAgent: String = codexUserAgent(),
+): Request = Request.Builder()
+    .url(CodexOAuthManager.TOKEN_URL)
+    .header("originator", CODEX_ORIGINATOR)
+    .header("User-Agent", userAgent)
+    .post(
+        buildCodexRefreshBody(refreshToken)
+            .toString()
+            .encodeToByteArray()
+            .toRequestBody("application/json".toMediaType())
+    )
+    .build()
+
+internal fun selectCodexMetadataAccountIndex(
+    accounts: List<CodexAccount>,
+    startIndex: Int,
+): Int? {
+    if (accounts.isEmpty()) return null
+    repeat(accounts.size) { offset ->
+        val index = (startIndex + offset).mod(accounts.size)
+        val account = accounts[index]
+        if (account.enabled && account.tokenStatus != CodexTokenStatus.INVALID) return index
+    }
+    return null
+}

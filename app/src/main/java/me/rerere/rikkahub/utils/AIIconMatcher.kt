@@ -8,6 +8,7 @@ fun computeAIIconByName(name: String): String? {
 
     val lowerName = name.lowercase()
     val result = when {
+        PATTERN_CODEX.containsMatchIn(lowerName) -> "codex.svg"
         PATTERN_OPENAI.containsMatchIn(lowerName) -> "openai.svg"
         PATTERN_GEMINI.containsMatchIn(lowerName) -> "gemini-color.svg"
         PATTERN_GOOGLE.containsMatchIn(lowerName) -> "google-color.svg"
@@ -124,3 +125,5 @@ private val PATTERN_SEARCH_METASO = Regex("metaso|秘塔")
 private val PATTERN_SEARCH_FIRECRAWL = Regex("firecrawl")
 private val PATTERN_SEARCH_JINA = Regex("jina")
 private val PATTERN_SEARCH_SEARXNG = Regex("searxng")
+
+private val PATTERN_CODEX = Regex("codex")

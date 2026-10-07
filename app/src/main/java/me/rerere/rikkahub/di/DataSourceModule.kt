@@ -19,6 +19,10 @@ import me.rerere.rikkahub.data.ai.TranslationHandler
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
 import me.rerere.rikkahub.data.api.RikkaHubAPI
 import me.rerere.rikkahub.data.api.SponsorAPI
+import me.rerere.rikkahub.data.codex.CodexAccountRepository
+import me.rerere.rikkahub.data.codex.CodexCredentialStore
+import me.rerere.rikkahub.data.codex.CodexOAuthManager
+import me.rerere.rikkahub.data.codex.CodexProvider
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.files.RemoteFileStore
 import me.rerere.rikkahub.data.sync.BackupManager
@@ -35,6 +39,7 @@ import me.rerere.rikkahub.data.sync.S3Sync
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
+import org.koin.core.qualifier.named
 import org.koin.dsl.module
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
@@ -198,8 +203,41 @@ val dataSourceModule = module {
         SponsorAPI.create(get())
     }
 
+    // OAuth tokens and ChatGPT request bodies must never pass through request logging.
+    // Retain the canonical client's current proxy, timeout, and TLS configuration.
+    single<OkHttpClient>(named("codex")) {
+        get<OkHttpClient>().newBuilder().apply {
+            interceptors().clear()
+            networkInterceptors().clear()
+        }.build()
+    }
+
     single {
-        ProviderManager(client = get(), context = get())
+        CodexAccountRepository(
+            store = CodexCredentialStore(context = get(), json = get()),
+            client = get(named("codex")),
+            json = get(),
+        )
+    }
+
+    single {
+        CodexOAuthManager(
+            context = get(), scope = get<AppScope>(),
+            client = get(named("codex")), repository = get(),
+        )
+    }
+
+    single {
+        CodexProvider(
+            client = get(named("codex")), repository = get(),
+            json = get(), scope = get<AppScope>(),
+        )
+    }
+
+    single {
+        ProviderManager(client = get(), context = get()).also {
+            it.registerProvider("codex", get<CodexProvider>())
+        }
     }
 
     single { BackupManager(context = get(), database = get(), settingsStore = get(), json = get()) }
