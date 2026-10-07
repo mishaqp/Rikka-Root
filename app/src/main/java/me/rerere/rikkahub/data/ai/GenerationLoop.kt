@@ -101,6 +101,7 @@ class GenerationLoop(
         conversationId: Uuid? = null,
         workspaceCwd: String? = null,
         onWebContentRead: suspend () -> Unit = {},
+        onAutoCompress: suspend (List<UIMessage>) -> List<UIMessage>? = { null },
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
@@ -122,6 +123,11 @@ class GenerationLoop(
 
             // Skip generation if we have approved/denied tool calls to handle
             if (pendingTools.isEmpty()) {
+                if (AutoContextCompression.plan(messages, assistant) != null) {
+                    // Flush buffered tool results before the service inserts a stored checkpoint.
+                    awaitRootCheckpoint { ack -> emit(GenerationChunk.RootExecutionCheckpoint(messages, ack)) }
+                    onAutoCompress(messages)?.let { messages = it }
+                }
                 generateInternal(
                     assistant = assistant,
                     settings = settings,
@@ -424,7 +430,8 @@ class GenerationLoop(
             if (system.isNotBlank()) {
                 add(UIMessage.system(prompt = system).copy(isSynthetic = true))
             }
-            addAll(messages.limitContext(assistant.contextMessageLimit))
+            addAll(AutoContextCompression.activeMessages(messages,
+                if (assistant.autoCompressContext) 0 else assistant.contextMessageLimit))
         }.transforms(
             transformers = transformers,
             context = context,

@@ -406,6 +406,7 @@ internal fun AssistantBasicContent(
 
                 OutlinedTextField(
                     value = contextMessageLimitInput,
+                    enabled = !assistant.autoCompressContext,
                     onValueChange = { input ->
                         if (input.all(Char::isDigit) &&
                             (input.isEmpty() || input.toIntOrNull() != null)
@@ -439,13 +440,41 @@ internal fun AssistantBasicContent(
                     }
                 )
 
-                if (assistant.contextMessageLimit > 0) {
+                if (assistant.contextMessageLimit > 0 && !assistant.autoCompressContext) {
                     Text(
                         text = stringResource(R.string.assistant_page_context_message_limit_warning),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
+            }
+            FormItem(
+                modifier = Modifier.padding(8.dp),
+                label = { Text("Автоматическое сжатие контекста") },
+                description = { Text("Сохраняет последние 8 сообщений и инструкции. Использует выбранную модель сжатия и её обычные тарифы. Ограничение по числу сообщений временно не применяется.") },
+                tail = { Switch(assistant.autoCompressContext, { onUpdate(assistant.copy(autoCompressContext = it)) }) },
+            )
+            if (assistant.autoCompressContext) {
+                var thresholdInput by remember(assistant.id, assistant.autoCompressionTokenThreshold) {
+                    mutableStateOf(assistant.autoCompressionTokenThreshold.toString())
+                }
+                val value = thresholdInput.toIntOrNull()
+                OutlinedTextField(
+                    value = thresholdInput,
+                    onValueChange = { input ->
+                        if (input.all(Char::isDigit) && input.length <= 7) {
+                            thresholdInput = input
+                            input.toIntOrNull()?.takeIf { it in 2_048..2_000_000 }?.let {
+                                onUpdate(assistant.copy(autoCompressionTokenThreshold = it))
+                            }
+                        }
+                    },
+                    label = { Text("Примерный порог, токены") },
+                    supportingText = { Text("2048–2000000. Это оценка текста, а не размер контекста модели. Слишком большой недавний фрагмент остаётся целиком.") },
+                    isError = value == null || value !in 2_048..2_000_000,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true, modifier = Modifier.fillMaxWidth().padding(8.dp),
+                )
             }
             HorizontalDivider()
             FormItem(

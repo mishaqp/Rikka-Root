@@ -12,6 +12,8 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.completeWith
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -46,6 +48,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.root.persistRootCheckpoint
 import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationLoop
+import me.rerere.rikkahub.data.ai.AutoContextCompression
 import me.rerere.rikkahub.data.ai.TranslationHandler
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.tools.ChatToolFactory
@@ -757,17 +760,18 @@ class ChatService(
 
             // start generating
             val session = sessionManager.getOrCreate(conversationId)
+            val generationOwner = currentCoroutineContext()[Job]
+            val regenerationNodeId = messageRange?.let { conversation.messageNodes.getOrNull(it.endInclusive + 1)?.id }
+            fun requestMessages(current: Conversation): List<UIMessage> {
+                val end = if (regenerationNodeId == null) current.messageNodes.size else
+                    current.messageNodes.indexOfFirst { it.id == regenerationNodeId }.also { check(it >= 0) { "Regeneration target removed" } }
+                return AutoContextCompression.activeMessages(current.currentMessages.take(end))
+            }
             generationLoop.generateText(
                 settings = settings,
                 model = model,
                 processingStatus = session.processingStatus,
-                messages = conversation.currentMessages.let {
-                    if (messageRange != null) {
-                        it.subList(messageRange.start, messageRange.endInclusive + 1)
-                    } else {
-                        it
-                    }
-                },
+                messages = requestMessages(conversation),
                 assistant = assistant,
                 conversationId = conversationId,
                 conversationSystemPrompt = conversation.customSystemPrompt,
@@ -785,6 +789,26 @@ class ChatService(
                 outputTransformers = outputTransformers,
                 tools = tools,
                 onWebContentRead = { chatToolFactory.markWebContent(conversationId.toString()) },
+                onAutoCompress = { currentMessages ->
+                    val plan = AutoContextCompression.plan(currentMessages, assistant)
+                    if (plan == null) null else {
+                        session.processingStatus.value = "Сжатие контекста…"
+                        try {
+                            val result = compressConversationInternal(conversationId, session.state.value, "", plan.targetTokens,
+                                sourceEndMessageId = plan.sourceEndMessageId,
+                                permitGenerating = { generationOwner?.isActive == true },
+                                automaticThreshold = assistant.autoCompressionTokenThreshold,
+                                requestEndNodeId = regenerationNodeId,
+                            )
+                            currentCoroutineContext().ensureActive()
+                            result.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+                            if (result.isSuccess) requestMessages(session.state.value) else {
+                                Log.w(TAG, "Automatic context compression skipped (${result.exceptionOrNull()?.javaClass?.simpleName})")
+                                null
+                            }
+                        } finally { session.processingStatus.value = null }
+                    }
+                },
             ).onCompletion {
                 // 可能被取消了，或者意外结束，兜底更新
                 val updatedConversation = session.finishGeneration { conversation ->
@@ -805,14 +829,14 @@ class ChatService(
                     is GenerationChunk.RootExecutionCheckpoint -> {
                         persistRootCheckpoint(chunk.ack) {
                             val checkpoint = getConversationFlow(conversationId).value
-                                .updateCurrentMessages(chunk.messages)
-                            // Ordered after earlier chunks; su cannot launch until this Room write finishes.
+                                .let { AutoContextCompression.mergeGenerated(it, chunk.messages, regenerationNodeId) }
+                            // Ordered after earlier chunks; tools/compression wait for this Room write.
                             saveConversation(conversationId, checkpoint)
                         }
                     }
                     is GenerationChunk.Messages -> {
                         val updatedConversation = getConversationFlow(conversationId).value
-                            .updateCurrentMessages(chunk.messages)
+                            .let { AutoContextCompression.mergeGenerated(it, chunk.messages, regenerationNodeId) }
                         updateConversation(conversationId, updatedConversation)
 
                         // 通知等边缘副作用由 ChatNotificationManager 消费；
@@ -997,10 +1021,22 @@ class ChatService(
         additionalPrompt: String,
         targetTokens: Int,
         keepRecentMessages: Int = 32
+    ): Result<Unit> = compressConversationInternal(conversationId, conversation, additionalPrompt, targetTokens, keepRecentMessages)
+
+    private suspend fun compressConversationInternal(
+        conversationId: Uuid,
+        conversation: Conversation,
+        additionalPrompt: String,
+        targetTokens: Int,
+        keepRecentMessages: Int = 32,
+        sourceEndMessageId: Uuid? = null,
+        permitGenerating: () -> Boolean = { false },
+        automaticThreshold: Int? = null,
+        requestEndNodeId: Uuid? = null,
     ): Result<Unit> = runCatching {
         val session = sessionManager.getOrCreate(conversationId)
-        // 生成循环按下标回写消息，期间插入节点会让回复写到错误的节点上。
-        check(!session.isGenerating) { context.getString(R.string.chat_page_compress_blocked_generating) }
+        // Manual compression must wait; the automatic path owns an acknowledged generation boundary.
+        check(!session.isGenerating || permitGenerating()) { context.getString(R.string.chat_page_compress_blocked_generating) }
 
         val settings = settingsStore.settingsFlow.first()
         val model = settings.findModelById(settings.compressModelId)
@@ -1016,31 +1052,32 @@ class ChatService(
 
         // 上一个检查点之前的消息已被它的摘要覆盖，只压缩它之后、保留区之前的部分。
         val checkpointIndex = nodes.indexOfLast { it.currentMessage.isContextCheckpoint }
-        val cutIndex = nodes.size - keepRecentMessages.coerceAtLeast(0)
+        val cutIndex = if (sourceEndMessageId != null) {
+            nodes.indexOfFirst { it.currentMessage.id == sourceEndMessageId }.also { check(it >= 0) { "Compression source changed" } } + 1
+        } else AutoContextCompression.safeCutIndex(conversation.currentMessages, nodes.size - keepRecentMessages.coerceAtLeast(0))
         if (cutIndex <= checkpointIndex + 1) {
             throw IllegalStateException(context.getString(R.string.chat_page_compress_not_enough_messages))
         }
         // 上一份摘要一并交给模型，新摘要才能覆盖完整历史。
         val messagesToCompress = nodes.subList(checkpointIndex.coerceAtLeast(0), cutIndex)
-            .map { it.currentMessage }
+            .map { it.currentMessage }.filter { it.role != MessageRole.SYSTEM }
         // 生成循环只从最后一条消息恢复工具调用，待处理的工具被压到检查点之前就再也不会执行。
         check(messagesToCompress.none { message ->
             message.getTools().any { it.isPending || it.canResumeExecution || ToolPermissionPolicy.canResumeAutomatic(it) }
         }) { context.getString(R.string.chat_page_compress_pending_tools) }
+        check(AutoContextCompression.canCompress(messagesToCompress)) { context.getString(R.string.chat_page_compress_pending_tools) }
 
         fun splitMessages(messages: List<UIMessage>): List<List<UIMessage>> {
             if (messages.size <= maxMessagesPerChunk) return listOf(messages)
-            val mid = messages.size / 2
+            val mid = AutoContextCompression.safeCutIndex(messages, messages.size / 2)
+            if (mid == 0 || mid == messages.size) return listOf(messages)
             val left = splitMessages(messages.subList(0, mid))
             val right = splitMessages(messages.subList(mid, messages.size))
             return left + right
         }
 
         suspend fun compressMessages(messages: List<UIMessage>): String {
-            val contentToCompress = messages.joinToString("\n\n") {
-                // 上一份摘要是更早历史的唯一来源，不能截断。
-                it.summaryAsText(maxLength = if (it.isContextCheckpoint) Int.MAX_VALUE else 2000)
-            }
+            val contentToCompress = AutoContextCompression.summaryText(messages)
             val prompt = settings.compressPrompt.applyPlaceholders(
                 "content" to contentToCompress,
                 "target_tokens" to targetTokens.toString(),
@@ -1053,7 +1090,9 @@ class ChatService(
             val result = providerHandler.generateText(
                 providerSetting = provider,
                 messages = listOf(UIMessage.user(prompt)),
-                params = backgroundTextGenerationParams(model, conversationId),
+                params = backgroundTextGenerationParams(model, conversationId).let {
+                    if (automaticThreshold != null) it.copy(maxTokens = targetTokens) else it
+                },
             )
 
             return result.message.toText().trim().takeIf { it.isNotBlank() }
@@ -1069,12 +1108,23 @@ class ChatService(
         // 原消息原样保留，只在切点插入摘要。摘要生成期间对话可能已变化，
         // 因此按节点定位插入到最新状态，而不是用调用时的快照整体覆盖。
         val newConversation = synchronized(session) {
-            check(!session.isGenerating) { context.getString(R.string.chat_page_compress_blocked_generating) }
+            check(!session.isGenerating || permitGenerating()) { context.getString(R.string.chat_page_compress_blocked_generating) }
+            check(session.state.value.messageNodes.take(cutIndex).map { it.id to it.currentMessage } ==
+                nodes.take(cutIndex).map { it.id to it.currentMessage }) { "Compression source changed" }
             val updated = insertContextCheckpoint(
                 conversation = session.state.value,
                 afterNodeId = nodes[cutIndex - 1].id,
                 summary = compressedSummaries.joinToString("\n\n"),
             ) ?: throw IllegalStateException(context.getString(R.string.chat_page_compress_conversation_changed))
+            if (automaticThreshold != null) {
+                val requestEnd = requestEndNodeId?.let { id -> updated.messageNodes.indexOfFirst { it.id == id }.also { check(it >= 0) } }
+                    ?: updated.messageNodes.size
+                val assistant = settings.getAssistantOf(updated)
+                val protectedPrompt = if (assistant.allowConversationSystemPrompt && !updated.customSystemPrompt.isNullOrBlank()) updated.customSystemPrompt else assistant.systemPrompt
+                check(AutoContextCompression.estimateTokens(AutoContextCompression.activeMessages(updated.currentMessages.take(requestEnd))) + protectedPrompt.length / 2 < automaticThreshold * 60L / 100) {
+                    "Compression summary exceeded the configured trigger"
+                }
+            }
             updated.copy(chatSuggestions = emptyList()).also { updateConversation(conversationId, it) }
         }
 
@@ -1397,7 +1447,8 @@ class ChatService(
 
         if (!edited) return
 
-        saveConversation(conversationId, currentConversation.copy(messageNodes = updatedNodes))
+        saveConversation(conversationId, currentConversation.copy(messageNodes =
+            AutoContextCompression.retainCheckpoints(currentConversation.messageNodes, updatedNodes)))
     }
 
     suspend fun forkConversationAtMessage(
@@ -1462,7 +1513,8 @@ class ChatService(
             }
         }
 
-        saveConversation(conversationId, currentConversation.copy(messageNodes = updatedNodes))
+        saveConversation(conversationId, currentConversation.copy(messageNodes =
+            AutoContextCompression.retainCheckpoints(currentConversation.messageNodes, updatedNodes)))
     }
 
     suspend fun deleteMessage(
@@ -1518,7 +1570,7 @@ class ChatService(
             )
         }
 
-        return conversation.copy(messageNodes = updatedNodes)
+        return conversation.copy(messageNodes = AutoContextCompression.retainCheckpoints(conversation.messageNodes, updatedNodes))
     }
 
     private fun UIMessagePart.copyWithForkedFileUrl(): UIMessagePart {

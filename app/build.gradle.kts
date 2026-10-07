@@ -25,8 +25,8 @@ android {
         minSdk = 26
         targetSdk = 37
         // Reserve two digits for fork revisions of each upstream version.
-        versionCode = 191 * 100 + 1
-        versionName = "2.5.6-root.1"
+        versionCode = 191 * 100 + 2
+        versionName = "2.5.6-root.2"
         resValue("string", "shortcut_target_package", "me.mishaqp.rikkaroot")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
