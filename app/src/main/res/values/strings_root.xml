@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string translatable="false" name="assistant_page_local_tools_root_title">Root shell</string>
-    <string translatable="false" name="assistant_page_local_tools_root_desc">Run Android commands as root through su. Disabled by default. Every command requires approval. Your device root manager also controls access; disabling this tool does not revoke its grant.</string>
+    <string translatable="false" name="assistant_page_local_tools_root_desc">Run Android commands as root through su. Disabled by default. Commands require approval unless automatic execution is enabled below. Your device root manager also controls access; disabling this tool does not revoke its grant.</string>
     <string translatable="false" name="assistant_page_local_tools_root_status_title">Last root verification</string>
     <string translatable="false" name="assistant_page_local_tools_root_verify">Verify root</string>
     <string translatable="false" name="assistant_page_local_tools_root_unchecked">Not verified. Tap Verify root to check access; your root manager may ask for permission.</string>
@@ -11,4 +11,17 @@
     <string translatable="false" name="assistant_page_local_tools_root_denied">Root was denied or verification failed. Review access in your device root manager, then verify again.</string>
     <string translatable="false" name="assistant_page_local_tools_root_not_root">su did not grant UID 0. ADB or shell access alone is insufficient.</string>
     <string translatable="false" name="assistant_page_local_tools_root_timeout">Verification timed out. Review access in your device root manager, then verify again.</string>
+    <string translatable="false" name="root_automatic_title">Выполнять root-команды без подтверждения</string>
+    <string translatable="false" name="root_automatic_description">Разрешает этому ассистенту запускать root-команды без запроса подтверждения, включая команды, содержимое которых невозможно проверить. Команды могут изменять устройство и данные.</string>
+    <string translatable="false" name="root_automatic_active">Root-команды выполняются без подтверждения</string>
+    <string translatable="false" name="root_automatic_disable">Отключить</string>
+    <string translatable="false" name="root_automatic_disable_hint">Отключение действует на будущие запуски. Для уже запущенной команды используйте кнопку остановки чата.</string>
+    <string translatable="false" name="root_access_save_failed">Не удалось сохранить разрешение root. Проверьте переключатель и повторите попытку.</string>
+    <string translatable="false" name="root_command_log_title">Журнал root-команд</string>
+    <string translatable="false" name="root_command_log_description">Последние команды этого ассистента и результаты выполнения.</string>
+    <string translatable="false" name="root_command_log_open">Открыть</string>
+    <string translatable="false" name="root_command_log_empty">Для этого ассистента пока нет записей.</string>
+    <string translatable="false" name="root_command_log_status">Статус: %1$s</string>
+    <string translatable="false" name="root_command_log_exit_code">Код выхода: %1$d</string>
+    <string translatable="false" name="root_command_log_close">Закрыть</string>
 </resources>

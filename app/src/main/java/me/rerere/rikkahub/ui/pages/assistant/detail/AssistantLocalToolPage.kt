@@ -17,7 +17,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
@@ -28,9 +32,13 @@ import com.dokar.sonner.ToastType
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.root.RootAccessStore
 import me.rerere.rikkahub.root.RootShellManager
 import me.rerere.rikkahub.root.RootStatus
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import me.rerere.rikkahub.ui.components.ai.RootAutomaticSwitch
+import me.rerere.rikkahub.ui.components.ai.RootCommandJournalButton
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionInfo
@@ -87,8 +95,14 @@ private fun AssistantLocalToolContent(
     val context = LocalContext.current
     val toaster = LocalToaster.current
     val rootShellManager = koinInject<RootShellManager>()
+    val rootAccessStore = koinInject<RootAccessStore>()
     val rootStatus by rootShellManager.status.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+    val rootToolEnabled = assistant.localTools.contains(LocalToolOption.Root)
+    var rootChangePending by remember(assistant.id) { mutableStateOf(false) }
+    var rootToolOffRequested by remember(assistant.id, rootToolEnabled) { mutableStateOf(false) }
+    val latestAssistant by rememberUpdatedState(assistant)
+    val rootSaveError by rememberUpdatedState(stringResource(R.string.root_access_save_failed))
     val permissionRequiredText =
         stringResource(R.string.assistant_page_local_tools_screen_time_permission_required)
 
@@ -110,7 +124,34 @@ private fun AssistantLocalToolContent(
     )
     PermissionManager(permissionState = calendarPermissionState)
 
+    fun updateRootAccess(automatic: Boolean, disableTool: Boolean = false) {
+        if (rootChangePending) return
+        val assistantId = assistant.id
+        rootChangePending = true
+        if (disableTool) rootToolOffRequested = true
+        scope.launch {
+            try {
+                rootAccessStore.setAutomatic(assistantId.toString(), automatic)
+                if (disableTool && latestAssistant.id == assistantId) {
+                    onUpdate(latestAssistant.copy(localTools = latestAssistant.localTools - LocalToolOption.Root))
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                if (disableTool) rootToolOffRequested = false
+                toaster.show(rootSaveError, type = ToastType.Error)
+            } finally {
+                rootChangePending = false
+            }
+        }
+    }
+
     fun toggleLocalTool(option: LocalToolOption, enabled: Boolean) {
+        if (option == LocalToolOption.Root && !enabled) {
+            updateRootAccess(automatic = false, disableTool = true)
+            return
+        }
+        if (option == LocalToolOption.Root && enabled) rootToolOffRequested = false
         if (enabled && option == LocalToolOption.ScreenTime && !context.hasUsageStatsPermission()) {
             toaster.show(message = permissionRequiredText, type = ToastType.Warning)
             context.openUsageAccessSettings()
@@ -142,10 +183,27 @@ private fun AssistantLocalToolContent(
                 supportingContent = { Text(stringResource(R.string.assistant_page_local_tools_root_desc)) },
                 trailingContent = {
                     Switch(
-                        checked = assistant.localTools.contains(LocalToolOption.Root),
+                        checked = rootToolEnabled && !rootToolOffRequested,
+                        enabled = !rootChangePending,
                         onCheckedChange = { toggleLocalTool(LocalToolOption.Root, it) },
                     )
                 },
+            )
+            item(
+                headlineContent = { Text(stringResource(R.string.root_automatic_title)) },
+                supportingContent = { Text(stringResource(R.string.root_automatic_description)) },
+                trailingContent = {
+                    RootAutomaticSwitch(
+                        assistantId = assistant.id.toString(),
+                        enabled = rootToolEnabled && !rootToolOffRequested && !rootChangePending,
+                        onCheckedChange = { updateRootAccess(automatic = it) },
+                    )
+                },
+            )
+            item(
+                headlineContent = { Text(stringResource(R.string.root_command_log_title)) },
+                supportingContent = { Text(stringResource(R.string.root_command_log_description)) },
+                trailingContent = { RootCommandJournalButton(assistant.id.toString()) },
             )
             item(
                 headlineContent = { Text(stringResource(R.string.assistant_page_local_tools_root_status_title)) },
