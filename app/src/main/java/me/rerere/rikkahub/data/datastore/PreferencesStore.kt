@@ -314,7 +314,7 @@ class SettingsStore(
                 networkSetting = JsonInstant.decodeFromString(preferences[NETWORK_SETTING] ?: "{}"),
                 searchServices = preferences[SEARCH_SERVICES]?.let {
                     JsonInstant.decodeFromString(it)
-                } ?: listOf(SearchServiceOptions.DEFAULT),
+                } ?: listOf(SearchServiceOptions.DEFAULT, SearchServiceOptions.DuckDuckGoOptions()),
                 searchCommonOptions = preferences[SEARCH_COMMON]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: SearchCommonOptions(),
@@ -606,7 +606,7 @@ data class Settings(
     val providers: List<ProviderSetting> = DEFAULT_PROVIDERS,
     val assistants: List<Assistant> = DEFAULT_ASSISTANTS,
     val assistantTags: List<Tag> = emptyList(),
-    val searchServices: List<SearchServiceOptions> = listOf(SearchServiceOptions.DEFAULT),
+    val searchServices: List<SearchServiceOptions> = listOf(SearchServiceOptions.DEFAULT, SearchServiceOptions.DuckDuckGoOptions()),
     val searchCommonOptions: SearchCommonOptions = SearchCommonOptions(),
     val searchServiceSelected: Int = 0,
     val mcpServers: List<McpServerConfig> = emptyList(),

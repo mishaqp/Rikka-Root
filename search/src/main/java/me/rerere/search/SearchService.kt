@@ -50,6 +50,7 @@ interface SearchService<T : SearchServiceOptions> {
                 is SearchServiceOptions.ZhipuOptions -> ZhipuSearchService
                 is SearchServiceOptions.DoubaoOptions -> DoubaoSearchService
                 is SearchServiceOptions.BingLocalOptions -> BingSearchService
+                is SearchServiceOptions.DuckDuckGoOptions -> DuckDuckGoSearchService
                 is SearchServiceOptions.SearXNGOptions -> SearXNGService
                 is SearchServiceOptions.LinkUpOptions -> LinkUpService
                 is SearchServiceOptions.BraveOptions -> BraveSearchService
@@ -151,6 +152,7 @@ sealed class SearchServiceOptions {
 
         val TYPES = mapOf(
             BingLocalOptions::class to "Bing",
+            DuckDuckGoOptions::class to "DuckDuckGo",
             RikkaHubOptions::class to "RikkaHub",
             ZhipuOptions::class to "智谱",
             DoubaoOptions::class to "豆包",
@@ -175,6 +177,12 @@ sealed class SearchServiceOptions {
     @Serializable
     @SerialName("bing_local")
     class BingLocalOptions(
+        override val id: Uuid = Uuid.random()
+    ) : SearchServiceOptions()
+
+    @Serializable
+    @SerialName("duckduckgo")
+    data class DuckDuckGoOptions(
         override val id: Uuid = Uuid.random()
     ) : SearchServiceOptions()
 

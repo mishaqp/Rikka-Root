@@ -1,5 +1,6 @@
 <?xml version='1.0' encoding='UTF-8'?>
 <resources>
+  <string translatable="false" name="duckduckgo_desc">Search DuckDuckGo and read web pages without an API key. Search may be temporarily blocked by anti-bot protection. Web reading supports HTML and plain text pages; JavaScript is not executed.</string>
   <string name="bing_desc">Note that Bing search is crawler-based, which may be unstable and is not recommended.</string>
   <string name="click_to_get_api_key">Click to get API Key</string>
   <string name="searxng_desc_1">settings.yml needs to enable json format support:</string>
