@@ -36,6 +36,7 @@ import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.canResumeToolExecution
+import me.rerere.rikkahub.root.canResumeRootTool
 import me.rerere.ai.ui.finishPendingTools
 import me.rerere.ai.ui.isEmptyInputMessage
 import me.rerere.common.android.Logging
@@ -148,6 +149,56 @@ internal fun insertContextCheckpoint(
     return conversation.copy(
         messageNodes = nodes.subList(0, index + 1) + checkpoint + nodes.subList(index + 1, nodes.size),
     )
+}
+
+internal fun repairIncompleteToolMessages(nodes: List<MessageNode>): List<MessageNode> {
+    var messagesNodes = nodes
+
+    // 移除无效 tool (未执行的 Tool)
+    messagesNodes = messagesNodes.mapIndexed { _, node ->
+        // Check for Tool type with non-executed tools
+        val hasPendingTools = node.currentMessage.getTools().any { !it.isExecuted }
+
+        if (hasPendingTools) {
+            // A process interruption must not discard started root evidence or fresh Auto siblings.
+            val rootTools = node.currentMessage.getTools().filter { it.toolName == "root_exec" }
+            if (rootTools.any { it.isExecuted || canResumeRootTool(it) }) return@mapIndexed node
+            // Keep messages that are ready to resume, such as approved/denied/answered tools.
+            val hasResumableTool = node.currentMessage.getTools().any {
+                !it.isExecuted && it.approvalState.canResumeToolExecution()
+            }
+            if (hasResumableTool) {
+                return@mapIndexed node
+            }
+
+            // If all tools are executed, it's valid
+            val allToolsExecuted = node.currentMessage.getTools().all { it.isExecuted }
+            if (allToolsExecuted && node.currentMessage.getTools().isNotEmpty()) {
+                return@mapIndexed node
+            }
+
+            // Remove messages that still have unresolved tool approvals.
+            return@mapIndexed node.copy(
+                messages = node.messages.filter { it.id != node.currentMessage.id },
+                selectIndex = node.selectIndex - 1
+            )
+        }
+        node
+    }
+
+    // 更新index
+    messagesNodes = messagesNodes.map { node ->
+        if (node.messages.isNotEmpty() && node.selectIndex !in node.messages.indices) {
+            node.copy(selectIndex = 0)
+        } else {
+            node
+        }
+    }
+
+    // 移除无效消息
+    messagesNodes = messagesNodes.filter { it.messages.isNotEmpty() }
+
+    return messagesNodes
 }
 
 data class ChatError(
@@ -792,50 +843,7 @@ class ChatService(
 
     private fun checkInvalidMessages(conversationId: Uuid) {
         val conversation = getConversationFlow(conversationId).value
-        var messagesNodes = conversation.messageNodes
-
-        // 移除无效 tool (未执行的 Tool)
-        messagesNodes = messagesNodes.mapIndexed { _, node ->
-            // Check for Tool type with non-executed tools
-            val hasPendingTools = node.currentMessage.getTools().any { !it.isExecuted }
-
-            if (hasPendingTools) {
-                // Keep messages that are ready to resume, such as approved/denied/answered tools.
-                val hasResumableTool = node.currentMessage.getTools().any {
-                    !it.isExecuted && it.approvalState.canResumeToolExecution()
-                }
-                if (hasResumableTool) {
-                    return@mapIndexed node
-                }
-
-                // If all tools are executed, it's valid
-                val allToolsExecuted = node.currentMessage.getTools().all { it.isExecuted }
-                if (allToolsExecuted && node.currentMessage.getTools().isNotEmpty()) {
-                    return@mapIndexed node
-                }
-
-                // Remove messages that still have unresolved tool approvals.
-                return@mapIndexed node.copy(
-                    messages = node.messages.filter { it.id != node.currentMessage.id },
-                    selectIndex = node.selectIndex - 1
-                )
-            }
-            node
-        }
-
-        // 更新index
-        messagesNodes = messagesNodes.map { node ->
-            if (node.messages.isNotEmpty() && node.selectIndex !in node.messages.indices) {
-                node.copy(selectIndex = 0)
-            } else {
-                node
-            }
-        }
-
-        // 移除无效消息
-        messagesNodes = messagesNodes.filter { it.messages.isNotEmpty() }
-
-        updateConversation(conversationId, conversation.copy(messageNodes = messagesNodes))
+        updateConversation(conversationId, conversation.copy(messageNodes = repairIncompleteToolMessages(conversation.messageNodes)))
     }
 
     private fun cancelToolByUser(tool: UIMessagePart.Tool): UIMessagePart.Tool {
@@ -1009,7 +1017,7 @@ class ChatService(
             .map { it.currentMessage }
         // 生成循环只从最后一条消息恢复工具调用，待处理的工具被压到检查点之前就再也不会执行。
         check(messagesToCompress.none { message ->
-            message.getTools().any { it.isPending || it.canResumeExecution }
+            message.getTools().any { it.isPending || it.canResumeExecution || canResumeRootTool(it) }
         }) { context.getString(R.string.chat_page_compress_pending_tools) }
 
         fun splitMessages(messages: List<UIMessage>): List<List<UIMessage>> {

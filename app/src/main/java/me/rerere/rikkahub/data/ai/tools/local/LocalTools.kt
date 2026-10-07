@@ -5,6 +5,7 @@ import me.rerere.ai.core.Tool
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.root.RootShellManager
+import me.rerere.rikkahub.root.RootAccessStore
 import me.rerere.tts.provider.TTSManager
 
 class LocalTools(
@@ -13,9 +14,8 @@ class LocalTools(
     private val ttsManager: TTSManager,
     private val settingsStore: SettingsStore,
     private val rootShellManager: RootShellManager,
+    private val rootAccessStore: RootAccessStore,
 ) {
-    val rootTool by lazy { buildRootTool(rootShellManager) }
-
     val javascriptTool by lazy { buildJavascriptTool() }
 
     val timeTool by lazy { buildTimeInfoTool() }
@@ -34,10 +34,10 @@ class LocalTools(
 
     val chartDisplayTool by lazy { buildChartDisplayTool() }
 
-    fun getTools(options: List<LocalToolOption>): List<Tool> {
+    fun getTools(options: List<LocalToolOption>, assistantId: String? = null): List<Tool> {
         val tools = mutableListOf<Tool>()
         if (options.contains(LocalToolOption.Root)) {
-            tools.add(rootTool)
+            tools.add(buildRootTool(rootShellManager, rootAccessStore, assistantId))
         }
         if (options.contains(LocalToolOption.JavascriptEngine)) {
             tools.add(javascriptTool)

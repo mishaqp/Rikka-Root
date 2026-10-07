@@ -7,6 +7,8 @@ import me.rerere.ai.provider.CustomBody
 import me.rerere.ai.provider.CustomHeader
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.limitContext
 import me.rerere.rikkahub.data.ai.tools.shouldUseExternalWebSearch
 import me.rerere.rikkahub.data.model.Assistant
@@ -22,6 +24,32 @@ import org.junit.Test
 import kotlin.uuid.Uuid
 
 class ChatServiceTest {
+    @Test fun `repair preserves completed root checkpoint and unstarted automatic sibling`() {
+        val checkpoint = UIMessagePart.Tool("started", "root_exec", "{\"command\":\"id\"}",
+            output = listOf(UIMessagePart.Text("root_execution_indeterminate")), approvalState = ToolApprovalState.Auto)
+        val unstarted = UIMessagePart.Tool("unstarted", "root_exec", "{\"command\":\"id\"}", approvalState = ToolApprovalState.Auto)
+        val user = UIMessage.user("run diagnostics").toMessageNode()
+        val node = UIMessage.assistant("").copy(parts = listOf(checkpoint, unstarted)).toMessageNode()
+        assertEquals(listOf(user, node), repairIncompleteToolMessages(listOf(user, node)))
+        assertTrue(checkpoint.isExecuted)
+        assertFalse(unstarted.isExecuted)
+    }
+
+    @Test fun `repair keeps root no replay evidence when only pending sibling remains`() {
+        val checkpoint = UIMessagePart.Tool("started", "root_exec", "{}",
+            output = listOf(UIMessagePart.Text("root_execution_indeterminate")), approvalState = ToolApprovalState.Auto)
+        val waiting = UIMessagePart.Tool("waiting", "root_exec", "{}", approvalState = ToolApprovalState.Pending)
+        val node = UIMessage.assistant("").copy(parts = listOf(checkpoint, waiting)).toMessageNode()
+        assertEquals(listOf(node), repairIncompleteToolMessages(listOf(node)))
+    }
+
+    @Test fun `root repair keeps ordinary approval and unrelated tool cleanup unchanged`() {
+        val pendingRoot = UIMessage.assistant("").copy(parts = listOf(UIMessagePart.Tool("pending", "root_exec", "{}", approvalState = ToolApprovalState.Pending))).toMessageNode()
+        val unstartedOther = UIMessage.assistant("").copy(parts = listOf(UIMessagePart.Tool("auto", "workspace_shell", "{}", approvalState = ToolApprovalState.Auto))).toMessageNode()
+        val approvedRoot = UIMessage.assistant("").copy(parts = listOf(UIMessagePart.Tool("approved", "root_exec", "{}", approvalState = ToolApprovalState.Approved))).toMessageNode()
+        assertEquals(listOf(approvedRoot), repairIncompleteToolMessages(listOf(pendingRoot, unstartedOther, approvedRoot)))
+    }
+
     @Test
     fun `fork conversation inherits folder and workspace context`() {
         val source = Conversation(

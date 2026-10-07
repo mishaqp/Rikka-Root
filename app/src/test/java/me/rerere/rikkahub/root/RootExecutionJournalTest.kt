@@ -16,6 +16,54 @@ import org.junit.Test
 class RootExecutionJournalTest {
     private fun approved() = UIMessagePart.Tool("call-root", "root_exec", "{\"command\":\"id\"}", approvalState = ToolApprovalState.Approved)
 
+    @Test fun `fresh automatic root call checkpoints and executes when live policy allows`() = runBlocking {
+        val events = mutableListOf<String>()
+        var checkpoint: UIMessagePart.Tool? = null
+        val automatic = approved().copy(approvalState = ToolApprovalState.Auto)
+        val result = executeRootToolOnce(automatic, {
+            checkpoint = it
+            events += "persist"
+        }, automaticAllowed = { true }) {
+            events += "execute"
+            listOf(UIMessagePart.Text("automatic result"))
+        }
+        assertEquals(listOf("persist", "execute"), events)
+        assertEquals("automatic result", (result.single() as UIMessagePart.Text).text)
+        assertTrue(checkpoint!!.isExecuted)
+        assertFalse(canResumeRootTool(checkpoint!!))
+        assertEquals(ToolApprovalState.Auto, checkpoint!!.approvalState)
+    }
+
+    @Test fun `automatic permission revoked during durable write prevents launch`() = runBlocking {
+        var allowed = true
+        var executed = false
+        var checkpoint: UIMessagePart.Tool? = null
+        try {
+            executeRootToolOnce(approved().copy(approvalState = ToolApprovalState.Auto), {
+                checkpoint = it
+                allowed = false
+            }, automaticAllowed = { allowed }) {
+                executed = true
+                emptyList()
+            }
+            fail("revoked automatic permission must prevent launch")
+        } catch (_: IllegalStateException) { }
+        assertNotNull("revocation happened after checkpoint persistence", checkpoint)
+        assertTrue(checkpoint!!.isExecuted)
+        assertFalse(executed)
+    }
+
+    @Test fun `mixed approval batch retains fresh automatic root siblings only`() {
+        val automatic = approved().copy(approvalState = ToolApprovalState.Auto)
+        val manual = approved()
+        val batch = listOf(automatic, manual)
+        val resumable = batch.filter { it.canResumeExecution || canResumeRootTool(it) }
+        assertEquals(batch, resumable)
+        assertFalse(canResumeRootTool(automatic.copy(toolName = "workspace_shell")))
+        assertFalse(canResumeRootTool(automatic.copy(approvalState = ToolApprovalState.Pending)))
+        assertFalse(canResumeRootTool(automatic.copy(output = listOf(UIMessagePart.Text("checkpoint")))))
+    }
+
     @Test fun `persists a nonresumable marker before launching the approved command`() = runBlocking {
         val events = mutableListOf<String>()
         var checkpoint: UIMessagePart.Tool? = null

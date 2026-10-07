@@ -14,6 +14,23 @@ import java.io.File
 class RootShellManagerTest {
     @get:Rule val temp = TemporaryFolder()
 
+    @Test fun revocationAfterProbePreventsLaunch() = runBlocking {
+        val (su, log) = fakeSu()
+        val result = RootShellManager(suExecutable = su.path).exec("printf should-not-run", 2_000) { false }
+        assertEquals("root_approval_required", result.error)
+        assertEquals(listOf("called"), log.readLines())
+        assertEquals("", result.stdout)
+    }
+
+    @Test fun revocationAtFinalIOCheckPreventsLaunch() = runBlocking {
+        val (su, log) = fakeSu()
+        var checks = 0
+        val result = RootShellManager(suExecutable = su.path).exec("printf should-not-run", 2_000) { ++checks == 1 }
+        assertEquals("root_approval_required", result.error)
+        assertEquals(2, checks)
+        assertEquals(listOf("called"), log.readLines())
+    }
+
     private fun fakeSu(uid: String = "0", probeExit: Int = 0): Pair<File, File> {
         val log = File(temp.root, "calls-${System.nanoTime()}").apply { writeText("") }
         val script = temp.newFile("su-${System.nanoTime()}")

@@ -34,6 +34,7 @@ import me.rerere.ai.ui.limitContext
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.root.executeRootToolOnce
 import me.rerere.rikkahub.root.awaitRootCheckpoint
+import me.rerere.rikkahub.root.canResumeRootTool
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.MessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
@@ -108,7 +109,7 @@ class GenerationLoop(
 
             // Check if we have tool calls ready to continue after user interaction.
             val pendingTools = messages.lastOrNull()?.getTools()?.filter {
-                it.canResumeExecution
+                it.canResumeExecution || canResumeRootTool(it)
             } ?: emptyList()
 
             val toolsToProcess: List<UIMessagePart.Tool>
@@ -213,16 +214,17 @@ class GenerationLoop(
                 }
 
                 // If there are pending approvals, break and wait for user
-                if (hasPendingApproval) {
+                if (hasPendingApproval && updatedTools.none(::canResumeRootTool)) {
                     Log.i(TAG, "generateText: waiting for tool approval")
                     break
                 }
 
-                toolsToProcess = updatedTools
+                // Automatic root siblings may run while a dangerous sibling waits for approval.
+                toolsToProcess = if (hasPendingApproval) updatedTools.filter(::canResumeRootTool) else updatedTools
             } else {
                 // Resuming after user interaction - use the resumable tools directly.
                 Log.i(TAG, "generateText: resuming with ${pendingTools.size} resumable tools")
-                toolsToProcess = messages.last().getTools().filter { it.canResumeExecution }
+                toolsToProcess = messages.last().getTools().filter { it.canResumeExecution || canResumeRootTool(it) }
             }
 
             // Handle tools (execute approved tools, handle denied tools)
@@ -272,7 +274,18 @@ class GenerationLoop(
                             }.getOrElse {
                                 error("Invalid tool arguments JSON for ${tool.toolName}: ${it.message}")
                             }
-                            Log.i(TAG, "generateText: executing tool ${toolDef.name} with args: $args")
+                            if (tool.toolName == "root_exec" &&
+                                tool.approvalState == ToolApprovalState.Auto && toolDef.needsApproval(args)
+                            ) {
+                                // Live revocation must also cover resumed/mixed batches.
+                                executedTools += tool.copy(approvalState = ToolApprovalState.Pending)
+                                return@forEach
+                            }
+                            if (tool.toolName == "root_exec") {
+                                Log.i(TAG, "generateText: executing root tool")
+                            } else {
+                                Log.i(TAG, "generateText: executing tool ${toolDef.name} with args: $args")
+                            }
                             val result = if (tool.toolName == "root_exec") {
                                 executeRootToolOnce(tool, persistStarted = { started ->
                                     val last = messages.last()
@@ -283,7 +296,7 @@ class GenerationLoop(
                                         emit(GenerationChunk.RootExecutionCheckpoint(checkpoint, ack))
                                     }
                                     messages = checkpoint
-                                }) { toolDef.execute(args) }
+                                }, automaticAllowed = { !toolDef.needsApproval(args) }) { toolDef.execute(args) }
                             } else {
                                 toolDef.execute(args)
                             }
@@ -294,7 +307,8 @@ class GenerationLoop(
                         }.onFailure {
                             // 取消必须向上传播，否则停止生成会被误报为工具执行错误
                             if (it is CancellationException) throw it
-                            it.printStackTrace()
+                            // Root input may contain credentials; neither exception details nor arguments belong in logs.
+                            if (tool.toolName != "root_exec") it.printStackTrace()
                             executedTools += tool.copy(
                                 output = listOf(
                                     UIMessagePart.Text(
@@ -303,8 +317,12 @@ class GenerationLoop(
                                                 put(
                                                     "error",
                                                     JsonPrimitive(buildString {
-                                                        append("[${it.javaClass.name}] ${it.message}")
-                                                        append("\n${it.stackTraceToString()}")
+                                                        if (tool.toolName == "root_exec") {
+                                                            append("Root execution stopped before a result could be confirmed (${it.javaClass.simpleName}). Review the device and request a new command; this call will not be replayed.")
+                                                        } else {
+                                                            append("[${it.javaClass.name}] ${it.message}")
+                                                            append("\n${it.stackTraceToString()}")
+                                                        }
                                                     })
                                                 )
                                             }
@@ -341,6 +359,11 @@ class GenerationLoop(
                     )
                 )
             )
+            if (executedTools.any { it.toolName == "root_exec" } &&
+                messages.last().getTools().any { it.approvalState == ToolApprovalState.Pending && !it.isExecuted }
+            ) {
+                break
+            }
         }
 
     }.flowOn(Dispatchers.IO)

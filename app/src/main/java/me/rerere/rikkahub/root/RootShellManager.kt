@@ -55,7 +55,7 @@ class RootShellManager(
         }
     }
 
-    internal suspend fun exec(command: String, timeoutMs: Int): RootProcessResult {
+    internal suspend fun exec(command: String, timeoutMs: Int, mayExecute: () -> Boolean = { true }): RootProcessResult {
         val verified = verifyRoot()
         if (verified != RootStatus.READY) {
             return RootProcessResult(
@@ -67,9 +67,11 @@ class RootShellManager(
                 reason = "Root verification: ${verified.name.lowercase()}. Check the device root manager and verify root again.",
             )
         }
+        if (!mayExecute()) return approvalRequired()
         // The original command is shell-quoted as one argument inside the owned process-group wrapper.
         // Even an unsuccessful/timed-out launch is returned once, never replayed/fallen back.
         val result = runInterruptible(Dispatchers.IO) {
+            if (!mayExecute()) return@runInterruptible approvalRequired()
             RootCommandSession(suExecutable, controlDirectory).use { session ->
                 val result = RootProcessRunner.run(
                     listOf(suExecutable, "-c", session.wrap(command)),
@@ -92,4 +94,9 @@ class RootShellManager(
         }
         return result
     }
+
+    private fun approvalRequired() = RootProcessResult(
+        error = "root_approval_required",
+        reason = "Automatic root access was disabled before launch. Request approval for a new call.",
+    )
 }

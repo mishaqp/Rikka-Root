@@ -6,6 +6,7 @@ import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.ai.tools.ChatToolFactory
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.root.RootShellManager
+import me.rerere.rikkahub.root.RootAccessStore
 import me.rerere.rikkahub.service.ChatNotificationManager
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.service.MediaCreationService
@@ -27,9 +28,10 @@ val appModule = module {
     }
 
     single { RootShellManager(controlDirectory = get<android.content.Context>().cacheDir) }
+    single { RootAccessStore(java.io.File(get<android.content.Context>().noBackupFilesDir, "root-control")) }
 
     single {
-        LocalTools(get(), get(), get(), get(), get())
+        LocalTools(get(), get(), get(), get(), get(), get())
     }
 
     single {
