@@ -80,3 +80,17 @@ Built with Jetpack Compose, Kotlin, and follows Material Design 3 principles.
 - If the user does not explicitly request localization, prioritize implementing functionality without considering
   localization. (e.g `Text("Hello world")`)
 - For `locale-tui` operations, use the `locale-tui-localization` skill.
+
+## Rikka-Root: правила форка
+
+Для этого форка правила ниже имеют приоритет над общими командами сборки выше.
+
+- **Ветка и PR.** Рабочая ветка по умолчанию — `ccr-e93188a6-grrqko`; PR не создавать без запроса.
+- **APK и проверки.** APK собирать только через GitHub Actions workflow [Daily Build](https://github.com/mishaqp/Rikka-Root/actions/workflows/daily-build.yml); nightly prerelease — [ссылка](https://github.com/mishaqp/Rikka-Root/releases/tag/nightly). Локально запускать только компиляцию затронутого модуля и unit-тесты затронутых классов. Полный `assembleRelease` локально не запускать без необходимости.
+- **Цикл.** Правка → быстрые локальные проверки → commit и push в рабочую ветку → дождаться Actions. Статус смотреть через публичный [Actions API](https://api.github.com/repos/mishaqp/Rikka-Root/actions/runs). При падении прочитать лог упавшего шага, исправить и снова отправить изменения.
+- **Lint.** В основе 51 унаследованная ошибка; новых не добавлять, существующие ошибки не подавлять.
+- **Подпись и секреты.** Подписывать release только в GitHub Actions секретами `KEY_BASE64` и `SIGNING_CONFIG`. Ключи и пароли не коммитить и не выводить в логи.
+- **Среда Codex.** `scripts/codex-setup.sh` устанавливает JDK, Android SDK/NDK, Node/pnpm и клонирует справочные репозитории. Firebase и `google-services` в проекте не используются.
+- **Справочные репозитории.** `/workspace/refs/rikkahub-agent` — Kotlin, основа upstream 2.5.1; переносить с адаптацией под 2.5.6 и `ConversationConfig`. `/workspace/refs/Moru` — Flutter/Dart, только образец поведения; код переписывать на Kotlin.
+- **Инструменты и данные.** Новые инструменты регистрировать в системе разрешений («Разрешения инструментов»). Для `LocalToolOption` задавать `@SerialName` по примеру `Agent` ради совместимости бэкапов. Секреты пользователя в приложении хранить только в AndroidKeyStore.
+- **Интерфейс и отчёт.** Строки интерфейса писать на русском. После задачи сообщать, что сделано, коммиты, ссылку на Actions run и APK, а также что проверить на телефоне.
