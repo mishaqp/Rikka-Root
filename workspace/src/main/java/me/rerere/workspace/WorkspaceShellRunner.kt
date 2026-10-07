@@ -7,6 +7,8 @@ import java.util.concurrent.TimeUnit
 
 interface WorkspaceShellRunner {
     fun execute(context: WorkspaceShellContext): WorkspaceCommandResult
+    fun startBackground(context: WorkspaceShellContext, supervisor: WorkspaceProcessSupervisor): Process =
+        error("This shell runner does not support managed background processes")
 }
 
 data class WorkspaceShellContext(
@@ -24,6 +26,10 @@ data class WorkspaceShellContext(
 )
 
 class HostShellRunner : WorkspaceShellRunner {
+    override fun startBackground(context: WorkspaceShellContext, supervisor: WorkspaceProcessSupervisor): Process =
+        ProcessBuilder(supervisor.commandLine(listOf(defaultShell(), "-c", context.command)))
+            .directory(context.workingDir).redirectErrorStream(false).start()
+
     override fun execute(context: WorkspaceShellContext): WorkspaceCommandResult {
         val process = ProcessBuilder(defaultShell(), "-c", context.command)
             .directory(context.workingDir)

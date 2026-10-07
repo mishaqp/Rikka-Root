@@ -14,6 +14,7 @@ import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.workspace.RootfsInstallProgress
 import me.rerere.workspace.RootfsInstaller
 import me.rerere.workspace.WorkspaceCommandResult
+import me.rerere.workspace.BackgroundStatus
 import me.rerere.workspace.WorkspaceFileEntry
 import me.rerere.workspace.WorkspaceManager
 import me.rerere.workspace.WorkspaceShellStatus
@@ -311,12 +312,35 @@ class WorkspaceRepository(
         }
     }
 
+    suspend fun startBackground(id: String, command: String, cwd: String = ""): BackgroundStatus {
+        val workspace = dao.getById(id) ?: error("Workspace not found")
+        return runInterruptible(Dispatchers.IO) {
+            manager.ensureWorkspace(workspace.root)
+            manager.startBackgroundCommand(workspace.root, command, cwd, workspace.shellCompatibilityMode)
+        }
+    }
+
+    suspend fun backgroundProcesses(id: String): List<BackgroundStatus> {
+        val workspace = dao.getById(id) ?: error("Workspace not found")
+        return withContext(Dispatchers.IO) { manager.backgroundProcesses(workspace.root) }
+    }
+
+    suspend fun backgroundOutput(id: String, processId: String): BackgroundStatus {
+        val workspace = dao.getById(id) ?: error("Workspace not found")
+        return withContext(Dispatchers.IO) { manager.backgroundOutput(workspace.root, processId) ?: error("Process not found in this workspace") }
+    }
+
+    suspend fun stopBackground(id: String, processId: String): Boolean {
+        val workspace = dao.getById(id) ?: error("Workspace not found")
+        return runInterruptible(Dispatchers.IO) { manager.stopBackgroundProcess(workspace.root, processId) }
+    }
+
     suspend fun delete(id: String): Boolean {
         val workspace = dao.getById(id) ?: return false
-        dao.deleteById(id)
         withContext(Dispatchers.IO) {
             manager.deleteWorkspace(workspace.root)
         }
+        dao.deleteById(id)
         cleanupAssistantReferences(id)
         return true
     }

@@ -108,7 +108,7 @@ fun WorkspaceDetailPage(id: String) {
     val installProgress by vm.installProgress.collectAsStateWithLifecycle()
     val installError by vm.installError.collectAsStateWithLifecycle()
     val settingsError by vm.settingsError.collectAsStateWithLifecycle()
-    val pagerState = rememberPagerState { 2 }
+    val pagerState = rememberPagerState { 3 }
     val scope = rememberCoroutineScope()
     var deleteTarget by remember { mutableStateOf<WorkspaceFileEntry?>(null) }
     var showInstallDialog by remember { mutableStateOf(false) }
@@ -192,6 +192,12 @@ fun WorkspaceDetailPage(id: String) {
                     icon = { Icon(HugeIcons.File02, contentDescription = null) },
                     onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
                 )
+                NavigationBarItem(
+                    selected = pagerState.currentPage == 2,
+                    label = { Text("Процессы") },
+                    icon = { Icon(HugeIcons.ComputerTerminal01, null) },
+                    onClick = { scope.launch { pagerState.animateScrollToPage(2) } },
+                )
             }
         },
         containerColor = CustomColors.topBarColors.containerColor,
@@ -203,6 +209,7 @@ fun WorkspaceDetailPage(id: String) {
                 .fillMaxSize(),
         ) { page ->
             when (page) {
+                2 -> WorkspaceProcessesPanel(id, isActive = pagerState.currentPage == 2)
                 0 -> WorkspaceBasicPage(
                     workspace = state.workspace,
                     installProgress = installProgress,

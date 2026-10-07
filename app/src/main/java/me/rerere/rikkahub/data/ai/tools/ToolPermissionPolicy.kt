@@ -19,6 +19,8 @@ object ToolPermissionPolicy {
     val registry: Map<String, String> = linkedMapOf(
         "root_exec" to "root-команды",
         "workspace_shell" to "команды workspace",
+        "workspace_background_start" to "запуск фоновых процессов workspace",
+        "workspace_background_stop" to "остановка фоновых процессов workspace",
         "workspace_write_file" to "запись файлов workspace",
         "workspace_edit_file" to "редактирование файлов workspace",
         "clipboard_tool" to "запись в буфер обмена",

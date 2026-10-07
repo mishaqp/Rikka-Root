@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.data.ai.tools
 
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.jsonObject
@@ -17,6 +19,7 @@ import me.rerere.rikkahub.utils.generateUnifiedDiff
 import me.rerere.workspace.WorkspaceCommandResult
 import me.rerere.workspace.WorkspaceFileEntry
 import me.rerere.workspace.WorkspaceManager
+import me.rerere.workspace.BackgroundStatus
 import org.koin.java.KoinJavaComponent.getKoin
 import java.io.ByteArrayOutputStream
 
@@ -49,7 +52,59 @@ suspend fun createWorkspaceTools(
         createWriteFileTool(workspaceId, ::needsApproval, workspaceRepository),
         createEditFileTool(workspaceId, ::needsApproval, workspaceRepository),
         createShellTool(workspaceId, ::needsApproval, workspaceRepository, shellCwd),
-    )
+    ) + createBackgroundTools(workspaceId, workspaceRepository, shellCwd)
+}
+
+private fun createBackgroundTools(id: String, repository: WorkspaceRepository, defaultCwd: String?): List<Tool> = listOf(
+    Tool(
+        name = "workspace_background_start",
+        description = "Start a managed workspace background command. Returns a process id. At most five run at once. Processes stop when the app exits or workspace is deleted. Use output/list/stop tools to manage them.",
+        parameters = { InputSchema.Obj(buildJsonObject {
+            put("command", buildJsonObject { put("type", "string") })
+            put("cwd", buildJsonObject { put("type", "string"); put("description", "Relative workspace directory") })
+        }, listOf("command")) },
+        needsApproval = { true },
+        execute = { args ->
+            val params = args.jsonObject
+            val cwd = (params.string("cwd") ?: defaultCwd.orEmpty()).removePrefix("/workspace/").removePrefix("/workspace")
+            listOf(UIMessagePart.Text(repository.startBackground(id, params.string("command") ?: error("command required"), cwd).toBackgroundJson(false).toString()))
+        },
+    ),
+    Tool(
+        name = "workspace_background_list", description = "List managed background processes in this workspace, including exit status.",
+        execute = { listOf(UIMessagePart.Text(buildJsonArray {
+            repository.backgroundProcesses(id).forEach { add(it.toBackgroundJson(false)) }
+        }.toString())) },
+    ),
+    Tool(
+        name = "workspace_background_output", description = "Read bounded stdout/stderr tails and exit code of a managed process in this workspace.",
+        parameters = { backgroundIdSchema() },
+        execute = { args -> listOf(UIMessagePart.Text(repository.backgroundOutput(id,
+            args.jsonObject.string("process_id") ?: error("process_id required")).toBackgroundJson(true).toString())) },
+    ),
+    Tool(
+        name = "workspace_background_stop", description = "Stop a managed process and its child processes in this workspace; retain its output record.",
+        parameters = { backgroundIdSchema() }, needsApproval = { true },
+        execute = { args ->
+            val processId = args.jsonObject.string("process_id") ?: error("process_id required")
+            check(repository.stopBackground(id, processId)) { "Process not found in this workspace" }
+            listOf(UIMessagePart.Text(repository.backgroundOutput(id, processId).toBackgroundJson(false).toString()))
+        },
+    ),
+)
+
+private fun backgroundIdSchema() = InputSchema.Obj(buildJsonObject {
+    put("process_id", buildJsonObject { put("type", "string") })
+}, listOf("process_id"))
+
+private fun BackgroundStatus.toBackgroundJson(includeOutput: Boolean) = buildJsonObject {
+    put("id", id); put("command", command); put("cwd", cwd); put("running", running)
+    put("exitCode", exitCode?.let(::JsonPrimitive) ?: kotlinx.serialization.json.JsonNull)
+    put("startedAtMillis", startedAtMillis)
+    if (includeOutput) {
+        put("stdout", stdout); put("stderr", stderr)
+        put("droppedStdout", droppedStdout); put("droppedStderr", droppedStderr)
+    }
 }
 
 private val IMAGE_EXTENSIONS = setOf(

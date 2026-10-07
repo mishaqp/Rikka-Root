@@ -15,6 +15,9 @@ class ProotShellRunner(
     private val nativeLibraryDir: File,
     private val patcher: RootfsPatcher = RootfsPatcher(),
 ) : WorkspaceShellRunner {
+    override fun startBackground(context: WorkspaceShellContext, supervisor: WorkspaceProcessSupervisor): Process =
+        processBuilder(context, supervisor).start()
+
     override fun execute(context: WorkspaceShellContext): WorkspaceCommandResult {
         if (!WorkspaceManager.isUsableRootfs(context.linuxDir)) {
             return WorkspaceCommandResult(
@@ -41,9 +44,18 @@ class ProotShellRunner(
             )
         }
 
+        return processBuilder(context).start().readResult(context.timeoutMillis, context.stdin)
+    }
+
+    private fun processBuilder(context: WorkspaceShellContext, supervisor: WorkspaceProcessSupervisor? = null): ProcessBuilder {
+        check(WorkspaceManager.isUsableRootfs(context.linuxDir)) { "Rootfs is not installed" }
+        val proot = File(nativeLibraryDir, PROOT_EXEC)
+        val loader = File(nativeLibraryDir, PROOT_LOADER)
+        check(proot.isFile && loader.isFile) { "PRoot executable or loader is missing" }
         context.tempDir.mkdirs()
         patcher.patch(context.linuxDir)
-        val process = ProcessBuilder(buildCommand(context, proot))
+        val command = buildCommand(context, proot)
+        return ProcessBuilder(supervisor?.commandLine(command) ?: command)
             .directory(context.filesDir)
             .redirectErrorStream(false)
             .apply {
@@ -56,9 +68,6 @@ class ProotShellRunner(
                 environment()["PROOT_TMP_DIR"] = context.tempDir.absolutePath
                 environment()["TMPDIR"] = context.tempDir.absolutePath
             }
-            .start()
-
-        return process.readResult(context.timeoutMillis, context.stdin)
     }
 
     private fun buildCommand(

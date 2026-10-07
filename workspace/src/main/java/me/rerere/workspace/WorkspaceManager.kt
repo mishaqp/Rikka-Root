@@ -14,6 +14,7 @@ class WorkspaceManager(
     private val bindMounts: List<WorkspaceBindMount> = emptyList(),
 ) {
     private val fileSystem = WorkspaceFileSystem(config)
+    private val background = WorkspaceBackgroundProcesses()
 
     // 按 target 长度降序, 保证 /a/b 优先于 /a 匹配
     private val sortedBindMounts = bindMounts.sortedByDescending { it.target.trimEnd('/').length }
@@ -45,7 +46,10 @@ class WorkspaceManager(
 
     fun rootfsShell(root: String): String = rootfsShell(linuxDir(root))
 
-    fun deleteWorkspace(root: String): Boolean = workspaceDir(root).deleteRecursively()
+    fun deleteWorkspace(root: String): Boolean {
+        background.stopAll(root)
+        return workspaceDir(root).deleteRecursively()
+    }
 
     fun listFiles(
         root: String,
@@ -199,25 +203,37 @@ class WorkspaceManager(
         stdin: ByteArray? = null,
         shellCompatibilityMode: Boolean = false,
     ): WorkspaceCommandResult {
+        return shellRunner.execute(commandContext(root, command, cwd, timeoutMillis, stdin, shellCompatibilityMode))
+    }
+
+    fun startBackgroundCommand(root: String, command: String, cwd: String = "", shellCompatibilityMode: Boolean = false): BackgroundStatus {
+        val context = commandContext(root, command, cwd, DEFAULT_COMMAND_TIMEOUT_MS, null, shellCompatibilityMode)
+        return background.start(context) { shellRunner.startBackground(context, it) }
+    }
+
+    fun backgroundProcesses(root: String): List<BackgroundStatus> = background.list(root)
+    fun backgroundOutput(root: String, id: String): BackgroundStatus? = background.status(root, id)
+    fun stopBackgroundProcess(root: String, id: String): Boolean = background.stop(root, id)
+
+    private fun commandContext(root: String, command: String, cwd: String, timeoutMillis: Long,
+        stdin: ByteArray?, shellCompatibilityMode: Boolean): WorkspaceShellContext {
         require(command.isNotBlank()) { "Command is required" }
         val workingDir = fileSystem.resolve(filesDir(root), cwd)
         require(workingDir.exists()) { "Working directory does not exist: $cwd" }
         require(workingDir.isDirectory) { "Working path is not a directory: $cwd" }
 
-        return shellRunner.execute(
-            WorkspaceShellContext(
-                root = root,
-                command = command,
-                cwd = cwd,
-                filesDir = filesDir(root),
-                linuxDir = linuxDir(root),
-                tempDir = tempDir(root),
-                workingDir = workingDir,
-                timeoutMillis = timeoutMillis,
-                stdin = stdin,
-                bindMounts = bindMounts,
-                shellCompatibilityMode = shellCompatibilityMode,
-            )
+        return WorkspaceShellContext(
+            root = root,
+            command = command,
+            cwd = cwd,
+            filesDir = filesDir(root),
+            linuxDir = linuxDir(root),
+            tempDir = tempDir(root),
+            workingDir = workingDir,
+            timeoutMillis = timeoutMillis,
+            stdin = stdin,
+            bindMounts = bindMounts,
+            shellCompatibilityMode = shellCompatibilityMode,
         )
     }
 
