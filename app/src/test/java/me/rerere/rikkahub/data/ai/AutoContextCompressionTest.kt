@@ -261,7 +261,7 @@ class AutoContextCompressionTest {
             val launches = AtomicInteger()
             val root = ToolPermissionPolicy.apply(Tool("root_exec", "test", execute = {
                 launches.incrementAndGet(); listOf(UIMessagePart.Text("unexpected"))
-            }), store, conversation.id.toString())
+            }))
             var latest: List<UIMessage> = emptyList()
             fixture.loop.generateText(settings = fixture.settings, model = fixture.model, messages = conversation.currentMessages,
                 assistant = Assistant(autoCompressContext = true, streamOutput = false), tools = listOf(root), maxSteps = 1,

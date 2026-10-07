@@ -7,8 +7,8 @@ import kotlinx.serialization.json.contentOrNull
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.root.RootAccessStore
 import me.rerere.rikkahub.root.RootApprovalPolicy
+import me.rerere.rikkahub.data.preferences.isWorkspaceToolName
 
 /** Registry of side-effect capabilities actually implemented by this app. */
 object ToolPermissionPolicy {
@@ -37,19 +37,19 @@ object ToolPermissionPolicy {
 
     fun sideEffect(name: String, input: JsonElement): Boolean = when (name) {
         "clipboard_tool" -> ((input as? JsonObject)?.get("action") as? JsonPrimitive)?.contentOrNull != "read"
-        else -> name in registry
+        else -> ToolApprovalDefaults.requiresApproval(name)
     }
 
     fun canGrantAlways(name: String, input: JsonElement): Boolean =
         name != "ask_user" && !mandatoryConfirmation(name, input)
 
-    fun apply(tool: Tool, store: RootAccessStore, conversationId: String? = null): Tool = tool.copy(needsApproval = { input ->
+    fun apply(tool: Tool): Tool = tool.copy(needsApproval = { input ->
         when {
             tool.name == "ask_user" -> true // Interactive answers must never be auto-filled.
             mandatoryConfirmation(tool.name, input) -> true
-            tool.name.startsWith("mcp__") && store.isWebTainted(conversationId) -> true
-            sideEffect(tool.name, input) || tool.needsApproval(input) -> !store.isAllowed(tool.name, conversationId)
-            else -> false
+            // Resolve workspace's live overrides through isToolAutoApproved, not a frozen tool definition.
+            isWorkspaceToolName(tool.name) -> true
+            else -> sideEffect(tool.name, input) || tool.needsApproval(input)
         }
     })
 
@@ -58,7 +58,7 @@ object ToolPermissionPolicy {
             "Также будут автоодобряться подключённые MCP-инструменты, для которых настроено подтверждение. Вопросы пользователю остаются интерактивными.\n\n" +
             "Автоодобрение и «Всегда разрешать» не обходят подтверждение массового удаления защищённых каталогов, форматирования, записи в разделы, " +
             "изменения загрузчика, сброса устройства, отключения SELinux/проверки загрузки и remount рабочих разделов. " +
-            "После чтения веб-страницы или результата поиска подтверждения временно возвращаются до конца разговора. " +
+            "Подтверждения после веб-поиска возвращаются только при включённом переключателе «Спрашивать после веб-контента». " +
             "Запретный список не разбирает shell-обёртки (sh -c, eval) и содержимое скриптов.\n\n" +
             "Это опасная функция. Включайте, только если доверяете модели, конфигурации ассистента и своим запросам."
 }

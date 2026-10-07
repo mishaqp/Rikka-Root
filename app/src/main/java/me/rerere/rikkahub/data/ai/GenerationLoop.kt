@@ -16,6 +16,7 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -36,6 +37,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.root.executeRootToolOnce
 import me.rerere.rikkahub.root.awaitRootCheckpoint
 import me.rerere.rikkahub.data.ai.tools.ToolPermissionPolicy.canResumeAutomatic
+import me.rerere.rikkahub.data.ai.tools.ToolPermissionPolicy
 import me.rerere.rikkahub.data.ai.tools.WebContentGuard
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.MessageTransformer
@@ -102,12 +104,20 @@ class GenerationLoop(
         workspaceCwd: String? = null,
         onWebContentRead: suspend () -> Unit = {},
         onAutoCompress: suspend (List<UIMessage>) -> List<UIMessage>? = { null },
+        isToolAutoApproved: suspend (toolName: String, input: JsonElement) -> Boolean = { _, _ -> false },
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
 
         var messages: List<UIMessage> = messages
         if (WebContentGuard.hasWebContent(messages)) onWebContentRead()
+
+        suspend fun needsApproval(tool: UIMessagePart.Tool, definition: Tool): Boolean {
+            val args = tool.inputAsJson()
+            // These exceptions cannot be bypassed by YOLO, chat grants or Always.
+            if (tool.toolName == "ask_user" || ToolPermissionPolicy.mandatoryConfirmation(tool.toolName, args)) return true
+            return definition.needsApproval(args) && !isToolAutoApproved(tool.toolName, args)
+        }
 
         for (stepIndex in 0 until maxSteps) {
             Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
@@ -193,12 +203,12 @@ class GenerationLoop(
 
                 // Check for tools that need approval
                 var hasPendingApproval = false
-                val updatedTools = toolCalls.map { tool ->
+                val updatedTools = ArrayList<UIMessagePart.Tool>(toolCalls.size)
+                for (tool in toolCalls) {
                     val toolDef = tools.find { it.name == tool.toolName }
-                    when {
+                    val updated = when {
                         // Tool needs approval and state is Auto -> set to Pending
-                        toolDef?.needsApproval(tool.inputAsJson()) == true &&
-                            tool.approvalState is ToolApprovalState.Auto -> {
+                        tool.approvalState is ToolApprovalState.Auto && toolDef != null && needsApproval(tool, toolDef) -> {
                             hasPendingApproval = true
                             tool.copy(approvalState = ToolApprovalState.Pending)
                         }
@@ -210,6 +220,7 @@ class GenerationLoop(
 
                         else -> tool
                     }
+                    updatedTools.add(updated)
                 }
 
                 // If any tools were updated to Pending, update the message and break
@@ -287,7 +298,7 @@ class GenerationLoop(
                             }.getOrElse {
                                 error("Invalid tool arguments JSON for ${tool.toolName}: ${it.message}")
                             }
-                            if (tool.approvalState == ToolApprovalState.Auto && toolDef.needsApproval(args)
+                            if (tool.approvalState == ToolApprovalState.Auto && needsApproval(tool, toolDef)
                             ) {
                                 // Live revocation must also cover resumed/mixed batches.
                                 executedTools += tool.copy(approvalState = ToolApprovalState.Pending)
@@ -306,14 +317,14 @@ class GenerationLoop(
                             }
                             val result = if (tool.toolName == "root_exec") {
                                 executeRootToolOnce(tool, persistStarted = ::persistStarted,
-                                    automaticAllowed = { !toolDef.needsApproval(args) }) { toolDef.execute(args) }
+                                    automaticAllowed = { !needsApproval(tool, toolDef) }) { toolDef.execute(args) }
                             } else {
                                 persistStarted(tool.copy(output = listOf(UIMessagePart.Text(buildJsonObject {
                                     put("error", "tool_execution_indeterminate")
                                     put("reason", "This tool was checkpointed before launch. Its effects are unknown if interrupted. This call will not run again; review its effects before requesting a new call.")
                                 }.toString()))))
                                 currentCoroutineContext().ensureActive()
-                                check(tool.approvalState == ToolApprovalState.Approved || !toolDef.needsApproval(args)) {
+                                check(tool.approvalState == ToolApprovalState.Approved || !needsApproval(tool, toolDef)) {
                                     "Automatic permission revoked before launch"
                                 }
                                 toolDef.execute(args)

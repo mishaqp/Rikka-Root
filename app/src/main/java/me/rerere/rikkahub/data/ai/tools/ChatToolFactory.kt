@@ -17,6 +17,7 @@ import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.workspace.WorkspaceShellStatus
 import me.rerere.rikkahub.root.RootAccessStore
+import me.rerere.rikkahub.data.preferences.ToolApprovalPreferences
 
 private const val TAG = "ChatToolFactory"
 
@@ -37,6 +38,7 @@ class ChatToolFactory(
     private val skillManager: SkillManager,
     private val workspaceRepository: WorkspaceRepository,
     private val rootAccessStore: RootAccessStore,
+    private val toolApprovalPreferences: ToolApprovalPreferences,
 ) {
     suspend fun createTools(
         settings: Settings,
@@ -96,13 +98,17 @@ class ChatToolFactory(
                 )
             )
         }
-    }.map { ToolPermissionPolicy.apply(it, rootAccessStore, conversationId) }
+    }.map { ToolPermissionPolicy.apply(it) }
 
     suspend fun restoreWebContentGuard(conversationId: String, messages: List<UIMessage>) {
         if (WebContentGuard.hasWebContent(messages)) markWebContent(conversationId)
     }
 
-    suspend fun markWebContent(conversationId: String) = rootAccessStore.markWebContent(conversationId)
+    suspend fun markWebContent(conversationId: String) {
+        if (toolApprovalPreferences.currentAskAfterWebContent()) rootAccessStore.markWebContent(conversationId)
+    }
+
+    fun hasWebContent(conversationId: String): Boolean = rootAccessStore.isWebTainted(conversationId)
 
     private suspend fun createWorkspaceToolsIfReady(workspaceId: String?, cwd: String?): List<Tool> {
         if (workspaceId.isNullOrBlank()) return emptyList()

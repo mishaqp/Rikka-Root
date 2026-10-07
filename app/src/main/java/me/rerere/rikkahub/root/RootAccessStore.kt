@@ -29,8 +29,9 @@ data class RootCommandLogEntry(
 )
 
 /**
- * Device-local permission and redacted audit history. Supply a directory under noBackupFilesDir;
- * permissions must never be included in assistant exports or imported settings.
+ * Redacted audit history and web-content markers. Supply a directory under noBackupFilesDir.
+ * The legacy permissions are a migration source for ToolApprovalPreferences; generation uses
+ * its fresh DataStore grants and the trusted RootInvocation callback.
  */
 class RootAccessStore(private val directory: File) {
     private val file = File(directory, "root-access.json")

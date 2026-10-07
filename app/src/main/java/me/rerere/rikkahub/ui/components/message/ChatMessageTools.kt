@@ -7,9 +7,6 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentWidth
@@ -17,7 +14,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
@@ -51,7 +47,6 @@ import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.BubbleChatQuestion
-import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.Tools
 import me.rerere.rikkahub.R
@@ -63,11 +58,8 @@ import me.rerere.rikkahub.ui.components.ui.ChainOfThoughtScope
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.ui.components.DotLoading
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
-import me.rerere.rikkahub.root.RootAccessStore
 import me.rerere.rikkahub.data.ai.tools.ToolPermissionPolicy
-import org.koin.compose.koinInject
+import me.rerere.rikkahub.service.ChatService.ApprovalScope
 
 private const val ASK_USER_TOOL_NAME = "ask_user"
 
@@ -104,7 +96,7 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool
 fun ChainOfThoughtScope.ChatMessageToolStep(
     tool: UIMessagePart.Tool,
     loading: Boolean = false,
-    onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
+    onToolApproval: ((toolCallId: String, approved: Boolean, reason: String, scope: ApprovalScope, toolName: String) -> kotlinx.coroutines.Job)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
 ) {
     // ask_user 是交互式问答流程, 不走注册式渲染框架
@@ -138,11 +130,9 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
 
     var showResult by remember { mutableStateOf(false) }
     var showDenyDialog by remember { mutableStateOf(false) }
-    var showApprovalDialog by remember(tool.toolCallId) { mutableStateOf(false) }
-    var savingGrant by remember(tool.toolCallId) { mutableStateOf(false) }
-    var grantError by remember(tool.toolCallId) { mutableStateOf(false) }
-    val approvalStore = koinInject<RootAccessStore>()
+    val submission = remember(tool.toolCallId) { ToolApprovalSubmission() }
     val approvalScope = rememberCoroutineScope()
+    val inFlight = submission.inFlight
     var expanded by remember { mutableStateOf(true) }
     val isPending = tool.isPending
     val isDenied = tool.approvalState is ToolApprovalState.Denied
@@ -180,28 +170,29 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         },
         extra = if (isPending && onToolApproval != null) {
             {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    FilledTonalIconButton(
-                        onClick = { showDenyDialog = true },
-                        modifier = Modifier.size(28.dp),
-                    ) {
-                        Icon(
-                            imageVector = HugeIcons.Cancel01,
-                            contentDescription = stringResource(R.string.chat_message_tool_deny),
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                    FilledTonalIconButton(
-                        onClick = { showApprovalDialog = true },
-                        modifier = Modifier.size(28.dp),
-                    ) {
-                        Icon(
-                            imageVector = HugeIcons.Tick01,
-                            contentDescription = stringResource(R.string.chat_message_tool_approve),
-                            modifier = Modifier.size(14.dp)
-                        )
+                Column {
+                    val broaderScopesAllowed = ToolPermissionPolicy.canGrantAlways(tool.toolName, tool.inputAsJson())
+                    if (!broaderScopesAllowed) Text(
+                        "Эта root-команда всегда требует отдельного подтверждения.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        ToolApprovalAction.entries.forEach { action ->
+                            TextButton(
+                                enabled = !inFlight && (action.scope == ApprovalScope.Once || broaderScopesAllowed),
+                                onClick = {
+                                    if (inFlight) return@TextButton
+                                    if (action == ToolApprovalAction.Deny) {
+                                        showDenyDialog = true
+                                    } else {
+                                        submission.submit(approvalScope) {
+                                            onToolApproval(tool.toolCallId, action.approved, "", action.scope, tool.toolName)
+                                        }
+                                    }
+                                },
+                            ) { Text(action.label) }
+                        }
                     }
                 }
             }
@@ -245,55 +236,16 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         },
     )
 
-    if (showApprovalDialog && isPending && onToolApproval != null) {
-        AlertDialog(
-            onDismissRequest = { if (!savingGrant) showApprovalDialog = false },
-            title = { Text("Разрешить запуск ${tool.toolName}?") },
-            text = {
-                Column(modifier = Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-                    Text(tool.input)
-                    if (ToolPermissionPolicy.mandatoryConfirmation(tool.toolName, tool.inputAsJson())) {
-                        Text("Эта root-команда всегда требует отдельного подтверждения.", color = MaterialTheme.colorScheme.error)
-                    }
-                    if (grantError) Text("Не удалось сохранить разрешение. Команда не одобрена.", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            confirmButton = {
-                FlowRow {
-                    if (ToolPermissionPolicy.canGrantAlways(tool.toolName, tool.inputAsJson())) {
-                        TextButton(enabled = !savingGrant, onClick = {
-                            savingGrant = true
-                            approvalScope.launch {
-                                try {
-                                    approvalStore.grantAlways(tool.toolName)
-                                    showApprovalDialog = false
-                                    onToolApproval(tool.toolCallId, true, "")
-                                } catch (cancelled: CancellationException) { throw cancelled }
-                                catch (_: Exception) { grantError = true }
-                                finally { savingGrant = false }
-                            }
-                        }) { Text("Всегда разрешать") }
-                    }
-                    TextButton(enabled = !savingGrant, onClick = {
-                        showApprovalDialog = false
-                        onToolApproval(tool.toolCallId, true, "")
-                    }) { Text("Разрешить") }
-                }
-            },
-            dismissButton = {
-                TextButton(enabled = !savingGrant, onClick = { showApprovalDialog = false; showDenyDialog = true }) {
-                    Text("Отклонить")
-                }
-            },
-        )
-    }
-
     if (showDenyDialog && onToolApproval != null) {
         ToolDenyReasonDialog(
             onDismiss = { showDenyDialog = false },
             onConfirm = { reason ->
                 showDenyDialog = false
-                onToolApproval(tool.toolCallId, false, reason)
+                if (!inFlight) {
+                    submission.submit(approvalScope) {
+                        onToolApproval(tool.toolCallId, false, reason, ApprovalScope.Once, tool.toolName)
+                    }
+                }
             }
         )
     }

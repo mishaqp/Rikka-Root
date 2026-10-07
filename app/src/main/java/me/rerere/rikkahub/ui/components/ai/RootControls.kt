@@ -2,7 +2,6 @@ package me.rerere.rikkahub.ui.components.ai
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -11,82 +10,23 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.dokar.sonner.ToastType
 import java.text.DateFormat
 import java.util.Date
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.root.RootAccessStore
-import me.rerere.rikkahub.ui.context.LocalToaster
 import org.koin.compose.koinInject
-
-/** Reads live access state, independently of the conversation's frozen configuration. */
-@Composable
-fun RootAutomaticIndicator(conversationId: String) {
-    val store = koinInject<RootAccessStore>()
-    val permissions by store.permissions.collectAsStateWithLifecycle()
-    val webConversations by store.webContentConversations.collectAsStateWithLifecycle()
-    val webBlocked = conversationId in webConversations
-    val automaticGrants = permissions.autoApproveAll || permissions.alwaysAllow.isNotEmpty()
-    val scope = rememberCoroutineScope()
-    val toaster = LocalToaster.current
-    val errorText by rememberUpdatedState(stringResource(R.string.root_access_save_failed))
-    var pending by remember { mutableStateOf(false) }
-    if (!automaticGrants && !webBlocked) return
-
-    Surface(color = MaterialTheme.colorScheme.errorContainer) {
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    if (webBlocked) "подтверждения включены из-за веб-контента"
-                    else if (permissions.autoApproveAll) "Автоодобрение инструментов включено"
-                    else "Для инструментов включено «Всегда разрешать»",
-                    style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.weight(1f),
-                )
-                if (automaticGrants) TextButton(
-                    enabled = !pending,
-                    onClick = {
-                        pending = true
-                        scope.launch {
-                            try {
-                                store.disableAllAutomaticApprovals()
-                            } catch (error: CancellationException) {
-                                throw error
-                            } catch (_: Exception) {
-                                toaster.show(errorText, type = ToastType.Error)
-                            } finally {
-                                pending = false
-                            }
-                        }
-                    },
-                ) { Text(stringResource(R.string.root_automatic_disable)) }
-            }
-            Text(
-                if (webBlocked) "В этом разговоре автоматические разрешения не применяются. Глобальные настройки сохранены."
-                else stringResource(R.string.root_automatic_disable_hint),
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-    }
-}
 
 @Composable
 fun RootCommandJournalButton(assistantId: String? = null) {

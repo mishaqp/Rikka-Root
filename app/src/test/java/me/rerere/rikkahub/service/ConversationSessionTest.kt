@@ -8,6 +8,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.launch
@@ -17,6 +18,9 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.preferences.ToolApprovalTestStore
+import org.junit.Rule
+import org.junit.rules.TemporaryFolder
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -27,6 +31,69 @@ import org.junit.Test
 import kotlin.uuid.Uuid
 
 class ConversationSessionTest {
+    @get:Rule val folder = TemporaryFolder()
+    @Test(timeout = 10_000)
+    fun `double Always tap persists permission before resuming and executes once`() = runBlocking {
+        ToolApprovalTestStore(folder.newFolder()).use { fixture ->
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            val id = Uuid.random()
+            val session = ConversationSession(id, Conversation.ofId(id), scope, {})
+            val releaseWrite = CompletableDeferred<Unit>()
+            var pending = true
+            var executions = 0
+            fun approve() = session.launchToolApproval(scope,
+                grant = { releaseWrite.await(); fixture.preferences.grantAlways("root_exec") },
+                launchResume = { block -> scope.launch(start = CoroutineStart.LAZY) { block() } },
+                resume = {
+                    assertTrue("Grant must finish before the continuation starts", "root_exec" in fixture.preferences.current())
+                    if (pending) { pending = false; executions++ }
+                },
+            )
+            try {
+                val first = approve()
+                val second = approve()
+                assertEquals(0, executions)
+                releaseWrite.complete(Unit)
+                second.join()
+                assertTrue(first.isCompleted)
+                assertEquals(1, executions)
+                assertFalse(first.isCancelled)
+                assertFalse(second.isCancelled)
+            } finally { session.cleanup(); scope.cancel() }
+        }
+    }
+
+    @Test(timeout = 10_000)
+    fun `cancelled approval continuation cannot cancel Always grant`() = runBlocking {
+        ToolApprovalTestStore(folder.newFolder()).use { fixture ->
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            val id = Uuid.random()
+            val session = ConversationSession(id, Conversation.ofId(id), scope, {})
+            val enteredWrite = CompletableDeferred<Unit>()
+            val releaseWrite = CompletableDeferred<Unit>()
+            val finishedWrite = CompletableDeferred<Unit>()
+            try {
+                val job = session.launchToolApproval(scope,
+                    grant = {
+                        enteredWrite.complete(Unit)
+                        releaseWrite.await()
+                        fixture.preferences.grantAlways("root_exec")
+                        finishedWrite.complete(Unit)
+                    },
+                    launchResume = { block -> scope.launch(start = CoroutineStart.LAZY) { block() } },
+                    resume = { error("Cancelled continuation must not execute") },
+                )
+                enteredWrite.await()
+                job.cancelAndJoin()
+                assertFalse(finishedWrite.isCompleted)
+                releaseWrite.complete(Unit)
+                finishedWrite.await()
+                assertTrue(job.isCancelled)
+                assertTrue("root_exec" in fixture.preferences.current())
+            } finally { releaseWrite.complete(Unit); session.cleanup(); scope.cancel() }
+        }
+    }
+
     @Test
     fun `metadata edits survive reopening and final generation save`() = runBlocking {
         val id = Uuid.random()

@@ -15,6 +15,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.tools.local.buildRootTool
+import me.rerere.rikkahub.data.preferences.ToolApprovalTestStore
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -22,6 +23,28 @@ import org.junit.rules.TemporaryFolder
 
 class RootAutomaticToolTest {
     @get:Rule val temp = TemporaryFolder()
+
+    @Test fun trustedDataStorePermissionExecutesRootAndRevocationIgnoresLegacyFlag() = runBlocking {
+        ToolApprovalTestStore(temp.newFolder()).use { fixture ->
+            val store = RootAccessStore(temp.newFolder())
+            val tool = buildRootTool(RootShellManager(suExecutable = fakeSu().path), store, "assistant")
+            val first = File(temp.root, "allowed-by-new-preferences")
+            fixture.preferences.setYolo(true)
+            val allowed = withContext(RootInvocation(automatic = true, automaticAllowed = { fixture.preferences.currentYolo() })) {
+                tool.execute(buildJsonObject { put("command", "touch '${first.path}'") })
+            }
+            assertTrue(first.exists())
+            assertTrue(allowed.toString().contains("\"success\":true"))
+            fixture.preferences.setYolo(false)
+            store.setAutoApprove(true) // An old migrated flag must not resurrect a revoked grant.
+            val second = File(temp.root, "revoked-by-new-preferences")
+            val revoked = withContext(RootInvocation(automatic = true, automaticAllowed = { fixture.preferences.currentYolo() })) {
+                tool.execute(buildJsonObject { put("command", "touch '${second.path}'") })
+            }
+            assertFalse(second.exists())
+            assertTrue(revoked.toString().contains("root_approval_required"))
+        }
+    }
 
     @Test fun webGuardProvenancePreventsLaunchEvenWhenGlobalPermissionStaysEnabled() = runBlocking {
         val store = RootAccessStore(temp.newFolder())

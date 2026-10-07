@@ -60,7 +60,6 @@ import me.rerere.hugeicons.stroke.LeftToRightListBullet
 import me.rerere.hugeicons.stroke.Menu03
 import me.rerere.hugeicons.stroke.MessageAdd01
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.ui.components.ai.RootAutomaticIndicator
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getSelectedASRProvider
@@ -330,7 +329,6 @@ private fun ChatPageContent(
                             vm.updateTitle(it)
                         }
                     )
-                    RootAutomaticIndicator(conversationId = conversation.id.toString())
                 }
             },
             bottomBar = {
@@ -471,8 +469,8 @@ private fun ChatPageContent(
                         chatListState.requestScrollToItem(index)
                     }
                 },
-                onToolApproval = { toolCallId, approved, reason ->
-                    vm.handleToolApproval(toolCallId, approved, reason)
+                onToolApproval = { toolCallId, approved, reason, scope, toolName ->
+                    vm.handleToolApproval(toolCallId, approved, reason, scope, toolName)
                 },
                 onToolAnswer = { toolCallId, answer ->
                     vm.handleToolAnswer(toolCallId, answer)

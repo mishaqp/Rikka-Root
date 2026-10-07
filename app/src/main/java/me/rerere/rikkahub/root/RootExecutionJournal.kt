@@ -14,7 +14,7 @@ import me.rerere.ai.ui.UIMessagePart
 /** Approval provenance is trusted coroutine context, never model-controlled JSON. */
 internal class RootInvocation(
     val automatic: Boolean,
-    val automaticAllowed: () -> Boolean = { true },
+    val automaticAllowed: (suspend () -> Boolean)? = null,
 ) : AbstractCoroutineContextElement(Key) {
     companion object Key : CoroutineContext.Key<RootInvocation>
 }
@@ -23,10 +23,10 @@ internal class RootInvocation(
 internal suspend fun executeRootToolOnce(
     tool: UIMessagePart.Tool,
     persistStarted: suspend (UIMessagePart.Tool) -> Unit,
-    automaticAllowed: () -> Boolean = { false },
+    automaticAllowed: suspend () -> Boolean = { false },
     execute: suspend () -> List<UIMessagePart>,
 ): List<UIMessagePart> {
-    fun authorised() = tool.approvalState == ToolApprovalState.Approved ||
+    suspend fun authorised() = tool.approvalState == ToolApprovalState.Approved ||
         (tool.approvalState == ToolApprovalState.Auto && automaticAllowed())
     check(tool.toolName == "root_exec" && !tool.isExecuted && authorised()) {
         "Root execution requires a fresh approved call or current automatic permission."

@@ -52,6 +52,11 @@ import me.rerere.rikkahub.data.ai.AutoContextCompression
 import me.rerere.rikkahub.data.ai.TranslationHandler
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.tools.ChatToolFactory
+import me.rerere.rikkahub.data.ai.tools.ToolApprovalAllowList
+import me.rerere.rikkahub.data.ai.tools.resolveToolAutoApproval
+import me.rerere.rikkahub.data.ai.tools.resolveWorkspaceToolApproval
+import me.rerere.rikkahub.data.preferences.ToolApprovalPreferences
+import me.rerere.rikkahub.data.preferences.isWorkspaceToolName
 import me.rerere.rikkahub.data.ai.tools.InvalidMcpServerNamesException
 import me.rerere.rikkahub.data.ai.tools.shouldUseExternalWebSearch
 import me.rerere.rikkahub.data.ai.transformers.Base64ImageToLocalFileTransformer
@@ -255,6 +260,7 @@ class ChatService(
     private val filesManager: FilesManager,
     private val workspaceRepository: WorkspaceRepository,
     private val folderRepository: FolderRepository,
+    private val toolApprovalPreferences: ToolApprovalPreferences,
 ) {
     // workspace 系统提示注入 (依赖 workspaceRepository, 故在类内构造)
     private val workspaceReminderTransformer = WorkspaceReminderTransformer(workspaceRepository)
@@ -616,15 +622,18 @@ class ChatService(
 
     // ---- 处理工具调用审批 ----
 
+    enum class ApprovalScope { Once, ChatScope, Always }
+
     fun handleToolApproval(
         conversationId: Uuid,
         toolCallId: String,
         approved: Boolean,
         reason: String = "",
         answer: String? = null,
+        scope: ApprovalScope = ApprovalScope.Once,
+        toolName: String? = null,
     ) = synchronized(sessionManager.getOrCreate(conversationId)) {
         val session = sessionManager.getOrCreate(conversationId)
-        val previousJob = session.getJob()
 
         val hasOtherPendingTools = session.state.value.messageNodes.any { node ->
             node.currentMessage.parts.any { part ->
@@ -632,66 +641,99 @@ class ChatService(
             }
         }
 
-        val job = launchGenerationJob(
-            conversationId = conversationId,
-            keepAliveInBackground = !hasOtherPendingTools,
-        ) {
-            try {
-                afterPreviousGeneration(previousJob) {
-                    val conversation = session.state.value
-                    // Ignore double taps and stale approvals for completed or inactive tools.
-                    if (conversation.currentMessages.none { message ->
-                            message.getTools().any { it.toolCallId == toolCallId && it.isPending }
-                        }) return@afterPreviousGeneration
-                    val newApprovalState = when {
-                        answer != null -> ToolApprovalState.Answered(answer)
-                        approved -> ToolApprovalState.Approved
-                        else -> ToolApprovalState.Denied(reason)
-                    }
-
-                    // Update the tool approval state
-                    val updatedNodes = conversation.messageNodes.map { node ->
-                        node.copy(
-                            messages = node.messages.map { msg ->
-                                msg.copy(
-                                    parts = msg.parts.map { part ->
-                                        when {
-                                            part is UIMessagePart.Tool && part.toolCallId == toolCallId -> {
-                                                part.copy(approvalState = newApprovalState)
-                                            }
-
-                                            else -> part
-                                        }
-                                    }
-                                )
-                            }
-                        )
-                    }
-                    val updatedConversation = conversation.copy(messageNodes = updatedNodes)
-                    saveConversation(conversationId, updatedConversation)
-
-                    // Check if there are still pending tools
-                    val hasPendingTools = updatedNodes.any { node ->
-                        node.currentMessage.parts.any { part ->
-                            part is UIMessagePart.Tool && part.isPending
+        session.launchToolApproval(
+            appScope = appScope,
+            grant = {
+                if (approved && toolName != null && scope != ApprovalScope.Once) {
+                    ensureInitialized(session)
+                    val tool = session.state.value.currentMessages.flatMap { it.getTools() }
+                        .firstOrNull { it.toolCallId == toolCallId && it.isPending }
+                    if (tool?.toolName == toolName && ToolPermissionPolicy.canGrantAlways(toolName, tool.inputAsJson())) {
+                        when (scope) {
+                            ApprovalScope.ChatScope -> ToolApprovalAllowList.grantForChat(conversationId, toolName)
+                            ApprovalScope.Always -> grantAlwaysScope(conversationId, toolName)
+                            ApprovalScope.Once -> Unit
                         }
                     }
-
-                    // Only continue generation when all pending tools are handled
-                    if (!hasPendingTools) {
-                        handleMessageComplete(conversationId)
-                    }
-
-                    _generationDoneFlow.emit(conversationId)
                 }
+            },
+            launchResume = { block ->
+                launchGenerationJob(conversationId, keepAliveInBackground = !hasOtherPendingTools) {
+                    try { block() }
+                    catch (e: Exception) {
+                        if (e is CancellationException) throw e
+                        session.messageQueue.pause()
+                        addError(IllegalStateException("Не удалось сохранить одобрение инструмента."), conversationId,
+                            title = context.getString(R.string.error_title_tool_approval))
+                    }
+                }
+            },
+        ) {
+            try {
+                ensureInitialized(session)
+                val conversation = session.state.value
+                // Ignore double taps and stale approvals for completed or inactive tools.
+                if (conversation.currentMessages.none { message ->
+                        message.getTools().any { it.toolCallId == toolCallId && it.isPending }
+                    }) return@launchToolApproval
+                val newApprovalState = when {
+                    answer != null -> ToolApprovalState.Answered(answer)
+                    approved -> ToolApprovalState.Approved
+                    else -> ToolApprovalState.Denied(reason)
+                }
+
+                // Update the tool approval state
+                val updatedNodes = conversation.messageNodes.map { node ->
+                    node.copy(
+                        messages = node.messages.map { msg ->
+                            msg.copy(
+                                parts = msg.parts.map { part ->
+                                    when {
+                                        part is UIMessagePart.Tool && part.toolCallId == toolCallId -> {
+                                            part.copy(approvalState = newApprovalState)
+                                        }
+
+                                        else -> part
+                                    }
+                                }
+                            )
+                        }
+                    )
+                }
+                val updatedConversation = conversation.copy(messageNodes = updatedNodes)
+                saveConversation(conversationId, updatedConversation)
+
+                // Check if there are still pending tools
+                val hasPendingTools = updatedNodes.any { node ->
+                    node.currentMessage.parts.any { part ->
+                        part is UIMessagePart.Tool && part.isPending
+                    }
+                }
+
+                // Only continue generation when all pending tools are handled
+                if (!hasPendingTools) {
+                    handleMessageComplete(conversationId)
+                }
+
+                _generationDoneFlow.emit(conversationId)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 session.messageQueue.pause()
                 addError(e, conversationId, title = context.getString(R.string.error_title_tool_approval))
             }
         }
+    }
 
-        session.setJob(job, cancelPrevious = false)
+    private suspend fun grantAlwaysScope(conversationId: Uuid, toolName: String) {
+        if (isWorkspaceToolName(toolName)) {
+            val conversation = getConversationFlow(conversationId).value
+            // ConversationConfig may bind a different workspace from the assistant's current setting.
+            val workspaceId = settingsStore.settingsFlow.first().getAssistantOf(conversation).workspaceId?.toString()
+            val granted = workspaceId != null && workspaceRepository.setToolApproval(workspaceId, toolName, needsApproval = false)
+            if (!granted) ToolApprovalAllowList.grantForChat(conversationId, toolName)
+        } else {
+            toolApprovalPreferences.grantAlways(toolName)
+        }
     }
 
     // ---- 处理消息补全 ----
@@ -789,6 +831,17 @@ class ChatService(
                 outputTransformers = outputTransformers,
                 tools = tools,
                 onWebContentRead = { chatToolFactory.markWebContent(conversationId.toString()) },
+                isToolAutoApproved = { toolName, input ->
+                    resolveToolAutoApproval(toolApprovalPreferences, conversationId, toolName,
+                        webContentSeen = chatToolFactory.hasWebContent(conversationId.toString()),
+                        workspaceNeedsApproval = {
+                            // Authorize the workspace bound to these tool closures, even if the UI switches workspace mid-turn.
+                            val workspaceId = assistant.workspaceId?.toString()
+                            val workspace = workspaceId?.let { workspaceRepository.getById(it) }
+                            workspace == null || resolveWorkspaceToolApproval(toolName, workspace.toolApprovalOverrides(), input)
+                        },
+                    )
+                },
                 onAutoCompress = { currentMessages ->
                     val plan = AutoContextCompression.plan(currentMessages, assistant)
                     if (plan == null) null else {

@@ -7,6 +7,7 @@ import me.rerere.rikkahub.data.ai.tools.ChatToolFactory
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.root.RootShellManager
 import me.rerere.rikkahub.root.RootAccessStore
+import me.rerere.rikkahub.data.preferences.ToolApprovalPreferences
 import me.rerere.rikkahub.service.ChatNotificationManager
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.service.MediaCreationService
@@ -29,6 +30,7 @@ val appModule = module {
 
     single { RootShellManager(controlDirectory = get<android.content.Context>().cacheDir) }
     single { RootAccessStore(java.io.File(get<android.content.Context>().noBackupFilesDir, "root-control")) }
+    single { ToolApprovalPreferences(get(), get()) }
 
     single {
         LocalTools(get(), get(), get(), get(), get(), get())
@@ -82,6 +84,7 @@ val appModule = module {
             skillManager = get(),
             workspaceRepository = get(),
             rootAccessStore = get(),
+            toolApprovalPreferences = get(),
         )
     }
 
@@ -101,7 +104,8 @@ val appModule = module {
             mcpManager = get(),
             filesManager = get(),
             workspaceRepository = get(),
-            folderRepository = get()
+            folderRepository = get(),
+            toolApprovalPreferences = get(),
         )
     }
 

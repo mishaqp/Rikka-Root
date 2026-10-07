@@ -4,6 +4,8 @@ import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
@@ -30,6 +32,7 @@ class WorkspaceRepository(
     private val rootfsInstaller: RootfsInstaller,
     private val settingsStore: SettingsStore,
 ) {
+    private val toolApprovalMutex = Mutex()
     fun listFlow(): Flow<List<WorkspaceEntity>> = dao.listFlow()
 
     suspend fun checkIntegrity() = withContext(Dispatchers.IO) {
@@ -102,17 +105,8 @@ class WorkspaceRepository(
         dao.setShellCompatibilityMode(id, enabled, System.currentTimeMillis())
     }
 
-    suspend fun setToolApproval(id: String, toolName: String, needsApproval: Boolean): Boolean {
-        val workspace = dao.getById(id) ?: return false
-        val overrides = workspace.toolApprovalOverrides() + (toolName to needsApproval)
-        dao.upsert(
-            workspace.copy(
-                toolApprovals = JsonInstant.encodeToString(overrides),
-                updatedAt = System.currentTimeMillis(),
-            )
-        )
-        return true
-    }
+    suspend fun setToolApproval(id: String, toolName: String, needsApproval: Boolean): Boolean =
+        updateWorkspaceToolApproval(dao, toolApprovalMutex, id, toolName, needsApproval)
 
     suspend fun installRootfs(
         id: String,
@@ -383,4 +377,21 @@ class WorkspaceRepository(
         private const val TAG = "WorkspaceRepository"
         private const val MAX_PREVIEW_BYTES = 512L * 1024
     }
+}
+
+/** Serialize the complete read/merge/write so concurrent Always grants retain each other. */
+internal suspend fun updateWorkspaceToolApproval(
+    dao: WorkspaceDAO,
+    mutex: Mutex,
+    id: String,
+    toolName: String,
+    needsApproval: Boolean,
+): Boolean = mutex.withLock {
+    val workspace = dao.getById(id) ?: return@withLock false
+    val overrides = workspace.toolApprovalOverrides() + (toolName to needsApproval)
+    dao.upsert(workspace.copy(
+        toolApprovals = JsonInstant.encodeToString(overrides),
+        updatedAt = System.currentTimeMillis(),
+    ))
+    true
 }

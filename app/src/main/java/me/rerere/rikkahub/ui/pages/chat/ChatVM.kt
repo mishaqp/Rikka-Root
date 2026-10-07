@@ -268,10 +268,10 @@ class ChatVM(
     fun handleToolApproval(
         toolCallId: String,
         approved: Boolean,
-        reason: String = ""
-    ) {
-        chatService.handleToolApproval(_conversationId, toolCallId, approved, reason)
-    }
+        reason: String = "",
+        scope: ChatService.ApprovalScope = ChatService.ApprovalScope.Once,
+        toolName: String? = null,
+    ): kotlinx.coroutines.Job = chatService.handleToolApproval(_conversationId, toolCallId, approved, reason, scope = scope, toolName = toolName)
 
     fun handleToolAnswer(
         toolCallId: String,

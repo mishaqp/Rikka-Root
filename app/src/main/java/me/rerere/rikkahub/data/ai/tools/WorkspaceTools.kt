@@ -31,10 +31,19 @@ val WorkspaceToolDefaultApprovals: Map<String, Boolean> = mapOf(
     "workspace_write_file" to false,
     "workspace_edit_file" to false,
     "workspace_shell" to true,
+    "workspace_background_start" to true,
+    "workspace_background_stop" to true,
+    "workspace_background_list" to false,
+    "workspace_background_output" to false,
 )
 
 fun resolveWorkspaceToolApproval(name: String, overrides: Map<String, Boolean>): Boolean =
     overrides[name] ?: WorkspaceToolDefaultApprovals[name] ?: false
+
+/** Live workspace settings retain the argument-specific write/edit path gate. */
+fun resolveWorkspaceToolApproval(name: String, overrides: Map<String, Boolean>, input: kotlinx.serialization.json.JsonElement): Boolean =
+    resolveWorkspaceToolApproval(name, overrides) ||
+        (name in setOf("workspace_write_file", "workspace_edit_file") && input.pathOutsideWritableRoots("path"))
 
 suspend fun createWorkspaceTools(
     workspaceId: String?,

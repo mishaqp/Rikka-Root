@@ -3,6 +3,7 @@ package me.rerere.rikkahub.service
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -136,6 +137,23 @@ class ConversationSession(
     }
 
     fun getJob(): Job? = _generationJob.value
+
+    /** Snapshot before setJob; persist grants outside the cancellable resume coroutine. */
+    internal fun launchToolApproval(
+        appScope: CoroutineScope,
+        grant: suspend () -> Unit,
+        launchResume: (suspend () -> Unit) -> Job,
+        resume: suspend () -> Unit,
+    ): Job = synchronized(this) {
+        val previousJob = getJob()
+        val grantJob = appScope.async(NonCancellable) { grant() }
+        val job = launchResume {
+            grantJob.await()
+            afterPreviousGeneration(previousJob, resume)
+        }
+        setJob(job, cancelPrevious = false)
+        job
+    }
 
     @Synchronized
     fun cancelJobs(): List<Job> = activeJobs.toList().also { jobs ->

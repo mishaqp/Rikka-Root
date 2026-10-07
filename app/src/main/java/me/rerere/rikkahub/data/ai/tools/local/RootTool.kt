@@ -44,16 +44,19 @@ fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = nul
         val command = commandValue?.takeIf { it.isString }?.contentOrNull
         val timeoutValue = args?.get("timeout_ms")
         val timeout = if (timeoutValue == null) 30_000 else (timeoutValue as? JsonPrimitive)?.takeIf { !it.isString }?.intOrNull
-        val automaticAtStart = assistantId != null && accessStore?.isAllowed("root_exec") == true
         // Trusted invocation provenance survives revocation between journal acknowledgment and entry.
         val invocation = currentCoroutineContext()[RootInvocation]
+        suspend fun automaticAllowed(): Boolean = invocation?.automaticAllowed?.invoke()
+            ?: (assistantId != null && accessStore?.isAllowed("root_exec") == true)
+        val automaticAtStart = if (invocation?.automatic == false) false else automaticAllowed()
         val automaticInvocation = invocation?.automatic ?: automaticAtStart
         val result = when {
             command.isNullOrBlank() || timeout == null -> buildJsonObject {
                 put("error", "invalid_arguments")
                 put("reason", "command must be a non-empty string and timeout_ms must be an integer.")
             }
-            !automaticAtStart && !automaticInvocation && RootCommandGuard.check(command) != null -> buildJsonObject {
+            // An Approved invocation has already passed the explicit confirmation in the loop.
+            invocation == null && !automaticAtStart && !automaticInvocation && RootCommandGuard.check(command) != null -> buildJsonObject {
                 put("error", "root_command_blocked")
                 put("reason", RootCommandGuard.check(command))
             }
@@ -68,8 +71,7 @@ fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = nul
                 var journalError = false
                 val executed = try {
                     manager.exec(command, timeout.coerceIn(1_000, 300_000)) {
-                        !automaticInvocation || assistantId != null && accessStore?.isAllowed("root_exec") == true &&
-                            (invocation?.automaticAllowed?.invoke() != false)
+                        !automaticInvocation || automaticAllowed() && RootApprovalPolicy.reason(command) == null
                     }.also {
                         exitCode = it.exitCode
                         status = it.error ?: if (it.exitCode == 0) "completed" else "failed"

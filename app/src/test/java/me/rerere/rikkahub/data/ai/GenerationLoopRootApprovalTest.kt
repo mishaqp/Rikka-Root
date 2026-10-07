@@ -16,6 +16,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -32,6 +33,11 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.root.persistRootCheckpoint
+import me.rerere.rikkahub.data.ai.tools.ToolPermissionPolicy
+import me.rerere.rikkahub.data.ai.tools.ToolApprovalAllowList
+import me.rerere.rikkahub.data.ai.tools.resolveToolAutoApproval
+import me.rerere.rikkahub.data.preferences.ToolApprovalTestStore
+import kotlin.uuid.Uuid
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
@@ -45,6 +51,76 @@ import org.junit.rules.TemporaryFolder
 /** Real generation loop and OpenAI wire decoder; only the HTTP boundary and root process are replaced. */
 class GenerationLoopRootApprovalTest {
     @get:Rule val folder = TemporaryFolder()
+
+    @Test(timeout = 15_000)
+    fun `yolo after search executes all capabilities but keeps dangerous root and ask user pending`() = runBlocking {
+        ToolApprovalTestStore(folder.newFolder()).use { approvals ->
+            approvals.preferences.setYolo(true)
+            val id = Uuid.random()
+            val names = listOf("search_web") + ToolPermissionPolicy.registry.keys.filter { it != "root_exec" } +
+                listOf("mcp__server__write", "eval_javascript", "ask_user")
+            val calls = names.map { UIMessagePart.Tool(it, it, "{}") } +
+                call("root", "id -u") + call("dangerous", "setenforce 0")
+            Fixture(folder.newFolder(), toolResponse(calls)).use { fixture ->
+                val runs = mutableListOf<String>()
+                var webSeen = true // Same chat already contains web content, including before resumption.
+                val tools = names.map { name -> ToolPermissionPolicy.apply(Tool(name, "test", execute = {
+                    runs += name
+                    listOf(UIMessagePart.Text("done"))
+                })) }
+                fixture.automatic.set(false) // The new preferences, not the old root flag, must authorize root.
+                fixture.collect(listOf(UIMessage.user("Search, then use the tools")), extraTools = tools,
+                    onWebContentRead = { webSeen = true },
+                    isToolAutoApproved = { name, _ -> resolveToolAutoApproval(approvals.preferences, id, name, webSeen) },
+                )
+                assertEquals(names - "ask_user", runs)
+                assertEquals(listOf("id -u"), fixture.commands)
+                val result = fixture.latest.last().getTools()
+                assertEquals(setOf("dangerous", "ask_user"), result.filter { it.isPending }.map { it.toolCallId }.toSet())
+                assertTrue(result.filter { !it.isPending }.all { it.isExecuted && it.approvalState == ToolApprovalState.Auto })
+                assertEquals(1, fixture.requests.get())
+                val approved = fixture.latest.dropLast(1) + fixture.latest.last().copy(parts = fixture.latest.last().parts.map {
+                    if (it is UIMessagePart.Tool && it.toolCallId == "dangerous") it.copy(approvalState = ToolApprovalState.Approved) else it
+                })
+                fixture.collect(approved, extraTools = tools,
+                    isToolAutoApproved = { name, _ -> resolveToolAutoApproval(approvals.preferences, id, name, webSeen) },
+                )
+                assertEquals("Only explicit confirmation can run the protected command", listOf("id -u", "setenforce 0"), fixture.commands)
+                assertTrue(fixture.latest.last().getTools().single { it.toolName == "ask_user" }.isPending)
+            }
+        }
+    }
+
+    @Test(timeout = 15_000)
+    fun `enabling yolo during same generation affects next tool invocation`() = runBlocking {
+        ToolApprovalTestStore(folder.newFolder()).use { approvals ->
+            Fixture(folder.newFolder()).use { fixture ->
+                val id = Uuid.random()
+                val runs = mutableListOf<String>()
+                val enable = Tool("search_web", "test", execute = {
+                    approvals.preferences.setYolo(true)
+                    runs += "search_web"
+                    listOf(UIMessagePart.Text("external content"))
+                })
+                val mcp = ToolPermissionPolicy.apply(Tool("mcp__server__write", "test", execute = {
+                    runs += "mcp__server__write"
+                    listOf(UIMessagePart.Text("done"))
+                }))
+                fixture.automatic.set(false)
+                var webSeen = false
+                val calls = listOf(UIMessagePart.Tool("search", enable.name, "{}"),
+                    UIMessagePart.Tool("mcp", mcp.name, "{}"), call("root", "id -u"))
+                fixture.collect(listOf(UIMessage.assistant("").copy(parts = calls)), extraTools = listOf(enable, mcp),
+                    onWebContentRead = { webSeen = true },
+                    isToolAutoApproved = { name, _ -> resolveToolAutoApproval(approvals.preferences, id, name, webSeen) },
+                    maxSteps = 1,
+                )
+                assertEquals(listOf("search_web", "mcp__server__write"), runs)
+                assertEquals(listOf("id -u"), fixture.commands)
+                assertFalse(fixture.latest.last().getTools().any { it.isPending })
+            }
+        }
+    }
 
     @Test(timeout = 15_000)
     fun `interrupted automatic or manually approved side effect is durable and never replayed`() = runBlocking {
@@ -195,6 +271,17 @@ class GenerationLoopRootApprovalTest {
         id, "root_exec", buildJsonObject { put("command", command) }.toString(),
     )
 
+    private fun toolResponse(calls: List<UIMessagePart.Tool>): String {
+        val wireCalls = buildJsonArray {
+            calls.forEach { call -> add(buildJsonObject {
+                put("id", call.toolCallId)
+                put("type", "function")
+                put("function", buildJsonObject { put("name", call.toolName); put("arguments", call.input) })
+            }) }
+        }
+        return """{"id":"tools","model":"test-chat","choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"tool_calls":$wireCalls}}]}"""
+    }
+
     @Test(timeout = 15_000)
     fun `search result in the same batch restores root and workspace approval immediately`() = runBlocking {
         val response = """{"id":"response-tools","model":"test-chat","choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"tool_calls":[{"id":"search","type":"function","function":{"name":"search_web","arguments":"{}"}},{"id":"ordinary","type":"function","function":{"name":"root_exec","arguments":"{\"command\":\"id -u\"}"}},{"id":"write","type":"function","function":{"name":"workspace_write_file","arguments":"{}"}}]}}]}"""
@@ -301,12 +388,14 @@ class GenerationLoopRootApprovalTest {
             extraTools: List<Tool> = emptyList(),
             maxSteps: Int = 3,
             onWebContentRead: suspend () -> Unit = {},
+            isToolAutoApproved: suspend (String, kotlinx.serialization.json.JsonElement) -> Boolean = { _, _ -> false },
             beforeWrite: suspend (GenerationChunk.RootExecutionCheckpoint) -> Unit = {},
         ) {
             latest = messages
             loop.generateText(settings = settings, model = model, messages = messages,
                 assistant = Assistant(streamOutput = false), tools = listOf(tool) + extraTools, maxSteps = maxSteps,
                 onWebContentRead = onWebContentRead,
+                isToolAutoApproved = isToolAutoApproved,
             ).collect { chunk ->
                 when (chunk) {
                     is GenerationChunk.Messages -> latest = chunk.messages

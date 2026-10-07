@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -55,7 +56,7 @@ class RootShellManager(
         }
     }
 
-    internal suspend fun exec(command: String, timeoutMs: Int, mayExecute: () -> Boolean = { true }): RootProcessResult {
+    internal suspend fun exec(command: String, timeoutMs: Int, mayExecute: suspend () -> Boolean = { true }): RootProcessResult {
         val verified = verifyRoot()
         if (verified != RootStatus.READY) {
             return RootProcessResult(
@@ -70,20 +71,22 @@ class RootShellManager(
         if (!mayExecute()) return approvalRequired()
         // The original command is shell-quoted as one argument inside the owned process-group wrapper.
         // Even an unsuccessful/timed-out launch is returned once, never replayed/fallen back.
-        val result = runInterruptible(Dispatchers.IO) {
-            if (!mayExecute()) return@runInterruptible approvalRequired()
-            RootCommandSession(suExecutable, controlDirectory).use { session ->
-                val result = RootProcessRunner.run(
-                    listOf(suExecutable, "-c", session.wrap(command)),
-                    timeoutMs,
-                    beforeStop = { session.cancel() },
-                )
-                if (session.rootDenied()) {
-                    result.copy(error = "root_not_granted", reason = "The new su execution did not have UID 0. The command was not executed; verify root again.")
-                } else if (session.capabilityUnavailable()) {
-                    result.copy(error = "root_cleanup_unavailable", reason = "setsid is required for root command cancellation. The command was not executed.")
-                } else {
-                    result.copy(reason = session.cleanupError ?: result.reason)
+        val result = withContext(Dispatchers.IO) {
+            if (!mayExecute()) return@withContext approvalRequired()
+            runInterruptible {
+                RootCommandSession(suExecutable, controlDirectory).use { session ->
+                    val result = RootProcessRunner.run(
+                        listOf(suExecutable, "-c", session.wrap(command)),
+                        timeoutMs,
+                        beforeStop = { session.cancel() },
+                    )
+                    if (session.rootDenied()) {
+                        result.copy(error = "root_not_granted", reason = "The new su execution did not have UID 0. The command was not executed; verify root again.")
+                    } else if (session.capabilityUnavailable()) {
+                        result.copy(error = "root_cleanup_unavailable", reason = "setsid is required for root command cancellation. The command was not executed.")
+                    } else {
+                        result.copy(reason = session.cleanupError ?: result.reason)
+                    }
                 }
             }
         }
