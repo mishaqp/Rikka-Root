@@ -17,6 +17,16 @@ object ToolPermissionPolicy {
             tool.toolName != "ask_user"
 
     val registry: Map<String, String> = linkedMapOf(
+        "mcp_list" to "список серверов MCP",
+        "mcp_get" to "чтение конфигурации MCP",
+        "mcp_add" to "добавление сервера MCP",
+        "mcp_update" to "изменение сервера MCP",
+        "mcp_delete" to "удаление сервера MCP",
+        "mcp_set_enabled" to "включение и отключение MCP",
+        "mcp_test" to "проверка подключения MCP",
+        "mcp_list_tools" to "список инструментов MCP",
+        "mcp_set_tool_approval" to "изменение подтверждения MCP-инструмента",
+
         "ssh_exec" to "команды SSH",
         "save_ssh_host" to "сохранение хоста SSH",
         "list_ssh_hosts" to "список хостов SSH",

@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.data.ai.tools
 
 import android.util.Log
+import me.rerere.rikkahub.data.ai.mcp.control.McpControlCaller
+import me.rerere.rikkahub.data.ai.mcp.buildMcpToolName
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import me.rerere.ai.core.Tool
@@ -101,11 +103,19 @@ class ChatToolFactory(
             addAll(createSearchTools(settings))
         }
         val workspaceId = assistant.workspaceId?.toString()
+        val mcpCaller = me.rerere.rikkahub.data.ai.mcp.control.createMcpControlCaller(
+            callerAssistant = assistant,
+            conversationId = conversationId?.let { runCatching { Uuid.parse(it) }.getOrNull() },
+            headless = executionContext != null,
+            updateChatAssistant = { id, transform ->
+                GlobalContext.get().get<me.rerere.rikkahub.service.ChatService>().updateChatAssistant(id, transform)
+            },
+        )
         addAll(localTools.getTools(assistant.localTools, assistant.id.toString(), conversationId,
             workspaceCwd, wallpaperChatImages(messages), workspaceId?.let { id ->
                 { path -> workspaceRepository.resolveRootfsFile(id, path) }
             }, modelCanReadImages = Modality.IMAGE in model.inputModalities,
-            callerAssistant = assistant, tokenBudget = tokenBudget ?: executionContext?.costBudget))
+            callerAssistant = assistant, tokenBudget = tokenBudget ?: executionContext?.costBudget, mcpCaller = mcpCaller))
         if (assistant.enableRecentChatsReference) {
             addAll(createConversationTools(conversationRepository, assistant.id))
         }
@@ -130,7 +140,7 @@ class ChatToolFactory(
         mcpTools.forEach { (serverId, serverName, tool) ->
             add(
                 Tool(
-                    name = "mcp__${serverName}__${tool.name}",
+                    name = buildMcpToolName(serverId, serverName, tool.name),
                     description = tool.description ?: "",
                     parameters = { tool.inputSchema },
                     needsApproval = { tool.needsApproval },

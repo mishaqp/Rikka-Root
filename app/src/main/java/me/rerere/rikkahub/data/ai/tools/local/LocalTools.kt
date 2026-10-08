@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.ai.tools.local
 
 import android.content.Context
+import me.rerere.rikkahub.data.ai.mcp.control.*
 import me.rerere.ai.core.Tool
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.event.AppEventBus
@@ -77,8 +78,28 @@ class LocalTools(
         modelCanReadImages: Boolean = false,
         callerAssistant: Assistant? = null,
         tokenBudget: TokenBudgetLedger? = null,
+        mcpCaller: McpControlCaller? = null,
     ): List<Tool> {
         val tools = mutableListOf<Tool>()
+        if (LocalToolOption.McpControl in options) {
+            val manager = get().get<me.rerere.rikkahub.data.ai.mcp.McpManager>()
+            val secrets = get().get<McpControlSecretStore>()
+            val sanitizer = get().get<McpToolSecretSanitizer>()
+            val caller = mcpCaller ?: McpControlCaller(
+                assistantMcpServers = { callerAssistant?.mcpServers ?: emptySet() },
+                addServer = { error("Контекст текущего чата MCP недоступен.") },
+                removeServer = { error("Контекст текущего чата MCP недоступен.") })
+            tools.addAll(listOf(mcpListTool(settingsStore, manager, caller), mcpGetTool(settingsStore, manager, caller),
+                mcpAddTool(settingsStore, manager, caller, secrets), mcpUpdateTool(settingsStore, manager, secrets),
+                mcpDeleteTool(settingsStore, manager, caller), mcpSetEnabledTool(settingsStore, manager, secrets),
+                mcpTestTool(settingsStore, manager, secrets), mcpListToolsTool(settingsStore, manager, caller),
+                mcpSetToolApprovalTool(settingsStore)).map { tool ->
+                    tool.copy(execute = { input ->
+                        tool.execute(kotlinx.serialization.json.Json.parseToJsonElement(
+                            sanitizer.sanitizeForPersistence(tool.name, input.toString())))
+                    })
+                })
+        }
         if (LocalToolOption.Ssh in options) {
             val access = LocalFileAccess(context, workspaceCwd, chatImages, resolveWorkspacePath)
             tools.addAll(listOf(sshExecTool(context, sshHostRepository.toolSecrets),

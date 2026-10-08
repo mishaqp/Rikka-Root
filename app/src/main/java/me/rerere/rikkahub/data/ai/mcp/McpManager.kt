@@ -27,6 +27,8 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.saveUploadFromBytes
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.ai.mcp.control.McpControlSecretStore
+import me.rerere.rikkahub.data.ai.mcp.control.guardedMcpHttpClient
 import me.rerere.rikkahub.utils.JsonInstant
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
@@ -43,6 +45,7 @@ class McpManager(
     private val settingsStore: SettingsStore,
     private val appScope: AppScope,
     private val filesManager: FilesManager,
+    private val secretStore: McpControlSecretStore,
 ) {
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
@@ -65,6 +68,16 @@ class McpManager(
         install(SSE)
     }
 
+    private val publicOkHttpClient = guardedMcpHttpClient(okHttpClient, publicAddressOnly = true)
+    private val publicHttpClient = HttpClient(OkHttp) {
+        followRedirects = false
+        engine { preconfigured = publicOkHttpClient }
+        install(ContentNegotiation) {
+            json(Json { prettyPrint = true; isLenient = true })
+        }
+        install(SSE)
+    }
+
     private val statusStore = McpStatusStore()
     private val oauthCallbackServer = OAuthLoopbackCallbackServer(
         port = MCP_OAUTH_CALLBACK_PORT,
@@ -75,14 +88,19 @@ class McpManager(
         appScope = appScope,
         oauthClient = OAuthHttpClient(okHttpClient),
         discoveryClient = McpOAuthDiscoveryClient(okHttpClient),
+        publicOAuthClient = OAuthHttpClient(publicOkHttpClient),
+        publicDiscoveryClient = McpOAuthDiscoveryClient(publicOkHttpClient),
         callbackServer = oauthCallbackServer,
         authorizationLauncher = CustomTabsOAuthAuthorizationLauncher,
         updateStatus = statusStore::update,
+        secretStore = secretStore,
     )
     private val sessionRegistry = McpSessionRegistry(
         settingsStore = settingsStore,
         appScope = appScope,
         httpClient = httpClient,
+        publicHttpClient = publicHttpClient,
+        secretStore = secretStore,
         oauthCoordinator = oauthCoordinator,
         statusStore = statusStore,
     )
@@ -137,6 +155,13 @@ class McpManager(
 
     suspend fun syncAll() = sessionRegistry.syncAll()
 
+    /** Agent forceResync adaptation: detach resets backoff, then reconnect and sync. */
+    suspend fun forceResync(serverId: Uuid) {
+        val config = settingsStore.settingsFlow.value.mcpServers.firstOrNull { it.id == serverId } ?: return
+        sessionRegistry.removeClient(config)
+        sessionRegistry.addClient(config)
+    }
+
     fun startAuthorization(config: McpServerConfig, context: Context) {
         oauthCoordinator.startAuthorization(config, context)
     }
@@ -161,4 +186,10 @@ class McpManager(
         )
         return UIMessagePart.Image(url = filesManager.getFile(entity).toUri().toString())
     }
+}
+
+// Copied from ExTV/rikkahub-agent McpManager.kt (AGPL v3), shared with mcp_list_tools.
+fun buildMcpToolName(serverId: Uuid, serverName: String, toolName: String): String {
+    val serverSlug = serverId.toString().take(8).replace("-", "")
+    return "mcp__" + serverSlug + "_" + serverName + "__" + toolName
 }

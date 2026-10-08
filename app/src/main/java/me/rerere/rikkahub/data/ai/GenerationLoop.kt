@@ -323,6 +323,14 @@ class GenerationLoop(
 
                     else -> {
                         // Auto or Approved - execute the tool
+                        if (tools.none { it.name == tool.toolName }) {
+                            executedTools += tool.copy(output = listOf(UIMessagePart.Text(buildJsonObject {
+                                put("error", "tool_not_found")
+                                put("detail", "Инструмент '${tool.toolName}' недоступен в этом ответе; после изменения MCP начните новый ответ.")
+                                put("tools_available_this_turn", tools.joinToString(", ") { it.name }.take(1500))
+                            }.toString())))
+                            return@forEach
+                        }
                         runCatching {
                             val toolDef = tools.find { toolDef -> toolDef.name == tool.toolName }
                                 ?: error("Tool ${tool.toolName} not found")

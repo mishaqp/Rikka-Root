@@ -60,7 +60,7 @@ internal class McpOAuthDiscoveryClient(
             for (url in candidates) {
                 val metadata = runCatching { getJson<ProtectedResourceMetadata>(url) }.getOrNull()
                 if (metadata != null && metadata.authorizationServers.isNotEmpty()) {
-                    Log.i(TAG, "Protected resource metadata: $url -> ${metadata.authorizationServers}")
+                    Log.i(TAG, "Protected resource metadata discovered; authorization_servers=${metadata.authorizationServers.size}")
                     return@withContext metadata
                 }
             }
@@ -73,7 +73,7 @@ internal class McpOAuthDiscoveryClient(
             for (url in wellKnownAuthorizationServerUrls(issuer)) {
                 val metadata = runCatching { getJson<AuthorizationServerMetadata>(url) }.getOrNull()
                 if (metadata?.authorizationEndpoint != null && metadata.tokenEndpoint != null) {
-                    Log.i(TAG, "Authorization server metadata: $url")
+                    Log.i(TAG, "Authorization server metadata discovered")
                     return@withContext metadata
                 }
             }

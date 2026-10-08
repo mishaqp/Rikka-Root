@@ -35,6 +35,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.ai.mcp.control.McpControlSecretStore
+import me.rerere.rikkahub.data.ai.mcp.control.McpUrlGuard
+import me.rerere.rikkahub.reliability.SecretRedactor
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration.Companion.seconds
 import kotlin.uuid.Uuid
@@ -95,6 +98,8 @@ internal class McpSessionRegistry(
     private val settingsStore: SettingsStore,
     private val appScope: AppScope,
     private val httpClient: HttpClient,
+    private val publicHttpClient: HttpClient,
+    private val secretStore: McpControlSecretStore,
     private val oauthCoordinator: McpOAuthCoordinator,
     private val statusStore: McpStatusStore,
 ) {
@@ -215,7 +220,19 @@ internal class McpSessionRegistry(
                 session.reconnectAttempt = 0
             }
 
-            val config = oauthCoordinator.ensureFreshToken(session.config)
+            val config = try {
+                oauthCoordinator.ensureFreshToken(session.config)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // A restored backup contains references, never the device-bound vault.
+                // Report missing/corrupt credentials rather than killing the app-scope job.
+                statusStore.update(session.config.id, McpStatus.Error(
+                    "Секреты OAuth MCP недоступны. Введите их заново в настройках MCP.",
+                    SecretRedactor.redact(e.stackTraceToString()),
+                ))
+                return@withLock ConnectResult.Failed
+            }
             session.config = config
             if (!forceReconnect &&
                 session.client != null &&
@@ -231,10 +248,10 @@ internal class McpSessionRegistry(
             oldClient?.let { closeClient(it, config.commonOptions.name) }
 
             val sdkClient = createSdkClient(config)
-            val transport = createTransport(config)
-            installTransportCallbacks(config, sdkClient, transport)
-
             try {
+                if (config.commonOptions.publicAddressOnly) McpUrlGuard.validateTarget(config.serverUrl)
+                val transport = createTransport(config)
+                installTransportCallbacks(config, sdkClient, transport)
                 sdkClient.connect(transport)
                 val syncedConfig = syncTools(session, sdkClient, config)
                 if (sessions[config.id] !== session ||
@@ -256,7 +273,7 @@ internal class McpSessionRegistry(
                 throw e
             } catch (e: Exception) {
                 closeClient(sdkClient, config.commonOptions.name)
-                Log.e(TAG, "Failed to connect MCP server ${config.id}", e)
+                Log.e(TAG, "Failed to connect MCP server ${config.id}: ${SecretRedactor.redact(e.stackTraceToString())}")
                 if (oauthCoordinator.needsAuthorization(config, e)) {
                     statusStore.update(config.id, McpStatus.NeedsAuthorization)
                     ConnectResult.NeedsAuthorization
@@ -336,7 +353,7 @@ internal class McpSessionRegistry(
             requestReconnect(config.id, sdkClient)
         }
         transport.onError { error ->
-            Log.e(TAG, "Transport error for ${config.id}: ${error.message}")
+            Log.e(TAG, "Transport error for ${config.id}: ${SecretRedactor.redact(error.message.orEmpty())}")
             if (!isSseStreamGiveUpError(error)) requestReconnect(config.id, sdkClient)
         }
     }
@@ -420,7 +437,7 @@ internal class McpSessionRegistry(
 
     private suspend fun closeClient(client: Client, serverName: String) {
         runCatching { client.close() }
-            .onFailure { Log.w(TAG, "Failed to close MCP client $serverName", it) }
+            .onFailure { Log.w(TAG, "Failed to close MCP client $serverName: ${SecretRedactor.redact(it.stackTraceToString())}") }
     }
 
     private fun createSdkClient(config: McpServerConfig): Client = Client(
@@ -430,20 +447,20 @@ internal class McpSessionRegistry(
     private fun createTransport(config: McpServerConfig): AbstractTransport = when (config) {
         is McpServerConfig.SseTransportServer -> SseClientTransport(
             urlString = config.url,
-            client = httpClient,
+            client = if (config.commonOptions.publicAddressOnly) publicHttpClient else httpClient,
             requestBuilder = { appendResolvedHeaders(config) },
         )
 
         is McpServerConfig.StreamableHTTPServer -> StreamableHttpClientTransport(
             url = config.url,
-            client = httpClient,
+            client = if (config.commonOptions.publicAddressOnly) publicHttpClient else httpClient,
             requestBuilder = { appendResolvedHeaders(config) },
         )
     }
 
     private fun HttpRequestBuilder.appendResolvedHeaders(config: McpServerConfig) {
         headers.appendAll(StringValues.build {
-            config.resolvedHeaders().forEach { (name, value) -> append(name, value) }
+            config.resolvedHeaders(secretStore::resolve).forEach { (name, value) -> append(name, value) }
         })
     }
 
@@ -466,6 +483,7 @@ internal data class McpConnectionKey(
     val serverUrl: String,
     val clientName: String,
     val headers: List<Pair<String, String>>,
+    val publicAddressOnly: Boolean = false,
 )
 
 internal fun McpServerConfig.connectionKey(): McpConnectionKey = McpConnectionKey(
@@ -476,6 +494,7 @@ internal fun McpServerConfig.connectionKey(): McpConnectionKey = McpConnectionKe
     serverUrl = serverUrl,
     clientName = commonOptions.name,
     headers = resolvedHeaders(),
+    publicAddressOnly = commonOptions.publicAddressOnly,
 )
 
 private fun hasSameConnectionParameters(
@@ -483,10 +502,13 @@ private fun hasSameConnectionParameters(
     right: McpServerConfig?,
 ): Boolean = left != null && right != null && left.connectionKey() == right.connectionKey()
 
-private fun McpServerConfig.resolvedHeaders(): List<Pair<String, String>> {
+internal fun McpServerConfig.resolvedHeaders(resolveSecret: (String) -> String = { it }): List<Pair<String, String>> {
     // 设置页“添加请求头”后未填写会留下空名称，OkHttp 会直接抛出 "name is empty"
-    val base = commonOptions.headers.filter { it.first.isNotBlank() }
-    val token = commonOptions.oauth?.takeIf { it.enabled }?.accessToken
+    val base = commonOptions.headers.filter { it.first.isNotBlank() }.map { (name, value) ->
+        name to if (McpControlSecretStore.isReference(value)) resolveSecret(value) else value
+    }
+    val storedToken = commonOptions.oauth?.takeIf { it.enabled }?.accessToken
+    val token = storedToken?.let { if (McpControlSecretStore.isReference(it)) resolveSecret(it) else it }
     val hasAuthorization = base.any { it.first.equals("Authorization", ignoreCase = true) }
     return if (!token.isNullOrBlank() && !hasAuthorization) {
         base + ("Authorization" to "Bearer $token")

@@ -12,6 +12,8 @@ data class McpCommonOptions(
     val headers: List<Pair<String, String>> = emptyList(),
     val tools: List<McpTool> = emptyList(),
     val oauth: McpOAuthState? = null,
+    /** Set only by MCP control: guarded public DNS and no redirects on every transport request. */
+    val publicAddressOnly: Boolean = false,
 )
 
 /**

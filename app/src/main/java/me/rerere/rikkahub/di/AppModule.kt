@@ -48,6 +48,8 @@ val appModule = module {
             assistantSource = { id -> settings.settingsFlow.value.assistants.singleOrNull { it.id == id } })
     }
 
+    single { me.rerere.rikkahub.data.ai.mcp.control.McpControlSecretStore(get()) }
+    single { me.rerere.rikkahub.data.ai.mcp.control.McpToolSecretSanitizer(get()) }
     single { me.rerere.rikkahub.data.ssh.SshCredentialStore(get(), get()) }
     single { me.rerere.rikkahub.data.ssh.SshToolSecretSanitizer(get()) }
     single { me.rerere.rikkahub.data.repository.SshHostRepository(

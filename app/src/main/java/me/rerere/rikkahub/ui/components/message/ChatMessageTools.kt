@@ -171,9 +171,26 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         extra = if (isPending && onToolApproval != null) {
             {
                 Column {
+                    // Copied from Agent's approval-card path: secret headers must not be
+                    // displayed as raw JSON before the user approves MCP configuration.
+                    if (tool.toolName.startsWith("mcp_")) {
+                        val mcpRendered = runCatching {
+                            (tool.inputAsJson() as? JsonObject)?.let {
+                                me.rerere.rikkahub.data.ai.mcp.control.McpApprovalRenderer
+                                    .render(tool.toolName, it)
+                            }
+                        }.getOrNull()
+                        if (!mcpRendered.isNullOrBlank()) {
+                            Text(
+                                text = mcpRendered,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                     val broaderScopesAllowed = ToolPermissionPolicy.canGrantAlways(tool.toolName, tool.inputAsJson())
                     if (!broaderScopesAllowed) Text(
-                        "Эта root-команда всегда требует отдельного подтверждения.",
+                        "Этот инструмент всегда требует отдельного подтверждения.",
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.labelSmall,
                     )

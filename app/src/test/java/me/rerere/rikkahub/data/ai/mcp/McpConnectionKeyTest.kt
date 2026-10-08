@@ -3,6 +3,10 @@ package me.rerere.rikkahub.data.ai.mcp
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Test
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import me.rerere.rikkahub.data.ai.mcp.control.McpControlSecretStore
+import kotlin.uuid.Uuid
 
 class McpConnectionKeyTest {
     private val base = McpServerConfig.StreamableHTTPServer(
@@ -56,5 +60,21 @@ class McpConnectionKeyTest {
             commonOptions = manualAuth.commonOptions.copy(oauth = null)
         )
         assertEquals(manualAuthWithoutOAuth.connectionKey(), manualAuth.connectionKey())
+    }
+
+    @Test fun `guard changes require reconnect and connection metadata keeps references`() {
+        val reference = McpControlSecretStore.REFERENCE_PREFIX + Uuid.random().toString()
+        val configured = base.copy(commonOptions = base.commonOptions.copy(
+            publicAddressOnly = true,
+            headers = listOf("X-Api-Key" to reference),
+            oauth = McpOAuthState(enabled = true, accessToken = reference),
+        ))
+        assertTrue(configured.connectionKey().publicAddressOnly)
+        assertNotEquals(configured.connectionKey(), configured.copy(commonOptions = configured.commonOptions.copy(publicAddressOnly = false)).connectionKey())
+        val realHeaders = configured.resolvedHeaders { assertEquals(reference, it); "secret-canary" }
+        assertEquals("secret-canary", realHeaders.first { it.first == "X-Api-Key" }.second)
+        assertEquals("Bearer secret-canary", realHeaders.first { it.first == "Authorization" }.second)
+        assertFalse(configured.connectionKey().toString().contains("secret-canary"))
+        assertTrue(configured.connectionKey().toString().contains(reference))
     }
 }

@@ -1,5 +1,9 @@
 package me.rerere.rikkahub.ui.pages.setting
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.view.WindowManager
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -38,6 +42,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalBottomSheetProperties
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SecondaryTabRow
@@ -53,10 +58,11 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -71,8 +77,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -95,6 +105,8 @@ import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
 import me.rerere.rikkahub.data.ai.mcp.McpStatus
 import me.rerere.rikkahub.data.ai.mcp.McpTool
+import me.rerere.rikkahub.data.ai.mcp.secureMcpConfigForPersistence
+import me.rerere.rikkahub.data.ai.mcp.control.McpControlSecretStore
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.ItemAction
 import me.rerere.rikkahub.ui.components.ui.ItemActionMenu
@@ -113,14 +125,40 @@ import me.rerere.ui.components.SwitchSize
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 
+internal fun protectMcpSettingsSecrets(
+    config: McpServerConfig,
+    headerDrafts: Map<Int, String>,
+    secretStore: McpControlSecretStore,
+): McpServerConfig = secureMcpConfigForPersistence(config.clone(commonOptions = config.commonOptions.copy(
+    headers = config.commonOptions.headers.mapIndexed { index, (name, value) ->
+        name to (headerDrafts[index]?.trim() ?: value)
+    },
+)), secretStore)
+
+private fun Context.mcpSettingsActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.mcpSettingsActivity()
+    else -> null
+}
+
 @Composable
 fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
+    val context = LocalContext.current
+    val secretStore = koinInject<McpControlSecretStore>()
+    val pageScope = rememberCoroutineScope()
+    var secureStorageError by remember { mutableStateOf<String?>(null) }
+    DisposableEffect(context) {
+        val window = context.mcpSettingsActivity()?.window
+        val wasSecure = window?.attributes?.flags?.and(WindowManager.LayoutParams.FLAG_SECURE) != 0
+        window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        onDispose { if (!wasSecure) window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
+    }
     val settings by vm.settings.collectAsStateWithLifecycle()
     val mcpConfigs = settings.mcpServers
     val creationState = useEditState<McpServerConfig> {
         vm.updateSettings(
             settings.copy(
-                mcpServers = mcpConfigs + it
+                mcpServers = mcpConfigs + protectMcpSettingsSecrets(it, emptyMap(), secretStore)
             )
         )
     }
@@ -129,7 +167,7 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
             settings.copy(
                 mcpServers = mcpConfigs.map {
                     if (it.id == newConfig.id) {
-                        newConfig
+                        protectMcpSettingsSecrets(newConfig, emptyMap(), secretStore)
                     } else {
                         it
                     }
@@ -238,9 +276,26 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
             onImport = { newConfigs ->
                 val existingIds = mcpConfigs.map { it.commonOptions.name }.toSet()
                 val toAdd = newConfigs.filter { it.commonOptions.name.isNotBlank() && it.commonOptions.name !in existingIds }
-                vm.updateSettings(settings.copy(mcpServers = mcpConfigs + toAdd))
-                showImportDialog = false
+                pageScope.launch {
+                    try {
+                        val protected = withContext(Dispatchers.IO) { toAdd.map { protectMcpSettingsSecrets(it, emptyMap(), secretStore) } }
+                        vm.updateSettings(settings.copy(mcpServers = mcpConfigs + protected))
+                        showImportDialog = false
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        secureStorageError = "Не удалось сохранить секреты MCP в защищённом хранилище. Импорт не выполнен; повторите попытку."
+                    }
+                }
             }
+        )
+    }
+    secureStorageError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { secureStorageError = null },
+            title = { Text("Защищённое хранилище MCP") },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = { secureStorageError = null }) { Text("Понятно") } },
         )
     }
 }
@@ -373,7 +428,7 @@ private fun McpServerItem(
                 if (status == McpStatus.NeedsAuthorization) {
                     val context = LocalContext.current
                     Text(
-                        text = "需要 OAuth 授权",
+                        text = "Требуется OAuth-авторизация",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -381,19 +436,19 @@ private fun McpServerItem(
                         onClick = { mcpManager.startAuthorization(item, context) },
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                     ) {
-                        Text("OAuth 授权")
+                        Text("Авторизовать через OAuth")
                     }
                 }
                 if (status == McpStatus.Authorizing) {
                     Text(
-                        text = "正在授权，请在浏览器中完成…",
+                        text = "Завершите авторизацию в браузере…",
                         style = MaterialTheme.typography.labelSmall,
                     )
                     TextButton(
                         onClick = { mcpManager.cancelAuthorization(item) },
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                     ) {
-                        Text("取消授权")
+                        Text("Отменить авторизацию")
                     }
                 }
             }
@@ -429,9 +484,16 @@ private fun McpServerItem(
 @Composable
 private fun McpServerConfigModal(state: EditState<McpServerConfig>) {
     state.EditStateContent { config, updateValue ->
+        val secretStore = koinInject<McpControlSecretStore>()
+        // Drafts are never included in EditState config or Android saved-instance state.
+        val headerDrafts = remember(config.id) { mutableStateMapOf<Int, String>() }
+        var saving by remember(config.id) { mutableStateOf(false) }
+        var saveError by remember(config.id) { mutableStateOf<String?>(null) }
+        DisposableEffect(config.id) { onDispose { headerDrafts.clear() } }
         val pagerState = rememberPagerState { 2 }
         val scope = rememberCoroutineScope()
         ModalBottomSheet(
+            properties = ModalBottomSheetProperties(securePolicy = SecureFlagPolicy.SecureOn),
             onDismissRequest = {
                 state.dismiss()
             },
@@ -481,7 +543,14 @@ private fun McpServerConfigModal(state: EditState<McpServerConfig>) {
                         0 -> {
                             McpCommonOptionsConfigure(
                                 config = config,
-                                update = updateValue
+                                update = updateValue,
+                                headerDrafts = headerDrafts,
+                                updateHeaderDraft = { index, value -> headerDrafts[index] = value },
+                                removeHeaderDraft = { index ->
+                                    val remaining = headerDrafts.toMap().filterKeys { it != index }
+                                    headerDrafts.clear()
+                                    remaining.forEach { (position, value) -> headerDrafts[if (position > index) position - 1 else position] = value }
+                                },
                             )
                         }
 
@@ -498,15 +567,33 @@ private fun McpServerConfigModal(state: EditState<McpServerConfig>) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
                 ) {
                     TextButton(
+                        enabled = !saving,
                         onClick = {
                             if (config.commonOptions.name.isNotBlank() && isValidMcpName(config.commonOptions.name)) {
-                                state.confirm()
+                                val drafts = headerDrafts.toMap()
+                                scope.launch {
+                                    saving = true
+                                    saveError = null
+                                    try {
+                                        val protected = withContext(Dispatchers.IO) { protectMcpSettingsSecrets(config, drafts, secretStore) }
+                                        updateValue(protected)
+                                        headerDrafts.clear()
+                                        state.confirm()
+                                    } catch (cancelled: CancellationException) {
+                                        throw cancelled
+                                    } catch (_: Exception) {
+                                        saveError = "Не удалось сохранить секреты MCP в защищённом хранилище. Изменения не сохранены; повторите попытку."
+                                    } finally {
+                                        saving = false
+                                    }
+                                }
                             }
                         }
                     ) {
                         Text(stringResource(R.string.setting_mcp_page_save))
                     }
                 }
+                saveError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         }
     }
@@ -515,7 +602,10 @@ private fun McpServerConfigModal(state: EditState<McpServerConfig>) {
 @Composable
 private fun McpCommonOptionsConfigure(
     config: McpServerConfig,
-    update: (McpServerConfig) -> Unit
+    update: (McpServerConfig) -> Unit,
+    headerDrafts: Map<Int, String>,
+    updateHeaderDraft: (Int, String) -> Unit,
+    removeHeaderDraft: (Int) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -715,8 +805,9 @@ private fun McpCommonOptionsConfigure(
             ) {
                 config.commonOptions.headers.forEachIndexed { index, header ->
                     var headerName by remember(header.first) { mutableStateOf(header.first) }
-                    var headerValue by remember(header.second) { mutableStateOf(header.second) }
-                    var headerValueVisible by rememberSaveable { mutableStateOf(false) }
+                    val storedSecret = McpControlSecretStore.isReference(header.second)
+                    val headerValue = headerDrafts[index] ?: if (storedSecret || config.commonOptions.publicAddressOnly) "" else header.second
+                    var headerValueVisible by remember(config.id, index, header.second) { mutableStateOf(false) }
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -751,21 +842,7 @@ private fun McpCommonOptionsConfigure(
                             OutlinedTextField(
                                 value = headerValue,
                                 onValueChange = {
-                                    headerValue = it
-                                    val updatedHeaders =
-                                        config.commonOptions.headers.toMutableList()
-                                    updatedHeaders[index] = updatedHeaders[index].first to it.trim()
-                                    update(
-                                        when (config) {
-                                            is McpServerConfig.SseTransportServer -> config.copy(
-                                                commonOptions = config.commonOptions.copy(headers = updatedHeaders)
-                                            )
-
-                                            is McpServerConfig.StreamableHTTPServer -> config.copy(
-                                                commonOptions = config.commonOptions.copy(headers = updatedHeaders)
-                                            )
-                                        }
-                                    )
+                                    updateHeaderDraft(index, it)
                                 },
                                 label = { Text(stringResource(R.string.setting_mcp_page_header_value)) },
                                 modifier = Modifier.fillMaxWidth(),
@@ -778,10 +855,14 @@ private fun McpCommonOptionsConfigure(
                                         )
                                     }
                                 },
-                                placeholder = { Text(stringResource(R.string.setting_mcp_page_header_value_placeholder)) }
+                                placeholder = {
+                                    Text(if (storedSecret) "Секрет сохранён. Введите новое значение для замены." else stringResource(R.string.setting_mcp_page_header_value_placeholder))
+                                },
+                                supportingText = if (storedSecret && index !in headerDrafts) ({ Text("Сохранённое значение скрыто и остаётся без изменений.") }) else null,
                             )
                         }
                         IconButton(onClick = {
+                            removeHeaderDraft(index)
                             val updatedHeaders = config.commonOptions.headers.toMutableList()
                             updatedHeaders.removeAt(index)
                             update(
@@ -941,7 +1022,7 @@ private fun McpToolCard(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text(
-                        text = "启用",
+                        text = "Включено",
                         style = MaterialTheme.typography.labelSmall,
                     )
                     Switch(
@@ -1030,6 +1111,7 @@ private fun McpImportModal(
     val parseErrorMsg = stringResource(R.string.setting_mcp_page_import_parse_error)
 
     ModalBottomSheet(
+        properties = ModalBottomSheetProperties(securePolicy = SecureFlagPolicy.SecureOn),
         onDismissRequest = onDismiss,
         sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded))
     ) {
