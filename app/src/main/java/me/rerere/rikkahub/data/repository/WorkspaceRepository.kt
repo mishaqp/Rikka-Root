@@ -237,6 +237,12 @@ class WorkspaceRepository(
         manager.exportFile(workspace.root, path, area, outputStream)
     }
 
+    /** Resolve through the same mount table used by workspace tools and PRoot. */
+    suspend fun resolveRootfsFile(id: String, path: String): java.io.File = withContext(Dispatchers.IO) {
+        val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        manager.resolveRootfsFile(workspace.root, path)
+    }
+
     /** 按 Rootfs 内绝对路径读取文件大小, 支持 /workspace、bind mount 与 Rootfs 内部路径 */
     suspend fun rootfsFileSize(
         id: String,

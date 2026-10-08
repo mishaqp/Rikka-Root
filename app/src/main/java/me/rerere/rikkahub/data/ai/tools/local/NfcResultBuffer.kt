@@ -44,6 +44,7 @@ class NfcResultBuffer {
     }
 
     @Synchronized fun get(requestId: String): NfcSession? = pending?.takeIf { it.requestId == requestId }
+    @Synchronized fun isBusy(): Boolean = pending != null
     @Synchronized fun isActive(requestId: String): Boolean = get(requestId)?.isCompleting == false
     @Synchronized fun claim(requestId: String): Boolean {
         val session = get(requestId) ?: return false

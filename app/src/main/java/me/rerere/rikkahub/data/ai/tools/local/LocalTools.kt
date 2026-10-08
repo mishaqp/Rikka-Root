@@ -7,6 +7,7 @@ import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.root.RootShellManager
 import me.rerere.rikkahub.root.RootAccessStore
 import me.rerere.tts.provider.TTSManager
+import java.io.File
 
 class LocalTools(
     private val context: Context,
@@ -34,7 +35,11 @@ class LocalTools(
 
     val chartDisplayTool by lazy { buildChartDisplayTool() }
 
-    fun getTools(options: List<LocalToolOption>, assistantId: String? = null, conversationId: String? = null): List<Tool> {
+    fun getTools(
+        options: List<LocalToolOption>, assistantId: String? = null, conversationId: String? = null,
+        workspaceCwd: String? = null, chatImages: List<String> = emptyList(),
+        resolveWorkspacePath: (suspend (String) -> File)? = null,
+    ): List<Tool> {
         val tools = mutableListOf<Tool>()
         if (LocalToolOption.Battery in options) tools.add(batteryTool(context))
         if (LocalToolOption.AudioInfo in options) tools.add(audioInfoTool(context))
@@ -58,8 +63,10 @@ class LocalTools(
             tools.add(getVolumeTool(context))
             tools.add(setVolumeTool(context))
         }
-        if (LocalToolOption.Wallpaper in options) tools.add(setWallpaperTool(context))
+        if (LocalToolOption.Wallpaper in options) tools.add(setWallpaperTool(context,
+            LocalImageSources(File(context.filesDir, "upload"), workspaceCwd, chatImages, resolveWorkspacePath)))
         if (LocalToolOption.Nfc in options) {
+            tools.add(nfcStatusTool(context))
             tools.add(nfcReadTagTool(context))
             tools.add(nfcWriteTagTool(context))
         }

@@ -37,6 +37,7 @@ object ToolPermissionPolicy {
         "get_volume" to "чтение громкости",
         "set_volume" to "изменение громкости",
         "set_wallpaper" to "смена обоев",
+        "nfc_status" to "состояние NFC",
         "nfc_read_tag" to "чтение NFC-меток",
         "nfc_write_tag" to "запись NFC-меток",
     )

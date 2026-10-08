@@ -24,6 +24,33 @@ private fun nfcTimeoutSchema() = buildJsonObject {
     put("description", "Foreground session timeout in seconds (default 30)")
 }
 
+internal fun nfcStatusPayload(available: Boolean, enabled: Boolean, foreground: Boolean, busy: Boolean): JsonObject = buildJsonObject {
+    put("available", available)
+    put("enabled", available && enabled)
+    put("app_in_foreground", foreground)
+    put("session_active", busy)
+    put("ready_to_read", available && enabled && foreground && !busy)
+    put("status", when {
+        !available -> "На устройстве нет NFC."
+        !enabled -> "NFC выключен. Включите его в настройках Android."
+        !foreground -> "Для чтения метки откройте Rikka-Root."
+        busy -> "Уже открыт сеанс NFC. Завершите или отмените его."
+        else -> "NFC готов. Для чтения вызовите nfc_read_tag и поднесите метку."
+    })
+}
+
+fun nfcStatusTool(context: Context): Tool = Tool(
+    name = "nfc_status",
+    description = "Check whether NFC hardware is present, enabled and ready to read. Reports foreground and active-session state. Does not scan tags or open a screen.",
+    parameters = { InputSchema.Obj(buildJsonObject {}) },
+    needsApproval = { true },
+    execute = { deviceToolResult { withContext(Dispatchers.Main.immediate) {
+        val adapter = context.getSystemService(NfcManager::class.java)?.defaultAdapter
+        nfcStatusPayload(adapter != null, adapter?.isEnabled == true,
+            ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED), sharedNfcSessions.isBusy())
+    } } },
+)
+
 private suspend fun runNfcSession(context: Context, write: Boolean, timeout: Int, records: JsonArray?): JsonObject {
     val unavailable = withContext(Dispatchers.Main.immediate) {
         if (!ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {

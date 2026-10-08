@@ -9,6 +9,7 @@ import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
+import me.rerere.rikkahub.data.ai.tools.local.wallpaperChatImages
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.model.Assistant
@@ -46,6 +47,7 @@ class ChatToolFactory(
         model: Model,
         workspaceCwd: String? = null,
         conversationId: String? = null,
+        messages: List<UIMessage> = emptyList(),
     ): List<Tool> = buildList {
         if (assistant.enableMemory) {
             val memoryAssistantId = if (assistant.useGlobalMemory) {
@@ -65,7 +67,11 @@ class ChatToolFactory(
         if (shouldUseExternalWebSearch(assistant, model)) {
             addAll(createSearchTools(settings))
         }
-        addAll(localTools.getTools(assistant.localTools, assistant.id.toString(), conversationId))
+        val workspaceId = assistant.workspaceId?.toString()
+        addAll(localTools.getTools(assistant.localTools, assistant.id.toString(), conversationId,
+            workspaceCwd, wallpaperChatImages(messages), workspaceId?.let { id ->
+                { path -> workspaceRepository.resolveRootfsFile(id, path) }
+            }))
         if (assistant.enableRecentChatsReference) {
             addAll(createConversationTools(conversationRepository, assistant.id))
         }

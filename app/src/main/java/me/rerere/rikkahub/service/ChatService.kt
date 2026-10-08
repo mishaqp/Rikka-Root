@@ -778,6 +778,13 @@ class ChatService(
             checkInvalidMessages(conversationId)
             val conversation = getConversationFlow(conversationId).value
 
+            val regenerationNodeId = messageRange?.let { conversation.messageNodes.getOrNull(it.endInclusive + 1)?.id }
+            fun requestMessages(current: Conversation): List<UIMessage> {
+                val end = if (regenerationNodeId == null) current.messageNodes.size else
+                    current.messageNodes.indexOfFirst { it.id == regenerationNodeId }.also { check(it >= 0) { "Regeneration target removed" } }
+                return AutoContextCompression.activeMessages(current.currentMessages.take(end))
+            }
+
             val tools = try {
                 chatToolFactory.createTools(
                     settings = settings,
@@ -785,6 +792,7 @@ class ChatService(
                     model = model,
                     workspaceCwd = conversation.workspaceCwd,
                     conversationId = conversationId.toString(),
+                    messages = requestMessages(conversation),
                 )
             } catch (error: InvalidMcpServerNamesException) {
                 sessionManager.get(conversationId)?.messageQueue?.pause()
@@ -803,12 +811,6 @@ class ChatService(
             // start generating
             val session = sessionManager.getOrCreate(conversationId)
             val generationOwner = currentCoroutineContext()[Job]
-            val regenerationNodeId = messageRange?.let { conversation.messageNodes.getOrNull(it.endInclusive + 1)?.id }
-            fun requestMessages(current: Conversation): List<UIMessage> {
-                val end = if (regenerationNodeId == null) current.messageNodes.size else
-                    current.messageNodes.indexOfFirst { it.id == regenerationNodeId }.also { check(it >= 0) { "Regeneration target removed" } }
-                return AutoContextCompression.activeMessages(current.currentMessages.take(end))
-            }
             generationLoop.generateText(
                 settings = settings,
                 model = model,

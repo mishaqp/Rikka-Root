@@ -15,7 +15,7 @@ import kotlin.uuid.Uuid
 class PackageBApprovalTest {
     @get:Rule val folder = TemporaryFolder()
     private val names = listOf("set_torch", "vibrate", "get_brightness", "set_brightness",
-        "get_volume", "set_volume", "set_wallpaper", "nfc_read_tag", "nfc_write_tag")
+        "get_volume", "set_volume", "set_wallpaper", "nfc_status", "nfc_read_tag", "nfc_write_tag")
     private val backupNames = listOf("torch", "vibrate", "brightness", "volume", "wallpaper", "nfc")
     private val input = Json.parseToJsonElement("{}")
 
