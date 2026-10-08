@@ -34,8 +34,20 @@ class LocalTools(
 
     val chartDisplayTool by lazy { buildChartDisplayTool() }
 
-    fun getTools(options: List<LocalToolOption>, assistantId: String? = null): List<Tool> {
+    fun getTools(options: List<LocalToolOption>, assistantId: String? = null, conversationId: String? = null): List<Tool> {
         val tools = mutableListOf<Tool>()
+        if (LocalToolOption.Battery in options) tools.add(batteryTool(context))
+        if (LocalToolOption.AudioInfo in options) tools.add(audioInfoTool(context))
+        if (LocalToolOption.TelephonyInfo in options) tools.add(telephonyInfoTool(context))
+        if (LocalToolOption.WifiInfo in options) tools.add(wifiInfoTool(context))
+        if (LocalToolOption.Sensors in options) {
+            tools.add(listSensorsTool(context))
+            tools.add(readSensorTool(context))
+        }
+        if (LocalToolOption.StorageInfo in options) tools.add(storageTool())
+        if (LocalToolOption.Toast in options) tools.add(toastTool(context))
+        if (LocalToolOption.Notification in options) tools.add(notificationTool(context, conversationId))
+        if (LocalToolOption.Share in options) tools.add(shareTool(context))
         if (options.contains(LocalToolOption.Root)) {
             tools.add(buildRootTool(rootShellManager, rootAccessStore, assistantId))
         }

@@ -27,6 +27,9 @@ object ToolPermissionPolicy {
         "calendar_create" to "создание событий календаря",
         "memory_tool" to "создание, изменение и удаление памяти",
         "text_to_speech" to "озвучивание текста",
+        "show_toast" to "всплывающие сообщения",
+        "post_notification" to "публикация уведомлений",
+        "share" to "открытие системного меню отправки",
     )
 
     fun mandatoryConfirmation(name: String, input: JsonElement): Boolean {

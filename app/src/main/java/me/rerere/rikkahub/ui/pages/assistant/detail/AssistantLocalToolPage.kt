@@ -289,5 +289,6 @@ private fun AssistantLocalToolContent(
                 }
             )
         }
+        DeviceLocalToolSettings(assistant, onUpdate)
     }
 }
