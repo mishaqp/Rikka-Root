@@ -69,7 +69,7 @@ object SettingsJsonMigrator {
 
             JsonInstant.encodeToString(JsonObject(root))
         }.onFailure {
-            Log.e(TAG, "migrate: Failed to migrate settings JSON, using original", it)
+            Log.e(TAG, "migrate: Failed to migrate settings JSON, using original (${it.javaClass.simpleName})")
         }.getOrDefault(settingsJson)
     }
 }

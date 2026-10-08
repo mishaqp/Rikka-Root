@@ -12,6 +12,8 @@ import kotlinx.serialization.json.Json
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.migration.SettingsJsonMigrator
+import me.rerere.rikkahub.data.datastore.migration.protectLegacyMcpConfigs
+import me.rerere.rikkahub.data.ai.mcp.control.McpControlSecretStore
 import me.rerere.rikkahub.data.db.AppDatabaseFactory
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.SQLiteConfiguration
@@ -106,10 +108,19 @@ class BackupManager(
                                 "Cannot create backup staging directory"
                             }
                             zip.getInputStream(entry).use { input ->
-                                FileOutputStream(target).use { output ->
-                                    input.copyTo(output)
-                                    output.fd.sync()
-                                }
+                                if (entry.name == "settings.json") {
+                                    val restored = try {
+                                        json.decodeFromString<Settings>(SettingsJsonMigrator.migrate(input.bufferedReader().readText()))
+                                    } catch (_: Exception) {
+                                        error("Не удалось прочитать настройки из бэкапа. Восстановление не применено.")
+                                    }
+                                    require(!restored.init) { "Backup contains uninitialized settings" }
+                                    val protected = restored.copy(mcpServers = protectLegacyMcpConfigs(restored.mcpServers, McpControlSecretStore(context)))
+                                    PendingRestore.writeDurably(target, json.encodeToString(protected))
+                                } else FileOutputStream(target).use { output ->
+                                        input.copyTo(output)
+                                        output.fd.sync()
+                                    }
                             }
                             restoredEntries++
                         }

@@ -41,6 +41,9 @@ import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV1Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV2Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV3Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV4Migration
+import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreMcpSecretsMigration
+import me.rerere.rikkahub.data.datastore.migration.protectLegacyMcpConfigs
+import me.rerere.rikkahub.data.ai.mcp.control.McpControlSecretStore
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.model.InjectionPosition
@@ -97,6 +100,7 @@ private fun createSettingsDataStore(context: Context): DataStore<Preferences> {
             PreferenceStoreV2Migration(),
             PreferenceStoreV3Migration(),
             PreferenceStoreV4Migration(),
+            PreferenceStoreMcpSecretsMigration(McpControlSecretStore(context)),
         ),
         produceFile = { file },
     )
@@ -194,10 +198,11 @@ class SettingsStore(
         // Uses the same DataStore singleton without starting settings flows or requiring Koin.
         internal suspend fun restoreBeforeInitialization(context: Context, settings: Settings) {
             require(!settings.init) { "Cannot restore uninitialized settings" }
-            persistSettings(context.settingsStore, settings)
+            persistSettings(context.settingsStore, settings, McpControlSecretStore(context))
         }
 
-        private suspend fun persistSettings(dataStore: DataStore<Preferences>, settings: Settings) {
+        private suspend fun persistSettings(dataStore: DataStore<Preferences>, settings: Settings, secretStore: McpControlSecretStore) {
+            val protectedMcpServers = protectLegacyMcpConfigs(settings.mcpServers, secretStore)
             dataStore.edit { preferences ->
                 preferences[DYNAMIC_COLOR] = settings.dynamicColor
                 preferences[THEME_ID] = settings.themeId
@@ -232,7 +237,7 @@ class SettingsStore(
                 preferences[SEARCH_COMMON] = JsonInstant.encodeToString(settings.searchCommonOptions)
                 preferences[SEARCH_SELECTED] = settings.searchServiceSelected.coerceIn(0, (settings.searchServices.size - 1).coerceAtLeast(0))
 
-                preferences[MCP_SERVERS] = JsonInstant.encodeToString(settings.mcpServers)
+                preferences[MCP_SERVERS] = JsonInstant.encodeToString(protectedMcpServers)
                 preferences[WEBDAV_CONFIG] = JsonInstant.encodeToString(settings.webDavConfig)
                 preferences[S3_CONFIG] = JsonInstant.encodeToString(settings.s3Config)
                 preferences[UPLOAD_S3_CONFIG] = JsonInstant.encodeToString(settings.uploadS3Config)
@@ -262,6 +267,7 @@ class SettingsStore(
     }
 
     private val dataStore = context.settingsStore
+    private val mcpSecretStore = McpControlSecretStore(context)
 
     // 读取失败时绝不能回退为空配置, 否则默认值会被当成用户数据写回, 覆盖全部设置
     // 偶发 IO 错误重试, 仍失败则向上抛出 (文件损坏由 corruptionHandler 处理)
@@ -473,8 +479,9 @@ class SettingsStore(
             Log.w(TAG, "Cannot update dummy settings")
             return
         }
-        settingsFlow.value = settings
-        persistSettings(dataStore, settings)
+        val protected = settings.copy(mcpServers = protectLegacyMcpConfigs(settings.mcpServers, mcpSecretStore))
+        persistSettings(dataStore, protected, mcpSecretStore)
+        settingsFlow.value = protected
     }
 
     suspend fun update(fn: (Settings) -> Settings) {
