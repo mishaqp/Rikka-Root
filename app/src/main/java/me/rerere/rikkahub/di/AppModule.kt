@@ -48,6 +48,7 @@ val appModule = module {
             assistantSource = { id -> settings.settingsFlow.value.assistants.singleOrNull { it.id == id } })
     }
 
+    single { me.rerere.rikkahub.data.preferences.TermuxPreferences(get()) }
     single { SubAgentRegistry() }
     single<CronPayloadCipher> { AndroidCronPayloadCipher() }
     single { ScheduledJobRepository(get(), get()) }
@@ -64,7 +65,7 @@ val appModule = module {
     }
 
     single {
-        LocalTools(get(), get(), get(), get(), get(), get(), get())
+        LocalTools(get(), get(), get(), get(), get(), get(), get(), get())
     }
 
     single {

@@ -48,6 +48,7 @@ class LocalTools(
     private val rootShellManager: RootShellManager,
     private val rootAccessStore: RootAccessStore,
     private val filesManager: FilesManager,
+    private val termuxPreferences: me.rerere.rikkahub.data.preferences.TermuxPreferences,
 ) {
     private val keystoreCrypto by lazy { KeystoreCrypto(AndroidToolKeyStore(context)) }
     val javascriptTool by lazy { buildJavascriptTool() }
@@ -77,6 +78,9 @@ class LocalTools(
         tokenBudget: TokenBudgetLedger? = null,
     ): List<Tool> {
         val tools = mutableListOf<Tool>()
+        if (LocalToolOption.Termux in options) tools.addAll(listOf(
+            termuxRunCommandTool(context), termuxSessionStartTool(context), termuxSessionSendTool(context),
+            termuxSessionReadTool(context), termuxSessionKillTool(context), termuxSessionListTool(context)))
         if (LocalToolOption.Reliability in options) tools.add(generateBugReportTool(
             context, BugReportBuilder(context) {
                 get().get<ChatService>().errors.value.map { it.error }

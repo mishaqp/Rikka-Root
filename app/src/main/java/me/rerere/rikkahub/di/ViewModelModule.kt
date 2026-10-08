@@ -40,6 +40,7 @@ val viewModelModule = module {
         )
     }
     viewModelOf(::ChatDrawerVM)
+    viewModel { me.rerere.rikkahub.ui.pages.setting.termux.SettingTermuxViewModel(get()) }
     viewModelOf(::SettingVM)
     viewModelOf(::DebugVM)
     viewModelOf(::HistoryVM)

@@ -3,6 +3,8 @@
   xmlns:tools="http://schemas.android.com/tools">
 
   <uses-permission android:name="android.permission.INTERNET" />
+  <!-- Package F: request only when enabling Termux for an assistant. -->
+  <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
   <!-- Ordinary permission: reboot/update recovery only rearms WorkManager. -->
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
   <uses-permission android:name="android.permission.CAMERA" />
@@ -61,6 +63,7 @@
     android:required="false" />
 
   <queries>
+    <package android:name="com.termux" />
     <intent>
       <action android:name="android.media.action.IMAGE_CAPTURE" />
     </intent>

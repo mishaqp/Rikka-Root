@@ -272,6 +272,11 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         headlineContent = { Text(stringResource(R.string.setting_page_media)) },
                     )
                     item(
+                        onClick = { navController.navigate(Screen.SettingTermux) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_termux_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_termux)) },
+                    )
+                    item(
                         onClick = { navController.navigate(Screen.SettingMcp) },
                         leadingContent = { Icon(HugeIcons.McpServer, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_mcp_desc)) },

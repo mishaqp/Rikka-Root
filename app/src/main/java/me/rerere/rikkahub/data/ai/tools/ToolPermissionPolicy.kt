@@ -17,6 +17,13 @@ object ToolPermissionPolicy {
             tool.toolName != "ask_user"
 
     val registry: Map<String, String> = linkedMapOf(
+        "termux_run_command" to "команды Termux",
+        "termux_session_start" to "запуск сессии Termux",
+        "termux_session_send" to "ввод в сессию Termux",
+        "termux_session_read" to "чтение сессии Termux",
+        "termux_session_kill" to "остановка сессии Termux",
+        "termux_session_list" to "список сессий Termux",
+
         "schedule_job" to "создание заданий по расписанию",
         "list_jobs" to "список собственных заданий",
         "get_job_history" to "история собственных заданий",

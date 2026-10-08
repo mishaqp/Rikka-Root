@@ -1,6 +1,9 @@
 package me.rerere.rikkahub.data.ai
 
 import android.content.Context
+import android.os.SystemClock
+import kotlinx.coroutines.withTimeoutOrNull
+import me.rerere.rikkahub.data.ai.limits.ToolRuntimeLimits
 import android.util.Log
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
@@ -106,7 +109,7 @@ class GenerationLoop(
         assistant: Assistant,
         memories: List<AssistantMemory>? = null,
         tools: List<Tool> = emptyList(),
-        maxSteps: Int = 256,
+        maxSteps: Int = ToolRuntimeLimits.maxToolSteps,
         processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
         conversationSystemPrompt: String? = null,
         conversationId: Uuid? = null,
@@ -137,7 +140,10 @@ class GenerationLoop(
             return definition.needsApproval(args) && !isToolAutoApproved(tool.toolName, args)
         }
 
-        for (stepIndex in 0 until maxSteps) {
+        val turnStartMs = SystemClock.elapsedRealtime()
+        val turnBudgetMs = ToolRuntimeLimits.turnBudgetMs
+        for (stepIndex in 0 until minOf(maxSteps, ToolRuntimeLimits.maxToolSteps)) {
+            if (SystemClock.elapsedRealtime() - turnStartMs >= turnBudgetMs) break
             budget?.ensureCanContinue()
             Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
 
@@ -344,11 +350,19 @@ class GenerationLoop(
                             }
                             suspend fun executeWithBudget(): List<UIMessagePart> {
                                 budget?.ensureCanContinue()
-                                return if (budget == null) toolDef.execute(args) else
-                                    withContext(TokenBudgetContext(budget)) {
-                                        budget.ensureCanContinue()
-                                        toolDef.execute(args)
-                                    }
+                                val remainingMs = turnBudgetMs - (SystemClock.elapsedRealtime() - turnStartMs)
+                                val cancelled = listOf(UIMessagePart.Text(buildJsonObject {
+                                    put("error", "tool_cancelled_wall_clock")
+                                    put("message", "Истёк общий лимит времени на инструменты этого ответа.")
+                                }.toString()))
+                                if (remainingMs <= 0) return cancelled
+                                return withTimeoutOrNull(remainingMs) {
+                                    if (budget == null) toolDef.execute(args) else
+                                        withContext(TokenBudgetContext(budget)) {
+                                            budget.ensureCanContinue()
+                                            toolDef.execute(args)
+                                        }
+                                } ?: cancelled
                             }
                             budget?.ensureCanContinue()
                             val result = if (tool.toolName == "root_exec") {

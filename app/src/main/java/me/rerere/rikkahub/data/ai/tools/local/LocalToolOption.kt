@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 sealed class LocalToolOption {
+    @Serializable @SerialName("termux") data object Termux : LocalToolOption()
     @Serializable @SerialName("sub_agents") data object SubAgents : LocalToolOption()
     @Serializable @SerialName("cron_jobs") data object CronJobs : LocalToolOption()
     @Serializable @SerialName("reliability") data object Reliability : LocalToolOption()

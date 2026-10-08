@@ -513,6 +513,10 @@ class RouteActivity : ComponentActivity() {
                                 SettingMediaPage()
                             }
 
+                            entry<Screen.SettingTermux> {
+                                me.rerere.rikkahub.ui.pages.setting.termux.SettingTermuxPage()
+                            }
+
                             entry<Screen.SettingMcp> {
                                 SettingMcpPage()
                             }
@@ -750,6 +754,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingMcp : Screen
+
+    @Serializable
+    data object SettingTermux : Screen
 
     @Serializable
     data object SettingDonate : Screen
