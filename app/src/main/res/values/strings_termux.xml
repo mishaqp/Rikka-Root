@@ -1,68 +1,68 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="assistant_page_local_tools_termux_title">Termux</string>
-    <string name="assistant_page_local_tools_termux_status_not_installed">Termux не установлен — скачайте с github.com/termux/termux-app/releases</string>
-    <string name="assistant_page_local_tools_termux_status_no_permission">Включите, чтобы запросить разрешение RUN_COMMAND</string>
-    <string name="assistant_page_local_tools_termux_status_untested">Откройте Termux и выполните: mkdir -p ~/.termux &amp;&amp; echo \'allow-external-apps=true\' &gt;&gt; ~/.termux/termux.properties. Принудительно остановите Termux и откройте снова. Нажмите для проверки.</string>
-    <string name="assistant_page_local_tools_termux_status_ok">Подключено — команды возвращают результат</string>
-    <string name="assistant_page_local_tools_termux_verify">проверить</string>
-    <string name="assistant_page_local_tools_termux_verifying">Проверка подключения…</string>
-    <string name="assistant_page_local_tools_termux_verify_ok">Подключение Termux проверено.</string>
-    <string name="assistant_page_local_tools_termux_verify_props_missing">Termux не ответил. Выполните в Termux: mkdir -p ~/.termux &amp;&amp; echo \'allow-external-apps=true\' &gt;&gt; ~/.termux/termux.properties. Принудительно остановите Termux и откройте снова.</string>
-    <string name="assistant_page_local_tools_termux_postgrant_title">Завершите настройку Termux</string>
-    <string name="assistant_page_local_tools_termux_postgrant_message">Разрешение RUN_COMMAND предоставлено. Для выполнения команд нужен allow-external-apps=true в ~/.termux/termux.properties.\n\nОткройте Termux и вставьте команду ниже, затем принудительно остановите Termux в настройках Android и откройте снова.\n\nПодключение станет зелёным после проверки.</string>
-    <string name="assistant_page_local_tools_termux_postgrant_command">mkdir -p ~/.termux &amp;&amp; echo \'allow-external-apps=true\' &gt;&gt; ~/.termux/termux.properties</string>
-    <string name="assistant_page_local_tools_termux_postgrant_copy">Скопировать команду</string>
-    <string name="assistant_page_local_tools_termux_postgrant_copied">Команда скопирована — вставьте её в Termux.</string>
-    <string name="assistant_page_local_tools_termux_verify_no_permission">Разрешение RUN_COMMAND не предоставлено. Выключите и включите Termux, чтобы повторить запрос Android. Без разрешения команды недоступны.</string>
-    <string name="assistant_page_local_tools_termux_verify_unexpected">Termux вернул неожиданный результат: %1$s</string>
-    <string name="setting_page_termux">Termux</string>
-    <string name="setting_page_termux_desc">Команды оболочки, таймауты и подключение Termux.</string>
-    <string name="setting_termux_title">Termux</string>
-    <string name="setting_termux_section_status">Состояние</string>
-    <string name="setting_termux_status_app">Приложение Termux</string>
-    <string name="setting_termux_status_app_installed">Установлено — нажмите, чтобы открыть</string>
-    <string name="setting_termux_status_app_missing">Не установлено — нажмите, чтобы скачать</string>
-    <string name="setting_termux_status_open">Открыть Termux</string>
-    <string name="setting_termux_status_open_desc">Запустить приложение Termux</string>
-    <string name="setting_termux_status_permission">Разрешение RUN_COMMAND</string>
-    <string name="setting_termux_status_permission_granted">Предоставлено</string>
-    <string name="setting_termux_toast_permission_granted">Разрешение предоставлено</string>
-    <string name="setting_termux_status_permission_missing">Не предоставлено — включите Termux в инструментах ассистента</string>
-    <string name="setting_termux_status_verify">allow-external-apps</string>
-    <string name="setting_termux_status_verify_ok">Подключение проверено</string>
-    <string name="setting_termux_status_verify_unknown">Не проверено — нажмите для проверки</string>
-    <string name="setting_termux_verify_ok">Termux работает.</string>
-    <string name="setting_termux_verify_not_installed">Termux не установлен.</string>
-    <string name="setting_termux_verify_no_permission">Разрешение RUN_COMMAND не предоставлено. Включите Termux в настройках ассистента → Локальные инструменты и разрешите выполнение команд. Без этого команды недоступны.</string>
-    <string name="setting_termux_verify_allow_external_apps">Истекло время ожидания. Проверьте allow-external-apps=true в ~/.termux/termux.properties.</string>
-    <string name="setting_termux_verify_unexpected_output">Проверка вернула неожиданный результат.</string>
-    <string name="setting_termux_verify_other_error">Ошибка проверки: %s</string>
-    <string name="setting_termux_section_timeouts">Таймауты</string>
-    <string name="setting_termux_command_timeout">Время ожидания команды</string>
-    <string name="setting_termux_command_timeout_desc">Сколько ждать результат фоновой команды. От 5 до 600 с.</string>
-    <string name="setting_termux_turn_budget">Время одного ответа (все инструменты)</string>
-    <string name="setting_termux_turn_budget_desc">Предельное время выполнения инструментов для одного сообщения пользователя. От 1 до 60 мин.</string>
-    <string name="setting_termux_verify_timeout">Время проверки подключения</string>
-    <string name="setting_termux_verify_timeout_desc">Таймаут проверки allow-external-apps командой echo. От 3 до 30 с.</string>
-    <string name="setting_termux_unit_seconds">с</string>
-    <string name="setting_termux_unit_minutes">мин</string>
-    <string name="setting_termux_unit_steps">шагов</string>
-    <string name="setting_termux_max_tool_steps">Шагов инструментов за ответ</string>
-    <string name="setting_termux_max_tool_steps_desc">Сколько вызовов инструментов разрешено в одном ответе. Для установки или сборки можно увеличить. От 1 до 500; предел времени действует одновременно.</string>
-    <string name="setting_termux_unit_bytes">байт</string>
-    <string name="setting_termux_section_defaults">Настройки и ограничения</string>
-    <string name="setting_termux_working_dir">Рабочая папка по умолчанию</string>
-    <string name="setting_termux_max_stdout">Объём stdout</string>
-    <string name="setting_termux_max_stdout_desc">Максимум байтов stdout, возвращаемых модели за команду. От 1 000 до 64 000.</string>
-    <string name="setting_termux_max_stderr">Объём stderr</string>
-    <string name="setting_termux_max_stderr_desc">Максимум байтов stderr, возвращаемых модели за команду. От 500 до 16 000.</string>
-    <string name="setting_termux_apt_wrap">Запуск apt/dpkg без диалогов</string>
-    <string name="setting_termux_apt_wrap_desc">Добавляет DEBIAN_FRONTEND=noninteractive, чтобы обновление apt не ожидало ответа на вопросы.</string>
-    <string name="setting_termux_section_help">Настройка подключения</string>
-    <string name="setting_termux_help_allow_external_apps_title">Как включить allow-external-apps</string>
-    <string name="setting_termux_help_allow_external_apps_body">В Termux выполните:\n\n  mkdir -p ~/.termux\n  echo \'allow-external-apps=true\' &gt;&gt; ~/.termux/termux.properties\n\nЗатем принудительно остановите Termux в настройках Android и откройте снова. Нажмите строку проверки выше.</string>
-    <string name="perm_label_termux_run">Команды Termux</string>
-    <string name="perm_desc_termux_run">Позволяет Rikka-Root выполнять команды в Termux. Запрашивается при включении функции.</string>
-    <string name="tool_name_termux">Termux</string>
+    <string translatable="false" name="assistant_page_local_tools_termux_title">Termux</string>
+    <string translatable="false" name="assistant_page_local_tools_termux_status_not_installed">Termux не установлен — скачайте с github.com/termux/termux-app/releases</string>
+    <string translatable="false" name="assistant_page_local_tools_termux_status_no_permission">Включите, чтобы запросить разрешение RUN_COMMAND</string>
+    <string translatable="false" name="assistant_page_local_tools_termux_status_untested">Откройте Termux и выполните: mkdir -p ~/.termux &amp;&amp; echo \'allow-external-apps=true\' &gt;&gt; ~/.termux/termux.properties. Принудительно остановите Termux и откройте снова. Нажмите для проверки.</string>
+    <string translatable="false" name="assistant_page_local_tools_termux_status_ok">Подключено — команды возвращают результат</string>
+    <string translatable="false" name="assistant_page_local_tools_termux_verify">проверить</string>
+    <string translatable="false" name="assistant_page_local_tools_termux_verifying">Проверка подключения…</string>
+    <string translatable="false" name="assistant_page_local_tools_termux_verify_ok">Подключение Termux проверено.</string>
+    <string translatable="false" name="assistant_page_local_tools_termux_verify_props_missing">Termux не ответил. Выполните в Termux: mkdir -p ~/.termux &amp;&amp; echo \'allow-external-apps=true\' &gt;&gt; ~/.termux/termux.properties. Принудительно остановите Termux и откройте снова.</string>
+    <string translatable="false" name="assistant_page_local_tools_termux_postgrant_title">Завершите настройку Termux</string>
+    <string translatable="false" name="assistant_page_local_tools_termux_postgrant_message">Разрешение RUN_COMMAND предоставлено. Для выполнения команд нужен allow-external-apps=true в ~/.termux/termux.properties.\n\nОткройте Termux и вставьте команду ниже, затем принудительно остановите Termux в настройках Android и откройте снова.\n\nПодключение станет зелёным после проверки.</string>
+    <string translatable="false" name="assistant_page_local_tools_termux_postgrant_command">mkdir -p ~/.termux &amp;&amp; echo \'allow-external-apps=true\' &gt;&gt; ~/.termux/termux.properties</string>
+    <string translatable="false" name="assistant_page_local_tools_termux_postgrant_copy">Скопировать команду</string>
+    <string translatable="false" name="assistant_page_local_tools_termux_postgrant_copied">Команда скопирована — вставьте её в Termux.</string>
+    <string translatable="false" name="assistant_page_local_tools_termux_verify_no_permission">Разрешение RUN_COMMAND не предоставлено. Выключите и включите Termux, чтобы повторить запрос Android. Без разрешения команды недоступны.</string>
+    <string translatable="false" name="assistant_page_local_tools_termux_verify_unexpected">Termux вернул неожиданный результат: %1$s</string>
+    <string translatable="false" name="setting_page_termux">Termux</string>
+    <string translatable="false" name="setting_page_termux_desc">Команды оболочки, таймауты и подключение Termux.</string>
+    <string translatable="false" name="setting_termux_title">Termux</string>
+    <string translatable="false" name="setting_termux_section_status">Состояние</string>
+    <string translatable="false" name="setting_termux_status_app">Приложение Termux</string>
+    <string translatable="false" name="setting_termux_status_app_installed">Установлено — нажмите, чтобы открыть</string>
+    <string translatable="false" name="setting_termux_status_app_missing">Не установлено — нажмите, чтобы скачать</string>
+    <string translatable="false" name="setting_termux_status_open">Открыть Termux</string>
+    <string translatable="false" name="setting_termux_status_open_desc">Запустить приложение Termux</string>
+    <string translatable="false" name="setting_termux_status_permission">Разрешение RUN_COMMAND</string>
+    <string translatable="false" name="setting_termux_status_permission_granted">Предоставлено</string>
+    <string translatable="false" name="setting_termux_toast_permission_granted">Разрешение предоставлено</string>
+    <string translatable="false" name="setting_termux_status_permission_missing">Не предоставлено — включите Termux в инструментах ассистента</string>
+    <string translatable="false" name="setting_termux_status_verify">allow-external-apps</string>
+    <string translatable="false" name="setting_termux_status_verify_ok">Подключение проверено</string>
+    <string translatable="false" name="setting_termux_status_verify_unknown">Не проверено — нажмите для проверки</string>
+    <string translatable="false" name="setting_termux_verify_ok">Termux работает.</string>
+    <string translatable="false" name="setting_termux_verify_not_installed">Termux не установлен.</string>
+    <string translatable="false" name="setting_termux_verify_no_permission">Разрешение RUN_COMMAND не предоставлено. Включите Termux в настройках ассистента → Локальные инструменты и разрешите выполнение команд. Без этого команды недоступны.</string>
+    <string translatable="false" name="setting_termux_verify_allow_external_apps">Истекло время ожидания. Проверьте allow-external-apps=true в ~/.termux/termux.properties.</string>
+    <string translatable="false" name="setting_termux_verify_unexpected_output">Проверка вернула неожиданный результат.</string>
+    <string translatable="false" name="setting_termux_verify_other_error">Ошибка проверки: %s</string>
+    <string translatable="false" name="setting_termux_section_timeouts">Таймауты</string>
+    <string translatable="false" name="setting_termux_command_timeout">Время ожидания команды</string>
+    <string translatable="false" name="setting_termux_command_timeout_desc">Сколько ждать результат фоновой команды. От 5 до 600 с.</string>
+    <string translatable="false" name="setting_termux_turn_budget">Время одного ответа (все инструменты)</string>
+    <string translatable="false" name="setting_termux_turn_budget_desc">Предельное время выполнения инструментов для одного сообщения пользователя. От 1 до 60 мин.</string>
+    <string translatable="false" name="setting_termux_verify_timeout">Время проверки подключения</string>
+    <string translatable="false" name="setting_termux_verify_timeout_desc">Таймаут проверки allow-external-apps командой echo. От 3 до 30 с.</string>
+    <string translatable="false" name="setting_termux_unit_seconds">с</string>
+    <string translatable="false" name="setting_termux_unit_minutes">мин</string>
+    <string translatable="false" name="setting_termux_unit_steps">шагов</string>
+    <string translatable="false" name="setting_termux_max_tool_steps">Шагов инструментов за ответ</string>
+    <string translatable="false" name="setting_termux_max_tool_steps_desc">Сколько вызовов инструментов разрешено в одном ответе. Для установки или сборки можно увеличить. От 1 до 500; предел времени действует одновременно.</string>
+    <string translatable="false" name="setting_termux_unit_bytes">байт</string>
+    <string translatable="false" name="setting_termux_section_defaults">Настройки и ограничения</string>
+    <string translatable="false" name="setting_termux_working_dir">Рабочая папка по умолчанию</string>
+    <string translatable="false" name="setting_termux_max_stdout">Объём stdout</string>
+    <string translatable="false" name="setting_termux_max_stdout_desc">Максимум байтов stdout, возвращаемых модели за команду. От 1 000 до 64 000.</string>
+    <string translatable="false" name="setting_termux_max_stderr">Объём stderr</string>
+    <string translatable="false" name="setting_termux_max_stderr_desc">Максимум байтов stderr, возвращаемых модели за команду. От 500 до 16 000.</string>
+    <string translatable="false" name="setting_termux_apt_wrap">Запуск apt/dpkg без диалогов</string>
+    <string translatable="false" name="setting_termux_apt_wrap_desc">Добавляет DEBIAN_FRONTEND=noninteractive, чтобы обновление apt не ожидало ответа на вопросы.</string>
+    <string translatable="false" name="setting_termux_section_help">Настройка подключения</string>
+    <string translatable="false" name="setting_termux_help_allow_external_apps_title">Как включить allow-external-apps</string>
+    <string translatable="false" name="setting_termux_help_allow_external_apps_body">В Termux выполните:\n\n  mkdir -p ~/.termux\n  echo \'allow-external-apps=true\' &gt;&gt; ~/.termux/termux.properties\n\nЗатем принудительно остановите Termux в настройках Android и откройте снова. Нажмите строку проверки выше.</string>
+    <string translatable="false" name="perm_label_termux_run">Команды Termux</string>
+    <string translatable="false" name="perm_desc_termux_run">Позволяет Rikka-Root выполнять команды в Termux. Запрашивается при включении функции.</string>
+    <string translatable="false" name="tool_name_termux">Termux</string>
 </resources>

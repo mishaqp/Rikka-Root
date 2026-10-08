@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="setting_ssh_title">SSH</string>
-    <string name="setting_ssh_security_info">Пароли и приватные ключи вводите здесь, не в чате. Они шифруются ключом AndroidKeyStore и не входят в резервные копии. Модель может использовать имя хоста через ssh_exec_saved, ssh_upload и ssh_download. Первый ключ сервера сохраняется; изменение ключа блокирует подключение.</string>
-    <string name="setting_ssh_error">Не удалось открыть или сохранить данные SSH. Если данные восстановлены из резервной копии, сохраните хост заново: секреты не переносятся на другой телефон.</string>
-    <string name="setting_ssh_delete">Удалить</string>
-    <string name="setting_ssh_save_title">Сохранить или заменить хост</string>
-    <string name="setting_ssh_name">Короткое имя хоста</string>
-    <string name="setting_ssh_host">Адрес сервера</string>
-    <string name="setting_ssh_port">Порт</string>
-    <string name="setting_ssh_user">Пользователь</string>
-    <string name="setting_ssh_password">Пароль (или приватный ключ ниже)</string>
-    <string name="setting_ssh_private_key">Приватный ключ PEM/OpenSSH целиком</string>
-    <string name="setting_ssh_passphrase">Пароль приватного ключа (необязательно)</string>
-    <string name="setting_ssh_save">Сохранить</string>
+    <string translatable="false" name="setting_ssh_title">SSH</string>
+    <string translatable="false" name="setting_ssh_security_info">Пароли и приватные ключи вводите здесь, не в чате. Они шифруются ключом AndroidKeyStore и не входят в резервные копии. Модель может использовать имя хоста через ssh_exec_saved, ssh_upload и ssh_download. Первый ключ сервера сохраняется; изменение ключа блокирует подключение.</string>
+    <string translatable="false" name="setting_ssh_error">Не удалось открыть или сохранить данные SSH. Если данные восстановлены из резервной копии, сохраните хост заново: секреты не переносятся на другой телефон.</string>
+    <string translatable="false" name="setting_ssh_delete">Удалить</string>
+    <string translatable="false" name="setting_ssh_save_title">Сохранить или заменить хост</string>
+    <string translatable="false" name="setting_ssh_name">Короткое имя хоста</string>
+    <string translatable="false" name="setting_ssh_host">Адрес сервера</string>
+    <string translatable="false" name="setting_ssh_port">Порт</string>
+    <string translatable="false" name="setting_ssh_user">Пользователь</string>
+    <string translatable="false" name="setting_ssh_password">Пароль (или приватный ключ ниже)</string>
+    <string translatable="false" name="setting_ssh_private_key">Приватный ключ PEM/OpenSSH целиком</string>
+    <string translatable="false" name="setting_ssh_passphrase">Пароль приватного ключа (необязательно)</string>
+    <string translatable="false" name="setting_ssh_save">Сохранить</string>
 </resources>

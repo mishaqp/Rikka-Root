@@ -222,6 +222,7 @@ internal fun ShellLocalToolSettings(assistant: Assistant, onUpdate: (Assistant) 
 @Composable
 private fun TermuxStatusRowSubtitle(enabled: Boolean) {
     val ctx = LocalContext.current
+    val resources = LocalResources.current
     val toaster = LocalToaster.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
@@ -279,29 +280,29 @@ private fun TermuxStatusRowSubtitle(enabled: Boolean) {
                         TermuxIntegration.VerifyResult.Ok -> {
                             TermuxIntegration.markVerifiedOk()
                             resumeTick++  // force recompose so verifiedRecently flips
-                            toaster.show(ctx.getString(R.string.assistant_page_local_tools_termux_verify_ok))
+                            toaster.show(resources.getString(R.string.assistant_page_local_tools_termux_verify_ok))
                         }
                         TermuxIntegration.VerifyResult.AllowExternalAppsMissing -> {
                             TermuxIntegration.clearVerified()
                             resumeTick++
-                            lastVerifyError = ctx.getString(R.string.assistant_page_local_tools_termux_verify_props_missing)
+                            lastVerifyError = resources.getString(R.string.assistant_page_local_tools_termux_verify_props_missing)
                             toaster.show(lastVerifyError ?: "", type = ToastType.Error)
                         }
                         TermuxIntegration.VerifyResult.NoPermission -> {
                             TermuxIntegration.clearVerified()
                             resumeTick++
-                            lastVerifyError = ctx.getString(R.string.assistant_page_local_tools_termux_verify_no_permission)
+                            lastVerifyError = resources.getString(R.string.assistant_page_local_tools_termux_verify_no_permission)
                             toaster.show(lastVerifyError ?: "", type = ToastType.Error)
                         }
                         TermuxIntegration.VerifyResult.NotInstalled -> {
                             TermuxIntegration.clearVerified()
                             resumeTick++
-                            lastVerifyError = ctx.getString(R.string.assistant_page_local_tools_termux_status_not_installed)
+                            lastVerifyError = resources.getString(R.string.assistant_page_local_tools_termux_status_not_installed)
                         }
                         is TermuxIntegration.VerifyResult.UnexpectedOutput -> {
                             TermuxIntegration.clearVerified()
                             resumeTick++
-                            lastVerifyError = ctx.getString(R.string.assistant_page_local_tools_termux_verify_unexpected, result.stdout.take(60))
+                            lastVerifyError = resources.getString(R.string.assistant_page_local_tools_termux_verify_unexpected, result.stdout.take(60))
                             toaster.show(lastVerifyError ?: "", type = ToastType.Error)
                         }
                         is TermuxIntegration.VerifyResult.OtherError -> {

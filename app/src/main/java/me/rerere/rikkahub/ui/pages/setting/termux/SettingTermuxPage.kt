@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -56,6 +57,7 @@ fun SettingTermuxPage(
     vm: SettingTermuxViewModel = koinViewModel(),
 ) {
     val ctx = LocalContext.current
+    val resources = LocalResources.current
     val toaster = LocalToaster.current
     val scope = rememberCoroutineScope()
     val config by vm.config.collectAsStateWithLifecycle()
@@ -141,7 +143,7 @@ fun SettingTermuxPage(
                         // Android permission is requested only when enabling the assistant's
                         // Termux feature, according to the fork's permission rules.
                         toaster.show(
-                            ctx.getString(if (hasPermission) R.string.setting_termux_toast_permission_granted
+                            resources.getString(if (hasPermission) R.string.setting_termux_toast_permission_granted
                                 else R.string.setting_termux_verify_no_permission),
                             type = if (hasPermission) ToastType.Success else ToastType.Error,
                         )
@@ -183,12 +185,12 @@ fun SettingTermuxPage(
                             lastVerifiedOk = TermuxIntegration.lastVerifiedOkAtMs > 0L
                             integrationState = TermuxIntegration.state(ctx)
                             val msg = when (result) {
-                                TermuxIntegration.VerifyResult.Ok -> ctx.getString(R.string.setting_termux_verify_ok)
-                                TermuxIntegration.VerifyResult.NotInstalled -> ctx.getString(R.string.setting_termux_verify_not_installed)
-                                TermuxIntegration.VerifyResult.NoPermission -> ctx.getString(R.string.setting_termux_verify_no_permission)
-                                TermuxIntegration.VerifyResult.AllowExternalAppsMissing -> ctx.getString(R.string.setting_termux_verify_allow_external_apps)
-                                is TermuxIntegration.VerifyResult.UnexpectedOutput -> ctx.getString(R.string.setting_termux_verify_unexpected_output)
-                                is TermuxIntegration.VerifyResult.OtherError -> ctx.getString(R.string.setting_termux_verify_other_error, result.message)
+                                TermuxIntegration.VerifyResult.Ok -> resources.getString(R.string.setting_termux_verify_ok)
+                                TermuxIntegration.VerifyResult.NotInstalled -> resources.getString(R.string.setting_termux_verify_not_installed)
+                                TermuxIntegration.VerifyResult.NoPermission -> resources.getString(R.string.setting_termux_verify_no_permission)
+                                TermuxIntegration.VerifyResult.AllowExternalAppsMissing -> resources.getString(R.string.setting_termux_verify_allow_external_apps)
+                                is TermuxIntegration.VerifyResult.UnexpectedOutput -> resources.getString(R.string.setting_termux_verify_unexpected_output)
+                                is TermuxIntegration.VerifyResult.OtherError -> resources.getString(R.string.setting_termux_verify_other_error, result.message)
                             }
                             val type = if (result == TermuxIntegration.VerifyResult.Ok) ToastType.Success else ToastType.Error
                             toaster.show(msg, type = type)

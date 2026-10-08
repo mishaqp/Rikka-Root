@@ -62,7 +62,7 @@
 | `app/src/main/java/me/rerere/rikkahub/data/preferences/TermuxDefaults.kt` | `app/src/main/java/me/rerere/rikkahub/data/preferences/TermuxDefaults.kt` | скопировано (исходные значения по умолчанию) |
 | `app/src/main/java/me/rerere/rikkahub/data/preferences/TermuxPreferences.kt` | `app/src/main/java/me/rerere/rikkahub/data/preferences/TermuxPreferences.kt` | скопировано (исходные Preferences и загрузка настроек) |
 | `app/src/main/java/me/rerere/rikkahub/data/preferences/TermuxRuntime.kt` | `app/src/main/java/me/rerere/rikkahub/data/preferences/TermuxRuntime.kt` | скопировано (исходное состояние интеграции и runtime) |
-| `app/src/main/java/me/rerere/rikkahub/ui/pages/setting/termux/SettingTermuxPage.kt` | `app/src/main/java/me/rerere/rikkahub/ui/pages/setting/termux/SettingTermuxPage.kt` | адаптировано (исходный экран настройки/проверки интеграции и лимитов; строки на русском, навигация/API 2.5.6) |
+| `app/src/main/java/me/rerere/rikkahub/ui/pages/setting/termux/SettingTermuxPage.kt` | `app/src/main/java/me/rerere/rikkahub/ui/pages/setting/termux/SettingTermuxPage.kt` | адаптировано (исходный экран настройки/проверки интеграции и лимитов; строки на русском, навигация/API 2.5.6, configuration-aware LocalResources) |
 | `app/src/main/java/me/rerere/rikkahub/ui/pages/setting/termux/SettingTermuxViewModel.kt` | `app/src/main/java/me/rerere/rikkahub/ui/pages/setting/termux/SettingTermuxViewModel.kt` | скопировано (исходный ViewModel) |
 | `app/src/main/res/values/strings.xml` | `app/src/main/res/values/strings_termux.xml` | адаптировано (перевод строк исходного экрана Termux Agent; отдельный русский ресурс Root) |
 | — (новая необходимая адаптация/регрессия Root) | `app/src/test/java/me/rerere/rikkahub/data/ai/tools/local/TermuxCommandGuardTest.kt` | адаптировано (новые регрессии HARDLINE: аргументы, составной/восстановленный ввод, клавиши и обязательное подтверждение) |
@@ -175,11 +175,11 @@
 | `app/src/main/java/me/rerere/rikkahub/di/ViewModelModule.kt` | `app/src/main/java/me/rerere/rikkahub/di/ViewModelModule.kt` | адаптировано (DI исходного Termux ViewModel) |
 | `app/src/main/java/me/rerere/rikkahub/ui/components/message/ChatMessageTools.kt` | `app/src/main/java/me/rerere/rikkahub/ui/components/message/ChatMessageTools.kt` | адаптировано (скопирована ветка карточки MCP confirmation Agent с исходным renderer и масками до стандартных кнопок Root) |
 | `app/src/main/java/me/rerere/rikkahub/ui/pages/assistant/detail/AssistantLocalToolPage.kt` | `app/src/main/java/me/rerere/rikkahub/ui/pages/assistant/detail/AssistantLocalToolPage.kt` | адаптировано (подключение F switches к существующим Root настройкам ассистента) |
-| `app/src/main/java/me/rerere/rikkahub/ui/pages/assistant/detail/AssistantLocalToolPage.kt` | `app/src/main/java/me/rerere/rikkahub/ui/pages/assistant/detail/ShellLocalToolSettings.kt` | адаптировано (адаптация исходных переключателей Agent, RUN_COMMAND запрос только при включении/отказ оставляет OFF, Termux setup/status и ссылки настроек) |
+| `app/src/main/java/me/rerere/rikkahub/ui/pages/assistant/detail/AssistantLocalToolPage.kt` | `app/src/main/java/me/rerere/rikkahub/ui/pages/assistant/detail/ShellLocalToolSettings.kt` | адаптировано (адаптация исходных переключателей Agent, RUN_COMMAND запрос только при включении/отказ оставляет OFF, Termux setup/status и ссылки настроек, configuration-aware LocalResources) |
 | — (существующая интеграция/тест Root) | `app/src/main/java/me/rerere/rikkahub/ui/pages/chat/ConversationExport.kt` | адаптировано (существующий Root export: удаление секретов/ссылок из Markdown и image-export до передачи) |
 | `app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingPage.kt` | `app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingPage.kt` | адаптировано (ссылки настроек Termux и безопасного ввода SSH, русские подписи) |
-| `app/src/main/res/values/strings.xml` | `app/src/main/res/values/strings_shell_tools.xml` | адаптировано (русские строки переключателей F и сообщений отказа в разрешении) |
-| — (новая необходимая адаптация/регрессия Root) | `app/src/main/res/values/strings_ssh.xml` | адаптировано (русский интерфейс защищённой формы SSH) |
+| `app/src/main/res/values/strings.xml` | `app/src/main/res/values/strings_shell_tools.xml` | адаптировано (русские строки переключателей F и сообщений отказа в разрешении; translatable=false по правилам русских строк форка) |
+| — (новая необходимая адаптация/регрессия Root) | `app/src/main/res/values/strings_ssh.xml` | адаптировано (русский интерфейс защищённой формы SSH; translatable=false по правилам строк форка) |
 | — (существующая интеграция/тест Root) | `app/src/test/java/me/rerere/rikkahub/data/ai/GenerationLoopRootApprovalTest.kt` | адаптировано (существующие регрессии Root дополнены подтверждением shell и запретами headless F) |
 | — (существующая интеграция/тест Root) | `app/src/test/java/me/rerere/rikkahub/data/ai/tools/ToolPermissionPolicyTest.kt` | адаптировано (существующие регрессии Root расширены registry F, SSH/Termux mandatory confirmation и SSH host-key reset) |
 | — (существующая интеграция/тест Root) | `app/src/test/java/me/rerere/rikkahub/data/ai/tools/local/LocalToolOptionCompatibilityTest.kt` | адаптировано (существующие регрессии сериализации Root расширены точными @SerialName Agent для F) |
@@ -212,7 +212,7 @@
 
 ## Локальная проверка и Daily Build
 
-Локально прошли `:app:compileDebugKotlin`, `:ai:compileDebugKotlin` и выбранные unit-тесты затронутых классов: app — 500, ai — 14; ошибок, пропусков и падений нет. Отдельно проверен цикл red/green регрессий отчёта и утечки журналов. Полная сборка APK и lint выполняются только в Daily Build; точные коммиты, ссылка завершённого Actions run и APK этой ревизии приводятся в итоговом сообщении после единственного общего push.
+Локально прошли `:app:compileDebugKotlin`, `:ai:compileDebugKotlin` и выбранные unit-тесты затронутых классов: app — 500, ai — 14; ошибок, пропусков и падений нет. Отдельно проверен цикл red/green регрессий отчёта и утечки журналов. Первая Daily Build прошла полный набор тестов, но выявила 104 новых замечания lint: 92 объявления русских строк и 12 обращений к ресурсам Compose; исправлены только эти адаптации без подавления существующих ошибок. Полная сборка APK и lint выполняются только в Daily Build; точные коммиты, ссылка завершённого Actions run и APK этой ревизии приводятся в итоговом сообщении после единственного общего push.
 
 ## Проверки на телефоне
 
