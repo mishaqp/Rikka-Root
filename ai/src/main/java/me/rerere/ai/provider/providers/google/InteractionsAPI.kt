@@ -3,7 +3,6 @@ package me.rerere.ai.provider.providers.google
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.channels.onFailure
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
@@ -86,16 +85,23 @@ internal class InteractionsAPI(
     ): TextGenerationResult = withContext(Dispatchers.IO) {
         val requestBody = buildRequestBody(messages, params, stream = false)
         val request = buildRequest(providerSetting, params, requestBody)
-        ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.REQUEST, params.model.modelId, null, request.body?.contentLength())
-
-        // await() waits for the response headers; reading the body can still block.
-        client.newCall(request).await().use { response ->
-            ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.RESPONSE, params.model.modelId, response.code, response.body.contentLength())
-            if (!response.isSuccessful) {
-                throw Exception("Failed to get response: ${response.code} ${response.body.string()}")
+        val metadata = ProviderLog.Summary(ProviderLog.Provider.GOOGLE, params.model.modelId)
+        try {
+            // await() waits for the response headers; reading the body can still block.
+            client.newCall(request).await().use { response ->
+                metadata.response(response.code)
+                if (!response.isSuccessful) {
+                    val errorBody = response.body.string()
+                    metadata.bodySize(errorBody.toByteArray(Charsets.UTF_8).size.toLong())
+                    throw Exception("Failed to get response: ${response.code} ${errorBody}")
+                }
+                val bodyStr = response.body.string()
+                metadata.bodySize(bodyStr.toByteArray(Charsets.UTF_8).size.toLong())
+                val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
+                parseInteraction(bodyJson, fallbackModel = params.model.modelId)
             }
-            val bodyJson = json.parseToJsonElement(response.body.string()).jsonObject
-            parseInteraction(bodyJson, fallbackModel = params.model.modelId)
+        } finally {
+            metadata.finish()
         }
     }
 
@@ -104,77 +110,75 @@ internal class InteractionsAPI(
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): Flow<StreamChunk> = callbackFlow {
-        val requestBody = buildRequestBody(messages, params, stream = true)
-        val request = buildRequest(providerSetting, params, requestBody)
+        val metadata = ProviderLog.Summary(ProviderLog.Provider.GOOGLE, params.model.modelId)
+        try {
+            val requestBody = buildRequestBody(messages, params, stream = true)
+            val request = buildRequest(providerSetting, params, requestBody)
 
-        ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.REQUEST, params.model.modelId, null, request.body?.contentLength())
+            val decoder = InteractionsStreamDecoder(fallbackModel = params.model.modelId)
 
-        val decoder = InteractionsStreamDecoder(fallbackModel = params.model.modelId)
-
-        var responseCode: Int? = null
-
-        fun sendChunks(chunks: Iterable<StreamChunk>) {
-            chunks.forEach { chunk ->
-                trySend(chunk).onFailure {
-                    ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.CHUNK_DROPPED, params.model.modelId, responseCode, null)
-                }
-            }
-        }
-
-        val listener = object : EventSourceListener() {
-            override fun onOpen(eventSource: EventSource, response: Response) {
-                responseCode = response.code
-                ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.STREAM_OPEN, params.model.modelId, response.code, response.body.contentLength())
-            }
-
-            override fun onEvent(
-                eventSource: EventSource,
-                id: String?,
-                type: String?,
-                data: String
-            ) {
-                ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.STREAM_EVENT, params.model.modelId, responseCode, data.toByteArray(Charsets.UTF_8).size.toLong())
-                try {
-                    val result = decoder.accept(SseEvent(id = id, event = type, data = data))
-                    sendChunks(result.chunks)
-                    if (result.completed) close()
-                } catch (e: Throwable) {
-                    ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.PARSE_FAILED, params.model.modelId, responseCode, data.toByteArray(Charsets.UTF_8).size.toLong())
-                    close(e)
+            fun sendChunks(chunks: Iterable<StreamChunk>) {
+                chunks.forEach { chunk ->
+                    trySend(chunk)
                 }
             }
 
-            override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                var exception = t
-                ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.STREAM_FAILED, params.model.modelId, response?.code ?: responseCode, response?.body?.contentLength())
+            val listener = object : EventSourceListener() {
+                override fun onOpen(eventSource: EventSource, response: Response) {
+                    metadata.response(response.code)
+                }
 
-                val bodyRaw = response?.body?.stringSafe()
-                try {
-                    if (!bodyRaw.isNullOrBlank()) {
-                        exception = json.parseToJsonElement(bodyRaw).parseErrorDetail()
-                    } else if (t == null && response != null) {
-                        exception = Exception("Unknown error: ${response.code}")
+                override fun onEvent(
+                    eventSource: EventSource,
+                    id: String?,
+                    type: String?,
+                    data: String
+                ) {
+                    metadata.event(data.toByteArray(Charsets.UTF_8).size.toLong())
+                    try {
+                        val result = decoder.accept(SseEvent(id = id, event = type, data = data))
+                        sendChunks(result.chunks)
+                        if (result.completed) close()
+                    } catch (e: Throwable) {
+                        close(e)
                     }
-                } catch (e: Throwable) {
-                    ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.PARSE_FAILED, params.model.modelId, response?.code ?: responseCode, bodyRaw?.toByteArray(Charsets.UTF_8)?.size?.toLong())
-                } finally {
-                    close(exception ?: Exception("Stream failed"))
+                }
+
+                override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
+                    var exception = t
+                    response?.let { metadata.response(it.code) }
+
+                    val bodyRaw = response?.body?.stringSafe()
+                    metadata.bodySize(bodyRaw?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0)
+                    try {
+                        if (!bodyRaw.isNullOrBlank()) {
+                            exception = json.parseToJsonElement(bodyRaw).parseErrorDetail()
+                        } else if (t == null && response != null) {
+                            exception = Exception("Unknown error: ${response.code}")
+                        }
+                    } catch (e: Throwable) {
+                    } finally {
+                        close(exception ?: Exception("Stream failed"))
+                    }
+                }
+
+                override fun onClosed(eventSource: EventSource) {
+                    sendChunks(decoder.onClosed())
+                    close()
                 }
             }
 
-            override fun onClosed(eventSource: EventSource) {
-                sendChunks(decoder.onClosed())
-                close()
+            val eventSource = EventSources.createFactory(client)
+                .newEventSource(request, listener)
+
+            awaitClose {
+                eventSource.cancel()
             }
-        }
+            // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
 
-        val eventSource = EventSources.createFactory(client)
-            .newEventSource(request, listener)
-
-        awaitClose {
-            eventSource.cancel()
+        } finally {
+            metadata.finish()
         }
-        // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
     }.buffer(Channel.UNLIMITED).flowOn(Dispatchers.IO)
 
     private fun buildRequest(

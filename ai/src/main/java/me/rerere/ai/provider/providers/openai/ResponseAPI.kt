@@ -3,7 +3,6 @@ package me.rerere.ai.provider.providers.openai
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.channels.onFailure
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
@@ -99,18 +98,24 @@ class ResponseAPI(
             .configureSessionHeaders(providerSetting.baseUrl, params.sessionId)
             .build()
 
-        ProviderLog.record(ProviderLog.Provider.OPENAI, ProviderLog.Operation.REQUEST, params.model.modelId, null, request.body?.contentLength())
+        val metadata = ProviderLog.Summary(ProviderLog.Provider.OPENAI, params.model.modelId)
+        try {
+            // await() waits for the response headers; reading the body can still block.
+            client.newCall(request).await().use { response ->
+                metadata.response(response.code)
+                if (!response.isSuccessful) {
+                    val errorBody = response.body.string()
+                    metadata.bodySize(errorBody.toByteArray(Charsets.UTF_8).size.toLong())
+                    throw Exception("Failed to get response: ${response.code} ${errorBody}")
+                }
 
-        // await() waits for the response headers; reading the body can still block.
-        client.newCall(request).await().use { response ->
-            ProviderLog.record(ProviderLog.Provider.OPENAI, ProviderLog.Operation.RESPONSE, params.model.modelId, response.code, response.body.contentLength())
-            if (!response.isSuccessful) {
-                throw Exception("Failed to get response: ${response.code} ${response.body.string()}")
+                val bodyStr = response.body.string()
+                metadata.bodySize(bodyStr.toByteArray(Charsets.UTF_8).size.toLong())
+                val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
+                parseResponseOutput(bodyJson)
             }
-
-            val bodyStr = response.body.string()
-            val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
-            parseResponseOutput(bodyJson)
+        } finally {
+            metadata.finish()
         }
     }
 
@@ -119,92 +124,90 @@ class ResponseAPI(
         messages: List<UIMessage>,
         params: TextGenerationParams
     ): Flow<StreamChunk> = callbackFlow {
-        val requestBody = buildRequestBody(
-            providerSetting = providerSetting,
-            messages = messages,
-            params = params,
-            stream = true,
-        )
-        val request = Request.Builder()
-            .url("${providerSetting.baseUrl}${providerSetting.responsesPath}")
-            .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader(
-                "Authorization",
-                "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}"
+        val metadata = ProviderLog.Summary(ProviderLog.Provider.OPENAI, params.model.modelId)
+        try {
+            val requestBody = buildRequestBody(
+                providerSetting = providerSetting,
+                messages = messages,
+                params = params,
+                stream = true,
             )
-            .configureReferHeaders(providerSetting.baseUrl)
-            .configureSessionHeaders(providerSetting.baseUrl, params.sessionId)
-            .build()
+            val request = Request.Builder()
+                .url("${providerSetting.baseUrl}${providerSetting.responsesPath}")
+                .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
+                .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+                .addHeader(
+                    "Authorization",
+                    "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}"
+                )
+                .configureReferHeaders(providerSetting.baseUrl)
+                .configureSessionHeaders(providerSetting.baseUrl, params.sessionId)
+                .build()
 
-        ProviderLog.record(ProviderLog.Provider.OPENAI, ProviderLog.Operation.REQUEST, params.model.modelId, null, request.body?.contentLength())
+            val decoder = ResponseApiStreamDecoder()
 
-        val decoder = ResponseApiStreamDecoder()
-
-        var responseCode: Int? = null
-
-        fun sendChunks(chunks: Iterable<StreamChunk>) {
-            chunks.forEach { chunk ->
-                trySend(chunk).onFailure {
-                    ProviderLog.record(ProviderLog.Provider.OPENAI, ProviderLog.Operation.CHUNK_DROPPED, params.model.modelId, responseCode, null)
-                }
-            }
-        }
-
-        val listener = object : EventSourceListener() {
-            override fun onOpen(eventSource: EventSource, response: Response) {
-                responseCode = response.code
-                ProviderLog.record(ProviderLog.Provider.OPENAI, ProviderLog.Operation.STREAM_OPEN, params.model.modelId, response.code, response.body.contentLength())
-            }
-
-            override fun onEvent(
-                eventSource: EventSource,
-                id: String?,
-                type: String?,
-                data: String
-            ) {
-                ProviderLog.record(ProviderLog.Provider.OPENAI, ProviderLog.Operation.STREAM_EVENT, params.model.modelId, responseCode, data.toByteArray(Charsets.UTF_8).size.toLong())
-                try {
-                    val result = decoder.accept(SseEvent(id = id, event = type, data = data))
-                    sendChunks(result.chunks)
-                    if (result.completed) close()
-                } catch (e: Throwable) {
-                    close(e)
+            fun sendChunks(chunks: Iterable<StreamChunk>) {
+                chunks.forEach { chunk ->
+                    trySend(chunk)
                 }
             }
 
-            override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                var exception = t
+            val listener = object : EventSourceListener() {
+                override fun onOpen(eventSource: EventSource, response: Response) {
+                    metadata.response(response.code)
+                }
 
-                ProviderLog.record(ProviderLog.Provider.OPENAI, ProviderLog.Operation.STREAM_FAILED, params.model.modelId, response?.code ?: responseCode, response?.body?.contentLength())
-
-                val bodyRaw = response?.body?.stringSafe()
-                try {
-                    if (!bodyRaw.isNullOrBlank()) {
-                        val bodyElement = Json.parseToJsonElement(bodyRaw)
-                        exception = bodyElement.parseErrorDetail()
+                override fun onEvent(
+                    eventSource: EventSource,
+                    id: String?,
+                    type: String?,
+                    data: String
+                ) {
+                    metadata.event(data.toByteArray(Charsets.UTF_8).size.toLong())
+                    try {
+                        val result = decoder.accept(SseEvent(id = id, event = type, data = data))
+                        sendChunks(result.chunks)
+                        if (result.completed) close()
+                    } catch (e: Throwable) {
+                        close(e)
                     }
-                } catch (e: Throwable) {
-                    ProviderLog.record(ProviderLog.Provider.OPENAI, ProviderLog.Operation.PARSE_FAILED, params.model.modelId, response?.code ?: responseCode, bodyRaw?.toByteArray(Charsets.UTF_8)?.size?.toLong())
-                } finally {
-                    close(exception)
+                }
+
+                override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
+                    var exception = t
+
+                    response?.let { metadata.response(it.code) }
+
+                    val bodyRaw = response?.body?.stringSafe()
+                    metadata.bodySize(bodyRaw?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0)
+                    try {
+                        if (!bodyRaw.isNullOrBlank()) {
+                            val bodyElement = Json.parseToJsonElement(bodyRaw)
+                            exception = bodyElement.parseErrorDetail()
+                        }
+                    } catch (e: Throwable) {
+                    } finally {
+                        close(exception)
+                    }
+                }
+
+                override fun onClosed(eventSource: EventSource) {
+                    sendChunks(decoder.onClosed())
+                    close()
                 }
             }
 
-            override fun onClosed(eventSource: EventSource) {
-                sendChunks(decoder.onClosed())
-                close()
+            val eventSource = EventSources.createFactory(client)
+                .newEventSource(request, listener)
+
+            awaitClose {
+                eventSource.cancel()
             }
-        }
+            // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
 
-        val eventSource = EventSources.createFactory(client)
-            .newEventSource(request, listener)
-
-        awaitClose {
-            ProviderLog.record(ProviderLog.Provider.OPENAI, ProviderLog.Operation.STREAM_CLOSED, params.model.modelId, responseCode, null)
-            eventSource.cancel()
+        } finally {
+            metadata.finish()
         }
-        // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
     }.buffer(Channel.UNLIMITED).flowOn(Dispatchers.IO)
 
     internal fun buildRequestBody(
@@ -449,7 +452,6 @@ class ResponseAPI(
                                                     put("type", "input_image")
                                                     put("image_url", encoded.base64)
                                                 }.onFailure {
-                                                    ProviderLog.record(ProviderLog.Provider.OPENAI, ProviderLog.Operation.IMAGE_ENCODING_FAILED, null, null, null)
                                                     put("type", "input_text")
                                                     put("text", "Error: Failed to encode image to base64")
                                                 }
@@ -537,7 +539,6 @@ class ResponseAPI(
                                         put("type", "input_image")
                                         put("image_url", encodedImage.base64)
                                     }.onFailure {
-                                        ProviderLog.record(ProviderLog.Provider.OPENAI, ProviderLog.Operation.IMAGE_ENCODING_FAILED, null, null, null)
                                         put("type", "input_text")
                                         put("text", "Error: Failed to encode image to base64")
                                     }

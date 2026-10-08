@@ -4,7 +4,6 @@ import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.channels.onFailure
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
@@ -136,32 +135,38 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                     .get()
                     .build()
             )
-            val response = client.newCall(request).await()
-            ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.RESPONSE, null, response.code, response.body.contentLength())
-            if (response.isSuccessful) {
-                val body = response.body?.string() ?: error("empty body")
-                val bodyObject = json.parseToJsonElement(body).jsonObject
-                val models = bodyObject["models"]?.jsonArray ?: return@withContext emptyList()
+            val metadata = ProviderLog.Summary(ProviderLog.Provider.GOOGLE, null)
+            try {
+                val response = client.newCall(request).await()
+                metadata.response(response.code)
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: error("empty body")
+                    metadata.bodySize(body.toByteArray(Charsets.UTF_8).size.toLong())
+                    val bodyObject = json.parseToJsonElement(body).jsonObject
+                    val models = bodyObject["models"]?.jsonArray ?: return@withContext emptyList()
 
-                models.mapNotNull {
-                    val modelObject = it.jsonObject
+                    models.mapNotNull {
+                        val modelObject = it.jsonObject
 
-                    // 忽略非chat/embedding模型
-                    val supportedGenerationMethods =
-                        modelObject["supportedGenerationMethods"]!!.jsonArray
-                            .map { method -> method.jsonPrimitive.content }
-                    if ("generateContent" !in supportedGenerationMethods && "embedContent" !in supportedGenerationMethods) {
-                        return@mapNotNull null
+                        // 忽略非chat/embedding模型
+                        val supportedGenerationMethods =
+                            modelObject["supportedGenerationMethods"]!!.jsonArray
+                                .map { method -> method.jsonPrimitive.content }
+                        if ("generateContent" !in supportedGenerationMethods && "embedContent" !in supportedGenerationMethods) {
+                            return@mapNotNull null
+                        }
+
+                        Model(
+                            modelId = modelObject["name"]!!.jsonPrimitive.content.substringAfter("/"),
+                            displayName = modelObject["displayName"]!!.jsonPrimitive.content,
+                            type = if ("generateContent" in supportedGenerationMethods) ModelType.CHAT else ModelType.EMBEDDING,
+                        )
                     }
-
-                    Model(
-                        modelId = modelObject["name"]!!.jsonPrimitive.content.substringAfter("/"),
-                        displayName = modelObject["displayName"]!!.jsonPrimitive.content,
-                        type = if ("generateContent" in supportedGenerationMethods) ModelType.CHAT else ModelType.EMBEDDING,
-                    )
+                } else {
+                    emptyList()
                 }
-            } else {
-                emptyList()
+            } finally {
+                metadata.finish()
             }
         }
 
@@ -198,24 +203,32 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 .build()
         )
 
-        val response = client.newCall(request).await()
-        ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.RESPONSE, params.model.modelId, response.code, response.body.contentLength())
-        if (!response.isSuccessful) {
-            throw Exception("Failed to get response: ${response.code} ${response.body?.string()}")
+        val metadata = ProviderLog.Summary(ProviderLog.Provider.GOOGLE, params.model.modelId)
+        try {
+            val response = client.newCall(request).await()
+            metadata.response(response.code)
+            if (!response.isSuccessful) {
+                val errorBody = response.body?.string()
+                metadata.bodySize(errorBody?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0)
+                throw Exception("Failed to get response: ${response.code} ${errorBody}")
+            }
+
+            val bodyStr = response.body?.string() ?: ""
+            metadata.bodySize(bodyStr.toByteArray(Charsets.UTF_8).size.toLong())
+            val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
+
+            val candidate = bodyJson["candidates"]?.jsonArray?.firstOrNull()?.jsonObject
+                ?: error("No candidates in response")
+            TextGenerationResult(
+                id = Uuid.random().toString(),
+                model = params.model.modelId,
+                message = parseMessage(candidate),
+                finishReason = candidate["finishReason"]?.jsonPrimitive?.contentOrNull,
+                usage = parseUsageMeta(bodyJson["usageMetadata"] as? JsonObject),
+            )
+        } finally {
+            metadata.finish()
         }
-
-        val bodyStr = response.body?.string() ?: ""
-        val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
-
-        val candidate = bodyJson["candidates"]?.jsonArray?.firstOrNull()?.jsonObject
-            ?: error("No candidates in response")
-        TextGenerationResult(
-            id = Uuid.random().toString(),
-            model = params.model.modelId,
-            message = parseMessage(candidate),
-            finishReason = candidate["finishReason"]?.jsonPrimitive?.contentOrNull,
-            usage = parseUsageMeta(bodyJson["usageMetadata"] as? JsonObject),
-        )
     }
 
     override suspend fun streamText(
@@ -233,116 +246,112 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): Flow<StreamChunk> = callbackFlow {
-        val requestBody = buildCompletionRequestBody(messages, params)
+        val metadata = ProviderLog.Summary(ProviderLog.Provider.GOOGLE, params.model.modelId)
+        try {
+            val requestBody = buildCompletionRequestBody(messages, params)
 
-        val url = buildUrl(
-            providerSetting = providerSetting,
-            path = if (providerSetting.vertexAI) {
-                "publishers/google/models/${params.model.modelId}:streamGenerateContent"
-            } else {
-                "models/${params.model.modelId}:streamGenerateContent"
-            }
-        ).newBuilder().addQueryParameter("alt", "sse").build()
-
-        val request = transformRequest(
-            providerSetting = providerSetting,
-            request = Request.Builder()
-                .url(url)
-                .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
-                .configureSessionHeaders(url.toString(), params.sessionId)
-                .post(
-                    json.encodeToString(requestBody).toRequestBody("application/json".toMediaType())
-                )
-                .configureReferHeaders(providerSetting.baseUrl)
-                .build()
-        )
-
-        ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.REQUEST, params.model.modelId, null, request.body?.contentLength())
-
-        val responseId = Uuid.random().toString()
-        val decoder = GoogleStreamDecoder(responseId, params.model.modelId)
-
-        var responseCode: Int? = null
-
-        fun sendChunks(chunks: Iterable<StreamChunk>) {
-            chunks.forEach { chunk ->
-                trySend(chunk).onFailure {
-                    ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.CHUNK_DROPPED, params.model.modelId, responseCode, null)
+            val url = buildUrl(
+                providerSetting = providerSetting,
+                path = if (providerSetting.vertexAI) {
+                    "publishers/google/models/${params.model.modelId}:streamGenerateContent"
+                } else {
+                    "models/${params.model.modelId}:streamGenerateContent"
                 }
-            }
-        }
+            ).newBuilder().addQueryParameter("alt", "sse").build()
 
-        val listener = object : EventSourceListener() {
-            override fun onOpen(eventSource: EventSource, response: Response) {
-                responseCode = response.code
-                ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.STREAM_OPEN, params.model.modelId, response.code, response.body.contentLength())
-            }
+            val request = transformRequest(
+                providerSetting = providerSetting,
+                request = Request.Builder()
+                    .url(url)
+                    .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
+                    .configureSessionHeaders(url.toString(), params.sessionId)
+                    .post(
+                        json.encodeToString(requestBody).toRequestBody("application/json".toMediaType())
+                    )
+                    .configureReferHeaders(providerSetting.baseUrl)
+                    .build()
+            )
 
-            override fun onEvent(
-                eventSource: EventSource,
-                id: String?,
-                type: String?,
-                data: String
-            ) {
-                ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.STREAM_EVENT, params.model.modelId, responseCode, data.toByteArray(Charsets.UTF_8).size.toLong())
+            val responseId = Uuid.random().toString()
+            val decoder = GoogleStreamDecoder(responseId, params.model.modelId)
 
-                try {
-                    val result = decoder.accept(SseEvent(id = id, event = type, data = data))
-                    sendChunks(result.chunks)
-                    if (result.completed) close()
-                } catch (e: Throwable) {
-                    ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.PARSE_FAILED, params.model.modelId, responseCode, data.toByteArray(Charsets.UTF_8).size.toLong())
-                    close(e)
+            fun sendChunks(chunks: Iterable<StreamChunk>) {
+                chunks.forEach { chunk ->
+                    trySend(chunk)
                 }
             }
 
-            override fun onFailure(
-                eventSource: EventSource,
-                t: Throwable?,
-                response: Response?
-            ) {
-                var exception = t
+            val listener = object : EventSourceListener() {
+                override fun onOpen(eventSource: EventSource, response: Response) {
+                    metadata.response(response.code)
+                }
 
-                ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.STREAM_FAILED, params.model.modelId, response?.code ?: responseCode, response?.body?.contentLength())
+                override fun onEvent(
+                    eventSource: EventSource,
+                    id: String?,
+                    type: String?,
+                    data: String
+                ) {
+                    metadata.event(data.toByteArray(Charsets.UTF_8).size.toLong())
 
-                try {
-                    if (t == null && response != null) {
-                        val bodyStr = response.body.stringSafe()
-                        if (!bodyStr.isNullOrEmpty()) {
-                            val bodyElement = json.parseToJsonElement(bodyStr)
-                            if (bodyElement is JsonObject) {
-                                exception = Exception(
-                                    bodyElement["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content
-                                        ?: "unknown"
-                                )
-                            }
-                        } else {
-                            exception = Exception("Unknown error: ${response.code}")
-                        }
+                    try {
+                        val result = decoder.accept(SseEvent(id = id, event = type, data = data))
+                        sendChunks(result.chunks)
+                        if (result.completed) close()
+                    } catch (e: Throwable) {
+                        close(e)
                     }
-                } catch (e: Throwable) {
-                    ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.PARSE_FAILED, params.model.modelId, response?.code ?: responseCode, null)
-                    exception = e
-                } finally {
-                    close(exception ?: Exception("Stream failed"))
+                }
+
+                override fun onFailure(
+                    eventSource: EventSource,
+                    t: Throwable?,
+                    response: Response?
+                ) {
+                    var exception = t
+
+                    response?.let { metadata.response(it.code) }
+
+                    try {
+                        if (t == null && response != null) {
+                            val bodyStr = response.body.stringSafe()
+                            metadata.bodySize(bodyStr?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0)
+                            if (!bodyStr.isNullOrEmpty()) {
+                                val bodyElement = json.parseToJsonElement(bodyStr)
+                                if (bodyElement is JsonObject) {
+                                    exception = Exception(
+                                        bodyElement["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content
+                                            ?: "unknown"
+                                    )
+                                }
+                            } else {
+                                exception = Exception("Unknown error: ${response.code}")
+                            }
+                        }
+                    } catch (e: Throwable) {
+                        exception = e
+                    } finally {
+                        close(exception ?: Exception("Stream failed"))
+                    }
+                }
+
+                override fun onClosed(eventSource: EventSource) {
+                    sendChunks(decoder.onClosed())
+                    close()
                 }
             }
 
-            override fun onClosed(eventSource: EventSource) {
-                ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.STREAM_CLOSED, params.model.modelId, responseCode, null)
-                sendChunks(decoder.onClosed())
-                close()
+            val eventSource = EventSources.createFactory(client)
+                    .newEventSource(request, listener)
+
+            awaitClose {
+                eventSource.cancel()
             }
-        }
+            // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
 
-        val eventSource = EventSources.createFactory(client)
-                .newEventSource(request, listener)
-
-        awaitClose {
-            ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.STREAM_CLOSED, params.model.modelId, responseCode, null)
-            eventSource.cancel()
+        } finally {
+            metadata.finish()
         }
-        // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
     }.buffer(Channel.UNLIMITED).flowOn(Dispatchers.IO)
 
     private fun buildCompletionRequestBody(
@@ -821,20 +830,20 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
                 // 1. 拆分出纯文本部分
                 val textParts = output.filterIsInstance<UIMessagePart.Text>()
-                
+
                 // 2. 提取所有的多模态(图片/视频/音频)，并直接转为 Google 要求的格式
                 // 过滤出最终包含 inlineData 的数据块
                 val mediaGoogleParts = output
                     .filter { it !is UIMessagePart.Text }
                     .mapNotNull { it.toGooglePart() }
-                    .filter { it.containsKey("inlineData") } 
+                    .filter { it.containsKey("inlineData") }
 
                 // 3. 构建给模型看的结构化 response 节点
                 put("response", buildJsonObject {
                     // 处理文本结果
                     if (textParts.isNotEmpty()) {
                         put(
-                            "result", 
+                            "result",
                             textParts.joinToString("\n") { it.text }
                         )
                     } else if (mediaGoogleParts.isEmpty()) {
@@ -866,7 +875,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                                     // 添加能够让 $ref 认出它的唯一名称
                                     put("displayName", refName)
                                 })
-                                
+
                                 // 保留可能存在的其他字段
                                 googlePart.forEach { (k, v) ->
                                     if (k != "inlineData") put(k, v)

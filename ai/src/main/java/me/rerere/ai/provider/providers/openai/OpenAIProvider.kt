@@ -55,7 +55,6 @@ class OpenAIProvider(
     private val chatCompletionsAPI = ChatCompletionsAPI(client = client, keyRoulette = keyRoulette)
     private val responseAPI = ResponseAPI(client = client, keyRoulette = keyRoulette)
 
-
     override suspend fun listModels(providerSetting: ProviderSetting.OpenAI): List<Model> =
         withContext(Dispatchers.IO) {
             val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
@@ -66,24 +65,32 @@ class OpenAIProvider(
                 .get()
                 .build()
 
-            val response = client.newCall(request).await()
-            ProviderLog.record(ProviderLog.Provider.OPENAI, ProviderLog.Operation.RESPONSE, null, response.code, response.body.contentLength())
-            if (!response.isSuccessful) {
-                error("Failed to get models: ${response.code} ${response.body?.string()}")
-            }
+            val metadata = ProviderLog.Summary(ProviderLog.Provider.OPENAI, null)
+            try {
+                val response = client.newCall(request).await()
+                metadata.response(response.code)
+                if (!response.isSuccessful) {
+                    val errorBody = response.body?.string()
+                    metadata.bodySize(errorBody?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0)
+                    error("Failed to get models: ${response.code} ${errorBody}")
+                }
 
-            val bodyStr = response.body?.string() ?: ""
-            val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
-            val data = bodyJson["data"]?.jsonArray ?: return@withContext emptyList()
+                val bodyStr = response.body?.string() ?: ""
+                metadata.bodySize(bodyStr.toByteArray(Charsets.UTF_8).size.toLong())
+                val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
+                val data = bodyJson["data"]?.jsonArray ?: return@withContext emptyList()
 
-            data.mapNotNull { modelJson ->
-                val modelObj = modelJson.jsonObject
-                val id = modelObj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                data.mapNotNull { modelJson ->
+                    val modelObj = modelJson.jsonObject
+                    val id = modelObj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
 
-                Model(
-                    modelId = id,
-                    displayName = id,
-                )
+                    Model(
+                        modelId = id,
+                        displayName = id,
+                    )
+                }
+            } finally {
+                metadata.finish()
             }
         }
 
@@ -218,7 +225,7 @@ class OpenAIProvider(
                 put("model", params.model.modelId)
                 put("prompt", params.prompt)
                 put("n", params.numOfImages)
-                
+
                 // 只匹配 x.ai 本身及其子域名，避免 "xxx-max.ai" 之类的中转域名被误判
                 val host = providerSetting.baseUrl.toHttpUrlOrNull()?.host?.lowercase()
                 val isGrok = host == "x.ai" || host?.endsWith(".x.ai") == true ||
@@ -240,18 +247,25 @@ class OpenAIProvider(
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        ProviderLog.record(ProviderLog.Provider.OPENAI, ProviderLog.Operation.REQUEST, params.model.modelId, null, request.body?.contentLength())
-
-        val items = withContext(Dispatchers.IO) {
-            val response = client.newCall(request).await()
-            ProviderLog.record(ProviderLog.Provider.OPENAI, ProviderLog.Operation.RESPONSE, params.model.modelId, response.code, response.body.contentLength())
-            if (!response.isSuccessful) {
-                error("Failed to generate image: ${response.code} ${response.body?.string()}")
+        val metadata = ProviderLog.Summary(ProviderLog.Provider.OPENAI, params.model.modelId)
+        try {
+            val items = withContext(Dispatchers.IO) {
+                val response = client.newCall(request).await()
+                metadata.response(response.code)
+                if (!response.isSuccessful) {
+                    val errorBody = response.body?.string()
+                    metadata.bodySize(errorBody?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0)
+                    error("Failed to generate image: ${response.code} ${errorBody}")
+                }
+                val bodyStr = response.body.string()
+                metadata.bodySize(bodyStr.toByteArray(Charsets.UTF_8).size.toLong())
+                parseImageResponse(bodyStr)
             }
-            parseImageResponse(response.body.string())
-        }
 
-        items.forEach { emit(it) }
+            items.forEach { emit(it) }
+        } finally {
+            metadata.finish()
+        }
     }
 
     override suspend fun editImage(

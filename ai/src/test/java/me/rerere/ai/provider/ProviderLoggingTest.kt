@@ -2,6 +2,11 @@ package me.rerere.ai.provider
 
 import java.io.ByteArrayOutputStream
 import java.io.PrintStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -196,8 +201,103 @@ class ProviderLoggingTest {
         assertTrue(logs().contains("model=sha256:"))
     }
 
-    private fun client(body: String, code: Int = 200, sse: Boolean = false) = OkHttpClient.Builder()
+    @Test
+    fun `large streams from every API produce one final line with all event bytes`() = runBlocking {
+        for (provider in listOf("openai-chat", "openai-responses", "google", "claude", "google-interactions")) {
+            ShadowLog.clear()
+            output.reset()
+            val data = when (provider) {
+                "openai-chat" -> """{"id":"reply","model":"gpt-4o","choices":[{"index":0,"delta":{"content":"$responseCanary ответ"}}]}"""
+                "openai-responses" -> """{"type":"response.output_text.delta","item_id":"item","content_index":0,"delta":"$responseCanary ответ"}"""
+                "google" -> """{"candidates":[{"content":{"parts":[{"text":"$responseCanary ответ"}]}}]}"""
+                "google-interactions" -> """{"event_type":"step.delta","index":0,"delta":{"type":"text","text":"$responseCanary ответ"}}"""
+                else -> """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"$responseCanary ответ"}}"""
+            }
+            val start = """{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"""
+            val header = when (provider) {
+                "openai-responses" -> "event: response.output_text.delta\n"
+                "claude" -> "event: content_block_delta\n"
+                else -> ""
+            }
+            val body = (if (provider == "claude") "event: content_block_start\n" + sse(start) else "") +
+                (header + sse(data)).repeat(150)
+            val http = client(body, sse = true)
+            withTimeout(5_000) { stream(provider, http).toList() }
+            assertSafeLogs(provider.substringBefore('-'))
+            val expectedEvents = if (provider == "claude") 151 else 150
+            val expectedBytes = data.toByteArray(Charsets.UTF_8).size.toLong() * 150 +
+                if (provider == "claude") start.toByteArray(Charsets.UTF_8).size else 0
+            assertTrue("$provider event count", logs().contains("event_count=$expectedEvents "))
+            assertTrue("$provider UTF-8 event bytes", logs().contains("size_bytes=$expectedBytes "))
+        }
+    }
+
+    @Test
+    fun `cancelled stream emits exactly one summary after cleanup`() = runBlocking {
+        val fixtures = listOf(
+            "openai-chat" to sse("""{"id":"reply","model":"gpt-4o","choices":[{"index":0,"delta":{"content":"$responseCanary"}}]}"""),
+            "openai-responses" to ("event: response.output_text.delta\n" + sse("""{"type":"response.output_text.delta","item_id":"item","content_index":0,"delta":"$responseCanary"}""")),
+            "google" to sse("""{"candidates":[{"content":{"parts":[{"text":"$responseCanary"}]}}]}"""),
+            "google-interactions" to sse("""{"event_type":"step.delta","index":0,"delta":{"type":"text","text":"$responseCanary"}}"""),
+            "claude" to ("event: content_block_start\n" + sse("""{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}""") +
+                "event: content_block_delta\n" + sse("""{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"$responseCanary"}}""")),
+        )
+        for ((provider, events) in fixtures) {
+            ShadowLog.clear()
+            output.reset()
+            withTimeout(5_000) { stream(provider, client(events.repeat(150), sse = true)).take(1).toList() }
+            assertSafeLogs(provider.substringBefore('-'))
+        }
+    }
+
+    @Test
+    fun `malformed nonstream response emits one summary even when parser throws`() = runBlocking {
+        val body = "broken-json $responseCanary $secretCanary"
+        val failure = runCatching {
+            ChatCompletionsAPI(client(body), KeyRoulette.default()).generateText(openAI(), messages, params)
+        }.exceptionOrNull()
+        assertTrue(failure != null)
+        assertSafeLogs("openai")
+        assertTrue(logs().contains("size_bytes=${body.toByteArray(Charsets.UTF_8).size} "))
+    }
+
+    @Test
+    fun `simultaneous responses keep independent model status and size summaries`() = runBlocking {
+        val barrier = CountDownLatch(2)
+        val bodyOne = chatResponse()
+        val bodyTwo = chatResponse().replace(responseCanary, "$responseCanary extra")
+        fun concurrentClient(body: String) = client(body, beforeResponse = {
+            barrier.countDown()
+            assertTrue("both requests should overlap", barrier.await(5, TimeUnit.SECONDS))
+        })
+        val first = async(Dispatchers.Default) {
+            ChatCompletionsAPI(concurrentClient(bodyOne), KeyRoulette.default()).generateText(openAI(), messages, params.copy(model = Model(modelId = "first-model")))
+        }
+        val second = async(Dispatchers.Default) {
+            ChatCompletionsAPI(concurrentClient(bodyTwo), KeyRoulette.default()).generateText(openAI(), messages, params.copy(model = Model(modelId = "second-model")))
+        }
+        first.await()
+        second.await()
+        assertEquals(2, metadata().size)
+        for ((model, body) in listOf("first-model" to bodyOne, "second-model" to bodyTwo)) {
+            val line = metadata().single { it.msg.contains("model=$model ") }.msg
+            assertTrue(line.contains("size_bytes=${body.toByteArray(Charsets.UTF_8).size} "))
+            assertTrue(line.contains("event_count=0 "))
+            assertTrue(line.contains("http_code=200 "))
+        }
+    }
+
+    private suspend fun stream(provider: String, http: OkHttpClient) = when (provider) {
+        "openai-chat" -> ChatCompletionsAPI(http, KeyRoulette.default()).streamText(openAI(), messages, params)
+        "openai-responses" -> ResponseAPI(http).streamText(openAI(), messages, params)
+        "google" -> GoogleProvider(http).streamText(google(), messages, params)
+        "google-interactions" -> GoogleProvider(http).streamText(google().copy(useInteractionsApi = true), messages, params)
+        else -> ClaudeProvider(http).streamText(claude(), messages, params)
+    }
+
+    private fun client(body: String, code: Int = 200, sse: Boolean = false, beforeResponse: (() -> Unit)? = null) = OkHttpClient.Builder()
         .addInterceptor { chain ->
+            beforeResponse?.invoke()
             capturedRequest = chain.request()
             Response.Builder()
                 .request(chain.request())
@@ -230,11 +330,15 @@ class ProviderLoggingTest {
         assertTrue("provider metadata should remain", logs.contains("provider=$provider"))
         assertTrue("HTTP metadata should remain", logs.contains("http_code="))
         assertTrue("size metadata should remain", logs.contains("size_bytes="))
+        assertEquals("exactly one final diagnostic per response", 1, metadata().size)
+        assertTrue("event count should remain", logs.contains("event_count="))
+        assertTrue("monotonic response duration should remain", Regex("duration_ms=\\d+").containsMatchIn(logs))
         if (expectsModel) assertTrue("ordinary model ID should remain", logs.contains("model=gpt-4o"))
         assertTrue(ShadowLog.getLogs().all { it.throwable == null })
     }
 
     private fun logs() = ShadowLog.getLogs().joinToString("\n") { it.msg } + output.toString(Charsets.UTF_8)
+    private fun metadata() = ShadowLog.getLogs().filter { it.tag == "ProviderMetadata" }
     private fun openAI() = ProviderSetting.OpenAI(baseUrl = "https://api.example/v1", apiKey = secretCanary)
     private fun google() = ProviderSetting.Google(baseUrl = "https://api.example/v1", apiKey = secretCanary)
     private fun claude() = ProviderSetting.Claude(baseUrl = "https://api.example/v1", apiKey = secretCanary)
