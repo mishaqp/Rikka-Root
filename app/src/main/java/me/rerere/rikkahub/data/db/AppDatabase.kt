@@ -50,8 +50,9 @@ import me.rerere.rikkahub.utils.JsonInstant
         MediaCreationRecordEntity::class,
         ScheduledJobEntity::class,
         ScheduledJobRunEntity::class,
+        me.rerere.rikkahub.data.db.entity.SshHostEntity::class,
     ],
-    version = 28,
+    version = 29,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -75,6 +76,7 @@ import me.rerere.rikkahub.utils.JsonInstant
         AutoMigration(from = 25, to = 26),
         AutoMigration(from = 26, to = 27),
         AutoMigration(from = 27, to = 28),
+        AutoMigration(from = 28, to = 29),
     ]
 )
 @TypeConverters(TokenUsageConverter::class)
@@ -100,6 +102,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun scheduledJobDao(): ScheduledJobDao
 
     abstract fun scheduledJobRunDao(): ScheduledJobRunDao
+
+    abstract fun sshHostDao(): me.rerere.rikkahub.data.db.dao.SshHostDao
 }
 
 object TokenUsageConverter {

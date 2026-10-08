@@ -49,6 +49,7 @@ class LocalTools(
     private val rootAccessStore: RootAccessStore,
     private val filesManager: FilesManager,
     private val termuxPreferences: me.rerere.rikkahub.data.preferences.TermuxPreferences,
+    private val sshHostRepository: me.rerere.rikkahub.data.repository.SshHostRepository,
 ) {
     private val keystoreCrypto by lazy { KeystoreCrypto(AndroidToolKeyStore(context)) }
     val javascriptTool by lazy { buildJavascriptTool() }
@@ -78,6 +79,14 @@ class LocalTools(
         tokenBudget: TokenBudgetLedger? = null,
     ): List<Tool> {
         val tools = mutableListOf<Tool>()
+        if (LocalToolOption.Ssh in options) {
+            val access = LocalFileAccess(context, workspaceCwd, chatImages, resolveWorkspacePath)
+            tools.addAll(listOf(sshExecTool(context, sshHostRepository.toolSecrets),
+                saveSshHostTool(sshHostRepository), listSshHostsTool(sshHostRepository),
+                deleteSshHostTool(sshHostRepository), forgetSshHostKeyTool(context),
+                sshExecSavedTool(context, sshHostRepository), sshUploadTool(context, sshHostRepository, access),
+                sshDownloadTool(context, sshHostRepository, access)))
+        }
         if (LocalToolOption.Termux in options) tools.addAll(listOf(
             termuxRunCommandTool(context), termuxSessionStartTool(context), termuxSessionSendTool(context),
             termuxSessionReadTool(context), termuxSessionKillTool(context), termuxSessionListTool(context)))

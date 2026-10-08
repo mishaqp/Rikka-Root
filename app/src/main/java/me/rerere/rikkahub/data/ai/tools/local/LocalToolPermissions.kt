@@ -8,6 +8,7 @@ import androidx.core.content.ContextCompat
 
 /** Dangerous permissions only; normal permissions are declared for their specific API. */
 internal fun localToolRuntimePermissions(option: LocalToolOption, sdkInt: Int): List<String> = when (option) {
+    LocalToolOption.Ssh -> if (sdkInt >= 37) listOf("android.permission.ACCESS_LOCAL_NETWORK") else emptyList()
     LocalToolOption.Termux -> listOf("com.termux.permission.RUN_COMMAND")
     LocalToolOption.Download -> if (sdkInt <= 28) listOf(Manifest.permission.WRITE_EXTERNAL_STORAGE) else emptyList()
     LocalToolOption.Location -> listOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)

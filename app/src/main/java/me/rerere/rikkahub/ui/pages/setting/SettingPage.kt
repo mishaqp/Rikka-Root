@@ -272,6 +272,10 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         headlineContent = { Text(stringResource(R.string.setting_page_media)) },
                     )
                     item(
+                        onClick = { navController.navigate(Screen.SettingSsh) },
+                        headlineContent = { Text(stringResource(R.string.setting_ssh_title)) },
+                    )
+                    item(
                         onClick = { navController.navigate(Screen.SettingTermux) },
                         supportingContent = { Text(stringResource(R.string.setting_page_termux_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_termux)) },

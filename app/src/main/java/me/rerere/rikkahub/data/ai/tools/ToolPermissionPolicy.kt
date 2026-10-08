@@ -17,6 +17,15 @@ object ToolPermissionPolicy {
             tool.toolName != "ask_user"
 
     val registry: Map<String, String> = linkedMapOf(
+        "ssh_exec" to "команды SSH",
+        "save_ssh_host" to "сохранение хоста SSH",
+        "list_ssh_hosts" to "список хостов SSH",
+        "delete_ssh_host" to "удаление хоста SSH",
+        "ssh_forget_host_key" to "удаление доверенного ключа сервера SSH",
+        "ssh_exec_saved" to "команды сохранённого хоста SSH",
+        "ssh_upload" to "отправка файлов SFTP",
+        "ssh_download" to "чтение файлов SFTP",
+
         "termux_run_command" to "команды Termux",
         "termux_session_start" to "запуск сессии Termux",
         "termux_session_send" to "ввод в сессию Termux",

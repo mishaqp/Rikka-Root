@@ -23,6 +23,9 @@ import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.rikkahub.data.ssh.SshToolSecretSanitizer
+import me.rerere.rikkahub.data.ssh.sanitizeSshToolMessages
+import me.rerere.rikkahub.data.ai.mcp.control.McpToolSecretSanitizer
 import me.rerere.rikkahub.utils.JsonInstant
 import java.time.Instant
 import kotlin.uuid.Uuid
@@ -34,6 +37,8 @@ class ConversationRepository(
     private val database: AppDatabase,
     private val filesManager: FilesManager,
     private val messageFtsManager: MessageFtsManager,
+    private val sshToolSecrets: SshToolSecretSanitizer? = null,
+    private val mcpSecretSanitizer: McpToolSecretSanitizer? = null,
 ) {
     companion object {
         private const val PAGE_SIZE = 20
@@ -310,25 +315,27 @@ class ConversationRepository(
     }
 
     suspend fun insertConversation(conversation: Conversation) {
+        val safeConversation = sanitizeSshConversation(conversation, sshToolSecrets, mcpSecretSanitizer)
         database.withTransaction {
             conversationDAO.insert(
-                conversationToConversationEntity(conversation)
+                conversationToConversationEntity(safeConversation)
             )
-            saveMessageNodes(conversation.id.toString(), conversation.messageNodes)
+            saveMessageNodes(safeConversation.id.toString(), safeConversation.messageNodes)
         }
-        messageFtsManager.indexConversation(conversation)
+        messageFtsManager.indexConversation(safeConversation)
     }
 
     suspend fun updateConversation(conversation: Conversation) {
+        val safeConversation = sanitizeSshConversation(conversation, sshToolSecrets, mcpSecretSanitizer)
         database.withTransaction {
             conversationDAO.update(
-                conversationToConversationEntity(conversation)
+                conversationToConversationEntity(safeConversation)
             )
             // 删除旧的节点，插入新的节点
             messageNodeDAO.deleteByConversation(conversation.id.toString())
-            saveMessageNodes(conversation.id.toString(), conversation.messageNodes)
+            saveMessageNodes(safeConversation.id.toString(), safeConversation.messageNodes)
         }
-        messageFtsManager.indexConversation(conversation)
+        messageFtsManager.indexConversation(safeConversation)
     }
 
     suspend fun deleteConversation(conversation: Conversation) {
@@ -362,7 +369,7 @@ class ConversationRepository(
             val entity = conversationDAO.getConversationById(id) ?: return@forEachIndexed
             val nodes = loadMessageNodes(entity.id)
             val conversation = conversationEntityToConversation(entity, nodes)
-            messageFtsManager.indexConversation(conversation)
+            messageFtsManager.indexConversation(sanitizeSshConversation(conversation, sshToolSecrets, mcpSecretSanitizer))
             onProgress(index + 1, total)
         }
     }
@@ -519,13 +526,27 @@ class ConversationRepository(
                 id = node.id.toString(),
                 conversationId = conversationId,
                 nodeIndex = index,
-                messages = JsonInstant.encodeToString(node.messages),
+                messages = JsonInstant.encodeToString(sanitizeSshToolMessages(node.messages,
+                    sanitizePrivateToolArgs(sshToolSecrets, mcpSecretSanitizer))),
                 selectIndex = node.selectIndex
             )
         }
         messageNodeDAO.insertAll(entities)
     }
 }
+
+internal fun sanitizeSshConversation(conversation: Conversation, secrets: SshToolSecretSanitizer?,
+    mcpSecrets: McpToolSecretSanitizer? = null): Conversation =
+    conversation.copy(messageNodes = conversation.messageNodes.map { node ->
+        node.copy(messages = sanitizeSshToolMessages(node.messages,
+            sanitizePrivateToolArgs(secrets, mcpSecrets)))
+    })
+
+private fun sanitizePrivateToolArgs(ssh: SshToolSecretSanitizer?, mcp: McpToolSecretSanitizer?): (String, String) -> String =
+    { name, input ->
+        val sshSafe = ssh?.sanitizeForPersistence(name, input) ?: SshToolSecretSanitizer.sanitizeForExport(name, input)
+        mcp?.sanitizeForPersistence(name, sshSafe) ?: McpToolSecretSanitizer.sanitizeForExport(name, sshSafe)
+    }
 
 /**
  * 轻量级的会话查询结果，不包含 nodes 和 suggestions 字段

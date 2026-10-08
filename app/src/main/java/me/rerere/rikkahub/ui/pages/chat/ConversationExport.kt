@@ -80,6 +80,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.ssh.sanitizeSshToolMessages
 import me.rerere.rikkahub.ui.components.message.MessagePartBlock
 import me.rerere.rikkahub.ui.components.message.ThinkingStep
 import me.rerere.rikkahub.ui.components.message.ChatMessageServerToolStep
@@ -266,7 +267,7 @@ private fun exportToMarkdown(
         append("# ${conversation.title}\n\n")
         append("*Exported on ${LocalDateTime.now().toLocalString()}*\n\n")
 
-        messages.forEach { message ->
+        sanitizeSshToolMessages(messages).forEach { message ->
             val role = if (message.role == MessageRole.USER) "**User**" else "**Assistant**"
             append("$role:\n\n")
             message.parts.forEach { part ->
@@ -415,7 +416,7 @@ private suspend fun exportToImage(
             CompositionLocalProvider(LocalSettings provides settings) {
                 ExportedChatImage(
                     conversation = conversation,
-                    messages = messages,
+                    messages = sanitizeSshToolMessages(messages),
                     options = options
                 )
             }

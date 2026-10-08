@@ -215,6 +215,9 @@ dependencies {
     // jetbrains markdown parser
     implementation(libs.jetbrains.markdown)
 
+    // SSH/SFTP: the same maintained JSch version as Agent.
+    implementation("com.github.mwiede:jsch:0.2.21")
+
     // okhttp
     implementation(libs.okhttp)
     implementation(libs.okhttp.sse)

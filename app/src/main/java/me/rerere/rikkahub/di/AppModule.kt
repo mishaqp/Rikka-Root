@@ -48,6 +48,10 @@ val appModule = module {
             assistantSource = { id -> settings.settingsFlow.value.assistants.singleOrNull { it.id == id } })
     }
 
+    single { me.rerere.rikkahub.data.ssh.SshCredentialStore(get(), get()) }
+    single { me.rerere.rikkahub.data.ssh.SshToolSecretSanitizer(get()) }
+    single { me.rerere.rikkahub.data.repository.SshHostRepository(
+        get<me.rerere.rikkahub.data.db.AppDatabase>().sshHostDao(), get(), get()) }
     single { me.rerere.rikkahub.data.preferences.TermuxPreferences(get()) }
     single { SubAgentRegistry() }
     single<CronPayloadCipher> { AndroidCronPayloadCipher() }
@@ -65,7 +69,7 @@ val appModule = module {
     }
 
     single {
-        LocalTools(get(), get(), get(), get(), get(), get(), get(), get())
+        LocalTools(get(), get(), get(), get(), get(), get(), get(), get(), get())
     }
 
     single {

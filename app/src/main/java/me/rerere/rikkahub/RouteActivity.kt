@@ -513,6 +513,10 @@ class RouteActivity : ComponentActivity() {
                                 SettingMediaPage()
                             }
 
+                            entry<Screen.SettingSsh> {
+                                me.rerere.rikkahub.ui.pages.setting.ssh.SettingSshPage()
+                            }
+
                             entry<Screen.SettingTermux> {
                                 me.rerere.rikkahub.ui.pages.setting.termux.SettingTermuxPage()
                             }
@@ -757,6 +761,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingTermux : Screen
+
+    @Serializable
+    data object SettingSsh : Screen
 
     @Serializable
     data object SettingDonate : Screen

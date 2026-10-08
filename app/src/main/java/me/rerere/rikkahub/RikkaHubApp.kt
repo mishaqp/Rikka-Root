@@ -94,6 +94,8 @@ class RikkaHubApp : Application() {
         cleanupToolOutputs()
 
         // cleanup workspace temp dirs (proot + rootfs /tmp)
+        me.rerere.rikkahub.utils.NetworkChangeMonitor.start(this)
+
         cleanupWorkspaceTempDirs()
 
         // check workspace integrity (mark workspaces with missing files as broken after backup restore)
