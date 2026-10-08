@@ -4,8 +4,14 @@ package me.rerere.rikkahub.reliability
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import me.rerere.rikkahub.BuildConfig
 import java.io.BufferedReader
 import java.io.File
@@ -16,8 +22,10 @@ import java.util.Date
 import java.util.Locale
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import kotlin.coroutines.resume
 
 private const val TAG = "BugReportBuilder"
+private const val LOGCAT_TIMEOUT_MILLIS = 5_000L
 
 /**
  * Builds a redacted bug-report ZIP suitable for sharing via the system share sheet.
@@ -47,20 +55,36 @@ class BugReportBuilder(
     }
 
     suspend fun build(): File = withContext(Dispatchers.IO) {
-        val ts = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
         val outDir = File(context.cacheDir, "bug_reports").apply { mkdirs() }
-        val zipFile = File(outDir, "rikkahub-agent-bug-$ts.zip")
-
-        ZipOutputStream(FileOutputStream(zipFile)).use { zip ->
-            zip.putEntry("meta.txt", buildMeta())
-            zip.putEntry("logcat.txt", captureLogcat())
-            zip.putEntry("errors.txt", SecretRedactor.redact(errorsLoader().joinToString("\n\n") {
-                it.stackTraceToString()
-            }.ifEmpty { "Ошибок ChatService нет." }))
-            zip.putEntry("README.txt", buildReadme())
+        val zipFile = createReportFile(outDir)
+        var completed = false
+        try {
+            ZipOutputStream(FileOutputStream(zipFile)).use { zip ->
+                zip.putEntry("meta.txt", buildMeta())
+                zip.putEntry("logcat.txt", captureLogcat())
+                zip.putEntry("errors.txt", SecretRedactor.redact(errorsLoader().joinToString("\n\n") {
+                    it.stackTraceToString()
+                }.ifEmpty { "Ошибок ChatService нет." }))
+                zip.putEntry("README.txt", buildReadme())
+            }
+            completed = true
+            Log.i(TAG, "build: wrote ${zipFile.length()} bytes to ${zipFile.absolutePath}")
+            zipFile
+        } finally {
+            // Keep completed reports available even if a later workspace copy is cancelled.
+            if (!completed) zipFile.delete()
         }
-        Log.i(TAG, "build: wrote ${zipFile.length()} bytes to ${zipFile.absolutePath}")
-        zipFile
+    }
+
+    private fun createReportFile(outDir: File): File {
+        val format = SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US)
+        var timestamp = System.currentTimeMillis()
+        while (true) {
+            val file = File(outDir, "rikka-root-report-${format.format(Date(timestamp))}.zip")
+            // Reserve the name atomically so simultaneous builds never overwrite each other.
+            if (file.createNewFile()) return file
+            timestamp++
+        }
     }
 
     private fun ZipOutputStream.putEntry(name: String, content: String) {
@@ -105,21 +129,58 @@ class BugReportBuilder(
         Редактор скрывает распространённые формы, но не все возможные секреты.
         """.trimIndent()
 
-    private fun captureLogcat(): String {
+    private suspend fun captureLogcat(): String {
         // -t 5000: last ~5000 lines. -v threadtime: timestamps + thread/proc.
         // --pid limits the original Agent command to this process, without root/READ_LOGS.
         return try {
             val proc = logcatProcess(listOf("logcat", "-d", "-t", "5000", "-v", "threadtime",
                 "--pid=${android.os.Process.myPid()}"))
-            val raw = BufferedReader(InputStreamReader(proc.inputStream)).useLines { lines ->
-                lines.joinToString("\n")
-            }
-            proc.waitFor()
+            val raw = withTimeout(LOGCAT_TIMEOUT_MILLIS) { readLogcat(proc) }.getOrThrow()
             SecretRedactor.redact(raw)
+        } catch (timeout: TimeoutCancellationException) {
+            // Only our capture timeout becomes a diagnostic; caller cancellation propagates.
+            currentCoroutineContext().ensureActive()
+            val diagnostic = "(Не удалось прочитать logcat: таймаут ${LOGCAT_TIMEOUT_MILLIS / 1000} с.)"
+            Log.w(TAG, diagnostic)
+            diagnostic
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (t: Throwable) {
-            Log.w(TAG, "captureLogcat failed", t)
-            "(Не удалось прочитать logcat: ${t.message ?: t.javaClass.simpleName})"
+            val diagnostic = SecretRedactor.redact("(Не удалось прочитать logcat:\n${t.stackTraceToString()})")
+            // Never pass the raw throwable to Android logging: its message/cause can contain keys.
+            Log.w(TAG, diagnostic)
+            diagnostic
         }
+    }
+
+    private suspend fun readLogcat(proc: java.lang.Process): Result<String> =
+        suspendCancellableCoroutine { continuation ->
+            // A blocked pipe read and waitFor are not cancellable by themselves. Destroying
+            // logcat releases both; close every stream on cancellation and normal completion.
+            continuation.invokeOnCancellation { closeLogcatProcess(proc) }
+            Dispatchers.IO.dispatch(continuation.context, Runnable {
+                val result = try {
+                    runCatching {
+                        BufferedReader(InputStreamReader(proc.inputStream)).useLines { lines ->
+                            val raw = lines.joinToString("\n")
+                            proc.waitFor()
+                            raw
+                        }
+                    }
+                } finally {
+                    closeLogcatProcess(proc)
+                }
+                // A failure is resumed as a value so a cancellation race cannot send an
+                // unredacted exception to CoroutineExceptionHandler.
+                continuation.resume(result)
+            })
+        }
+
+    private fun closeLogcatProcess(proc: java.lang.Process) {
+        runCatching { proc.destroy() }
+        runCatching { proc.outputStream.close() }
+        runCatching { proc.errorStream.close() }
+        runCatching { proc.inputStream.close() }
     }
 }
 
@@ -151,6 +212,8 @@ object SecretRedactor {
     // Added for Rikka-Root providers. Keep the original Agent patterns above unchanged.
     // Run these first so the broad original hex/base64 rules cannot split a key's suffix.
     private val providerPatterns: List<Pair<Regex, String>> = listOf(
+        // The original Agent header rule stops at ';'. Mask the entire cookie line first.
+        Regex("""(?i)(cookie|set-cookie)\s*[:=]\s*[^\r\n]*""") to "$1: [redacted]",
         Regex("""(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----""") to "[redacted-private-key]",
         Regex("""\b(?:sk-|tp-|gsk_|xai-|AIza)[A-Za-z0-9._-]+""") to "[redacted-provider-key]",
         Regex("""(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+""") to "Bearer [redacted]",

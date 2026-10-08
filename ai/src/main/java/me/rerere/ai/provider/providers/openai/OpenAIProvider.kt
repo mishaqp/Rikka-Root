@@ -1,7 +1,6 @@
 package me.rerere.ai.provider.providers.openai
 
 import android.content.Context
-import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -16,6 +15,7 @@ import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
+import me.rerere.ai.provider.ProviderLog
 import me.rerere.ai.provider.EmbeddingGenerationParams
 import me.rerere.ai.provider.EmbeddingGenerationResult
 import me.rerere.ai.provider.ImageEditParams
@@ -46,8 +46,6 @@ import java.io.File
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 
-private const val TAG = "OpenAIProvider"
-
 class OpenAIProvider(
     private val client: OkHttpClient,
     context: Context? = null
@@ -69,6 +67,7 @@ class OpenAIProvider(
                 .build()
 
             val response = client.newCall(request).await()
+            ProviderLog.record(ProviderLog.Provider.OPENAI, ProviderLog.Operation.RESPONSE, null, response.code, response.body.contentLength())
             if (!response.isSuccessful) {
                 error("Failed to get models: ${response.code} ${response.body?.string()}")
             }
@@ -232,8 +231,6 @@ class OpenAIProvider(
                 .mergeCustomBody(params.customBody)
         )
 
-        Log.i(TAG, "generateImage: $requestBody")
-
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}/images/generations")
             .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
@@ -243,8 +240,11 @@ class OpenAIProvider(
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
+        ProviderLog.record(ProviderLog.Provider.OPENAI, ProviderLog.Operation.REQUEST, params.model.modelId, null, request.body?.contentLength())
+
         val items = withContext(Dispatchers.IO) {
             val response = client.newCall(request).await()
+            ProviderLog.record(ProviderLog.Provider.OPENAI, ProviderLog.Operation.RESPONSE, params.model.modelId, response.code, response.body.contentLength())
             if (!response.isSuccessful) {
                 error("Failed to generate image: ${response.code} ${response.body?.string()}")
             }

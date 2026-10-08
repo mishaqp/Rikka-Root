@@ -2,7 +2,7 @@ package me.rerere.rikkahub.reliability
 
 import android.content.Context
 import android.content.ContextWrapper
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.*
 import kotlinx.serialization.json.*
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.ui.UIMessagePart
@@ -13,6 +13,9 @@ import org.junit.Assert.*
 import org.junit.Test
 import java.io.*
 import java.nio.file.Files
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.zip.ZipFile
 
 class BugReportBuilderTest {
@@ -30,6 +33,47 @@ class BugReportBuilderTest {
         override fun waitFor(): Int = 0
         override fun exitValue(): Int = 0
         override fun destroy() {}
+    }
+    private class StalledLogcatProcess(private val stallWhileReading: Boolean) : Process() {
+        val started = CountDownLatch(1)
+        val destroyed = AtomicBoolean(false)
+        val inputClosed = AtomicBoolean(false)
+        val outputClosed = AtomicBoolean(false)
+        val errorClosed = AtomicBoolean(false)
+        private val released = CountDownLatch(1)
+        private fun awaitRelease() {
+            started.countDown()
+            // Fail-safe also lets this regression fail against the old unbounded capture.
+            released.await(8, TimeUnit.SECONDS)
+        }
+        private val input = object : InputStream() {
+            override fun read(): Int {
+                if (stallWhileReading) awaitRelease()
+                return -1
+            }
+            override fun close() { inputClosed.set(true) }
+        }
+        private val output = object : ByteArrayOutputStream() {
+            override fun close() { outputClosed.set(true); super.close() }
+        }
+        private val error = object : ByteArrayInputStream(byteArrayOf()) {
+            override fun close() { errorClosed.set(true); super.close() }
+        }
+        override fun getInputStream(): InputStream = input
+        override fun getErrorStream(): InputStream = error
+        override fun getOutputStream(): OutputStream = output
+        override fun waitFor(): Int {
+            if (!stallWhileReading) awaitRelease()
+            return 0
+        }
+        override fun exitValue(): Int = if (destroyed.get()) 0 else throw IllegalThreadStateException()
+        override fun destroy() { destroyed.set(true); released.countDown() }
+        fun assertCleanedUp() {
+            assertTrue("logcat process must be destroyed", destroyed.get())
+            assertTrue("stdout must be closed", inputClosed.get())
+            assertTrue("stdin must be closed", outputClosed.get())
+            assertTrue("stderr must be closed", errorClosed.get())
+        }
     }
     private fun entries(file: File): Map<String, String> = ZipFile(file).use { zip ->
         zip.entries().asSequence().associate { entry ->
@@ -90,6 +134,70 @@ class BugReportBuilderTest {
             val logs = entries(reportBuilder.build()).getValue("logcat.txt")
             assertTrue(logs.contains("logcat unavailable"))
         } finally { root.deleteRecursively() }
+    }
+
+    @Test fun captureFailureRedactsItsMessageAndCompleteStack() = runBlocking {
+        val root = Files.createTempDirectory("report-capture-secret").toFile()
+        try {
+            val reportBuilder = BugReportBuilder(ReportContext(root)).apply {
+                logcatProcess = {
+                    throw IllegalStateException("logcat unavailable password=capture-password", IllegalArgumentException("Bearer capture.token.secret"))
+                        .apply { addSuppressed(IllegalStateException("sk-capture-secret")) }
+                }
+            }
+            val report = entries(reportBuilder.build())
+            val logs = report.getValue("logcat.txt")
+            assertTrue(logs.contains("logcat unavailable"))
+            assertTrue(logs.contains("java.lang.IllegalStateException"))
+            assertTrue(logs.contains("Caused by:"))
+            for (secret in listOf("capture-password", "capture.token.secret", "sk-capture-secret"))
+                assertFalse("Secret leaked in capture failure", report.values.joinToString("\n").contains(secret))
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun concurrentReportsHaveUniqueRootNamesAndDoNotOverwrite() = runBlocking {
+        val root = Files.createTempDirectory("report-unique").toFile()
+        try {
+            val reportBuilder = builder(ReportContext(root))
+            val reports = List(12) { async { reportBuilder.build() } }.awaitAll()
+            assertEquals(reports.size, reports.map { it.absolutePath }.toSet().size)
+            for (report in reports) {
+                assertTrue(report.name.matches(Regex("rikka-root-report-\\d{8}-\\d{6}-\\d{3}\\.zip")))
+                assertTrue(entries(report).getValue("logcat.txt").contains("ReportMarker"))
+            }
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun stalledLogcatHasBoundedCaptureAndAllStreamsAreClosed() = runBlocking {
+        val root = Files.createTempDirectory("report-timeout").toFile()
+        val process = StalledLogcatProcess(stallWhileReading = true)
+        try {
+            val reportBuilder = BugReportBuilder(ReportContext(root)).apply { logcatProcess = { process } }
+            val start = System.nanoTime()
+            val logs = entries(reportBuilder.build()).getValue("logcat.txt")
+            val elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)
+            assertTrue("Capture must stop before the eight-second fail-safe", elapsedMillis < 7_000)
+            assertTrue(logs.contains("таймаут", ignoreCase = true))
+            process.assertCleanedUp()
+        } finally { process.destroy(); root.deleteRecursively() }
+    }
+
+    @Test fun cancellingLogcatWaitClosesProcessAndRemovesIncompleteReport() = runBlocking {
+        val root = Files.createTempDirectory("report-cancel").toFile()
+        val process = StalledLogcatProcess(stallWhileReading = false)
+        val reportBuilder = BugReportBuilder(ReportContext(root)).apply { logcatProcess = { process } }
+        val job = launch { reportBuilder.build(); fail("Cancelled capture returned a report") }
+        try {
+            withContext(Dispatchers.IO) { assertTrue(process.started.await(2, TimeUnit.SECONDS)) }
+            job.cancel()
+            withTimeout(1_000) { job.join() }
+            process.assertCleanedUp()
+            assertEquals(0, File(root, "cache/bug_reports").listFiles()?.size ?: 0)
+        } finally {
+            process.destroy()
+            job.cancelAndJoin()
+            root.deleteRecursively()
+        }
     }
 
     @Test fun toolReturnsOriginalAgentFieldsAndWorkspaceCopyReadableByArchiveTool() = runBlocking {

@@ -1,7 +1,6 @@
 package me.rerere.ai.provider.providers.claude
 
 import android.content.Context
-import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
@@ -33,6 +32,7 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.core.merge
+import me.rerere.ai.provider.ProviderLog
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.ClaudePromptCacheTtl
 import me.rerere.ai.provider.ImageGenerationParams
@@ -78,7 +78,6 @@ import okhttp3.sse.EventSourceListener
 import okhttp3.sse.EventSources
 import kotlin.time.Clock
 
-private const val TAG = "ClaudeProvider"
 private const val ANTHROPIC_VERSION = "2023-06-01"
 private const val CLAUDE_PAUSE_TURN = "pause_turn"
 private const val MAX_PAUSE_TURN_CONTINUATIONS = 5
@@ -308,9 +307,10 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             .configureSessionHeaders(providerSetting.baseUrl, params.sessionId)
             .build()
 
-        Log.i(TAG, "generateText: ${json.encodeToString(requestBody)}")
+        ProviderLog.record(ProviderLog.Provider.CLAUDE, ProviderLog.Operation.REQUEST, params.model.modelId, null, request.body?.contentLength())
 
         val response = client.newCall(request).await()
+        ProviderLog.record(ProviderLog.Provider.CLAUDE, ProviderLog.Operation.RESPONSE, params.model.modelId, response.code, response.body.contentLength())
         if (!response.isSuccessful) {
             throw Exception("Failed to get response: ${response.code} ${response.body?.string()}")
         }
@@ -359,30 +359,33 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             .configureSessionHeaders(providerSetting.baseUrl, params.sessionId)
             .build()
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
-
-        requestBody["messages"]!!.jsonArray.forEach {
-            Log.i(TAG, "streamText: $it")
-        }
+        ProviderLog.record(ProviderLog.Provider.CLAUDE, ProviderLog.Operation.REQUEST, params.model.modelId, null, request.body?.contentLength())
 
         val decoder = ClaudeStreamDecoder()
 
+        var responseCode: Int? = null
+
         fun sendChunks(chunks: Iterable<StreamChunk>) {
             chunks.forEach { chunk ->
-                trySend(chunk).onFailure { e ->
-                    Log.w(TAG, "onEvent: chunk dropped (${e?.message})")
+                trySend(chunk).onFailure {
+                    ProviderLog.record(ProviderLog.Provider.CLAUDE, ProviderLog.Operation.CHUNK_DROPPED, params.model.modelId, responseCode, null)
                 }
             }
         }
 
         val listener = object : EventSourceListener() {
+            override fun onOpen(eventSource: EventSource, response: Response) {
+                responseCode = response.code
+                ProviderLog.record(ProviderLog.Provider.CLAUDE, ProviderLog.Operation.STREAM_OPEN, params.model.modelId, response.code, response.body.contentLength())
+            }
+
             override fun onEvent(
                 eventSource: EventSource,
                 id: String?,
                 type: String?,
                 data: String
             ) {
-                Log.d(TAG, "onEvent: type=$type, data=$data")
+                ProviderLog.record(ProviderLog.Provider.CLAUDE, ProviderLog.Operation.STREAM_EVENT, params.model.modelId, responseCode, data.toByteArray(Charsets.UTF_8).size.toLong())
                 try {
                     val result = decoder.accept(SseEvent(id = id, event = type, data = data))
                     sendChunks(result.chunks)
@@ -395,19 +398,16 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                 var exception = t
 
-                t?.printStackTrace()
-                Log.e(TAG, "onFailure: ${t?.javaClass?.name} ${t?.message} / $response")
+                ProviderLog.record(ProviderLog.Provider.CLAUDE, ProviderLog.Operation.STREAM_FAILED, params.model.modelId, response?.code ?: responseCode, response?.body?.contentLength())
 
                 val bodyRaw = response?.body?.stringSafe()
                 try {
                     if (!bodyRaw.isNullOrBlank()) {
                         val bodyElement = Json.parseToJsonElement(bodyRaw)
-                        Log.i(TAG, "Error response: $bodyElement")
                         exception = bodyElement.parseErrorDetail()
                     }
                 } catch (e: Throwable) {
-                    Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
-                    e.printStackTrace()
+                    ProviderLog.record(ProviderLog.Provider.CLAUDE, ProviderLog.Operation.PARSE_FAILED, params.model.modelId, response?.code ?: responseCode, bodyRaw?.toByteArray(Charsets.UTF_8)?.size?.toLong())
                 } finally {
                     close(exception)
                 }
@@ -423,7 +423,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             .newEventSource(request, listener)
 
         awaitClose {
-            Log.d(TAG, "Closing eventSource")
+            ProviderLog.record(ProviderLog.Provider.CLAUDE, ProviderLog.Operation.STREAM_CLOSED, params.model.modelId, responseCode, null)
             eventSource.cancel()
         }
         // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
@@ -742,7 +742,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                     put("data", encoded.base64)
                 })
             }.onFailure {
-                Log.w(TAG, "encode image failed: $url", it)
+                ProviderLog.record(ProviderLog.Provider.CLAUDE, ProviderLog.Operation.IMAGE_ENCODING_FAILED, null, null, null)
                 put("type", "text")
                 put("text", "")
             }
@@ -804,10 +804,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                     }
                 }
 
-                "redacted_thinking" -> {
-                    val data = block["data"]?.jsonPrimitiveOrNull?.contentOrNull
-                    println(data)
-                }
+                "redacted_thinking" -> {}
 
                 "tool_use" -> {
                     val id = block["id"]?.jsonPrimitive?.contentOrNull ?: ""

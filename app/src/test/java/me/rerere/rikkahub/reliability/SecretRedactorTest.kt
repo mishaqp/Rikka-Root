@@ -59,6 +59,17 @@ class SecretRedactorTest {
         assertTrue(out.contains("[redacted]"))
     }
 
+    @Test fun `all Cookie and Set-Cookie values after semicolons are redacted`() {
+        val input = "Cookie: session=first-cookie; refresh=second-cookie; csrftoken=third-cookie\n" +
+            "Set-Cookie: id=fourth-cookie; session=fifth-cookie; HttpOnly\n" +
+            "Next diagnostic: preserved"
+        val out = SecretRedactor.redact(input)
+        for (secret in listOf("first-cookie", "second-cookie", "third-cookie", "fourth-cookie", "fifth-cookie"))
+            assertFalse("Cookie leaked: $secret", out.contains(secret))
+        assertTrue(out.contains("Next diagnostic: preserved"))
+        org.junit.Assert.assertEquals(out, SecretRedactor.redact(out))
+    }
+
     @Test fun `redactor is idempotent on already-redacted text`() {
         val once = SecretRedactor.redact("Authorization: Bearer abcdef.ghijkl.mnopqr.stuvwx")
         val twice = SecretRedactor.redact(once)

@@ -1,7 +1,6 @@
 package me.rerere.ai.provider.providers.google
 
 import android.content.Context
-import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
@@ -30,6 +29,7 @@ import kotlinx.serialization.json.putJsonArray
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
+import me.rerere.ai.provider.ProviderLog
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
@@ -78,8 +78,6 @@ import okhttp3.sse.EventSources
 import org.apache.commons.text.StringEscapeUtils
 import kotlin.time.Clock
 import kotlin.uuid.Uuid
-
-private const val TAG = "GoogleProvider"
 
 class GoogleProvider(private val client: OkHttpClient, context: Context? = null) : Provider<ProviderSetting.Google> {
     private val keyRoulette = if (context != null) KeyRoulette.lru(context) else KeyRoulette.default()
@@ -139,9 +137,9 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                     .build()
             )
             val response = client.newCall(request).await()
+            ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.RESPONSE, null, response.code, response.body.contentLength())
             if (response.isSuccessful) {
                 val body = response.body?.string() ?: error("empty body")
-                Log.d(TAG, "listModels: $body")
                 val bodyObject = json.parseToJsonElement(body).jsonObject
                 val models = bodyObject["models"]?.jsonArray ?: return@withContext emptyList()
 
@@ -201,6 +199,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         )
 
         val response = client.newCall(request).await()
+        ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.RESPONSE, params.model.modelId, response.code, response.body.contentLength())
         if (!response.isSuccessful) {
             throw Exception("Failed to get response: ${response.code} ${response.body?.string()}")
         }
@@ -258,34 +257,41 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 .build()
         )
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+        ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.REQUEST, params.model.modelId, null, request.body?.contentLength())
 
         val responseId = Uuid.random().toString()
         val decoder = GoogleStreamDecoder(responseId, params.model.modelId)
 
+        var responseCode: Int? = null
+
         fun sendChunks(chunks: Iterable<StreamChunk>) {
             chunks.forEach { chunk ->
-                trySend(chunk).onFailure { e ->
-                    Log.w(TAG, "onEvent: chunk dropped (${e?.message})")
+                trySend(chunk).onFailure {
+                    ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.CHUNK_DROPPED, params.model.modelId, responseCode, null)
                 }
             }
         }
 
         val listener = object : EventSourceListener() {
+            override fun onOpen(eventSource: EventSource, response: Response) {
+                responseCode = response.code
+                ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.STREAM_OPEN, params.model.modelId, response.code, response.body.contentLength())
+            }
+
             override fun onEvent(
                 eventSource: EventSource,
                 id: String?,
                 type: String?,
                 data: String
             ) {
-                Log.i(TAG, "onEvent: $data")
+                ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.STREAM_EVENT, params.model.modelId, responseCode, data.toByteArray(Charsets.UTF_8).size.toLong())
 
                 try {
                     val result = decoder.accept(SseEvent(id = id, event = type, data = data))
                     sendChunks(result.chunks)
                     if (result.completed) close()
                 } catch (e: Throwable) {
-                    Log.e(TAG, "Failed to parse stream event: $data", e)
+                    ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.PARSE_FAILED, params.model.modelId, responseCode, data.toByteArray(Charsets.UTF_8).size.toLong())
                     close(e)
                 }
             }
@@ -297,15 +303,13 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             ) {
                 var exception = t
 
-                t?.printStackTrace()
-                println("[onFailure] 发生错误: ${t?.message}")
+                ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.STREAM_FAILED, params.model.modelId, response?.code ?: responseCode, response?.body?.contentLength())
 
                 try {
                     if (t == null && response != null) {
                         val bodyStr = response.body.stringSafe()
                         if (!bodyStr.isNullOrEmpty()) {
                             val bodyElement = json.parseToJsonElement(bodyStr)
-                            println(bodyElement)
                             if (bodyElement is JsonObject) {
                                 exception = Exception(
                                     bodyElement["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content
@@ -317,7 +321,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                         }
                     }
                 } catch (e: Throwable) {
-                    e.printStackTrace()
+                    ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.PARSE_FAILED, params.model.modelId, response?.code ?: responseCode, null)
                     exception = e
                 } finally {
                     close(exception ?: Exception("Stream failed"))
@@ -325,7 +329,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             }
 
             override fun onClosed(eventSource: EventSource) {
-                println("[onClosed] 连接已关闭")
+                ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.STREAM_CLOSED, params.model.modelId, responseCode, null)
                 sendChunks(decoder.onClosed())
                 close()
             }
@@ -335,7 +339,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 .newEventSource(request, listener)
 
         awaitClose {
-            println("[awaitClose] 关闭eventSource")
+            ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.STREAM_CLOSED, params.model.modelId, responseCode, null)
             eventSource.cancel()
         }
         // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
@@ -526,7 +530,6 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         val parts = parseMessageParts(content["parts"]?.jsonArray)
 
         val groundingMetadata = message["groundingMetadata"]?.jsonObject
-        Log.i(TAG, "parseMessage: $groundingMetadata")
         val annotations = parseSearchGroundingMetadata(groundingMetadata) +
             if (groundingMetadata != null || message["urlContextMetadata"] != null) {
                 listOf(UIMessageAnnotation.WebContentUsed)
@@ -551,7 +554,6 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 url = uri
             )
         }
-        Log.i(TAG, "parseSearchGroundingMetadata: $chunks")
         return chunks
     }
 

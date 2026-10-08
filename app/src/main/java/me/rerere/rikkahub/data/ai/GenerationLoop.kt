@@ -684,8 +684,7 @@ class GenerationLoop(
         Log.w(
             TAG,
             "Provider connection failed, retrying in ${retryDelay}ms " +
-                    "($nextRetryCount/$MAX_PROVIDER_NETWORK_RETRIES)",
-            error,
+                    "($nextRetryCount/$MAX_PROVIDER_NETWORK_RETRIES), type=${error.javaClass.simpleName}",
         )
         delay(retryDelay)
         return nextRetryCount

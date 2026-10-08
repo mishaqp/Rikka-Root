@@ -1,6 +1,5 @@
 package me.rerere.ai.provider.providers.google
 
-import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
@@ -26,6 +25,7 @@ import kotlinx.serialization.json.putJsonArray
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
+import me.rerere.ai.provider.ProviderLog
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.ModelAbility
@@ -69,8 +69,6 @@ import okhttp3.sse.EventSourceListener
 import okhttp3.sse.EventSources
 import kotlin.time.Clock
 
-private const val TAG = "InteractionsAPI"
-
 /**
  * Gemini Interactions API (`POST /v1beta/interactions`)。
  *
@@ -88,9 +86,11 @@ internal class InteractionsAPI(
     ): TextGenerationResult = withContext(Dispatchers.IO) {
         val requestBody = buildRequestBody(messages, params, stream = false)
         val request = buildRequest(providerSetting, params, requestBody)
+        ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.REQUEST, params.model.modelId, null, request.body?.contentLength())
 
         // await() waits for the response headers; reading the body can still block.
         client.newCall(request).await().use { response ->
+            ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.RESPONSE, params.model.modelId, response.code, response.body.contentLength())
             if (!response.isSuccessful) {
                 throw Exception("Failed to get response: ${response.code} ${response.body.string()}")
             }
@@ -107,38 +107,46 @@ internal class InteractionsAPI(
         val requestBody = buildRequestBody(messages, params, stream = true)
         val request = buildRequest(providerSetting, params, requestBody)
 
-        Log.i(TAG, "streamText: ${json.encodeToString(requestBody)}")
+        ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.REQUEST, params.model.modelId, null, request.body?.contentLength())
 
         val decoder = InteractionsStreamDecoder(fallbackModel = params.model.modelId)
 
+        var responseCode: Int? = null
+
         fun sendChunks(chunks: Iterable<StreamChunk>) {
             chunks.forEach { chunk ->
-                trySend(chunk).onFailure { e ->
-                    Log.w(TAG, "onEvent: chunk dropped (${e?.message})")
+                trySend(chunk).onFailure {
+                    ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.CHUNK_DROPPED, params.model.modelId, responseCode, null)
                 }
             }
         }
 
         val listener = object : EventSourceListener() {
+            override fun onOpen(eventSource: EventSource, response: Response) {
+                responseCode = response.code
+                ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.STREAM_OPEN, params.model.modelId, response.code, response.body.contentLength())
+            }
+
             override fun onEvent(
                 eventSource: EventSource,
                 id: String?,
                 type: String?,
                 data: String
             ) {
-                Log.d(TAG, "onEvent: $id/$type $data")
+                ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.STREAM_EVENT, params.model.modelId, responseCode, data.toByteArray(Charsets.UTF_8).size.toLong())
                 try {
                     val result = decoder.accept(SseEvent(id = id, event = type, data = data))
                     sendChunks(result.chunks)
                     if (result.completed) close()
                 } catch (e: Throwable) {
-                    Log.e(TAG, "Failed to parse stream event: $data", e)
+                    ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.PARSE_FAILED, params.model.modelId, responseCode, data.toByteArray(Charsets.UTF_8).size.toLong())
                     close(e)
                 }
             }
 
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                 var exception = t
+                ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.STREAM_FAILED, params.model.modelId, response?.code ?: responseCode, response?.body?.contentLength())
 
                 val bodyRaw = response?.body?.stringSafe()
                 try {
@@ -148,7 +156,7 @@ internal class InteractionsAPI(
                         exception = Exception("Unknown error: ${response.code}")
                     }
                 } catch (e: Throwable) {
-                    Log.w(TAG, "onFailure: failed to parse from $bodyRaw")
+                    ProviderLog.record(ProviderLog.Provider.GOOGLE, ProviderLog.Operation.PARSE_FAILED, params.model.modelId, response?.code ?: responseCode, bodyRaw?.toByteArray(Charsets.UTF_8)?.size?.toLong())
                 } finally {
                     close(exception ?: Exception("Stream failed"))
                 }
