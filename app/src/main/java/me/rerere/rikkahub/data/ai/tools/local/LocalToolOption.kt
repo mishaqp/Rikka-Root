@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 sealed class LocalToolOption {
+    @Serializable @SerialName("reliability") data object Reliability : LocalToolOption()
     @Serializable @SerialName("files") data object Files : LocalToolOption()
     @Serializable @SerialName("external_storage") data object ExternalStorage : LocalToolOption()
     @Serializable @SerialName("archive") data object Archive : LocalToolOption()

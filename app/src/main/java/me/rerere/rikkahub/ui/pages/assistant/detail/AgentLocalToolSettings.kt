@@ -42,6 +42,20 @@ internal fun AgentLocalToolSettings(assistant: Assistant, onUpdate: (Assistant) 
             }
         })
     }
+    AgentFeatureCard(assistant, onUpdate, LocalToolOption.Reliability,
+        R.string.agent_tools_reliability_title, R.string.agent_tools_reliability_desc)
+}
+
+@Composable
+private fun AgentFeatureCard(assistant: Assistant, onUpdate: (Assistant) -> Unit,
+                             option: LocalToolOption, title: Int, description: Int) {
+    CardGroup {
+        item(headlineContent = { Text(stringResource(title)) },
+            supportingContent = { Text(stringResource(description)) },
+            trailingContent = { Switch(checked = option in assistant.localTools,
+                onCheckedChange = { checked -> onUpdate(assistant.copy(localTools = if (checked)
+                    (assistant.localTools + option).distinct() else assistant.localTools - option)) }) })
+    }
 }
 
 @Composable

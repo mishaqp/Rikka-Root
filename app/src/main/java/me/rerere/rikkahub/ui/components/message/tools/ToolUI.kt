@@ -1,5 +1,10 @@
 package me.rerere.rikkahub.ui.components.message.tools
 
+import android.content.ClipData
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,9 +15,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
@@ -180,6 +187,30 @@ fun DefaultToolPreview(
                                 contentDescription = null,
                                 modifier = Modifier.fillMaxWidth(),
                             )
+
+                            is UIMessagePart.Document -> {
+                                val androidContext = LocalContext.current
+                                val uri = Uri.parse(part.url)
+                                if (context.tool.toolName == "generate_bug_report" && uri.scheme == "content" &&
+                                    uri.authority == "${androidContext.packageName}.fileprovider") {
+                                    TextButton(onClick = {
+                                        val send = Intent(Intent.ACTION_SEND).apply {
+                                            type = part.mime
+                                            putExtra(Intent.EXTRA_STREAM, uri)
+                                            clipData = ClipData.newRawUri(part.fileName, uri)
+                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        }
+                                        try {
+                                            androidContext.startActivity(Intent.createChooser(send,
+                                                androidContext.getString(R.string.agent_tools_report_share))
+                                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                                        } catch (_: android.content.ActivityNotFoundException) {
+                                            Toast.makeText(androidContext, R.string.agent_tools_report_share_failed,
+                                                Toast.LENGTH_LONG).show()
+                                        }
+                                    }) { Text(stringResource(R.string.agent_tools_report_share_file, part.fileName)) }
+                                }
+                            }
 
                             else -> {}
                         }
