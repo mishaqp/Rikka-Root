@@ -10,6 +10,26 @@ import me.rerere.rikkahub.root.RootAccessStore
 import me.rerere.tts.provider.TTSManager
 import java.io.File
 
+/** The file-backed tool dispatcher shares one scoped resolver for the selected workspace. */
+internal fun scopedFileTools(
+    context: Context,
+    options: List<LocalToolOption>,
+    workspaceCwd: String? = null,
+    chatImages: List<String> = emptyList(),
+    resolveWorkspacePath: (suspend (String) -> File)? = null,
+    modelCanReadImages: Boolean = false,
+): List<Tool> = buildList {
+    if (options.any { it in listOf(LocalToolOption.Files, LocalToolOption.Archive,
+            LocalToolOption.MediaPlayer, LocalToolOption.MediaScanner, LocalToolOption.Download) }) {
+        val access = LocalFileAccess(context, workspaceCwd, chatImages, resolveWorkspacePath)
+        if (LocalToolOption.Files in options) addAll(fileManagerTools(access, context, modelCanReadImages))
+        if (LocalToolOption.Archive in options) addAll(listOf(zipFilesTool(context, access), unzipFileTool(context, access), listZipContentsTool(context, access)))
+        if (LocalToolOption.MediaPlayer in options) addAll(listOf(playMediaTool(context, access), stopMediaTool(context), pauseMediaTool(context), resumeMediaTool(context, access), seekMediaTool(context), getMediaStatusTool()))
+        if (LocalToolOption.MediaScanner in options) add(mediaScannerTool(context, access))
+        if (LocalToolOption.Download in options) addAll(listOf(downloadTool(context, access), writeTextFileTool(access)))
+    }
+}
+
 class LocalTools(
     private val context: Context,
     private val eventBus: AppEventBus,
@@ -45,15 +65,7 @@ class LocalTools(
         modelCanReadImages: Boolean = false,
     ): List<Tool> {
         val tools = mutableListOf<Tool>()
-        if (options.any { it in listOf(LocalToolOption.Files, LocalToolOption.Archive,
-                LocalToolOption.MediaPlayer, LocalToolOption.MediaScanner, LocalToolOption.Download) }) {
-            val access = LocalFileAccess(context, workspaceCwd, chatImages, resolveWorkspacePath)
-            if (LocalToolOption.Files in options) tools.addAll(fileManagerTools(access, context, modelCanReadImages))
-            if (LocalToolOption.Archive in options) tools.addAll(listOf(zipFilesTool(context, access), unzipFileTool(context, access), listZipContentsTool(context, access)))
-            if (LocalToolOption.MediaPlayer in options) tools.addAll(listOf(playMediaTool(context, access), stopMediaTool(context), pauseMediaTool(context), resumeMediaTool(context, access), seekMediaTool(context), getMediaStatusTool()))
-            if (LocalToolOption.MediaScanner in options) tools.add(mediaScannerTool(context, access))
-            if (LocalToolOption.Download in options) tools.addAll(listOf(downloadTool(context, access), writeTextFileTool(access)))
-        }
+        tools.addAll(scopedFileTools(context, options, workspaceCwd, chatImages, resolveWorkspacePath, modelCanReadImages))
         if (LocalToolOption.ExternalStorage in options) tools.addAll(listOf(listStorageVolumesTool(context), listGrantedDirectoriesTool(context), grantDirectoryAccessTool(context)))
         if (LocalToolOption.SystemIntents in options) tools.addAll(systemIntentTools(context))
         if (LocalToolOption.AppLauncher in options) tools.addAll(appLauncherTools(context))

@@ -63,12 +63,14 @@ internal suspend fun capturePersonalSpeech(
                     configuredCapture = { remaining ->
                         onStatus("$androidDiagnostic Переключение на $configuredEngine; говорите ещё раз. Этот движок может использовать сеть.")
                         if (provider == null) {
-                            SpeechCaptureOutcome.Error("ASR чата: провайдер не выбран. Настройте распознавание речи в настройках приложения.")
+                            SpeechCaptureOutcome.Error("ASR чата: провайдер не выбран. Настройте распознавание речи в настройках приложения.",
+                                asrProviderUnconfigured = true)
                         } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                             SpeechCaptureOutcome.Error("$configuredEngine: доступ к микрофону отозван.")
                         } else {
                             val controller = createAsrController(context.applicationContext, getKoin().get<OkHttpClient>(), provider)
-                            if (controller == null) SpeechCaptureOutcome.Error("$configuredEngine: провайдер не настроен. Проверьте его настройки в разделе распознавания речи.")
+                            if (controller == null) SpeechCaptureOutcome.Error("$configuredEngine: провайдер не настроен. Проверьте его настройки в разделе распознавания речи.",
+                                asrProviderUnconfigured = true)
                             else captureConfiguredAsr(controller, configuredEngine, remaining, requiresIdleFinalization(provider)) {
                                 onStatus("$configuredEngine: микрофон остановлен, ожидается окончательный текст.")
                             }
@@ -124,7 +126,9 @@ private suspend fun captureAndroidSpeech(
                 outcome.complete(if (text == null) SpeechCaptureOutcome.Error("$engine: речь не распознана.")
                     else SpeechCaptureOutcome.Transcript(text.take(65_536)))
             }
-            override fun onError(error: Int) { outcome.complete(SpeechCaptureOutcome.Error("$engine: ${androidSpeechError(error)}")) }
+            override fun onError(error: Int) {
+                outcome.complete(SpeechCaptureOutcome.Error("$engine: ${androidSpeechError(error)}", androidErrorCode = error))
+            }
         })
         currentCoroutineContext().ensureActive()
         onStatus("$engine: запуск микрофона, говорите.")
@@ -163,7 +167,7 @@ private fun androidSpeechError(code: Int): String {
         10 -> "ERROR_TOO_MANY_REQUESTS" to "слишком много запросов к службе"
         11 -> "ERROR_SERVER_DISCONNECTED" to "соединение со службой прервано"
         12 -> "ERROR_LANGUAGE_NOT_SUPPORTED" to "выбранный язык не поддерживается"
-        13 -> "ERROR_LANGUAGE_UNAVAILABLE" to "модель выбранного языка недоступна"
+        13 -> "ERROR_LANGUAGE_UNAVAILABLE" to "системная модель выбранного языка недоступна"
         14 -> "ERROR_CANNOT_CHECK_SUPPORT" to "служба не смогла проверить поддержку языка"
         15 -> "ERROR_CANNOT_LISTEN_TO_DOWNLOAD_EVENTS" to "служба не поддерживает уведомления о загрузке модели"
         else -> "ANDROID_ERROR" to "неизвестная ошибка службы распознавания"

@@ -19,6 +19,9 @@ import me.rerere.asr.providers.StepASRController
 import me.rerere.asr.providers.VolcengineASRController
 import okhttp3.OkHttpClient
 
+// Matches Android SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE without an API 31 field reference.
+private const val ANDROID_ERROR_LANGUAGE_UNAVAILABLE = 13
+
 /** Shared with chat speech; credentials remain in the existing selected-provider settings. */
 internal fun createAsrController(context: Context, httpClient: OkHttpClient, provider: ASRProviderSetting): ASRController? =
     when (provider) {
@@ -43,7 +46,11 @@ internal fun requiresIdleFinalization(provider: ASRProviderSetting): Boolean =
 
 internal sealed interface SpeechCaptureOutcome {
     data class Transcript(val text: String) : SpeechCaptureOutcome
-    data class Error(val message: String) : SpeechCaptureOutcome
+    data class Error(
+        val message: String,
+        val androidErrorCode: Int? = null,
+        val asrProviderUnconfigured: Boolean = false,
+    ) : SpeechCaptureOutcome
 }
 
 internal suspend fun captureSpeechWithFallback(
@@ -62,7 +69,8 @@ internal suspend fun captureSpeechWithFallback(
         val system = withTimeoutOrNull(systemBudget) { systemCapture(systemBudget) }
             ?: SpeechCaptureOutcome.Error(timeoutMessage)
         if (system is SpeechCaptureOutcome.Transcript) return@withTimeoutOrNull system
-        val diagnostic = (system as SpeechCaptureOutcome.Error).message
+        val systemError = system as SpeechCaptureOutcome.Error
+        val diagnostic = systemError.message
         timeoutMessage = "$diagnostic $configuredEngineLabel: общее время распознавания истекло."
         currentCoroutineContext().ensureActive()
         onFallback(diagnostic)
@@ -70,7 +78,13 @@ internal suspend fun captureSpeechWithFallback(
         if (remaining <= 0) return@withTimeoutOrNull SpeechCaptureOutcome.Error(timeoutMessage)
         when (val configured = configuredCapture(remaining)) {
             is SpeechCaptureOutcome.Transcript -> configured
-            is SpeechCaptureOutcome.Error -> SpeechCaptureOutcome.Error("$diagnostic ${configured.message}")
+            is SpeechCaptureOutcome.Error -> {
+                val remedy = if (systemError.androidErrorCode == ANDROID_ERROR_LANGUAGE_UNAVAILABLE &&
+                    configured.asrProviderUnconfigured) {
+                    " Чтобы продолжить, выберите и настройте провайдера ASR в приложении: «Настройки» → «Служба преобразования текста в речь» → «Распознавание речи», либо загрузите офлайн-модель выбранного языка в системных настройках распознавания речи Android."
+                } else ""
+                SpeechCaptureOutcome.Error("$diagnostic ${configured.message}$remedy")
+            }
         }
     } ?: SpeechCaptureOutcome.Error(timeoutMessage)
 }

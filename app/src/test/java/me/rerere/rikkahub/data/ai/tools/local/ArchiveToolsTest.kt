@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.data.ai.tools.local
 
+import android.content.Context
+import android.content.ContextWrapper
 import kotlinx.coroutines.*
 import org.junit.Assert.*
 import org.junit.Test
@@ -16,6 +18,24 @@ class ArchiveToolsTest {
             zip.putNextEntry(ZipEntry(name)); zip.write(bytes); zip.closeEntry()
         } }
     }.toByteArray()
+
+    @Test fun archiveDescriptionsGuideTheModelToNativeWorkspaceToolsWithoutInstallingPackages() {
+        val temp = Files.createTempDirectory("archive-descriptions").toFile()
+        try {
+            val context = object : ContextWrapper(null) {
+                override fun getFilesDir(): File = temp
+                override fun getApplicationContext(): Context = this
+            }
+            val tools = listOf(zipFilesTool(context), unzipFileTool(context), listZipContentsTool(context))
+            tools.forEach { tool ->
+                assertTrue("${tool.name}: native preference missing", tool.description.contains("Предпочитайте"))
+                assertTrue("${tool.name}: workspace paths missing", tool.description.contains("/workspace/"))
+                assertTrue("${tool.name}: relative paths missing", tool.description.contains("относительные пути"))
+                assertTrue("${tool.name}: package installation guidance missing", tool.description.contains("apt"))
+                assertTrue("${tool.name}: shell alternative missing", tool.description.contains("workspace_exec"))
+            }
+        } finally { temp.deleteRecursively() }
+    }
 
     @Test fun traversalNamesNeverReachTheDestination() = runBlocking {
         val unsafe = listOf("../x", "/x", "C:/x", "a/../x", "a\\..\\x", "./x", "a//x", "a\u0000x")

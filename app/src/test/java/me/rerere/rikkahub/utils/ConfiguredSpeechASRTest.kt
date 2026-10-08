@@ -9,6 +9,64 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ConfiguredSpeechASRTest {
+    @Test fun unavailableSystemLanguageWithoutSelectedAsrShowsBothRemedies() = runBlocking {
+        val diagnostic = "Системное распознавание Android: ERROR_LANGUAGE_UNAVAILABLE (13): системная модель выбранного языка недоступна."
+        val providerFailure = "ASR чата: провайдер не выбран. Настройте распознавание речи в настройках приложения."
+        val result = captureSpeechWithFallback(200,
+            systemCapture = { SpeechCaptureOutcome.Error(diagnostic, androidErrorCode = 13) },
+            configuredCapture = { SpeechCaptureOutcome.Error(providerFailure, asrProviderUnconfigured = true) },
+        ) as SpeechCaptureOutcome.Error
+
+        assertTrue(result.message.contains(diagnostic))
+        assertTrue(result.message.contains(providerFailure))
+        assertTrue(result.message.contains("«Настройки» → «Служба преобразования текста в речь» → «Распознавание речи»"))
+        assertTrue(result.message.contains("выберите и настройте провайдера ASR"))
+        assertTrue(result.message.contains("офлайн-модель выбранного языка"))
+        assertTrue(result.message.contains("системных настройках распознавания речи Android"))
+    }
+
+    @Test fun unavailableSystemLanguageWithIncompleteAsrShowsSetupPath() = runBlocking {
+        val diagnostic = "Локальное распознавание Android: ERROR_LANGUAGE_UNAVAILABLE (13): системная модель выбранного языка недоступна."
+        val providerFailure = "ASR чата — DashScope: провайдер не настроен. Проверьте его настройки в разделе распознавания речи."
+        val result = captureSpeechWithFallback(200,
+            systemCapture = { SpeechCaptureOutcome.Error(diagnostic, androidErrorCode = 13) },
+            configuredCapture = { SpeechCaptureOutcome.Error(providerFailure, asrProviderUnconfigured = true) },
+        ) as SpeechCaptureOutcome.Error
+
+        assertTrue(result.message.contains(diagnostic))
+        assertTrue(result.message.contains(providerFailure))
+        assertTrue(result.message.contains("«Настройки» → «Служба преобразования текста в речь» → «Распознавание речи»"))
+        assertTrue(result.message.contains("офлайн-модель выбранного языка"))
+    }
+
+    @Test fun otherAndroidFailureWithUnconfiguredAsrKeepsExistingDiagnostics() = runBlocking {
+        val diagnostic = "Android: ERROR_AUDIO (3)."
+        val providerFailure = "ASR чата: провайдер не выбран."
+        val result = captureSpeechWithFallback(200,
+            systemCapture = { SpeechCaptureOutcome.Error(diagnostic, androidErrorCode = 3) },
+            configuredCapture = { SpeechCaptureOutcome.Error(providerFailure, asrProviderUnconfigured = true) },
+        )
+        assertEquals(SpeechCaptureOutcome.Error("$diagnostic $providerFailure"), result)
+    }
+
+    @Test fun unavailableSystemLanguageWithConfiguredAsrFailureKeepsBothDiagnostics() = runBlocking {
+        val diagnostic = "Android: ERROR_LANGUAGE_UNAVAILABLE (13)."
+        val providerFailure = "ASR чата — Step: ошибка записи или сервиса."
+        val result = captureSpeechWithFallback(200,
+            systemCapture = { SpeechCaptureOutcome.Error(diagnostic, androidErrorCode = 13) },
+            configuredCapture = { SpeechCaptureOutcome.Error(providerFailure) },
+        )
+        assertEquals(SpeechCaptureOutcome.Error("$diagnostic $providerFailure"), result)
+    }
+
+    @Test fun unavailableSystemLanguageStillUsesConfiguredChatAsr() = runBlocking {
+        val result = captureSpeechWithFallback(200,
+            systemCapture = { SpeechCaptureOutcome.Error("Android: ERROR_LANGUAGE_UNAVAILABLE (13).", androidErrorCode = 13) },
+            configuredCapture = { SpeechCaptureOutcome.Transcript("Речь через настроенный ASR") },
+        )
+        assertEquals(SpeechCaptureOutcome.Transcript("Речь через настроенный ASR"), result)
+    }
+
     @Test fun androidFailureUsesConfiguredChatAsr() = runBlocking {
         val result = captureSpeechWithFallback(200,
             systemCapture = { SpeechCaptureOutcome.Error("Android: ERROR_AUDIO (3).") },

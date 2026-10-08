@@ -319,7 +319,7 @@ private suspend fun rollbackArchiveChanges(access: LocalFileAccess, changes: Lis
 
 fun zipFilesTool(context: Context, access: LocalFileAccess = LocalFileAccess(context)): Tool = Tool(
     name = "zip_files",
-    description = "Создать ZIP из файлов и папок рабочего пространства, временной области или явно выданных SAF-папок. sources и destination поддерживают file:// и content://. compression_level: 0–9, по умолчанию 6. Максимум 10 000 записей, 2 ГиБ данных и 512 МиБ ZIP.",
+    description = "Создать ZIP из файлов и папок рабочего пространства, временной области или явно выданных SAF-папок. Предпочитайте этот встроенный инструмент вместо workspace_exec для создания ZIP: он не требует установки zip/unzip через apt или другой менеджер пакетов. sources и destination поддерживают /workspace/..., относительные пути от текущей папки рабочего пространства (без рабочего пространства — от /scratch), /scratch/..., file:// и content://. base_dir задаёт локальную базовую папку для имён записей. compression_level: 0–9, по умолчанию 6. Максимум 10 000 записей, 2 ГиБ данных и 512 МиБ ZIP.",
     parameters = { InputSchema.Obj(buildJsonObject {
         put("sources", buildJsonObject { put("type", "array"); put("items", buildJsonObject { put("type", "string") }) })
         put("destination", buildJsonObject { put("type", "string") })
@@ -389,7 +389,7 @@ private fun checkExtractionRoot(access: LocalFileAccess, root: LocalFileSource, 
 
 fun unzipFileTool(context: Context, access: LocalFileAccess = LocalFileAccess(context)): Tool = Tool(
     name = "unzip_file",
-    description = "Распаковать ZIP в разрешённую папку. source и destination_dir поддерживают file:// и content://. overwrite по умолчанию false. Небезопасные пути, символические ссылки и слишком большие архивы отклоняются; частичные новые файлы удаляются при отмене.",
+    description = "Распаковать ZIP в разрешённую папку. Предпочитайте этот встроенный инструмент вместо workspace_exec для распаковки ZIP: он не требует установки zip/unzip через apt или другой менеджер пакетов. source и destination_dir поддерживают /workspace/..., относительные пути от текущей папки рабочего пространства (без рабочего пространства — от /scratch), /scratch/..., file:// и content:// явно выданных SAF-папок. overwrite по умолчанию false. Небезопасные пути, символические ссылки и слишком большие архивы отклоняются; частичные новые файлы удаляются при отмене.",
     parameters = { InputSchema.Obj(buildJsonObject {
         put("source", buildJsonObject { put("type", "string") })
         put("destination_dir", buildJsonObject { put("type", "string") })
@@ -487,7 +487,7 @@ fun unzipFileTool(context: Context, access: LocalFileAccess = LocalFileAccess(co
 
 fun listZipContentsTool(context: Context, access: LocalFileAccess = LocalFileAccess(context)): Tool = Tool(
     name = "list_zip_contents",
-    description = "Показать записи ZIP без распаковки в пользовательскую папку. source поддерживает file:// и content://. Чтение ограничено 10 000 записями, 2 ГиБ распакованных данных и 512 МиБ ZIP.",
+    description = "Показать записи ZIP без распаковки в пользовательскую папку. Предпочитайте этот встроенный инструмент вместо workspace_exec для просмотра ZIP: он не требует установки zip/unzip через apt или другой менеджер пакетов. source поддерживает /workspace/..., относительные пути от текущей папки рабочего пространства (без рабочего пространства — от /scratch), /scratch/..., file:// и content:// явно выданных SAF-папок. Чтение ограничено 10 000 записями, 2 ГиБ распакованных данных и 512 МиБ ZIP.",
     parameters = { InputSchema.Obj(buildJsonObject { put("source", buildJsonObject { put("type", "string") }) }, listOf("source")) },
     needsApproval = { true },
     execute = { input -> archiveOperation {
