@@ -25,6 +25,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
+import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
 import me.rerere.common.android.appTempFolder
 import me.rerere.rikkahub.di.appModule
 import me.rerere.rikkahub.di.dataSourceModule
@@ -35,6 +38,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.sync.BackupManager
 import me.rerere.rikkahub.data.sync.RestoreFailedException
 import me.rerere.rikkahub.utils.JsonInstant
+import me.rerere.rikkahub.service.CronJobScheduler
 import me.rerere.rikkahub.service.MediaCreationService
 import me.rerere.rikkahub.service.WebServerService
 import me.rerere.rikkahub.utils.CrashHandler
@@ -104,6 +108,9 @@ class RikkaHubApp : Application() {
         // Start WebServer if enabled in settings
         startWebServerIfEnabled()
 
+        // Reconcile interrupted claimed occurrences before rearming schedules.
+        restoreScheduledJobs()
+
         // Resume media generations interrupted by the last process death
         resumeMediaCreations()
 
@@ -111,6 +118,41 @@ class RikkaHubApp : Application() {
         incrementLaunchCount()
 
         // Composer.setDiagnosticStackTraceMode(ComposeStackTraceMode.Auto)
+    }
+
+    private fun restoreScheduledJobs() {
+        get<AppScope>().launch(Dispatchers.IO) {
+            try {
+                val settings = get<SettingsStore>()
+                settings.settingsFlow.first { !it.init }
+                val scheduler = get<CronJobScheduler>()
+                try {
+                    scheduler.restoreAfterProcessStart()
+                } catch (cancel: kotlinx.coroutines.CancellationException) {
+                    throw cancel
+                } catch (_: Exception) {
+                    Log.w(TAG, "Восстановление расписаний отложено до следующей попытки.")
+                }
+                // Re-enabling the feature resumes enabled schedules without requiring a restart.
+                settings.settingsFlow.map { value -> value.assistants.filter {
+                    LocalToolOption.CronJobs in it.localTools
+                }.map { it.id }.toSet() }.distinctUntilChanged().collect {
+                    try {
+                        scheduler.rearmAll()
+                    } catch (cancel: kotlinx.coroutines.CancellationException) {
+                        throw cancel
+                    } catch (_: Exception) {
+                        // A transient scheduling error must not terminate the settings observer.
+                        Log.w(TAG, "Восстановление расписаний отложено до следующей попытки.")
+                    }
+                }
+            } catch (cancel: kotlinx.coroutines.CancellationException) {
+                throw cancel
+            } catch (_: Exception) {
+                // Never log task text, tool arguments, encrypted payloads or provider errors.
+                Log.w(TAG, "Восстановление расписаний отложено до следующего запуска.")
+            }
+        }
     }
 
     private fun resumeMediaCreations() {

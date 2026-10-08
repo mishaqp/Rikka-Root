@@ -17,6 +17,13 @@ object ToolPermissionPolicy {
             tool.toolName != "ask_user"
 
     val registry: Map<String, String> = linkedMapOf(
+        "schedule_job" to "создание заданий по расписанию",
+        "list_jobs" to "список собственных заданий",
+        "get_job_history" to "история собственных заданий",
+        "delete_job" to "удаление заданий",
+        "pause_job" to "приостановка заданий",
+        "resume_job" to "возобновление заданий",
+        "trigger_job_now" to "ручной запуск задания",
         "subagent_dispatch" to "запуск субагента",
         "subagent_list" to "список собственных субагентов",
         "subagent_get" to "чтение результатов собственного субагента",

@@ -1,5 +1,5 @@
 package me.rerere.rikkahub.subagent
-import me.rerere.rikkahub.data.ai.tools.subAgentToolAllowlist
+import me.rerere.rikkahub.data.ai.tools.headlessToolAllowlist
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
 import org.junit.Assert.*
@@ -23,11 +23,11 @@ class SubAgentRequestTest {
     }
     @Test fun delegatedAllowlistFreezesAdvertisedCapabilitiesAndGatesSearchReplacement() {
         val advertised = mutableListOf("read_file", "workspace_shell", "mcp__Server__read")
-        val bounded = subAgentToolAllowlist(advertised, false, listOf("search_web", "scrape_web"))
+        val bounded = headlessToolAllowlist(advertised, false, listOf("search_web", "scrape_web"))
         advertised += "send_sms"
         assertEquals(setOf("read_file", "workspace_shell", "mcp__Server__read"), bounded)
         assertFalse("search_web" in bounded)
-        val replacement = subAgentToolAllowlist(bounded.toList(), true, listOf("search_web", "scrape_web"))
+        val replacement = headlessToolAllowlist(bounded.toList(), true, listOf("search_web", "scrape_web"))
         assertTrue(replacement.containsAll(listOf("search_web", "scrape_web", "workspace_shell", "mcp__Server__read")))
         assertFalse("send_sms" in replacement)
     }

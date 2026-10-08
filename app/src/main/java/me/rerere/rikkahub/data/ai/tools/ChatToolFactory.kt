@@ -25,6 +25,12 @@ import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
 import me.rerere.rikkahub.data.model.ConversationConfig
 import me.rerere.rikkahub.service.HeadlessRuntimeBindings
 import me.rerere.rikkahub.subagent.SubAgentCaller
+import me.rerere.rikkahub.data.ai.tools.local.createCronJobTools
+import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.repository.ScheduledJobRepository
+import me.rerere.rikkahub.data.repository.ScheduledJobRunRepository
+import me.rerere.rikkahub.service.CronJobScheduler
+import org.koin.core.context.GlobalContext
 import me.rerere.rikkahub.subagent.SubAgentEngine
 import me.rerere.rikkahub.subagent.SubAgentOwner
 import me.rerere.rikkahub.subagent.SubAgentRegistry
@@ -41,7 +47,7 @@ internal fun shouldUseExternalWebSearch(assistant: Assistant, model: Model): Boo
 }
 
 /** Freeze the complete advertised capability set after workspace/skills/MCP tools were added. */
-internal fun subAgentToolAllowlist(
+internal fun headlessToolAllowlist(
     advertisedToolNames: Collection<String>,
     allowExternalSearchReplacement: Boolean,
     externalSearchToolNames: Collection<String> = emptyList(),
@@ -132,6 +138,28 @@ class ChatToolFactory(
                 )
             )
         }
+        if (executionContext == null && LocalToolOption.CronJobs in assistant.localTools && conversationId != null) {
+            val id = runCatching { Uuid.parse(conversationId) }.getOrNull()
+            val stored = id?.let { conversationRepository.getConversationById(it) }
+            if (id != null && (stored == null || stored.assistantId == assistant.id)) {
+                // Generation supplied the effective chat snapshot, which may be newer than Room.
+                val caller = (stored ?: Conversation.ofId(id, assistant.id)).copy(
+                    config = ConversationConfig(chatModelId = model.id, reasoningLevel = assistant.reasoningLevel,
+                        enableWebSearch = assistant.enableWebSearch, builtInSearch = BuiltInTools.Search in model.tools,
+                        mcpServers = assistant.mcpServers, workspaceId = assistant.workspaceId,
+                        enabledSkills = assistant.enabledSkills), workspaceCwd = workspaceCwd)
+                val koin = GlobalContext.get()
+                addAll(createCronJobTools(koin.get<ScheduledJobRepository>(), koin.get<ScheduledJobRunRepository>(),
+                    koin.get<CronJobScheduler>(), caller, knownToolNames = {
+                        headlessToolAllowlist(
+                            advertisedToolNames = map { it.name },
+                            allowExternalSearchReplacement = assistant.enableWebSearch && BuiltInTools.Search in model.tools,
+                            externalSearchToolNames = if (assistant.enableWebSearch && BuiltInTools.Search in model.tools)
+                                createSearchTools(settings).map { it.name } else emptyList(),
+                        )
+                    }))
+            }
+        }
         if (executionContext == null && LocalToolOption.SubAgents in assistant.localTools && conversationId != null) {
             val conversationUuid = runCatching { Uuid.parse(conversationId) }.getOrNull()
             val conversation = conversationUuid?.let { conversationRepository.getConversationById(it) }
@@ -150,7 +178,7 @@ class ChatToolFactory(
                     ),
                     workspaceCwd = workspaceCwd,
                     webTaint = runtimeBindings.webTaintFor(conversationId),
-                    allowedTools = subAgentToolAllowlist(
+                    allowedTools = headlessToolAllowlist(
                         advertisedToolNames = map { it.name },
                         allowExternalSearchReplacement = assistant.enableWebSearch && BuiltInTools.Search in model.tools,
                         externalSearchToolNames = if (assistant.enableWebSearch && BuiltInTools.Search in model.tools)

@@ -46,6 +46,8 @@ internal fun AgentLocalToolSettings(assistant: Assistant, onUpdate: (Assistant) 
         R.string.agent_tools_reliability_title, R.string.agent_tools_reliability_desc)
     AgentFeatureCard(assistant, onUpdate, LocalToolOption.SubAgents,
         R.string.agent_tools_subagent_title, R.string.agent_tools_subagent_desc)
+    AgentFeatureCard(assistant, onUpdate, LocalToolOption.CronJobs,
+        R.string.agent_tools_cron_title, R.string.agent_tools_cron_desc)
     if (LocalToolOption.SubAgents in assistant.localTools) CardGroup {
         item(headlineContent = {
             OutlinedTextField(value = assistant.subAgentConcurrencyLimit.toString(),

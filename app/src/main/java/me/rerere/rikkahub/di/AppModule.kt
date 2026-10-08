@@ -8,6 +8,11 @@ import me.rerere.rikkahub.service.HeadlessRuntimeBindings
 import me.rerere.rikkahub.service.HeadlessTaskRunner
 import me.rerere.rikkahub.subagent.SubAgentEngine
 import me.rerere.rikkahub.subagent.SubAgentRegistry
+import me.rerere.rikkahub.data.repository.CronPayloadCipher
+import me.rerere.rikkahub.data.repository.AndroidCronPayloadCipher
+import me.rerere.rikkahub.data.repository.ScheduledJobRepository
+import me.rerere.rikkahub.data.repository.ScheduledJobRunRepository
+import me.rerere.rikkahub.service.CronJobScheduler
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.ai.tools.ChatToolFactory
 import me.rerere.rikkahub.data.event.AppEventBus
@@ -44,6 +49,10 @@ val appModule = module {
     }
 
     single { SubAgentRegistry() }
+    single<CronPayloadCipher> { AndroidCronPayloadCipher() }
+    single { ScheduledJobRepository(get(), get()) }
+    single { ScheduledJobRunRepository(get()) }
+    single { CronJobScheduler(get(), get(), get(), get()) }
     single { HeadlessRuntimeBindings(get(), get(), get(), get(), get(), get(), get()) }
     single<HeadlessTaskRunner> { get<HeadlessRuntimeBindings>().createRunner(get(), get()) }
     single {

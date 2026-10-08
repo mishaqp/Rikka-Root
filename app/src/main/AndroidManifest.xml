@@ -3,6 +3,8 @@
   xmlns:tools="http://schemas.android.com/tools">
 
   <uses-permission android:name="android.permission.INTERNET" />
+  <!-- Ordinary permission: reboot/update recovery only rearms WorkManager. -->
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
   <uses-permission android:name="android.permission.CAMERA" />
   <uses-permission android:name="android.permission.RECORD_AUDIO" />
   <!-- Package C: requested only when enabling the corresponding personal-data tool. -->
@@ -123,6 +125,14 @@
       android:name=".service.ToolMediaPlaybackService"
       android:exported="false"
       android:foregroundServiceType="mediaPlayback" />
+    <receiver
+      android:name=".service.CronBootReceiver"
+      android:exported="false">
+      <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED" />
+        <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+      </intent-filter>
+    </receiver>
     <receiver
       android:name=".ui.activity.SmsSentReceiver"
       android:exported="false" />
