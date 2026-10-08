@@ -2,12 +2,10 @@
    Sample backup rules file; uncomment and customize as necessary.
    See https://developer.android.com/guide/topics/data/autobackup
    for details.
-   Note: This file is ignored for devices older than API 31
-   See https://developer.android.com/about/versions/12/backup-restore
+   Legacy backup policy; API 31+ uses data_extraction_rules.xml.
 -->
 <full-backup-content>
-  <exclude domain="sharedpref" path="skill_secrets.xml" />
-  <exclude domain="root" path="app_webview/" />
+  <!-- The upload-only include also excludes WebView site data and skill secret preferences. -->
   <include
     domain="file"
     path="upload/" />

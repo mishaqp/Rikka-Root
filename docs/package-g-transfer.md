@@ -43,14 +43,16 @@ Geofence и фоновые координаты, foreground-app и notification-
 | 796ebccb | Перенос браузера |
 | 3ff51e86 | Таблица переноса и документация |
 | 4608e165 | Восстановление исходного браузера, JS HARDLINE и одобрений |
+| 0b50d150 | Финальные правила переноса и документация |
 
-Финальная правка браузера и правил переноса выполнена отдельным коммитом после решения пользователя. Все коммиты отправляются одним первоначальным push. Точный Actions run и APK выпуска указаны в итоговом отчёте сессии.
+Финальная правка браузера и правил переноса выполнена отдельным коммитом после решения пользователя. Все подсистемы отправлены одним первоначальным push. После просмотра CI-отчётов потребовался корректирующий push только для XML-бэкапа: общий счётчик lint скрывал две новые ошибки среди исчезнувших старых. Точный Actions run и APK выпуска указаны в итоговом отчёте сессии.
 
 ## Проверки
 
-Локально запускаются только компиляция app/ai и unit-тесты затронутых классов. После восстановления исходной логики прошли компиляция app/ai и окончательный набор: app 623 + ai 24 теста, failures/errors/skipped — 0. APK и lint — только Daily Build; 51 унаследованная lint-ошибка без новых подавлений.
+Локально запускаются только компиляция app/ai и unit-тесты затронутых классов. После восстановления исходной логики прошли компиляция app/ai и окончательный набор с AndroidBackupPolicyTest: app 624 + ai 24 теста, failures/errors/skipped — 0. APK и lint — только Daily Build. Исходный baseline — 51 унаследованная ошибка; подавления не добавлены. Первый CI выполнил 1931 тест без ошибок, но просмотр XML выявил две новые FullBackupContent, несмотря на успешный количественный gate (48 ошибок). Неверные legacy exclude устранены без расширения upload-only whitelist. Регрессия AndroidBackupPolicyTest проверяет настоящий Android BackupScheme с упакованным XML: включён только upload, приватные домены вне whitelist. Перед завершением новые ошибки дополнительно сравниваются по идентичности с принятым baseline F; нужен зелёный Daily Build исправленного HEAD.
 
 Проверены реальный DataStore migration/update/restore и отказ vault, конкурентные обновления настроек, SSE/отмена/параллельные ответы всех API, SQLite/Room backup/schema/rollback/restart, вложенные SSH/MCP, регистрация default OFF, текущие Android и tool grants, headless HARDLINE. Система разрешений браузера проверяется реальными GenerationLoop/HeadlessTaskRunner вызовами; Source JS guard имеет оригинальные тесты Agent.
+
 
 
 
@@ -305,8 +307,8 @@ Geofence и фоновые координаты, foreground-app и notification-
 | app/src/main/java/me/rerere/rikkahub/ui/pages/assistant/detail/AssistantLocalToolPage.kt | app/src/main/java/me/rerere/rikkahub/ui/pages/assistant/detail/AssistantLocalToolPage.kt | адаптировано: Обязательная интеграция G: регистрация, DI/UI, ConversationConfig, текущие разрешения и HARDLINE, веб-контент, vault или резервное копирование; без новых возможностей Agent. |
 | app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingPage.kt | app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingPage.kt | адаптировано: Обязательная интеграция G: регистрация, DI/UI, ConversationConfig, текущие разрешения и HARDLINE, веб-контент, vault или резервное копирование; без новых возможностей Agent. |
 | — (интеграция Root) | app/src/main/res/values/strings_agent_tools.xml | адаптировано: Обязательная интеграция G: регистрация, DI/UI, ConversationConfig, текущие разрешения и HARDLINE, веб-контент, vault или резервное копирование; без новых возможностей Agent. |
-| app/src/main/res/xml/backup_rules.xml | app/src/main/res/xml/backup_rules.xml | адаптировано: Обязательная интеграция G: регистрация, DI/UI, ConversationConfig, текущие разрешения и HARDLINE, веб-контент, vault или резервное копирование; без новых возможностей Agent. |
-| app/src/main/res/xml/data_extraction_rules.xml | app/src/main/res/xml/data_extraction_rules.xml | адаптировано: Обязательная интеграция G: регистрация, DI/UI, ConversationConfig, текущие разрешения и HARDLINE, веб-контент, vault или резервное копирование; без новых возможностей Agent. |
+| app/src/main/res/xml/backup_rules.xml | app/src/main/res/xml/backup_rules.xml | адаптировано: На Android до API 31 сохранён исходный whitelist: только file/upload/. Он исключает WebView и skill_secrets без избыточных exclude вне whitelist; устранены два новых FullBackupContent после просмотра первого CI-отчёта. |
+| app/src/main/res/xml/data_extraction_rules.xml | app/src/main/res/xml/data_extraction_rules.xml | адаптировано: На API 31+ явные исключения root/app_webview/ и sharedpref/skill_secrets.xml для cloud-backup и device-transfer; авторизация сайтов не попадает в бэкап. |
 | — (интеграция Root) | app/src/test/java/me/rerere/rikkahub/data/ai/GenerationLoopRootApprovalTest.kt | адаптировано: Регрессия затронутого класса и обязательной интеграции Root. |
 | app/src/test/java/me/rerere/rikkahub/data/ai/tools/HardlineCommandGuardBrowserTest.kt | app/src/test/java/me/rerere/rikkahub/data/ai/tools/HardlineCommandGuardBrowserTest.kt | скопировано: Без изменений. |
 | — (интеграция Root) | app/src/test/java/me/rerere/rikkahub/data/ai/tools/PackageGSecurityIntegrationTest.kt | адаптировано: Регрессия затронутого класса и обязательной интеграции Root. |
@@ -314,10 +316,11 @@ Geofence и фоновые координаты, foreground-app и notification-
 | — (интеграция Root) | app/src/test/java/me/rerere/rikkahub/data/ai/tools/local/PackageGRegistrationTest.kt | адаптировано: Регрессия затронутого класса и обязательной интеграции Root. |
 | — (интеграция Root) | app/src/test/java/me/rerere/rikkahub/data/datastore/McpLegacyPersistenceIntegrationTest.kt | адаптировано: Регрессия затронутого класса и обязательной интеграции Root. |
 | — (интеграция Root) | app/src/test/java/me/rerere/rikkahub/data/datastore/migration/PreferenceStoreMcpSecretsMigrationTest.kt | адаптировано: Регрессия затронутого класса и обязательной интеграции Root. |
+| — (интеграция Root) | app/src/test/java/me/rerere/rikkahub/data/sync/AndroidBackupPolicyTest.kt | адаптировано: Регрессия Android API 28: настоящий FullBackup.BackupScheme парсит упакованный R.xml.backup_rules; единственный whitelist file/upload, root/sharedpref и другие приватные домены не включены. |
 | — (интеграция Root) | app/src/test/java/me/rerere/rikkahub/data/sync/PendingRestoreMultipleDatabaseTest.kt | адаптировано: Регрессия затронутого класса и обязательной интеграции Root. |
 | — (интеграция Root) | app/src/test/java/me/rerere/rikkahub/service/PackageGPermissionTest.kt | адаптировано: Регрессия затронутого класса и обязательной интеграции Root. |
 
-Таблица содержит 228 файлов: 89 побайтовых копий и 139 адаптаций/интеграционных файлов. AGENTS.md и этот отчёт меняются отдельно как документация.
+Таблица содержит 229 файлов: 89 побайтовых копий и 140 адаптаций/интеграционных файлов. AGENTS.md и этот отчёт меняются отдельно как документация.
 
 ## Необходимые адаптации безопасности и совместимости
 
@@ -442,7 +445,7 @@ Source READ-инструменты и browser_done не требуют одоб�
 | P17 | R01 | Связать node_id с токеном/хешем snapshot и возвращать stale-ID при изменении дерева. | Тап не должен попасть в другой узел после reorder. | 3 | Изменение формата/срока жизни ID, дополнительное чтение дерева. |
 | P18 | R02 | Удалять незафиксированную MediaStore URI при сбое; добавить nonce имени cache. | Не оставлять pending-файлы и не перезаписывать параллельные скриншоты. | 2 | Изменения имени/cleanup артефакта; нужна проверка отмены. |
 | P19 | R03 | Ставить truncated только при наличии следующего подходящего узла. | Флаг должен отражать реальное обрезание дерева. | 2 | Небольшое изменение поля результата и стоимости обхода. |
-| P20 | R04 | Отдельно согласовать скрытие password nodes и ввод секретов без открытого аргумента/эхо в истории. | Не полагаться только на маскирование Android/OEM. | 3–5 | Изменение результатов/селекторов; возможны изменения общего vault и tool history, требуется согласование безопасности. |
+| P20 | R04 | Отдельно согласовать скрытие password nodes и ввод секретов без открытого аргумента/эхо в истории. | Не полагаться только на маскирование Android/OEM. | 3–5 | Изменение результатов/селекторов; возможны изменения общего vault и tool history, нужен отдельный выбор реализации пользователем. |
 | P21 | Root input ограничение | Согласовать безопасный Unicode ввод через IME/clipboard механизм. | Root input сейчас отклоняет кириллицу/Unicode. | 3–5 | Новая возможность и побочные эффекты clipboard/IME; отдельное решение пользователя. |
 | P22 | Root display ограничение | Сопоставлять logical display_id с физическим SurfaceFlinger ID. | Поддержать дополнительные дисплеи вместо ясного unsupported. | 2 | Различия OEM/Android; неправильное сопоставление снимает другой экран. |
 | P23 | Root after ограничение | Оптимизировать after-снимки и подтверждать UI quietness. | Снизить задержку полного uiautomator dump и улучшить settle. | 2–3 | Устаревшее дерево и неверный screen_changed при чрезмерном кэшировании. |
@@ -454,9 +457,11 @@ Source READ-инструменты и browser_done не требуют одоб�
 | P29 | W08 | Возвращать missing-context вместо true при неизвестном location. | Не выполнять солнечное действие без достаточных данных; согласовать до включения функции. | 2 | Сценарии перестанут запускаться, пока нет location; фоновые доступы отдельно. |
 | P30 | W09 | Безопасно разрешать callback cold-start Worker и ждать выполнения; согласовать с P24. | Не терять time/cron до первого repository sync. | 3 | Startup/background limits, повторная доставка; отсутствие двойных эффектов. |
 | P31 | B10 | Пропускать headless screenshot capture при BrowserScreenshotStreamer.NoOp. | Убрать лишние I/O и локальные PNG-копии, которые никому не доставляются. | 1 | Низкий: доставка по-прежнему отсутствует. При будущем реальном streamer сохранить capture/dedupe семантику. |
-| P32 | W10 | Отдельно согласовать обычное legacy BLUETOOTH с maxSdkVersion=30 и диагностику API≤30; BLUETOOTH_ADMIN не нужен. | Bluetooth workflow должен получать ACL/address на Android 8–11. | 2 | Это отсутствующее в Agent разрешение, сейчас не добавлено: требуется согласование. Проверить системные broadcasts; исправление не устраняет отдельно W07. |
+| P32 | W10 | Отдельно согласовать обычное legacy BLUETOOTH с maxSdkVersion=30 и диагностику API≤30; BLUETOOTH_ADMIN не нужен. | Bluetooth workflow должен получать ACL/address на Android 8–11. | 2 | Это отсутствующее в Agent разрешение, сейчас не добавлено; перенос сохранён без него, поддержку предлагается выбрать отдельной задачей. Проверить системные broadcasts; исправление не устраняет отдельно W07. |
 | P33 | B11 | Отдельно согласовать централизованную семантику NO_ALWAYS_ALLOW для browser_eval_js во всех режимах. | Если потребуется, обеспечить подтверждение каждого eval вместо нынешнего UI-only флага Source. | 3–5 | Меняет исходное поведение Agent, Yolo/chat grants и headless-запуски могут перестать работать; сейчас не применяется. |
 | P34 | B09 | Только отдельной задачей добавить опциональную защиту выдачи browser данных/фильтр известных секретов. | Если пользователь позже выберет это, уменьшить случайную передачу приватного контента из страниц/DOM/форм/скриншотов. | 2–4 | Пользователь отклонил такую защиту по умолчанию; меняет Source результаты, ломает формы/JS/authenticated сценарии и не обеспечивает абсолютной DLP; сейчас не применяется. |
+
+| P35 | Root CI, .github/scripts/android_build.py | Сравнивать новые lint-ошибки по идентичности с baseline, а не только по общему числу. | Gate количества пропустил два новых FullBackupContent при одновременном исчезновении пяти старых ошибок; обе новые исправлены в этом выпуске. | 2 | Поддержка baseline при обновлениях lint; корректная нормализация путей и диагностик. |
 
 
 Оценки не суммируются напрямую: некоторые предложения затрагивают одни и те же файлы (например, P24/P30). Спецдоступы и новые возможности требуют отдельного решения пользователя.
