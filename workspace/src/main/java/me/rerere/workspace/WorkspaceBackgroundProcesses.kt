@@ -3,6 +3,7 @@ package me.rerere.workspace
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import java.io.OutputStream
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -35,55 +36,72 @@ internal class BackgroundTail(private val capacity: Int = MAX_BG_OUTPUT_CHARS) {
     @Synchronized fun snapshot(): Pair<String, Long> = text.toString() to dropped
 }
 
-/** Host-side control files contain no command text or output. They are not backup state. */
+/** An app-held pipe controls lifetime; the host-side file stores only the exit code. */
 class WorkspaceProcessSupervisor(tempDir: File) : AutoCloseable {
     private val directory = File(tempDir, "bg-${UUID.randomUUID()}").apply {
         check(mkdirs()) { "Cannot create process control directory" }
         setReadable(false, false); setWritable(false, false); setExecutable(false, false)
         setReadable(true, true); setWritable(true, true); setExecutable(true, true)
     }
-    private val active = File(directory, "active").apply { createNewFile() }
     private val result = File(directory, "exit")
-    private val owner = File("/proc/self/stat").readText()
-    private val ownerPid = owner.substringBefore(' ').toLong()
-    private val ownerStart = owner.substringAfterLast(") ").split(' ')[19].toLong()
+    private var ownerChannel: OutputStream? = null
 
     fun commandLine(command: List<String>): List<String> {
         require(command.isNotEmpty())
         val script = """
-            owner_alive() {
-                stat=${'$'}(cat /proc/$ownerPid/stat 2>/dev/null) || return 1
+            diagnostic() { printf 'workspace-background: %s\n' "${'$'}1" >&2 2>/dev/null || :; }
+            # stdin is a lifetime pipe, not input for the command. Only the app owns its write end.
+            exec 3<&0 0</dev/null
+            if ! IFS= read -r control <&3; then
+                diagnostic owner_channel_closed_before_start
+                exit 125
+            fi
+            if [ "${'$'}control" != run ]; then
+                diagnostic invalid_owner_handshake
+                exit 125
+            fi
+            child_identity() {
+                # Use shell builtins: PATH, PRoot and access to the app's /proc entry are irrelevant.
+                IFS= read -r stat 2>/dev/null < /proc/${'$'}child/stat || return 1
                 rest=${'$'}{stat##*) }
+                [ "${'$'}rest" != "${'$'}stat" ] || return 1
                 set -- ${'$'}rest
+                [ "${'$'}#" -ge 20 ] || return 1
                 shift 19
-                [ "${'$'}1" = "$ownerStart" ] && [ -f ${quote(active.path)} ]
+                case "${'$'}1" in ''|*[!0-9]*) return 1 ;; esac
+                printf '%s' "${'$'}1"
             }
-            owner_alive || exit 125
-            ${command.joinToString(" ", transform = ::quote)} &
+            ${command.joinToString(" ", transform = ::quote)} </dev/null 3<&- &
             child=${'$'}!
-            child_stat=${'$'}(cat /proc/${'$'}child/stat 2>/dev/null)
-            child_rest=${'$'}{child_stat##*) }
-            set -- ${'$'}child_rest
-            child_start=''
-            if [ "${'$'}#" -ge 20 ]; then shift 19; child_start=${'$'}1; fi
+            child_start=${'$'}(child_identity)
             (
-                while owner_alive; do sleep 1; done
-                stat=${'$'}(cat /proc/${'$'}child/stat 2>/dev/null)
-                rest=${'$'}{stat##*) }
-                set -- ${'$'}rest
-                if [ -n "${'$'}child_start" ] && [ "${'$'}#" -ge 20 ]; then
-                    shift 19
-                    if [ "${'$'}1" = "${'$'}child_start" ]; then
-                        # PRoot ignores TERM. QUIT invokes kill_all_tracees, including detached children.
-                        kill -QUIT "${'$'}child" 2>/dev/null
-                    fi
+                # App death also closes stderr. A diagnostic must not kill the watchdog with SIGPIPE.
+                trap '' PIPE
+                # The explicit stdin redirect matters: asynchronous shell commands otherwise get /dev/null.
+                if IFS= read -r control; then
+                    diagnostic unexpected_owner_message
+                else
+                    diagnostic owner_channel_closed
+                fi
+                current_start=${'$'}(child_identity)
+                if [ -n "${'$'}child_start" ] && [ "${'$'}current_start" = "${'$'}child_start" ]; then
+                    # PRoot ignores TERM. QUIT invokes kill_all_tracees, including detached children.
+                    kill -QUIT "${'$'}child" 2>/dev/null
+                elif kill -0 "${'$'}child" 2>/dev/null; then
+                    diagnostic child_identity_unavailable
                 fi
                 sleep 1
                 kill -KILL -${'$'}${'$'} 2>/dev/null
-            ) &
+            ) <&3 3<&- &
+            exec 3<&-
             wait "${'$'}child"
             code=${'$'}?
-            printf '%s\n' "${'$'}code" > ${quote(result.path)}
+            # Startup cleanup may remove temp files. Recreate only the private result directory;
+            # process lifetime never depends on its existence.
+            if [ ! -d ${quote(directory.path)} ]; then
+                (umask 077; mkdir -p ${quote(directory.path)}) 2>/dev/null
+            fi
+            printf '%s\n' "${'$'}code" 2>/dev/null > ${quote(result.path)} || diagnostic exit_code_record_unavailable
             # The command is finished: also remove its watchdog and any remaining group members.
             kill -KILL -${'$'}${'$'} 2>/dev/null
             exit "${'$'}code"
@@ -93,9 +111,22 @@ class WorkspaceProcessSupervisor(tempDir: File) : AutoCloseable {
         return setsid + listOf(shell, "-c", script)
     }
 
-    internal fun requestStop() { active.delete() }
+    @Synchronized internal fun attachOwnerChannel(channel: OutputStream) {
+        ownerChannel = channel
+        try {
+            channel.write("run\n".toByteArray(Charsets.US_ASCII))
+            channel.flush()
+        } catch (_: IOException) {
+            // Preserve the process's startup diagnostic and exit code if it has already failed.
+            requestStop()
+        }
+    }
+    @Synchronized internal fun requestStop() {
+        try { ownerChannel?.close() } catch (_: IOException) { /* already closed by the process */ }
+        ownerChannel = null
+    }
     internal fun exitCode(): Int? = runCatching { result.readText().trim().toIntOrNull() }.getOrNull()
-    override fun close() { active.delete(); directory.deleteRecursively() }
+    override fun close() { requestStop(); directory.deleteRecursively() }
     private fun quote(value: String): String = "'" + value.replace("'", "'\"'\"'") + "'"
 }
 
@@ -145,7 +176,7 @@ class WorkspaceBackgroundProcesses : AutoCloseable {
         @Volatile private var completedCode: Int? = null
 
         init {
-            try { process.outputStream.close() } catch (_: IOException) { /* child may have already exited */ }
+            supervisor.attachOwnerChannel(process.outputStream)
             Thread {
                 process.waitFor()
                 outThread.join(1_000); errThread.join(1_000)

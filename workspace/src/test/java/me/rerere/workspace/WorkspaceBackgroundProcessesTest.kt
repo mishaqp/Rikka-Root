@@ -13,7 +13,82 @@ class WorkspaceBackgroundProcessesTest {
 
     private fun context(command: String, root: String = "test") = makeContext(temporary.newFolder(), command, root)
     private fun start(registry: WorkspaceBackgroundProcesses, context: WorkspaceShellContext) =
-        registry.start(context) { HostShellRunner().startBackground(context, it) }
+        registry.start(context) { launchBackground(context, it) }
+
+    @Test(timeout = 15_000) fun `start stays running and stop ends it when external proc reader is unavailable`() {
+        val ctx = context("printf started; sleep 60")
+        val bin = temporary.newFolder()
+        File(bin, "cat").apply { writeText("#!/bin/sh\nexit 1\n"); assertTrue(setExecutable(true)) }
+        WorkspaceBackgroundProcesses().use { registry ->
+            val task = registry.start(ctx) { supervisor ->
+                ProcessBuilder(testShell(supervisor.commandLine(listOf("/bin/sh", "-c", ctx.command))))
+                    .directory(ctx.workingDir).apply { environment()["PATH"] = "${bin.path}:${environment()["PATH"]}" }.start()
+            }
+            await { registry.status("test", task.id)!!.let { it.stdout == "started" || !it.running } }
+            val running = registry.status("test", task.id)!!
+            assertTrue("Command must start even when cat cannot inspect the owner: $running", running.running)
+            assertEquals("started", running.stdout)
+            assertNull(running.exitCode)
+            assertTrue(registry.stop("test", task.id))
+            assertFalse(registry.status("test", task.id)!!.running)
+        }
+    }
+
+    @Test(timeout = 15_000) fun `temporary directory cleanup cannot revoke the owner lifetime channel`() {
+        val ctx = context("printf started; sleep 60")
+        WorkspaceBackgroundProcesses().use { registry ->
+            val task = registry.start(ctx) { supervisor ->
+                // App startup cleans workspace temp directories asynchronously, possibly during launch.
+                assertTrue(ctx.tempDir.deleteRecursively())
+                launchBackground(ctx, supervisor)
+            }
+            await { registry.status("test", task.id)!!.let { it.stdout == "started" || !it.running } }
+            assertTrue(registry.status("test", task.id)!!.running)
+            assertTrue(registry.stop("test", task.id))
+            assertFalse(registry.status("test", task.id)!!.running)
+        }
+    }
+
+    @Test(timeout = 15_000) fun `startup refusal gives a fixed diagnostic without command or control input`() {
+        listOf(null, "private-input\n").forEach { input ->
+            val ctx = context("printf command_must_not_run")
+            WorkspaceProcessSupervisor(ctx.tempDir).use { supervisor ->
+                val process = launchBackground(ctx, supervisor)
+                try {
+                    process.outputStream.use { if (input != null) it.write(input.toByteArray()) }
+                    assertTrue(process.waitFor(5, TimeUnit.SECONDS))
+                    assertEquals(125, process.exitValue())
+                    assertEquals("", process.inputStream.bufferedReader().readText())
+                    val reason = if (input == null) "owner_channel_closed_before_start" else "invalid_owner_handshake"
+                    assertEquals("workspace-background: $reason\n", process.errorStream.bufferedReader().readText())
+                } finally { if (process.isAlive) process.destroyForcibly() }
+            }
+        }
+    }
+
+    @Test(timeout = 15_000) fun `normal exit code survives temporary directory cleanup before launch`() {
+        val ctx = context("printf hello; printf error >&2; exit 7")
+        WorkspaceBackgroundProcesses().use { registry ->
+            val task = registry.start(ctx) { supervisor ->
+                assertTrue(ctx.tempDir.deleteRecursively())
+                launchBackground(ctx, supervisor)
+            }
+            await { registry.status("test", task.id)!!.running == false }
+            val done = registry.status("test", task.id)!!
+            assertEquals(7, done.exitCode)
+            assertEquals("hello", done.stdout)
+            assertEquals("error", done.stderr)
+        }
+    }
+
+    @Test(timeout = 15_000) fun `empty command stdin stays separate from supervisor control channel`() {
+        WorkspaceBackgroundProcesses().use { registry ->
+            val task = start(registry, context("cat; printf stdin_closed"))
+            await { registry.status("test", task.id)!!.running == false }
+            assertEquals("stdin_closed", registry.status("test", task.id)!!.stdout)
+            assertEquals(0, registry.status("test", task.id)!!.exitCode)
+        }
+    }
 
     @Test fun `output tails are bounded independently and record discarded characters`() {
         val buffer = BackgroundTail(5)
@@ -99,6 +174,15 @@ class WorkspaceBackgroundProcessesTest {
             val temp = File(dir, "tmp").apply { mkdirs() }
             return WorkspaceShellContext(root, command, "", dir, dir, temp, dir, 30_000)
         }
+        // Set RIKKA_BG_TEST_SHELL to a host mksh executable to exercise the Android shell dialect too.
+        private fun testShell(command: List<String>): List<String> = System.getenv("RIKKA_BG_TEST_SHELL")?.let { shell ->
+            command.toMutableList().apply { this[size - 3] = shell }
+        } ?: command
+        private fun launchBackground(context: WorkspaceShellContext, supervisor: WorkspaceProcessSupervisor): Process {
+            if (System.getenv("RIKKA_BG_TEST_SHELL") == null) return HostShellRunner().startBackground(context, supervisor)
+            return ProcessBuilder(testShell(supervisor.commandLine(listOf("/bin/sh", "-c", context.command))))
+                .directory(context.workingDir).start()
+        }
         private fun running(pid: Long): Boolean = runCatching {
             File("/proc/$pid/stat").readText().substringAfterLast(") ").first() != 'Z'
         }.getOrDefault(false)
@@ -110,7 +194,7 @@ class WorkspaceBackgroundProcessesTest {
         @JvmStatic fun main(args: Array<String>) {
             val ctx = makeContext(File(args.first()), "sleep 60 & echo \$!; wait", "owner")
             val registry = WorkspaceBackgroundProcesses()
-            val task = registry.start(ctx) { HostShellRunner().startBackground(ctx, it) }
+            val task = registry.start(ctx) { launchBackground(ctx, it) }
             await { registry.status("owner", task.id)!!.stdout.trim().toLongOrNull() != null }
             println(registry.status("owner", task.id)!!.stdout.trim())
             System.out.flush()
