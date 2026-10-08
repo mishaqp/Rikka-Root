@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="setting_browser_title" translatable="false">Браузер</string>
+  <string name="setting_browser_section_browser" translatable="false">Браузер</string>
+  <string name="setting_browser_open" translatable="false">Открыть браузер</string>
+  <string name="setting_browser_open_desc" translatable="false">Запуск браузера на about:blank — удобно, чтобы войти один раз перед передачей управления ИИ.</string>
+  <string name="setting_browser_clear_data" translatable="false">Очистить данные просмотра</string>
+  <string name="setting_browser_clear_data_desc" translatable="false">Стереть файлы cookie, локальное хранилище и кэшированные страницы. Переключатели отдельных инструментов сохраняются.</string>
+  <string name="setting_browser_clear_data_confirm_title" translatable="false">Очистить данные просмотра?</string>
+  <string name="setting_browser_clear_data_confirm_body" translatable="false">Это очистит все файлы cookie, локальное хранилище и кэшированные страницы. Вам нужно будет заново войти на все сайты, которые использовал ИИ.</string>
+  <string name="setting_browser_clear_data_confirm" translatable="false">Очистить</string>
+  <string name="setting_browser_clear_data_done" translatable="false">Данные просмотра очищены.</string>
+  <string name="setting_browser_tools_enabled_title" translatable="false">Включённые инструменты</string>
+  <string name="setting_browser_category_read" translatable="false">Чтение</string>
+  <string name="setting_browser_category_write" translatable="false">Запись</string>
+  <string name="setting_browser_category_loop_control" translatable="false">Управление циклом</string>
+  <string name="setting_browser_tool_open_title" translatable="false">Открыть URL</string>
+  <string name="setting_browser_tool_open_desc" translatable="false">Переход по URL.</string>
+  <string name="setting_browser_tool_current_url_title" translatable="false">Текущий URL</string>
+  <string name="setting_browser_tool_current_url_desc" translatable="false">Чтение URL и заголовка страницы.</string>
+  <string name="setting_browser_tool_get_text_title" translatable="false">Получить текст</string>
+  <string name="setting_browser_tool_get_text_desc" translatable="false">Извлечение читаемого текста со страницы.</string>
+  <string name="setting_browser_tool_get_links_title" translatable="false">Получить ссылки</string>
+  <string name="setting_browser_tool_get_links_desc" translatable="false">Список всех URL ссылок и подписей.</string>
+  <string name="setting_browser_tool_back_title" translatable="false">Назад</string>
+  <string name="setting_browser_tool_back_desc" translatable="false">Переход назад в истории браузера.</string>
+  <string name="setting_browser_tool_forward_title" translatable="false">Вперёд</string>
+  <string name="setting_browser_tool_forward_desc" translatable="false">Переход вперёд в истории браузера.</string>
+  <string name="setting_browser_tool_wait_for_title" translatable="false">Ожидать элемент</string>
+  <string name="setting_browser_tool_wait_for_desc" translatable="false">Пауза до появления CSS-селектора.</string>
+  <string name="setting_browser_tool_click_title" translatable="false">Нажать</string>
+  <string name="setting_browser_tool_click_desc" translatable="false">Нажатие на элемент.</string>
+  <string name="setting_browser_tool_type_title" translatable="false">Ввести</string>
+  <string name="setting_browser_tool_type_desc" translatable="false">Ввод в поле ввода.</string>
+  <string name="setting_browser_tool_scroll_title" translatable="false">Прокрутить</string>
+  <string name="setting_browser_tool_scroll_desc" translatable="false">Прокрутка страницы.</string>
+  <string name="setting_browser_tool_submit_title" translatable="false">Отправить</string>
+  <string name="setting_browser_tool_submit_desc" translatable="false">Отправка формы.</string>
+  <string name="setting_browser_tool_select_title" translatable="false">Выбрать</string>
+  <string name="setting_browser_tool_select_desc" translatable="false">Выбор значения в &lt;select&gt;.</string>
+  <string name="setting_browser_tool_press_key_title" translatable="false">Нажать клавишу</string>
+  <string name="setting_browser_tool_press_key_desc" translatable="false">Синтез события клавиатуры.</string>
+  <string name="setting_browser_tool_done_title" translatable="false">Браузер-готово</string>
+  <string name="setting_browser_tool_done_desc" translatable="false">Позволяет ИИ сообщить, что он завершил задачу.</string>
+  <string name="setting_browser_section_defaults" translatable="false">Значения по умолчанию и лимиты</string>
+  <string name="setting_browser_search_engine" translatable="false">Поисковая система</string>
+  <string name="setting_browser_search_engine_desc" translatable="false">DuckDuckGo (по умолчанию) — переключение вступит в силу после выпуска browser_search.</string>
+  <string name="setting_browser_per_tool_timeout" translatable="false">Тайм-аут на инструмент</string>
+  <string name="setting_browser_per_tool_timeout_desc" translatable="false">Жёсткий лимит времени на один вызов инструмента: от 10 секунд до 10 минут.</string>
+  <string name="setting_browser_per_tool_timeout_unit" translatable="false">секунд</string>
+  <string name="setting_browser_single_task_timeout" translatable="false">Тайм-аут одной задачи</string>
+  <string name="setting_browser_single_task_timeout_desc" translatable="false">Лимит одной задачи браузера, ограничивающий бесконечные циклы: от 1 до 60 минут.</string>
+  <string name="setting_browser_single_task_timeout_unit" translatable="false">минут</string>
+  <string name="browser_address_bar_close" translatable="false">Закрыть браузер</string>
+  <string name="browser_address_bar_back" translatable="false">Браузер назад</string>
+  <string name="browser_address_bar_forward" translatable="false">Браузер вперёд</string>
+  <string name="browser_address_bar_refresh" translatable="false">Обновить страницу</string>
+  <string name="browser_address_bar_more" translatable="false">Дополнительно</string>
+  <string name="browser_address_bar_stop_ai" translatable="false">Остановить ИИ</string>
+  <string name="browser_address_bar_placeholder" translatable="false">Поиск или ввод URL</string>
+  <string name="browser_mini_chat_open" translatable="false">Открыть чат с ИИ</string>
+  <string name="browser_mini_chat_close" translatable="false">Закрыть чат с ИИ</string>
+  <string name="browser_mini_chat_title" translatable="false">Спросить ИИ</string>
+  <string name="browser_mini_chat_placeholder" translatable="false">Скажите ИИ, что делать…</string>
+  <string name="browser_mini_chat_generating" translatable="false">Думаю…</string>
+  <string name="browser_mini_chat_send" translatable="false">Отправить</string>
+  <string name="browser_ai_stripe_idle" translatable="false">ИИ готов</string>
+  <string name="browser_ai_stripe_active" translatable="false">ИИ: %1$s</string>
+  <string name="browser_ai_stripe_expand" translatable="false">Показать недавнее</string>
+  <string name="browser_ai_stripe_collapse" translatable="false">Скрыть</string>
+  <string name="browser_ai_stripe_stop" translatable="false">Стоп</string>
+  <string name="browser_ai_action_open" translatable="false">Открытие %1$s</string>
+  <string name="browser_ai_action_click" translatable="false">Нажато %1$s</string>
+  <string name="browser_ai_action_type" translatable="false">Ввод в %1$s</string>
+  <string name="browser_ai_action_scroll" translatable="false">Прокручено %1$s</string>
+  <string name="browser_ai_action_submit" translatable="false">Отправлено %1$s</string>
+  <string name="browser_ai_action_select" translatable="false">Выбран вариант в %1$s</string>
+  <string name="browser_ai_action_key" translatable="false">Нажата клавиша %1$s</string>
+  <string name="browser_ai_action_js" translatable="false">Выполнен JavaScript</string>
+  <string name="browser_ai_action_screenshot" translatable="false">Сделан снимок экрана</string>
+  <string name="browser_ai_action_read" translatable="false">Прочитано %1$s</string>
+  <string name="browser_ai_action_back" translatable="false">Назад</string>
+  <string name="browser_ai_action_forward" translatable="false">Вперёд</string>
+  <string name="browser_ai_action_done" translatable="false">Готово: %1$s</string>
+  <string name="browser_ai_action_stopped" translatable="false">Остановлено пользователем</string>
+  <string name="browser_ai_action_failed" translatable="false">Ошибка: %1$s</string>
+</resources>

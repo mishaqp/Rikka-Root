@@ -100,6 +100,12 @@
     android:theme="@style/Theme.Rikkahub"
     android:usesCleartextTraffic="true"
     tools:targetApi="33">
+    <activity
+      android:name=".browser.BrowserActivity"
+      android:exported="false"
+      android:configChanges="screenSize|orientation|keyboardHidden"
+      android:hardwareAccelerated="true"
+      android:theme="@style/Theme.Rikkahub" />
     <!-- Package F: disabled by default; requires verified Android caller and explicit trust. -->
     <activity
       android:name=".automation.ExternalAutomationActivity"
