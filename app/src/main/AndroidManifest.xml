@@ -24,6 +24,7 @@
   <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
   <!-- Package A: Wi-Fi connection state, granted at install time. -->
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+  <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
   <!-- Package A: requested only when enabling mobile-network info, Wi-Fi, or sensors. -->
   <uses-permission android:name="android.permission.READ_PHONE_STATE" />
   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />

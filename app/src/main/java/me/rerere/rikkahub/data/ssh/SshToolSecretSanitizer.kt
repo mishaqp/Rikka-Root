@@ -100,4 +100,4 @@ fun sanitizeSshToolMessages(messages: List<UIMessage>,
 }
 
 fun sanitizeToolArgsForExport(toolName: String, args: String): String =
-    McpToolSecretSanitizer.sanitizeForExport(toolName, SshToolSecretSanitizer.sanitizeForExport(toolName, args))
+    me.rerere.rikkahub.data.ai.tools.protectToolArguments(toolName, args, null, null)

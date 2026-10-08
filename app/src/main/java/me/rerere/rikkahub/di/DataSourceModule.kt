@@ -235,7 +235,7 @@ val dataSourceModule = module {
         }
     }
 
-    single { BackupManager(context = get(), database = get(), settingsStore = get(), json = get()) }
+    single { BackupManager(context = get(), database = get(), settingsStore = get(), json = get(), workflowDatabase = get()) }
 
     single {
         WebDavSync(

@@ -544,8 +544,7 @@ internal fun sanitizeSshConversation(conversation: Conversation, secrets: SshToo
 
 private fun sanitizePrivateToolArgs(ssh: SshToolSecretSanitizer?, mcp: McpToolSecretSanitizer?): (String, String) -> String =
     { name, input ->
-        val sshSafe = ssh?.sanitizeForPersistence(name, input) ?: SshToolSecretSanitizer.sanitizeForExport(name, input)
-        mcp?.sanitizeForPersistence(name, sshSafe) ?: McpToolSecretSanitizer.sanitizeForExport(name, sshSafe)
+        me.rerere.rikkahub.data.ai.tools.protectToolArguments(name, input, ssh, mcp)
     }
 
 /**

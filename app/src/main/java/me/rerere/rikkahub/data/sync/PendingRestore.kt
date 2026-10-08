@@ -17,7 +17,15 @@ internal class PendingRestore(
     private val root: File,
     private val databaseFile: File,
     private val filesDir: File,
+    private val additionalDatabaseFiles: List<File> = emptyList(),
 ) {
+    private val databaseFiles = listOf(databaseFile) + additionalDatabaseFiles
+
+    init {
+        require(databaseFiles.map { it.name }.distinct().size == databaseFiles.size) {
+            "Duplicate restore database names"
+        }
+    }
     private val pending get() = File(root, "pending")
 
     fun createStagingDirectory(): File {
@@ -94,10 +102,10 @@ internal class PendingRestore(
         val entries = paths.map { path ->
             RestoreEntry(path, install = true, hadOriginal = targetFile(path).exists())
         }.toMutableList()
-        if (paths.contains("database/${databaseFile.name}")) {
+        for (database in databaseFiles.filter { paths.contains("database/${it.name}") }) {
             // The new database is standalone. Keep the old DB's sidecars with the old DB only.
             for (suffix in listOf("-wal", "-shm", "-journal")) {
-                val path = "database/${databaseFile.name}$suffix"
+                val path = "database/${database.name}$suffix"
                 entries.add(0, RestoreEntry(path, install = false, hadOriginal = targetFile(path).exists()))
             }
         }
@@ -118,13 +126,10 @@ internal class PendingRestore(
         return when {
             path.startsWith("database/") -> {
                 val name = path.removePrefix("database/")
-                require(name in listOf(
-                    databaseFile.name, databaseFile.name + "-wal",
-                    databaseFile.name + "-shm", databaseFile.name + "-journal"
-                )) {
-                    "Invalid restore database path"
-                }
-                File(databaseFile.parentFile, name)
+                val database = databaseFiles.firstOrNull { file ->
+                    name in listOf(file.name, file.name + "-wal", file.name + "-shm", file.name + "-journal")
+                } ?: error("Invalid restore database path")
+                File(database.parentFile, name)
             }
             path.startsWith("files/") -> resolveInside(filesDir, path.removePrefix("files/"))
             else -> error("Invalid restore path: $path")

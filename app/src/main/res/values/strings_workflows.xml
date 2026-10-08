@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="relative_time_days_ago" translatable="false">%1$d дн назад</string>
+  <string name="relative_time_hours_ago" translatable="false">%1$d ч назад</string>
+  <string name="relative_time_just_now" translatable="false">только что</string>
+  <string name="relative_time_minutes_ago" translatable="false">%1$d мин назад</string>
+  <string name="relative_time_seconds_ago" translatable="false">%1$d с назад</string>
+  <string name="setting_page_workflow_detail_delete" translatable="false">Удалить</string>
+  <string name="setting_page_workflow_detail_delete_confirm_body" translatable="false">Это удаляет сценарий и его историю. Принадлежавшие ему триггеры (геозоны, расписания, широковещания) демонтируются при следующей сверке. Нельзя отменить.</string>
+  <string name="setting_page_workflow_detail_delete_confirm_no" translatable="false">Отмена</string>
+  <string name="setting_page_workflow_detail_delete_confirm_title" translatable="false">Удалить сценарий?</string>
+  <string name="setting_page_workflow_detail_delete_confirm_yes" translatable="false">Удалить</string>
+  <string name="setting_page_workflow_detail_edit" translatable="false">Редактировать в чате</string>
+  <string name="setting_page_workflow_detail_edit_prefill" translatable="false">Редактировать сценарий с именем “%1$s”.</string>
+  <string name="setting_page_workflow_detail_history_empty" translatable="false">Срабатываний пока не записано.</string>
+  <string name="setting_page_workflow_detail_no_conditions" translatable="false">(нет)</string>
+  <string name="setting_page_workflow_detail_run_now" translatable="false">Запустить сейчас</string>
+  <string name="setting_page_workflow_detail_run_now_done" translatable="false">Запуск завершён: %1$s</string>
+  <string name="setting_page_workflow_detail_section_actions" translatable="false">Действия</string>
+  <string name="setting_page_workflow_detail_section_conditions" translatable="false">Условия</string>
+  <string name="setting_page_workflow_detail_section_description" translatable="false">Описание</string>
+  <string name="setting_page_workflow_detail_section_history" translatable="false">История</string>
+  <string name="setting_page_workflow_detail_section_stats" translatable="false">Статистика</string>
+  <string name="setting_page_workflow_detail_section_trigger" translatable="false">Триггер</string>
+  <string name="setting_page_workflow_detail_stat_cooldown" translatable="false">Пауза: %1$d с</string>
+  <string name="setting_page_workflow_detail_stat_cooldown_none" translatable="false">Пауза: нет</string>
+  <string name="setting_page_workflow_detail_stat_daily_cap" translatable="false">Дневной лимит: %1$d</string>
+  <string name="setting_page_workflow_detail_stat_daily_cap_unlimited" translatable="false">Дневной лимит: без ограничений</string>
+  <string name="setting_page_workflow_detail_stat_last_run" translatable="false">Последний запуск: %1$s</string>
+  <string name="setting_page_workflow_detail_stat_last_run_never" translatable="false">Последний запуск: никогда</string>
+  <string name="setting_page_workflow_detail_stat_runs_today" translatable="false">Сегодня: %1$d запуск(ов)</string>
+  <string name="setting_page_workflows" translatable="false">Сценарии</string>
+  <string name="setting_page_workflows_desc" translatable="false">Автоматизация на основе триггеров: когда на устройстве что-то происходит, выполняется последовательность инструментов.</string>
+  <string name="setting_page_workflows_empty" translatable="false">Пока нет сценариев. Попросите ассистента создать один.</string>
+  <string name="setting_page_workflows_how_it_works" translatable="false">Как работают сценарии</string>
+  <string name="setting_page_workflows_how_it_works_dialog_body" translatable="false">Сценарий состоит из триггера, условий и списка действий. Триггер запускает проверку (WiFi, питание, батарея, экран, расписание или ручной запуск). Все условия должны пройти. Действия выполняются по порядку теми же инструментами, что в чате.\n\nЗапуск происходит в отдельном контексте без диалогов: действуют текущие разрешения владельца, включённые функции и запретный список root-команд. Инструменты, требующие личного подтверждения, блокируются. Результат виден в истории.\n\nТриггеры геозон, чужих уведомлений и активных приложений недоступны: специальные доступы не подключены. Условия заката/рассвета и активного приложения также отключены.</string>
+  <string name="setting_page_workflows_how_it_works_dialog_dismiss" translatable="false">Понятно</string>
+  <string name="setting_page_workflows_how_it_works_dialog_title" translatable="false">Как работают сценарии</string>
+  <string name="setting_page_workflows_subtitle_never_run" translatable="false">Не запускался</string>
+  <string name="setting_page_workflows_subtitle_ran_failed" translatable="false">Сбой %1$s</string>
+  <string name="setting_page_workflows_subtitle_ran_skipped" translatable="false">Пропущен %1$s</string>
+  <string name="setting_page_workflows_subtitle_ran_success" translatable="false">Запущен %1$s • Успех</string>
+  <string name="setting_page_workflows_subtitle_when" translatable="false">Когда: %1$s</string>
+</resources>

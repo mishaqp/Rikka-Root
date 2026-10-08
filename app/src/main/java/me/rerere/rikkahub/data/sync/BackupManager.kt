@@ -19,6 +19,12 @@ import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.SQLiteConfiguration
 import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.files.MediaCreationFiles
+import me.rerere.rikkahub.workflow.db.WorkflowDatabase
+import me.rerere.rikkahub.workflow.repository.sanitizeWorkflowDefinition
+import me.rerere.rikkahub.data.ai.tools.protectToolArguments
+import me.rerere.rikkahub.data.ai.mcp.control.McpToolSecretSanitizer
+import me.rerere.rikkahub.data.ssh.SshToolSecretSanitizer
+import me.rerere.rikkahub.data.ssh.SshCredentialStore
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.Files
@@ -34,6 +40,7 @@ class BackupManager(
     private val database: AppDatabase,
     private val settingsStore: SettingsStore,
     private val json: Json,
+    private val workflowDatabase: WorkflowDatabase,
 ) {
     private val restoreMutex = Mutex()
 
@@ -51,6 +58,9 @@ class BackupManager(
                     val snapshot = File(staging, SQLiteConfiguration.DATABASE_NAME)
                     DatabaseBackup.createSnapshot(database.openHelper.writableDatabase, snapshot)
                     addFile(zip, snapshot, DatabaseBackup.ARCHIVE_DATABASE)
+                    val workflowSnapshot = File(staging, WorkflowDatabaseBackup.ARCHIVE_DATABASE)
+                    WorkflowDatabaseBackup.createSnapshot(workflowDatabase, workflowSnapshot)
+                    addFile(zip, workflowSnapshot, WorkflowDatabaseBackup.ARCHIVE_DATABASE)
                 }
                 if (includeFiles) {
                     for (folder in ATTACHMENT_FOLDERS) {
@@ -88,6 +98,8 @@ class BackupManager(
                     val payload = File(staging, "payload")
                     val stagedDatabase = File(payload, "database/${SQLiteConfiguration.DATABASE_NAME}")
                     val stagedWal = File(stagedDatabase.path + "-wal")
+                    val stagedWorkflows = File(payload, "database/${WorkflowDatabase.NAME}")
+                    val stagedWorkflowWal = File(stagedWorkflows.path + "-wal")
                     val seen = mutableSetOf<String>()
                     var restoredEntries = 0
                     ZipFile(archive).use { zip ->
@@ -99,6 +111,9 @@ class BackupManager(
                                 DatabaseBackup.ARCHIVE_DATABASE -> if (includeDatabase) stagedDatabase else null
                                 DatabaseBackup.WAL -> if (includeDatabase) stagedWal else null
                                 DatabaseBackup.SHM -> null // Rebuilt by SQLite; never restore shared-memory state.
+                                WorkflowDatabaseBackup.ARCHIVE_DATABASE -> if (includeDatabase) stagedWorkflows else null
+                                WorkflowDatabaseBackup.WAL -> if (includeDatabase) stagedWorkflowWal else null
+                                WorkflowDatabaseBackup.SHM -> null
                                 else -> if (includeFiles && isAttachment(entry.name)) {
                                     PendingRestore.resolveInside(File(payload, "files"), entry.name)
                                 } else null
@@ -127,6 +142,7 @@ class BackupManager(
                     }
                     require(restoredEntries > 0) { "No selected data found in the backup" }
                     require(!stagedWal.exists() || stagedDatabase.exists()) { "Backup WAL has no matching database" }
+                    require(!stagedWorkflowWal.exists() || stagedWorkflows.exists()) { "Backup workflow WAL has no matching database" }
                     if (stagedDatabase.exists()) {
                         DatabaseBackup.normalize(context, stagedDatabase)
                         // Reject unsupported schemas before publishing; run supported old migrations on the copy.
@@ -137,6 +153,13 @@ class BackupManager(
                             room.close()
                         }
                         DatabaseBackup.removeSidecars(stagedDatabase)
+                    }
+                    if (stagedWorkflows.exists()) {
+                        val ssh = SshToolSecretSanitizer(SshCredentialStore(context, json))
+                        val mcp = McpToolSecretSanitizer(McpControlSecretStore(context))
+                        WorkflowDatabaseBackup.normalizeAndValidate(context, stagedWorkflows, sanitizeDefinition = { definition ->
+                            sanitizeWorkflowDefinition(definition) { name, input -> protectToolArguments(name, input, ssh, mcp) }
+                        })
                     }
 
                     val settingsFile = File(staging, "settings.json")
@@ -180,6 +203,7 @@ class BackupManager(
             root = File(context.noBackupFilesDir, "backup-restore"),
             databaseFile = context.getDatabasePath(SQLiteConfiguration.DATABASE_NAME),
             filesDir = context.filesDir,
+            additionalDatabaseFiles = listOf(context.getDatabasePath(WorkflowDatabase.NAME)),
         )
 
         /** Must finish before Koin, Room, SettingsStore or any background consumers are initialized. */
