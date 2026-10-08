@@ -35,6 +35,9 @@ internal fun personalQuery(input: JsonObject): String = input.textArgument("quer
 }!!
 
 internal data class SmsArguments(val recipient: String, val body: String, val subscriptionId: Int?)
+/** Android's isValidSubscriptionId is API 29+, but its validity rule is simply nonnegative. */
+internal fun resolveSmsSubscriptionId(requested: Int?, defaultId: () -> Int): Int? =
+    (requested ?: defaultId()).takeIf { it >= 0 }
 internal fun validateSmsArguments(input: JsonObject): SmsArguments {
     val recipient = input.textArgument("recipient")
     val body = input.textArgument("body")

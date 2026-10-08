@@ -65,8 +65,8 @@ fun smsSendTool(context: Context): Tool = personalJsonTool(context, "send_sms",
     }, listOf("recipient", "body")), ::validateSmsArguments, read = { args ->
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED)
             return@personalJsonTool deviceToolError("Разрешение отправки SMS отозвано.", Manifest.permission.SEND_SMS)
-        val subscription = args.subscriptionId ?: SubscriptionManager.getDefaultSmsSubscriptionId()
-        if (!SubscriptionManager.isValidSubscriptionId(subscription)) return@personalJsonTool deviceToolError("В Android не выбрана SIM для SMS. Выберите её в настройках Android или укажите subscription_id.")
+        val subscription = resolveSmsSubscriptionId(args.subscriptionId) { SubscriptionManager.getDefaultSmsSubscriptionId() }
+            ?: return@personalJsonTool deviceToolError("В Android не выбрана SIM для SMS. Выберите её в настройках Android или укажите subscription_id.")
         val manager = if (Build.VERSION.SDK_INT >= 31) context.getSystemService(SmsManager::class.java)?.createForSubscriptionId(subscription)
             else { @Suppress("DEPRECATION") SmsManager.getSmsManagerForSubscriptionId(subscription) }
         if (manager == null) return@personalJsonTool deviceToolError("Отправка SMS на устройстве недоступна.")

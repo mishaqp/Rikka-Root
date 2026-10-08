@@ -5,6 +5,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SmsDeliveryTest {
+    @Test fun simSelectionUsesExplicitIdOrDefaultAndRejectsMissingSimWithoutAndroid29Api() {
+        assertEquals(4, resolveSmsSubscriptionId(4) { error("Explicit SIM must not read Android default") })
+        assertEquals(2, resolveSmsSubscriptionId(null) { 2 })
+        assertNull(resolveSmsSubscriptionId(null) { -1 })
+        assertNull(resolveSmsSubscriptionId(-1) { 2 })
+    }
     @Test fun partialOrUnknownSubmissionTellsTheModelNeverToRetryAutomatically() {
         val json=smsOutcomeJson(SmsDeliveryResult(1,1,emptyMap()),2)
         assertEquals("false",json["success"].toString())
