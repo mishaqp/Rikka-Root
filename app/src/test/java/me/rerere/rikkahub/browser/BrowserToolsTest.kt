@@ -3,11 +3,13 @@ package me.rerere.rikkahub.browser
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.browser.NULL_CONTEXT
 import me.rerere.rikkahub.data.ai.tools.local.browserBackTool
 import me.rerere.rikkahub.data.ai.tools.local.browserClickAndReadTool
 import me.rerere.rikkahub.data.ai.tools.local.browserClickTool
 import me.rerere.rikkahub.data.ai.tools.local.browserCurrentUrlTool
 import me.rerere.rikkahub.data.ai.tools.local.browserDoneTool
+import me.rerere.rikkahub.data.ai.tools.local.browserEvalJsTool
 import me.rerere.rikkahub.data.ai.tools.local.browserForwardTool
 import me.rerere.rikkahub.data.ai.tools.local.browserGetTextTool
 import me.rerere.rikkahub.data.ai.tools.local.browserOpenTool
@@ -116,6 +118,10 @@ class BrowserToolsTest {
             out.contains("browser_not_open"))
     }
 
+    @Test fun `browser_eval_js rejects missing code`() {
+        val out = execText(browserEvalJsTool(), "{}")
+        assertTrue(out.contains("missing_code"))
+    }
 
     @Test fun `browser_wait_for rejects missing selector`() {
         val out = execText(browserWaitForTool(), "{}")
@@ -160,6 +166,13 @@ class BrowserToolsTest {
         assertTrue("must not carry the bound-path nav_failed key", !forward.contains("nav_failed"))
     }
 
+    @Test fun `browser_eval_js not_open envelope carries no stray eval_dispatch_failed key`() {
+        // Mirrors the browser_back/forward assertion above for eval_js's own honest-error
+        // hardening: the eval_dispatch_failed envelope only exists on the bound path.
+        val out = execText(browserEvalJsTool(), """{"code":"1+1"}""")
+        assertTrue(out.contains("browser_not_open"))
+        assertTrue("must not carry the bound-path eval_dispatch_failed key", !out.contains("eval_dispatch_failed"))
+    }
 
     @Test fun `write tools short-circuit to not_open when controller unbound`() {
         for (out in listOf(
@@ -168,6 +181,7 @@ class BrowserToolsTest {
             execText(browserScrollTool(), """{"direction":"down"}"""),
             execText(browserSelectTool(), """{"selector":"#s","value":"a"}"""),
             execText(browserPressKeyTool(), """{"key":"Enter"}"""),
+            execText(browserEvalJsTool(), """{"code":"1+1"}"""),
         )) {
             assertTrue("expected browser_not_open, got: $out", out.contains("browser_not_open"))
         }
@@ -191,27 +205,19 @@ class BrowserToolsTest {
         }
     }
 
-    @Test fun `secret capable Agent browser tools are not ported or registered`() {
-        for (name in listOf("browser_eval_js", "browser_get_dom", "browser_screenshot")) {
-            assertTrue(name, name !in BrowserToolDefaults.ALL_TOOLS)
-            assertTrue(name, name !in BrowserToolDefaults.DEFAULT_ENABLED)
-            assertNull(name, createBrowserTool(name, NULL_CONTEXT))
-        }
-    }
-
     @Test fun `createBrowserTool returns null for unknown name`() {
         val t = createBrowserTool("not_a_browser_tool", NULL_CONTEXT)
         assertNull(t)
     }
 
-    @Test fun `default enabled map covers all 15 retained tools`() {
+    @Test fun `default enabled map covers all 18 tools`() {
         // Token-cost optimisation pass added browser_click_and_read — count is now 18.
         // Every tool MUST have a default. A missing key would fall through to `false`,
         // which would silently disable a tool the user expected to be on. The reverse
         // (a default for a name not in ALL_TOOLS) wouldn't break anything but suggests
         // a typo, so we check both directions.
-        assertEquals(15, BrowserToolDefaults.ALL_TOOLS.size)
-        assertEquals(7, BrowserToolDefaults.WRITE_TOOLS.size)
+        assertEquals(18, BrowserToolDefaults.ALL_TOOLS.size)
+        assertEquals(8, BrowserToolDefaults.WRITE_TOOLS.size)
         assertEquals(BrowserToolDefaults.ALL_TOOLS.toSet(), BrowserToolDefaults.DEFAULT_ENABLED.keys)
         // Read tools default ON
         for (n in BrowserToolDefaults.READ_TOOLS) {

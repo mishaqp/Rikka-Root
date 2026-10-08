@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.data.ai.tools.local
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -22,11 +24,9 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.browser.BrowserAiActionKind
-import me.rerere.rikkahub.browser.BrowserInvocationContext
 import me.rerere.rikkahub.browser.BrowserController
 import me.rerere.rikkahub.browser.BrowserControllerHandle
 import me.rerere.rikkahub.browser.BrowserDiffHelper
-import me.rerere.rikkahub.browser.BrowserReadSafety
 import me.rerere.rikkahub.browser.BrowserToolDefaults
 import me.rerere.rikkahub.browser.HeadlessBrowserSessionPool
 import me.rerere.rikkahub.browser.ReadabilityRunner.runReadability
@@ -34,7 +34,10 @@ import me.rerere.rikkahub.browser.awaitReadyState
 import me.rerere.rikkahub.browser.evaluateJavascriptAsync
 import kotlinx.coroutines.currentCoroutineContext
 import me.rerere.rikkahub.data.ai.tools.RunExecutionContext
+import me.rerere.rikkahub.browser.BrowserInvocationContext
 import me.rerere.rikkahub.browser.ToolInvocationContext
+import java.io.File
+import java.io.FileOutputStream
 
 /**
  * Pass 2 of the in-app Browser feature: 17 LLM-callable tool factories that drive the
@@ -49,6 +52,16 @@ import me.rerere.rikkahub.browser.ToolInvocationContext
  * Settings → Browser unregisters it entirely, so YOLO can't accidentally run a tool the
  * user has explicitly disabled.
  */
+
+private const val MAX_SCREENSHOT_HEIGHT_PX = 8192
+private const val SCREENSHOT_CACHE_SUBDIR = "browser-shots"
+
+/**
+ * Hard cap on the string browser_eval_js puts in its result envelope. Matches the 64 KB
+ * ceiling the read tools (runGetText / runReadHelper) clamp page text/HTML to, so an eval of
+ * something like `document.body.outerHTML` can't bloat the turn with megabytes of payload.
+ */
+private const val EVAL_JS_MAX_RESULT_CHARS = 64 * 1024
 
 /**
  * Per-tool timeout budget every browser tool wraps its dispatch in. User-configurable via
@@ -86,7 +99,7 @@ private fun missingArgEnvelope(name: String, detail: String): JsonObject = build
 }
 
 private fun textPart(obj: JsonObject): List<UIMessagePart> =
-    listOf(UIMessagePart.Text(BrowserReadSafety.redactResult(obj).toString()))
+    listOf(UIMessagePart.Text(obj.toString()))
 
 /**
  * JSON-encode a Kotlin string so it can be embedded inside an evaluateJavascript payload
@@ -234,7 +247,7 @@ fun browserOpenTool(context: Context, invocationContext: ToolInvocationContext? 
                         if (!BrowserController.awaitBind(5_000L)) {
                             return@withTimeoutOrNull buildJsonObject {
                                 put("error", "browser_launch_failed")
-                                put("recovery", "Браузер не открылся за 5 секунд. Откройте приложение на экране и повторите browser_open; отдельное разрешение на наложение не требуется.")
+                                put("recovery", "Activity did not bind within 5s; retry browser_open or check that the app has overlay permission.")
                             }
                         }
                     }
@@ -294,11 +307,89 @@ fun browserCurrentUrlTool(): Tool = Tool(
     },
 )
 
+fun browserScreenshotTool(context: Context): Tool = Tool(
+    name = BrowserToolDefaults.SCREENSHOT,
+    description = "Capture the visible viewport of the browser as a PNG vision attachment. Use browser_get_text first if you only need the page's text — screenshots cost vision tokens. full_page=true is best-effort and currently captures the viewport only (viewport_only:true in the response).$TELEGRAM_HEADLESS_CUE",
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                put("full_page", buildJsonObject {
+                    put("type", "boolean")
+                    put("description", "If true, attempt to capture the entire scroll height (currently no-op; viewport-only)")
+                })
+            },
+        )
+    },
+    execute = { input ->
+        val fullPage = input.jsonObject["full_page"]?.jsonPrimitive?.booleanOrNull == true
+        val parts = mutableListOf<UIMessagePart>()
+        val out = withTimeoutOrNull(toolTimeoutMs) {
+            BrowserControllerHandle.withController {
+                trackJsonAction(BrowserAiActionKind.SCREENSHOT, null) {
+                    val (path, w, h) = withContext(Dispatchers.Main) {
+                        val width = webView.width.coerceAtLeast(1)
+                        val height = webView.height.coerceAtLeast(1).coerceAtMost(MAX_SCREENSHOT_HEIGHT_PX)
+                        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                        val canvas = Canvas(bitmap)
+                        webView.draw(canvas)
+                        val cacheDir = File(context.cacheDir, SCREENSHOT_CACHE_SUBDIR).apply { mkdirs() }
+                        val out = File(cacheDir, "screenshot-${System.currentTimeMillis()}.png")
+                        // Recycle unconditionally in a finally block so the bitmap is freed
+                        // exactly once regardless of whether compress() succeeds or throws.
+                        // The prior pattern called recycle() in onFailure AND then again
+                        // unconditionally — a double-recycle causes IllegalStateException.
+                        try {
+                            FileOutputStream(out).use { os ->
+                                bitmap.compress(Bitmap.CompressFormat.PNG, 100, os)
+                            }
+                        } finally {
+                            bitmap.recycle()
+                        }
+                        Triple(out.absolutePath, width, height)
+                    }
+                    buildJsonObject {
+                        put("success", true)
+                        put("file_path", path)
+                        put("width", w)
+                        put("height", h)
+                        if (fullPage) put("viewport_only", true)
+                    }
+                }
+            }
+        } ?: timeoutEnvelope(BrowserToolDefaults.SCREENSHOT)
+        out.jsonObject["file_path"]?.jsonPrimitive?.contentOrNull?.let { fp ->
+            parts.add(UIMessagePart.Image(url = "file://$fp"))
+        }
+        parts.add(UIMessagePart.Text(out.toString()))
+        parts
+    },
+)
+
 fun browserGetTextTool(): Tool = Tool(
     name = BrowserToolDefaults.GET_TEXT,
-    description = "Returns the main article content via Readability.js by default, falling back to selector-based extraction if Readability fails. Pass extract_mode:'raw' for page text without article extraction. Forms, hidden nodes and scripts are always excluded. Pass selector (e.g. 'article', 'main', '.content') for explicit scoping — selectors override Readability. max_chars (default 8000) caps the result. {text, truncated, extract_mode}.$TELEGRAM_HEADLESS_CUE",
+    description = "Returns the main article content via Readability.js by default, falling back to selector-based extraction if Readability fails. Pass extract_mode:'raw' for the unfiltered text. Pass selector (e.g. 'article', 'main', '.content') for explicit scoping — selectors override Readability. max_chars (default 8000) caps the result. Use this BEFORE screenshot if you only need text content. {text, truncated, extract_mode}.$TELEGRAM_HEADLESS_CUE",
     parameters = { getTextSchema(defaultMax = 8000) },
     execute = { input -> textPart(runGetText(input)) },
+)
+
+fun browserGetDomTool(): Tool = Tool(
+    name = BrowserToolDefaults.GET_DOM,
+    description = "Extract a simplified outerHTML of a CSS selector (default 'body'). Strips <script>/<style>. Truncates at max_chars (default 4000). Use scoped selectors like 'article' / 'main' rather than 'body' for relevance — body usually includes nav and footer chrome that costs tokens without value. {html, truncated}.$TELEGRAM_HEADLESS_CUE",
+    parameters = { selectorAndMaxCharsSchema(defaultMax = 4000, required = false) },
+    execute = { input -> textPart(runReadHelper(input, BrowserToolDefaults.GET_DOM, defaultMax = 4000) { selector, maxChars ->
+        """(function(){
+            try {
+                var el = document.querySelector(${jsString(selector)});
+                if (!el) return JSON.stringify({error:'selector_not_found', selector:${jsString(selector)}});
+                var clone = el.cloneNode(true);
+                clone.querySelectorAll('script,style,noscript').forEach(function(n){n.remove();});
+                var html = clone.outerHTML || '';
+                var truncated = false;
+                if (html.length > $maxChars) { html = html.substring(0, $maxChars); truncated = true; }
+                return JSON.stringify({html:html, truncated:truncated});
+            } catch(e) { return JSON.stringify({error:'js_failed', detail:String(e)}); }
+        })()"""
+    }) },
 )
 
 fun browserGetLinksTool(): Tool = Tool(
@@ -317,7 +408,22 @@ fun browserGetLinksTool(): Tool = Tool(
             ?.takeIf { it.isNotBlank() }) ?: "body"
         val out = withTimeoutOrNull(toolTimeoutMs) {
             BrowserControllerHandle.withController {
-                val js = BrowserReadSafety.linksScript(selector)
+                val js = """(function(){
+                    try {
+                        var root = document.querySelector(${jsString(selector)});
+                        if (!root) return JSON.stringify({error:'selector_not_found', selector:${jsString(selector)}});
+                        var anchors = root.querySelectorAll('a[href]');
+                        var out = [];
+                        for (var i=0; i<anchors.length && out.length<100; i++) {
+                            var a = anchors[i];
+                            var href = a.href || '';
+                            var text = (a.innerText || a.textContent || '').replace(/\s+/g,' ').trim();
+                            if (text.length>200) text = text.substring(0,200);
+                            out.push({href:href, text:text});
+                        }
+                        return JSON.stringify({links:out, count:out.length});
+                    } catch(e) { return JSON.stringify({error:'js_failed', detail:String(e)}); }
+                })()"""
                 parseJsResult(webView.evaluateJavascriptAsync(js))
             }
         } ?: timeoutEnvelope(BrowserToolDefaults.GET_LINKS)
@@ -484,7 +590,7 @@ fun browserClickTool(): Tool = Tool(
                                     el.scrollIntoView({block:'center', inline:'center'});
                                     el.click();
                                     return JSON.stringify({clicked:true});
-                                } catch(e) { return JSON.stringify({error:'js_failed'}); }
+                                } catch(e) { return JSON.stringify({error:'js_failed', detail:String(e)}); }
                             })()"""
                             val raw = webView.evaluateJavascriptAsync(js)
                             val res = parseJsResult(raw)
@@ -557,7 +663,7 @@ internal fun buildTypeScript(selector: String, text: String, clear: Boolean): St
             el.dispatchEvent(new Event('input', {bubbles:true}));
             el.dispatchEvent(new Event('change', {bubbles:true}));
             return JSON.stringify({typed:true});
-        } catch(e) { return JSON.stringify({error:'js_failed'}); }
+        } catch(e) { return JSON.stringify({error:'js_failed', detail:String(e)}); }
     })()"""
 }
 
@@ -630,7 +736,7 @@ fun browserScrollTool(): Tool = Tool(
                                     case 'bottom': window.scrollTo(0, document.body.scrollHeight); break;
                                 }
                                 return JSON.stringify({scroll_y: Math.round(window.scrollY)});
-                            } catch(e) { return JSON.stringify({error:'js_failed'}); }
+                            } catch(e) { return JSON.stringify({error:'js_failed', detail:String(e)}); }
                         })()"""
                         val res = parseJsResult(webView.evaluateJavascriptAsync(js))
                         if (res.containsKey("error")) return@trackJsonAction res
@@ -683,7 +789,7 @@ fun browserSubmitTool(): Tool = Tool(
                                     if (typeof form.requestSubmit === 'function') form.requestSubmit();
                                     else form.submit();
                                     return JSON.stringify({submitted:true, via:'form_submit'});
-                                } catch(e) { return JSON.stringify({error:'js_failed'}); }
+                                } catch(e) { return JSON.stringify({error:'js_failed', detail:String(e)}); }
                             })()"""
                             val res = parseJsResult(webView.evaluateJavascriptAsync(js))
                             if (res.containsKey("error")) return@withDiff res
@@ -733,7 +839,7 @@ fun browserSelectTool(): Tool = Tool(
                                     el.value = ${jsString(value)};
                                     el.dispatchEvent(new Event('change', {bubbles:true}));
                                     return JSON.stringify({selected:true});
-                                } catch(e) { return JSON.stringify({error:'js_failed'}); }
+                                } catch(e) { return JSON.stringify({error:'js_failed', detail:String(e)}); }
                             })()"""
                             val res = parseJsResult(webView.evaluateJavascriptAsync(js))
                             if (res.containsKey("error")) return@withDiff res
@@ -782,7 +888,7 @@ fun browserPressKeyTool(): Tool = Tool(
                                     el.dispatchEvent(down);
                                     el.dispatchEvent(up);
                                     return JSON.stringify({pressed:true});
-                                } catch(e) { return JSON.stringify({error:'js_failed'}); }
+                                } catch(e) { return JSON.stringify({error:'js_failed', detail:String(e)}); }
                             })()"""
                             val res = parseJsResult(webView.evaluateJavascriptAsync(js))
                             if (res.containsKey("error")) return@withDiff res
@@ -794,6 +900,75 @@ fun browserPressKeyTool(): Tool = Tool(
         }
         if (out["success"]?.toString() == "true") {
             BrowserController.streamScreenshotIfHeadless("Pressed $key")
+        }
+        textPart(out)
+    },
+)
+
+fun browserEvalJsTool(): Tool = Tool(
+    name = BrowserToolDefaults.EVAL_JS,
+    description = "Run arbitrary JavaScript in the page and return its last expression. HARDLINE-checked: shell-shaped strings, document.cookie writes, eval/Function constructors, and string-form setTimeout are all blocked at the tool dispatcher BEFORE the JS executes. Always asks for approval; never eligible for 'Always Allow'.$TELEGRAM_HEADLESS_CUE",
+    parameters = {
+        InputSchema.Obj(properties = buildJsonObject {
+            put("code", buildJsonObject {
+                put("type","string")
+                put("description","JavaScript to evaluate. The string returned by the WebView is the value of the last expression, JSON-encoded.")
+            })
+        }, required = listOf("code"))
+    },
+    execute = { input ->
+        // HARDLINE has already run via GenerationHandler before we get here. The execute
+        // body just dispatches the JS and forwards whatever the WebView returns. Any
+        // pattern HARDLINE missed is a bug to fix in HardlineCommandGuard, not here.
+        val code = input.jsonObject["code"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        val out = if (code == null) {
+            missingArgEnvelope("code", "code is required")
+        } else {
+            withTimeoutOrNull(toolTimeoutMs) {
+                BrowserControllerHandle.withController {
+                    trackAction(BrowserAiActionKind.JS, detail = null, ok = { !it.containsKey("error") }) {
+                        // Unlike every other tool's JS payload, the LLM's `code` here runs
+                        // unwrapped — no `(function(){try{...}catch(e){...}})()` shell — since
+                        // eval_js's whole point is running arbitrary script verbatim.
+                        // evaluateJavascriptAsync already catches a throw from the
+                        // evaluateJavascript() call itself, but wrap the rest of the dispatch
+                        // (clipping) too so ANY unexpected failure here reports an honest
+                        // {error:"eval_dispatch_failed"} envelope instead of propagating
+                        // uncaught and surfacing as an opaque tool_failed upstream.
+                        runCatching {
+                            val raw = webView.evaluateJavascriptAsync(code, toolTimeoutMs - 1_000L)
+                            // Clamp the raw result before it enters the envelope. evaluateJavascript
+                            // returns whatever the page's last expression serialised to — a model that
+                            // evals e.g. `document.body.outerHTML` can dump megabytes into the turn.
+                            // Reuse the 64 KB cap the read tools (runGetText / runReadHelper) apply.
+                            val (clipped, truncated) = clipText(raw ?: "null", EVAL_JS_MAX_RESULT_CHARS)
+                            buildJsonObject {
+                                put("result", clipped)
+                                if (truncated) put("truncated", true)
+                            }
+                        }.getOrElse {
+                            // Don't swallow cancellation: a withTimeoutOrNull timeout (or scope
+                            // cancellation) throws CancellationException from inside this block, and
+                            // catching it here would let this normal-looking envelope stand in for
+                            // the timeout instead of letting withTimeoutOrNull return null.
+                            if (it is CancellationException) throw it
+                            android.util.Log.w("BrowserTools", "browser_eval_js: dispatch threw type=${it.javaClass.simpleName}")
+                            buildJsonObject {
+                                put("error", "eval_dispatch_failed")
+                                put("detail", (it.message ?: it.javaClass.simpleName).take(200))
+                            }
+                        }
+                    }
+                }
+            } ?: timeoutEnvelope(BrowserToolDefaults.EVAL_JS)
+        }
+        // Pass 3: browser_eval_js is in WRITE_TOOLS — it CAN mutate page state (e.g.
+        // click via JS, modify the DOM, submit a form programmatically). Stream a screenshot
+        // so the Telegram user sees the page after the script ran, consistent with every
+        // other write tool. Only stream on success — error envelopes (timeout, missing_code,
+        // browser_not_open) all carry an "error" key so we use that as the gate.
+        if (!out.containsKey("error")) {
+            BrowserController.streamScreenshotIfHeadless("Ran JS")
         }
         textPart(out)
     },
@@ -854,7 +1029,7 @@ fun browserClickAndReadTool(): Tool = Tool(
                                 el.scrollIntoView({block:'center', inline:'center'});
                                 el.click();
                                 return JSON.stringify({clicked:true});
-                            } catch(e) { return JSON.stringify({error:'js_failed'}); }
+                            } catch(e) { return JSON.stringify({error:'js_failed', detail:String(e)}); }
                         })()"""
                         val clickRes = parseJsResult(webView.evaluateJavascriptAsync(clickJs))
                         if (clickRes.containsKey("error")) return@trackJsonAction clickRes
@@ -891,7 +1066,12 @@ fun browserClickAndReadTool(): Tool = Tool(
                                     }
                                 } else {
                                     // Fall back to selector-based body innerText.
-                                    val rawJs = BrowserReadSafety.rawTextScript("body", 64 * 1024)
+                                    val rawJs = """(function(){
+                                        try {
+                                            var t = (document.body.innerText || document.body.textContent || '').replace(/\s+/g,' ').trim();
+                                            return JSON.stringify({text:t});
+                                        } catch(e) { return JSON.stringify({error:'js_failed', detail:String(e)}); }
+                                    })()"""
                                     val rawRes = parseJsResult(webView.evaluateJavascriptAsync(rawJs))
                                     val rawText = rawRes["text"]?.jsonPrimitive?.contentOrNull.orEmpty()
                                     rawText to (if (mode == "auto") "raw_fallback" else "raw")
@@ -1037,7 +1217,7 @@ private fun getTextSchema(defaultMax: Int): InputSchema = InputSchema.Obj(
  */
 private suspend fun BrowserControllerHandle.WithControllerScope.captureBodyText(): String {
     val raw = webView.evaluateJavascriptAsync(
-        BrowserReadSafety.bodyTextScript(),
+        "(function(){try{return JSON.stringify(document.body.innerText||'');}catch(e){return JSON.stringify('');}})()",
         4_000L,
     ) ?: return ""
     return runCatching {
@@ -1090,7 +1270,7 @@ private fun parseFullArg(input: kotlinx.serialization.json.JsonElement): Boolean
  * Falls back to {error:'js_no_result'} on null and {error:'js_parse_failed'} on a
  * value that can't be parsed — both surface to the LLM cleanly without throwing.
  */
-internal fun parseJsResult(raw: String?): JsonObject {
+private fun parseJsResult(raw: String?): JsonObject {
     if (raw == null) return buildJsonObject { put("error", "js_no_result") }
     return runCatching {
         // evaluateJavascript wraps a JS string return value in JSON-quoted form, so
@@ -1099,7 +1279,7 @@ internal fun parseJsResult(raw: String?): JsonObject {
         val outer = Json.parseToJsonElement(raw)
         val inner = if (outer is JsonPrimitive && outer.isString) outer.contentOrNull.orEmpty() else outer.toString()
         Json.parseToJsonElement(inner).jsonObject
-    }.getOrElse { buildJsonObject { put("error", "js_parse_failed") } }
+    }.getOrElse { buildJsonObject { put("error", "js_parse_failed"); put("raw", raw) } }
 }
 
 /**
@@ -1197,7 +1377,16 @@ private suspend fun BrowserControllerHandle.WithControllerScope.runRawText(
     maxChars: Int,
     mode: String,
 ): JsonObject {
-    val js = BrowserReadSafety.rawTextScript(selector, maxChars)
+    val js = """(function(){
+        try {
+            var el = document.querySelector(${jsString(selector)});
+            if (!el) return JSON.stringify({error:'selector_not_found', selector:${jsString(selector)}});
+            var t = (el.innerText || el.textContent || '').replace(/\s+/g,' ').trim();
+            var truncated = false;
+            if (t.length > $maxChars) { t = t.substring(0, $maxChars); truncated = true; }
+            return JSON.stringify({text:t, truncated:truncated});
+        } catch(e) { return JSON.stringify({error:'js_failed', detail:String(e)}); }
+    })()"""
     val res = parseJsResult(webView.evaluateJavascriptAsync(js))
     return if (res.containsKey("error")) res else buildJsonObject {
         res.forEach { (k, v) -> put(k, v) }
@@ -1304,7 +1493,7 @@ private suspend fun runHistoryNav(toolName: String, forward: Boolean): JsonObjec
                         put("error", "nav_failed")
                         put(
                             "detail",
-                            navResult.exceptionOrNull()?.javaClass?.simpleName ?: "webview navigation threw",
+                            (navResult.exceptionOrNull()?.message ?: "webview navigation threw").take(200),
                         )
                     }
                 }
@@ -1342,7 +1531,9 @@ fun createBrowserTool(
     val tool = when (toolName) {
         BrowserToolDefaults.OPEN -> browserOpenTool(context, invocationContext)
         BrowserToolDefaults.CURRENT_URL -> browserCurrentUrlTool()
+        BrowserToolDefaults.SCREENSHOT -> browserScreenshotTool(context)
         BrowserToolDefaults.GET_TEXT -> browserGetTextTool()
+        BrowserToolDefaults.GET_DOM -> browserGetDomTool()
         BrowserToolDefaults.GET_LINKS -> browserGetLinksTool()
         BrowserToolDefaults.BACK -> browserBackTool()
         BrowserToolDefaults.FORWARD -> browserForwardTool()
@@ -1353,6 +1544,7 @@ fun createBrowserTool(
         BrowserToolDefaults.SUBMIT -> browserSubmitTool()
         BrowserToolDefaults.SELECT -> browserSelectTool()
         BrowserToolDefaults.PRESS_KEY -> browserPressKeyTool()
+        BrowserToolDefaults.EVAL_JS -> browserEvalJsTool()
         BrowserToolDefaults.CLICK_AND_READ -> browserClickAndReadTool()
         BrowserToolDefaults.DONE -> browserDoneTool(invocationContext)
         else -> null

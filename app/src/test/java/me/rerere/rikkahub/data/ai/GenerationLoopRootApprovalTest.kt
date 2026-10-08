@@ -73,9 +73,7 @@ class GenerationLoopRootApprovalTest {
                     onWebContentRead = { webSeen = true },
                     isToolAutoApproved = { name, _ -> resolveToolAutoApproval(approvals.preferences, id, name, webSeen) },
                 )
-                val mandatory = setOf("ask_user", "ssh_forget_host_key", "browser_click", "browser_type",
-                    "browser_scroll", "browser_submit", "browser_select", "browser_press_key", "browser_click_and_read",
-                    "skill_install_from_url", "skill_install_from_text")
+                val mandatory = setOf("ask_user", "ssh_forget_host_key", "skill_install_from_url", "skill_install_from_text")
                 assertEquals(names - mandatory, runs)
                 assertEquals(listOf("id -u"), fixture.commands)
                 val result = fixture.latest.last().getTools()
@@ -124,6 +122,91 @@ class GenerationLoopRootApprovalTest {
             }
         }
     }
+
+    @Test(timeout = 15_000)
+    fun `model browser cookie write is denied before ordinary approval or dispatch`() = runBlocking {
+        val call = browserEvalCall("cookie-write", "document.cookie='x'")
+        Fixture(folder.newFolder(), toolResponse(listOf(call))).use { fixture ->
+            val effects = AtomicInteger()
+            fixture.collect(listOf(UIMessage.user("Evaluate the page script")), extraTools = listOf(browserEvalFixture(effects)), maxSteps = 1)
+            val result = fixture.latest.last().getTools().single()
+            assertTrue(result.approvalState is ToolApprovalState.Denied)
+            assertFalse(result.isPending)
+            assertTrue(result.isExecuted)
+            assertEquals(0, effects.get())
+            assertFalse(fixture.checkpointFile.exists())
+            assertEquals(1, fixture.requests.get())
+        }
+    }
+
+    @Test(timeout = 15_000)
+    fun `approved browser cookie write from persisted conversation is blocked on resume`() = runBlocking {
+        Fixture(folder.newFolder()).use { fixture ->
+            val effects = AtomicInteger()
+            val approved = browserEvalCall("old-cookie-write", "document.cookie='x'").copy(approvalState = ToolApprovalState.Approved)
+            fixture.collect(listOf(UIMessage.assistant("").copy(parts = listOf(approved))),
+                extraTools = listOf(browserEvalFixture(effects)), maxSteps = 1)
+            val result = fixture.latest.last().getTools().single()
+            assertEquals(ToolApprovalState.Approved, result.approvalState)
+            val error = Json.parseToJsonElement(result.output.filterIsInstance<UIMessagePart.Text>().single().text)
+                .jsonObject.getValue("error").jsonPrimitive.content
+            assertTrue(error, error.contains("blocked by safety floor (hardline): hardline:js_cookie_write"))
+            assertFalse(result.isPending)
+            assertTrue(result.isExecuted)
+            assertEquals(0, effects.get())
+            assertFalse(fixture.checkpointFile.exists())
+            assertEquals(0, fixture.requests.get())
+        }
+    }
+
+    @Test(timeout = 15_000)
+    fun `safe browser cookie read stays raw and executes after ordinary manual approval`() = runBlocking {
+        val call = browserEvalCall("cookie-read", "document.cookie")
+        Fixture(folder.newFolder(), toolResponse(listOf(call))).use { fixture ->
+            val effects = AtomicInteger()
+            val tool = browserEvalFixture(effects)
+            fixture.collect(listOf(UIMessage.user("Read the page cookie")), extraTools = listOf(tool), maxSteps = 1)
+            assertTrue(fixture.latest.last().getTools().single().isPending)
+            assertEquals(0, effects.get())
+            val approved = fixture.latest.dropLast(1) + fixture.latest.last().copy(parts = fixture.latest.last().parts.map {
+                if (it is UIMessagePart.Tool) it.copy(approvalState = ToolApprovalState.Approved) else it
+            })
+            fixture.collect(approved, extraTools = listOf(tool), maxSteps = 1)
+            val result = fixture.latest.last().getTools().single()
+            assertTrue(result.isExecuted)
+            assertEquals(ToolApprovalState.Approved, result.approvalState)
+            assertEquals(1, effects.get())
+            assertEquals("raw-cookie-fixture-value", result.output.filterIsInstance<UIMessagePart.Text>().single().text)
+        }
+    }
+
+    @Test(timeout = 15_000)
+    fun `YOLO automatically dispatches safe browser eval without filtering raw result`() = runBlocking {
+        ToolApprovalTestStore(folder.newFolder()).use { grants ->
+            grants.preferences.setYolo(true)
+            val conversationId = Uuid.random()
+            val call = browserEvalCall("cookie-read-yolo", "document.cookie")
+            Fixture(folder.newFolder(), toolResponse(listOf(call))).use { fixture ->
+                val effects = AtomicInteger()
+                fixture.collect(listOf(UIMessage.user("Read the page cookie")), extraTools = listOf(browserEvalFixture(effects)), maxSteps = 1,
+                    isToolAutoApproved = { name, _ -> resolveToolAutoApproval(grants.preferences, conversationId, name, false) })
+                val result = fixture.latest.last().getTools().single()
+                assertTrue(result.isExecuted)
+                assertEquals(ToolApprovalState.Auto, result.approvalState)
+                assertEquals(1, effects.get())
+                assertEquals("raw-cookie-fixture-value", result.output.filterIsInstance<UIMessagePart.Text>().single().text)
+            }
+        }
+    }
+
+    private fun browserEvalCall(id: String, code: String) = UIMessagePart.Tool(id, "browser_eval_js",
+        buildJsonObject { put("code", code) }.toString())
+
+    private fun browserEvalFixture(effects: AtomicInteger) = ToolPermissionPolicy.apply(Tool(
+        "browser_eval_js", "Actual dispatcher boundary; WebView effect replaced only at execute", execute = {
+            effects.incrementAndGet()
+            listOf(UIMessagePart.Text("raw-cookie-fixture-value"))
+        }))
 
     @Test(timeout = 15_000)
     fun `interrupted automatic or manually approved side effect is durable and never replayed`() = runBlocking {

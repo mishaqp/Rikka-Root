@@ -122,8 +122,8 @@ class PackageGSecurityIntegrationTest {
     }
 
     @Test
-    fun `browser writes and skill installers remain blocked for yolo always grants and workflow dispatch`() = runBlocking {
-        val names = BrowserToolDefaults.WRITE_TOOLS + setOf("skill_install_from_url", "skill_install_from_text")
+    fun `skill installers remain blocked for yolo always grants and workflow dispatch`() = runBlocking {
+        val names = setOf("skill_install_from_url", "skill_install_from_text")
         val args = buildJsonObject { put("selector", "#send"); put("url", "https://example.org/skill"); put("text", "public") }
         ToolApprovalTestStore(temporary.newFolder()).use { grants ->
             grants.preferences.setYolo(true)
@@ -145,6 +145,39 @@ class PackageGSecurityIntegrationTest {
                 assertFalse(name, result.success)
                 assertTrue(name, result.error.orEmpty().contains("mandatory_confirmation"))
                 assertEquals("Forbidden action reached dispatch: $name", 0, dispatches)
+            }
+        }
+    }
+
+    @Test
+    fun `browser writes use ordinary device and run grants and the shared web-content switch`() = runBlocking {
+        val names = BrowserToolDefaults.WRITE_TOOLS + "browser_eval_js"
+        val args = buildJsonObject { put("selector", "#send"); put("code", "document.title") }
+        for (origin in listOf(RunOrigin.CRON, RunOrigin.SUB_AGENT, RunOrigin.WORKFLOW, RunOrigin.SKILL_TEST)) {
+            ToolApprovalTestStore(temporary.newFolder()).use { grants ->
+                for (name in names) {
+                    val run = RunExecutionContext(Uuid.random(), Uuid.random(), origin)
+                    assertFalse(name, ToolPermissionPolicy.mandatoryConfirmation(name, args))
+                    assertEquals(name, name != "browser_eval_js", ToolPermissionPolicy.canGrantAlways(name, args))
+                    assertEquals(name, null, HeadlessToolPolicy.blockReason(name, args))
+                    assertFalse("$name/$origin without a grant", resolveHeadlessAutoApproval(grants.preferences, run, name, args, false))
+                    ToolApprovalAllowList.grantForChat(run.runId, name)
+                    try {
+                        assertTrue("$name/$origin with run grant", resolveHeadlessAutoApproval(grants.preferences, run, name, args, false))
+                    } finally { ToolApprovalAllowList.clearChat(run.runId) }
+                    // Agent hides the eval Always button, but its dispatch callback still
+                    // respects stored grants as well as YOLO and per-chat grants.
+                    grants.preferences.grantAlways(name)
+                    assertTrue("$name/$origin with Always", resolveHeadlessAutoApproval(grants.preferences, run, name, args, false))
+                    grants.preferences.revoke(name)
+                    grants.preferences.setYolo(true)
+                    assertTrue("$name/$origin with YOLO", resolveHeadlessAutoApproval(grants.preferences, run, name, args, false))
+                    grants.preferences.setAskAfterWebContent(true)
+                    assertFalse("$name/$origin after web content", resolveHeadlessAutoApproval(grants.preferences, run, name, args, true))
+                    grants.preferences.setAskAfterWebContent(false)
+                    assertTrue("$name/$origin web switch disabled", resolveHeadlessAutoApproval(grants.preferences, run, name, args, true))
+                    grants.preferences.setYolo(false)
+                }
             }
         }
     }

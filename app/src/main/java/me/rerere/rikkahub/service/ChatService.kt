@@ -687,7 +687,11 @@ class ChatService(
                     ensureInitialized(session)
                     val tool = session.state.value.currentMessages.flatMap { it.getTools() }
                         .firstOrNull { it.toolCallId == toolCallId && it.isPending }
-                    if (tool?.toolName == toolName && ToolPermissionPolicy.canGrantAlways(toolName, tool.inputAsJson())) {
+                    if (tool?.toolName == toolName && when (scope) {
+                            ApprovalScope.ChatScope -> ToolPermissionPolicy.canGrantForChat(toolName, tool.inputAsJson())
+                            ApprovalScope.Always -> ToolPermissionPolicy.canGrantAlways(toolName, tool.inputAsJson())
+                            ApprovalScope.Once -> true
+                        }) {
                         when (scope) {
                             ApprovalScope.ChatScope -> ToolApprovalAllowList.grantForChat(conversationId, toolName)
                             ApprovalScope.Always -> grantAlwaysScope(conversationId, toolName)

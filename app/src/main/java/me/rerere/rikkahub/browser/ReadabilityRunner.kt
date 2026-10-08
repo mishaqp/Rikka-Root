@@ -67,19 +67,10 @@ object ReadabilityRunner {
             // Cloning is critical — Readability's `parse()` mutates the document it
             // operates on. Running against the live DOM would scrub the page from
             // under any subsequent browser_get_dom / browser_click call.
-            val payload = buildReadabilityScript(library)
-            val raw = this@runReadability.evaluateJavascriptAsync(payload, timeoutMs)
-            parseTextContent(raw)
-        }
-    }
-
-    /** Same source extraction payload, with the uniform fixed-reader privacy adapter. */
-    internal fun buildReadabilityScript(library: String): String = """(function(){
+            val payload = """(function(){
                 try {
                     if (typeof Readability === 'undefined') { $library }
-                    ${BrowserReadSafety.script}
-                    var doc = rikkaSafeClone(document);
-                    if (!doc) return JSON.stringify(null);
+                    var doc = document.cloneNode(true);
                     var article = new Readability(doc).parse();
                     if (!article) return JSON.stringify(null);
                     return JSON.stringify({
@@ -89,8 +80,12 @@ object ReadabilityRunner {
                         siteName: article.siteName || '',
                         length: (article.textContent || '').length
                     });
-                } catch(e) { return JSON.stringify({error:'readability_failed'}); }
+                } catch(e) { return JSON.stringify({error: String(e)}); }
             })()"""
+            val raw = this@runReadability.evaluateJavascriptAsync(payload, timeoutMs)
+            parseTextContent(raw)
+        }
+    }
 
     /**
      * Test hook: which SHA the runner is pinned to. Surfaced for logging / Doctor.

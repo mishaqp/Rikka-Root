@@ -79,10 +79,6 @@ class BrowserActivity : ComponentActivity() {
             }
             skillScope = viewer.scope
             skillRoot = registeredRoot
-        } else if (!allowedBrowserUrl(requestedUrl)) {
-            Toast.makeText(this, "Браузер принимает только http, https и about. Для файлов навыка нужен его изолированный просмотрщик.", Toast.LENGTH_LONG).show()
-            finish()
-            return
         }
 
         // Best-effort profile dir creation. The WebView falls back to its default location if
@@ -142,7 +138,7 @@ class BrowserActivity : ComponentActivity() {
                     onStopAi = { if (skillRoot == null) BrowserController.stopCurrentTask() },
                     onNavigate = { raw ->
                         val url = normalizeBrowserQuery(raw)
-                        if (allowedBrowserUrl(url) && skillScope?.isForeignSkillOrigin(Uri.parse(url)) != true) {
+                        if (skillRoot == null || (allowedBrowserUrl(url) && skillScope?.isForeignSkillOrigin(Uri.parse(url)) != true)) {
                             webView?.loadUrl(url)
                         } else {
                             Toast.makeText(this, "Этот адрес недоступен в текущем браузере.", Toast.LENGTH_LONG).show()

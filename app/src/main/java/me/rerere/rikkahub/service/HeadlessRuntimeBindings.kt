@@ -175,7 +175,7 @@ internal fun isHeadlessMcpToolEnabled(settings: Settings, assistant: Assistant, 
 
 /** Current capability switch is rechecked even when the tools were created before a settings change. */
 internal fun localOptionForHeadlessTool(name: String): LocalToolOption? = when (name) {
-    "browser_open", "browser_current_url", "browser_get_text",
+    "browser_open", "browser_current_url", "browser_get_text", "browser_get_dom", "browser_screenshot", "browser_eval_js",
     "browser_get_links", "browser_back", "browser_forward", "browser_wait_for", "browser_click", "browser_type",
     "browser_scroll", "browser_submit", "browser_select", "browser_press_key",
     "browser_click_and_read", "browser_done" -> LocalToolOption.Browser

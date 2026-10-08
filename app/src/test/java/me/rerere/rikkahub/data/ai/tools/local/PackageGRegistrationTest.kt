@@ -62,6 +62,8 @@ class PackageGRegistrationTest {
     @get:Rule val folder = TemporaryFolder()
     private val options = listOf(LocalToolOption.Browser, LocalToolOption.SkillImport, LocalToolOption.JsSkills,
         LocalToolOption.ScreenAutomation, LocalToolOption.Workflows)
+    private val browserWrites = setOf("browser_click", "browser_type", "browser_scroll", "browser_submit",
+        "browser_select", "browser_press_key", "browser_eval_js", "browser_click_and_read")
 
     @Test fun `new and restored assistants leave G absent even when browser read preferences are on`() = fixture { local, _ ->
         for (assistant in listOf(Assistant(), Json.decodeFromString<Assistant>("{}"))) {
@@ -83,21 +85,34 @@ class PackageGRegistrationTest {
         assertTrue(local.getTools(emptyList()).none { it.name.startsWith("browser_") })
         val click = local.getTools(listOf(LocalToolOption.Browser)).single { it.name == "browser_click" }
         assertTrue(ToolPermissionPolicy.apply(click).needsApproval(Json.parseToJsonElement("{\"selector\":\"button\"}")))
-        assertTrue(ToolPermissionPolicy.mandatoryConfirmation(click.name, Json.parseToJsonElement("{}")))
+        assertFalse(ToolPermissionPolicy.mandatoryConfirmation(click.name, Json.parseToJsonElement("{}")))
+        assertTrue(ToolPermissionPolicy.canGrantAlways(click.name, Json.parseToJsonElement("{}")))
     }
 
-    @Test fun `restored unsafe browser preferences cannot re-expose unrestricted secret surfaces`() = fixture { local, browser ->
+    @Test fun `all eighteen Agent browser tools follow master and individual preferences`() = fixture { local, browser ->
+        val expected = setOf("browser_open", "browser_current_url", "browser_screenshot", "browser_get_dom",
+            "browser_get_text", "browser_get_links", "browser_back", "browser_forward", "browser_wait_for",
+            "browser_click", "browser_type", "browser_scroll", "browser_submit", "browser_select",
+            "browser_press_key", "browser_eval_js", "browser_click_and_read", "browser_done")
         runBlocking {
-            browser.setToolEnabled("browser_eval_js", true)
-            browser.setToolEnabled("browser_get_dom", true)
-            browser.setToolEnabled("browser_screenshot", true)
+            expected.forEach { browser.setToolEnabled(it, true) }
         }
-        val names = local.getTools(listOf(LocalToolOption.Browser)).map { it.name }.toSet()
-        assertTrue("browser_get_text" in names)
-        assertTrue("browser_current_url" in names)
-        assertFalse("browser_eval_js" in names)
-        assertFalse("browser_get_dom" in names)
-        assertFalse("browser_screenshot" in names)
+        val names = { local.getTools(listOf(LocalToolOption.Browser)).map { it.name }.toSet() }
+        assertEquals(expected, names())
+        for (name in listOf("browser_eval_js", "browser_get_dom", "browser_screenshot")) {
+            runBlocking { browser.setToolEnabled(name, false) }
+            assertEquals(expected - name, names())
+            runBlocking { browser.setToolEnabled(name, true) }
+        }
+        assertTrue(local.getTools(emptyList()).none { it.name.startsWith("browser_") })
+        for (tool in local.getTools(listOf(LocalToolOption.Browser))) {
+            val args = Json.parseToJsonElement("{}")
+            assertTrue(tool.name, tool.name in ToolPermissionPolicy.registry)
+            assertEquals(tool.name, tool.name in browserWrites, ToolPermissionPolicy.apply(tool).needsApproval(args))
+            assertFalse(tool.name, ToolPermissionPolicy.mandatoryConfirmation(tool.name, args))
+            assertEquals(tool.name, tool.name != "browser_eval_js", ToolPermissionPolicy.canGrantAlways(tool.name, args))
+            assertTrue(tool.name, ToolPermissionPolicy.canGrantForChat(tool.name, args))
+        }
     }
 
     @Test fun `enabled G exposes its critical Agent tools once through LocalTools`() = fixture { local, _ ->
@@ -112,9 +127,10 @@ class PackageGRegistrationTest {
         assertEquals("Enabled subsystems must not introduce duplicate names", names.size, names.toSet().size)
         val args = Json.parseToJsonElement("{}")
         tools.forEach { tool ->
+            val approvalRequired = !tool.name.startsWith("browser_") || tool.name in browserWrites
             assertTrue(tool.name, tool.name in ToolPermissionPolicy.registry)
-            assertTrue(tool.name, ToolApprovalDefaults.requiresApproval(tool.name))
-            assertTrue(tool.name, ToolPermissionPolicy.apply(tool).needsApproval(args))
+            assertEquals(tool.name, approvalRequired, ToolApprovalDefaults.requiresApproval(tool.name))
+            assertEquals(tool.name, approvalRequired, ToolPermissionPolicy.apply(tool).needsApproval(args))
         }
     }
 

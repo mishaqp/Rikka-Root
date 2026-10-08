@@ -19,7 +19,9 @@ object ToolPermissionPolicy {
     val registry: Map<String, String> = linkedMapOf(
         "browser_open" to "открытие страницы браузера",
         "browser_current_url" to "адрес страницы браузера",
+        "browser_screenshot" to "снимок страницы браузера",
         "browser_get_text" to "текст страницы браузера",
+        "browser_get_dom" to "DOM страницы браузера",
         "browser_get_links" to "ссылки страницы браузера",
         "browser_back" to "переход назад в браузере",
         "browser_forward" to "переход вперёд в браузере",
@@ -30,6 +32,7 @@ object ToolPermissionPolicy {
         "browser_submit" to "отправка формы страницы",
         "browser_select" to "выбор значения на странице",
         "browser_press_key" to "нажатие клавиши в браузере",
+        "browser_eval_js" to "JavaScript на странице браузера",
         "browser_click_and_read" to "нажатие и чтение страницы",
         "browser_done" to "завершение задачи браузера",
         "skill_install_from_url" to "установка навыка по URL",
@@ -182,8 +185,7 @@ object ToolPermissionPolicy {
     )
 
     fun mandatoryConfirmation(name: String, input: JsonElement): Boolean {
-        if (name in me.rerere.rikkahub.browser.BrowserToolDefaults.WRITE_TOOLS ||
-            name in setOf("skill_install_from_url", "skill_install_from_text")) return true
+        if (name in setOf("skill_install_from_url", "skill_install_from_text")) return true
         if (name == "ssh_forget_host_key") return true
         val args = input as? JsonObject
         fun text(key: String): String? = (args?.get(key) as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
@@ -214,6 +216,10 @@ object ToolPermissionPolicy {
     }
 
     fun canGrantAlways(name: String, input: JsonElement): Boolean =
+        canGrantForChat(name, input) && name != "browser_eval_js"
+
+    // Agent's NO_ALWAYS_ALLOW flag hides persistent grants, while chat grants remain available.
+    fun canGrantForChat(name: String, input: JsonElement): Boolean =
         name != "ask_user" && !mandatoryConfirmation(name, input)
 
     fun apply(tool: Tool): Tool = tool.copy(needsApproval = { input ->

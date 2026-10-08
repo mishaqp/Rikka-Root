@@ -38,7 +38,7 @@ internal fun configureWebViewForRikka(webView: WebView) {
         // Phase 20D needs this — skill webview cards produce file:// URLs into the
         // app's private data dir. Cross-origin protection still applies via the
         // file:// unique-origin rule (http(s) pages can't fetch file:// content).
-        allowFileAccess = false
+        allowFileAccess = true
         // Required for skill webview assets: when a skill's viewer page (e.g.
         // virtual-piano's ui.html) is opened from a file:// URL it needs to load
         // sibling asset files (audio, images, sub-pages) also via file://. Without
@@ -46,9 +46,7 @@ internal fun configureWebViewForRikka(webView: WebView) {
         // <audio> elements). This only enables file:// → file:// sub-resource loads;
         // http(s) pages still cannot reach app-private file:// paths.
         @Suppress("DEPRECATION")
-        allowFileAccessFromFileURLs = false
-        @Suppress("DEPRECATION")
-        allowUniversalAccessFromFileURLs = false
+        allowFileAccessFromFileURLs = true
         allowContentAccess = false
         useWideViewPort = true
         loadWithOverviewMode = true

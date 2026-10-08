@@ -274,7 +274,9 @@ private fun ToolCategorySection(
 private fun toolDisplayTitle(toolName: String): String = when (toolName) {
     BrowserToolDefaults.OPEN -> stringResource(R.string.setting_browser_tool_open_title)
     BrowserToolDefaults.CURRENT_URL -> stringResource(R.string.setting_browser_tool_current_url_title)
+    BrowserToolDefaults.SCREENSHOT -> stringResource(R.string.setting_browser_tool_screenshot_title)
     BrowserToolDefaults.GET_TEXT -> stringResource(R.string.setting_browser_tool_get_text_title)
+    BrowserToolDefaults.GET_DOM -> stringResource(R.string.setting_browser_tool_get_dom_title)
     BrowserToolDefaults.GET_LINKS -> stringResource(R.string.setting_browser_tool_get_links_title)
     BrowserToolDefaults.BACK -> stringResource(R.string.setting_browser_tool_back_title)
     BrowserToolDefaults.FORWARD -> stringResource(R.string.setting_browser_tool_forward_title)
@@ -285,6 +287,7 @@ private fun toolDisplayTitle(toolName: String): String = when (toolName) {
     BrowserToolDefaults.SUBMIT -> stringResource(R.string.setting_browser_tool_submit_title)
     BrowserToolDefaults.SELECT -> stringResource(R.string.setting_browser_tool_select_title)
     BrowserToolDefaults.PRESS_KEY -> stringResource(R.string.setting_browser_tool_press_key_title)
+    BrowserToolDefaults.EVAL_JS -> stringResource(R.string.setting_browser_tool_eval_js_title)
     BrowserToolDefaults.DONE -> stringResource(R.string.setting_browser_tool_done_title)
     else -> toolName
 }
@@ -293,7 +296,9 @@ private fun toolDisplayTitle(toolName: String): String = when (toolName) {
 private fun toolDisplayDesc(toolName: String): String = when (toolName) {
     BrowserToolDefaults.OPEN -> stringResource(R.string.setting_browser_tool_open_desc)
     BrowserToolDefaults.CURRENT_URL -> stringResource(R.string.setting_browser_tool_current_url_desc)
+    BrowserToolDefaults.SCREENSHOT -> stringResource(R.string.setting_browser_tool_screenshot_desc)
     BrowserToolDefaults.GET_TEXT -> stringResource(R.string.setting_browser_tool_get_text_desc)
+    BrowserToolDefaults.GET_DOM -> stringResource(R.string.setting_browser_tool_get_dom_desc)
     BrowserToolDefaults.GET_LINKS -> stringResource(R.string.setting_browser_tool_get_links_desc)
     BrowserToolDefaults.BACK -> stringResource(R.string.setting_browser_tool_back_desc)
     BrowserToolDefaults.FORWARD -> stringResource(R.string.setting_browser_tool_forward_desc)
@@ -304,6 +309,7 @@ private fun toolDisplayDesc(toolName: String): String = when (toolName) {
     BrowserToolDefaults.SUBMIT -> stringResource(R.string.setting_browser_tool_submit_desc)
     BrowserToolDefaults.SELECT -> stringResource(R.string.setting_browser_tool_select_desc)
     BrowserToolDefaults.PRESS_KEY -> stringResource(R.string.setting_browser_tool_press_key_desc)
+    BrowserToolDefaults.EVAL_JS -> stringResource(R.string.setting_browser_tool_eval_js_desc)
     BrowserToolDefaults.DONE -> stringResource(R.string.setting_browser_tool_done_desc)
     else -> ""
 }

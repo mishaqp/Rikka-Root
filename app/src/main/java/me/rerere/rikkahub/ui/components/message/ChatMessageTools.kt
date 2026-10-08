@@ -190,21 +190,28 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                         }
                     }
                     val broaderScopesAllowed = ToolPermissionPolicy.canGrantAlways(tool.toolName, tool.inputAsJson())
+                    val chatScopeAllowed = ToolPermissionPolicy.canGrantForChat(tool.toolName, tool.inputAsJson())
                     if (me.rerere.rikkahub.workflow.tools.WorkflowApprovalRenderer.isWorkflowTool(tool.toolName)) {
                         val preview = runCatching {
                             me.rerere.rikkahub.workflow.tools.WorkflowApprovalRenderer.renderPlain(tool.toolName, tool.input)
                         }.getOrNull()
                         if (!preview.isNullOrBlank()) Text(preview, style = MaterialTheme.typography.labelSmall)
                     }
-                    if (!broaderScopesAllowed) Text(
+                    if (!chatScopeAllowed) Text(
                         "Этот инструмент всегда требует отдельного подтверждения.",
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.labelSmall,
                     )
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        ToolApprovalAction.entries.forEach { action ->
+                        ToolApprovalAction.entries.filterNot {
+                            tool.toolName == "browser_eval_js" && it.scope == ApprovalScope.Always
+                        }.forEach { action ->
                             TextButton(
-                                enabled = !inFlight && (action.scope == ApprovalScope.Once || broaderScopesAllowed),
+                                enabled = !inFlight && when (action.scope) {
+                                    ApprovalScope.Once -> true
+                                    ApprovalScope.ChatScope -> chatScopeAllowed
+                                    ApprovalScope.Always -> broaderScopesAllowed
+                                },
                                 onClick = {
                                     if (inFlight) return@TextButton
                                     if (action == ToolApprovalAction.Deny) {

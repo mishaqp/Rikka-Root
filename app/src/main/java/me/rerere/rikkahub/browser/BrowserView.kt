@@ -179,6 +179,14 @@ private fun WebViewHost(
             // lives in configureWebViewForRikka so foreground + headless behave
             // identically. See BrowserWebViewConfig.kt for the why.
             configureWebViewForRikka(this)
+            if (skillRoot != null) {
+                settings.allowFileAccess = false
+                @Suppress("DEPRECATION")
+                settings.allowFileAccessFromFileURLs = false
+                @Suppress("DEPRECATION")
+                settings.allowUniversalAccessFromFileURLs = false
+                settings.allowContentAccess = false
+            }
 
             // Profile dir is informational — the global WebView databases live where the
             // WebView wants. We create the dir ourselves in BrowserActivity.onCreate so
@@ -189,8 +197,8 @@ private fun WebViewHost(
             webViewClient = object : WebViewClient() {
                 override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                     val uri = request?.url ?: return null
-                    if (uri.scheme.equals("file", true) || uri.scheme.equals("content", true) ||
-                        skillScope?.isForeignSkillOrigin(uri) == true) return BrowserSkillScope.deniedResponse()
+                    if (skillRoot != null && (uri.scheme.equals("file", true) || uri.scheme.equals("content", true) ||
+                        skillScope?.isForeignSkillOrigin(uri) == true)) return BrowserSkillScope.deniedResponse()
                     return assetLoader?.shouldInterceptRequest(uri)
                         ?: if (uri.host.equals(skillScope?.originHost, true) && skillScope != null)
                             BrowserSkillScope.deniedResponse() else null
@@ -201,8 +209,8 @@ private fun WebViewHost(
                     request: WebResourceRequest?,
                 ): Boolean {
                     val uri = request?.url ?: return false
-                    return uri.scheme.equals("file", true) || uri.scheme.equals("content", true) ||
-                        skillScope?.isForeignSkillOrigin(uri) == true
+                    return skillRoot != null && (uri.scheme.equals("file", true) || uri.scheme.equals("content", true) ||
+                        skillScope?.isForeignSkillOrigin(uri) == true)
                 }
 
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {

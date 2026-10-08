@@ -60,6 +60,10 @@ object HeadlessToolPolicy {
         "get_screen_time", "keystore_encrypt", "keystore_decrypt",
     )
     fun blockReason(name: String, arguments: JsonElement): String? {
+        if (name == "browser_eval_js") {
+            (arguments as? JsonObject)?.let { HardlineCommandGuard.checkToolParsed(name, it) }
+                ?.let { return "hardline:$it" }
+        }
         if (name in trustMutations) return "mandatory_confirmation"
         if (name in interactive) return "interactive_tool"
         val obj = arguments as? JsonObject

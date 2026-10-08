@@ -84,4 +84,10 @@
   <string name="browser_ai_action_done" translatable="false">Готово: %1$s</string>
   <string name="browser_ai_action_stopped" translatable="false">Остановлено пользователем</string>
   <string name="browser_ai_action_failed" translatable="false">Ошибка: %1$s</string>
+  <string name="setting_browser_tool_eval_js_desc" translatable="false">Выполнение произвольного JS на странице (проверяется HARDLINE).</string>
+  <string name="setting_browser_tool_eval_js_title" translatable="false">Выполнить JavaScript</string>
+  <string name="setting_browser_tool_get_dom_desc" translatable="false">Извлечение упрощённого HTML со страницы.</string>
+  <string name="setting_browser_tool_get_dom_title" translatable="false">Получить DOM</string>
+  <string name="setting_browser_tool_screenshot_desc" translatable="false">Захват видимой области просмотра.</string>
+  <string name="setting_browser_tool_screenshot_title" translatable="false">Снимок экрана</string>
 </resources>

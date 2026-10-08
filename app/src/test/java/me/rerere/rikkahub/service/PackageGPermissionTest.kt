@@ -62,6 +62,9 @@ class PackageGPermissionTest {
     @get:Rule val folder = TemporaryFolder()
     private val origins = listOf(RunOrigin.WORKFLOW, RunOrigin.SKILL_TEST)
     private val empty = buildJsonObject { }
+    private val browserWrites = listOf("browser_click", "browser_type", "browser_scroll", "browser_submit",
+        "browser_select", "browser_press_key", "browser_eval_js", "browser_click_and_read")
+    private val browserArgs = buildJsonObject { put("selector", "#send"); put("code", "document.title") }
 
     @Test fun `workflow and skill test never inherit creator chat grants`() = runBlocking {
         for (origin in origins) fixture(origin).use { f ->
@@ -121,9 +124,8 @@ class PackageGPermissionTest {
         }
     }
 
-    @Test fun `browser writes and skill installs remain manual despite YOLO and Always Allow`() = runBlocking {
-        val names = listOf("browser_click", "browser_type", "browser_submit", "browser_click_and_read",
-            "skill_install_from_url", "skill_install_from_text")
+    @Test fun `skill installs remain manual despite YOLO and Always Allow`() = runBlocking {
+        val names = listOf("skill_install_from_url", "skill_install_from_text")
         for (origin in origins) fixture(origin).use { f ->
             f.grants.preferences.setYolo(true)
             for (name in names) {
@@ -135,6 +137,51 @@ class PackageGPermissionTest {
                 assertEquals("mandatory_confirmation", result.errorCode)
                 assertEquals(0, f.effects)
             }
+        }
+    }
+
+    @Test fun `configured ordinary browser grants launch actual effects in both G origins`() = runBlocking {
+        for (origin in origins) fixture(origin).use { f ->
+            var expectedEffects = 0
+            for (name in browserWrites.filter { it != "browser_eval_js" }) {
+                val denied = f.run(name, browserArgs)
+                assertEquals("${origin.name}:$name without grant", HeadlessTaskStatus.BLOCKED, denied.status)
+                assertEquals("approval_required", denied.errorCode)
+                assertEquals(expectedEffects, f.effects)
+                assertFalse(ToolPermissionPolicy.mandatoryConfirmation(name, browserArgs))
+                assertTrue(ToolPermissionPolicy.canGrantAlways(name, browserArgs))
+                f.grants.preferences.grantAlways(name)
+                assertEquals("${origin.name}:$name with Always", HeadlessTaskStatus.SUCCEEDED, f.run(name, browserArgs).status)
+                assertEquals(++expectedEffects, f.effects)
+            }
+            assertEquals(browserWrites.size - 1, f.checkpoints)
+        }
+    }
+
+    @Test fun `YOLO launches browser writes including safe eval in both G origins`() = runBlocking {
+        for (origin in origins) fixture(origin).use { f ->
+            f.grants.preferences.setYolo(true)
+            for ((index, name) in browserWrites.withIndex()) {
+                assertFalse(ToolPermissionPolicy.mandatoryConfirmation(name, browserArgs))
+                assertEquals("${origin.name}:$name", HeadlessTaskStatus.SUCCEEDED, f.run(name, browserArgs).status)
+                assertEquals(index + 1, f.effects)
+            }
+            assertEquals(browserWrites.size, f.checkpoints)
+        }
+    }
+
+    @Test fun `shared web-content switch controls ordinary browser effects in both G origins`() = runBlocking {
+        for (origin in origins) fixture(origin).use { f ->
+            f.grants.preferences.setYolo(true)
+            f.grants.preferences.setAskAfterWebContent(true)
+            f.markCreatorWebContent()
+            val denied = f.run("browser_eval_js", browserArgs)
+            assertEquals(HeadlessTaskStatus.BLOCKED, denied.status)
+            assertEquals("approval_required", denied.errorCode)
+            assertEquals(0, f.effects)
+            f.grants.preferences.setAskAfterWebContent(false)
+            assertEquals(HeadlessTaskStatus.SUCCEEDED, f.run("browser_eval_js", browserArgs).status)
+            assertEquals(1, f.effects)
         }
     }
 
@@ -220,6 +267,7 @@ class PackageGPermissionTest {
             }
         }
         private val client = OkHttpClient.Builder().addInterceptor { error("Direct G checks cannot call a provider") }.build()
+        suspend fun markCreatorWebContent() { bindings.markWebContent(creator.toString()) }
         suspend fun run(name: String, arguments: JsonElement = buildJsonObject { }): HeadlessTaskResult {
             val runner = HeadlessTaskRunner(
                 GenerationLoop(context, ProviderManager(client, context), Json { ignoreUnknownKeys = true }),

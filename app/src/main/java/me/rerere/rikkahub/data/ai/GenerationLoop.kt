@@ -238,7 +238,19 @@ class GenerationLoop(
                 val updatedTools = ArrayList<UIMessagePart.Tool>(toolCalls.size)
                 for (tool in toolCalls) {
                     val toolDef = tools.find { it.name == tool.toolName }
+                    val hardlineReason = if (tool.toolName == "browser_eval_js")
+                        me.rerere.rikkahub.data.ai.tools.HardlineCommandGuard.checkTool(tool.toolName, tool.input)
+                    else null
                     val updated = when {
+                        hardlineReason != null && tool.approvalState is ToolApprovalState.Auto -> {
+                            Log.w(TAG, "hardline-blocked ${tool.toolName}: $hardlineReason")
+                            tool.copy(approvalState = ToolApprovalState.Denied(
+                                "blocked by safety floor (hardline): $hardlineReason. " +
+                                    "This command cannot run via the agent under any " +
+                                    "circumstances. If the user genuinely needs it, they " +
+                                    "should run it themselves in a terminal outside the agent."
+                            ))
+                        }
                         // Tool needs approval and state is Auto -> set to Pending
                         tool.approvalState is ToolApprovalState.Auto && toolDef != null && needsApproval(tool, toolDef) -> {
                             hasPendingApproval = true
@@ -323,6 +335,20 @@ class GenerationLoop(
 
                     else -> {
                         // Auto or Approved - execute the tool
+                        val resumeHardlineReason = if (tool.toolName == "browser_eval_js")
+                            me.rerere.rikkahub.data.ai.tools.HardlineCommandGuard.checkTool(tool.toolName, tool.input)
+                        else null
+                        if (resumeHardlineReason != null) {
+                            executedTools += tool.copy(output = listOf(UIMessagePart.Text(
+                                json.encodeToString(buildJsonObject {
+                                    put("error", JsonPrimitive(
+                                        "blocked by safety floor (hardline): $resumeHardlineReason. " +
+                                            "This command cannot run via the agent under any circumstances."
+                                    ))
+                                })
+                            )))
+                            return@forEach
+                        }
                         if (tools.none { it.name == tool.toolName }) {
                             executedTools += tool.copy(output = listOf(UIMessagePart.Text(buildJsonObject {
                                 put("error", "tool_not_found")
