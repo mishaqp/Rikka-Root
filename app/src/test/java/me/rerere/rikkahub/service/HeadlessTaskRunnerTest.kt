@@ -9,6 +9,7 @@ import kotlinx.serialization.json.jsonArray
 import me.rerere.ai.core.Tool
 import me.rerere.rikkahub.costguards.TokenBudgetLedger
 import me.rerere.rikkahub.data.ai.tools.local.LocalFileAccess
+import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
 import me.rerere.rikkahub.data.ai.tools.local.fileManagerTools
 import me.rerere.rikkahub.data.ai.tools.local.SmsDeliveryResult
 import me.rerere.rikkahub.data.ai.tools.local.smsOutcomeJson
@@ -120,6 +121,43 @@ class HeadlessTaskRunnerTest {
         assertEquals(HeadlessTaskStatus.BLOCKED, result.status)
         assertEquals("", fixture.requestBody)
     }
+    @Test fun disablingExternalMasterAtCheckpointStopsActualSideEffect() = runBlocking {
+        val fixture = Fixture(disableExternalAtCheckpoint = true)
+        val result = fixture.runner.run(HeadlessTaskRequest.DirectActions(listOf(
+            HeadlessToolAction("write_text_file", buildJsonObject {}))),
+            fixture.context.copy(origin = RunOrigin.EXTERNAL_AUTOMATION))
+        assertEquals(HeadlessTaskStatus.BLOCKED, result.status)
+        assertEquals("feature_disabled", result.errorCode)
+        assertEquals(0, fixture.effects)
+    }
+    @Test fun externalRunsCannotExecuteOwnTrustMutationsEvenWithAutomaticAuthorization() = runBlocking {
+        for (name in listOf("external_automation_set_enabled", "external_automation_add_trusted_package",
+            "external_automation_remove_trusted_package")) {
+            var effects = 0
+            val fixture = Fixture(toolsOverride = listOf(Tool(name, "test", needsApproval = { true }, execute = {
+                effects++; listOf(UIMessagePart.Text("unexpected"))
+            })))
+            val result = fixture.runner.run(HeadlessTaskRequest.DirectActions(listOf(
+                HeadlessToolAction(name, buildJsonObject {}))), fixture.context.copy(origin = RunOrigin.EXTERNAL_AUTOMATION))
+            assertEquals(HeadlessTaskStatus.BLOCKED, result.status)
+            assertEquals("mandatory_confirmation", result.errorCode)
+            assertEquals(0, effects)
+        }
+    }
+    @Test fun shellGuardRunsBeforeAnyTermuxOrSshEffectInExternalTasks() = runBlocking {
+        for (name in listOf("ssh_exec", "ssh_exec_saved", "termux_run_command", "termux_session_start")) {
+            var effects = 0
+            val fixture = Fixture(toolsOverride = listOf(Tool(name, "test", needsApproval = { true }, execute = {
+                effects++; listOf(UIMessagePart.Text("unexpected"))
+            })))
+            val result = fixture.runner.run(HeadlessTaskRequest.DirectActions(listOf(HeadlessToolAction(name,
+                buildJsonObject { put("command", "rm -rf /system") }))),
+                fixture.context.copy(origin = RunOrigin.EXTERNAL_AUTOMATION))
+            assertEquals(HeadlessTaskStatus.BLOCKED, result.status)
+            assertEquals("root_command_blocked", result.errorCode)
+            assertEquals(0, effects)
+        }
+    }
     @Test fun inheritedBudgetWinsAndStandaloneRunObtainsItsOwnLedger() = runBlocking {
         val inherited = TokenBudgetLedger(enabled = true, hardCap = 1000)
         val standalone = TokenBudgetLedger(enabled = true, hardCap = 500)
@@ -217,6 +255,7 @@ class HeadlessTaskRunnerTest {
         private val pauseWhenToolsBuilt: Boolean = false,
         private val standaloneBudget: TokenBudgetLedger? = null,
         private val toolsOverride: List<Tool>? = null,
+        private val disableExternalAtCheckpoint: Boolean = false,
     ) {
         val events = mutableListOf<String>()
         var effects = 0
@@ -227,6 +266,7 @@ class HeadlessTaskRunnerTest {
         var builtContext: RunExecutionContext? = null
         var runAllowed = true
         var budgetRequests = 0
+        var externalMasterEnabled = true
         val model = Model(modelId = "test-chat")
         val owner = Assistant(chatModelId = model.id, systemPrompt = "owner system", streamOutput = false)
         private val selected = Assistant(systemPrompt = "selected assistant system")
@@ -249,6 +289,7 @@ class HeadlessTaskRunnerTest {
                 events += "checkpoint"
                 if (revokeAtCheckpoint) allowed = false
                 if (permissionRevokedAtCheckpoint) permission = false
+                if (disableExternalAtCheckpoint) externalMasterEnabled = false
             }
         }
         val runner = HeadlessTaskRunner(
@@ -266,7 +307,11 @@ class HeadlessTaskRunnerTest {
             settings = { settings }, journal = journal,
             authorize = { _, _, _ -> allowed },
             preflight = { _, _ -> if (permission) null else "android_permission_required" },
-            featureEnabled = { true },
+            featureEnabled = { execution ->
+                if (execution.origin == RunOrigin.EXTERNAL_AUTOMATION) {
+                    headlessFeatureEnabled(execution, owner.copy(localTools = listOf(LocalToolOption.ExternalAutomation))) { externalMasterEnabled }
+                } else true
+            },
             budgetFor = { _, _ -> budgetRequests++; standaloneBudget },
         )
     }

@@ -81,6 +81,13 @@ class LocalTools(
         mcpCaller: McpControlCaller? = null,
     ): List<Tool> {
         val tools = mutableListOf<Tool>()
+        if (LocalToolOption.ExternalAutomation in options) {
+            val config = get().get<me.rerere.rikkahub.automation.ExternalAutomationConfig>()
+            tools.addAll(listOf(me.rerere.rikkahub.automation.externalAutomationStatusTool(config),
+                me.rerere.rikkahub.automation.externalAutomationSetEnabledTool(config),
+                me.rerere.rikkahub.automation.externalAutomationAddTrustedPackageTool(config),
+                me.rerere.rikkahub.automation.externalAutomationRemoveTrustedPackageTool(config)))
+        }
         if (LocalToolOption.McpControl in options) {
             val manager = get().get<me.rerere.rikkahub.data.ai.mcp.McpManager>()
             val secrets = get().get<McpControlSecretStore>()

@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import kotlinx.serialization.json.JsonElement
+import me.rerere.rikkahub.automation.ExternalAutomationConfig
 import me.rerere.rikkahub.costguards.TokenBudgetStore
 import me.rerere.rikkahub.data.ai.GenerationLoop
 import me.rerere.rikkahub.data.ai.tools.ChatToolFactory
@@ -16,6 +17,9 @@ import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
 import me.rerere.rikkahub.data.ai.tools.local.missingLocalToolPermissions
 import me.rerere.rikkahub.data.ai.tools.resolveToolAutoApproval
 import me.rerere.rikkahub.data.ai.tools.resolveWorkspaceToolApproval
+import me.rerere.rikkahub.data.ai.mcp.buildMcpToolName
+import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.preferences.ToolApprovalPreferences
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
@@ -49,6 +53,7 @@ class HeadlessRuntimeBindings(
     private val workspaceRepository: WorkspaceRepository,
     private val rootShellManager: RootShellManager,
     private val tokenBudgetStore: TokenBudgetStore,
+    private val externalAutomationConfig: ExternalAutomationConfig,
 ) {
     private val taints = ConcurrentHashMap<String, RunWebTaint>()
 
@@ -77,13 +82,8 @@ class HeadlessRuntimeBindings(
         .singleOrNull { it.id == ownerId }?.subAgentConcurrencyLimit?.coerceIn(1, 8) ?: 3
 
     suspend fun featureEnabled(execution: RunExecutionContext): Boolean {
-        if (!execution.runStillAllowed()) return false
         val assistant = settingsStore.settingsFlow.value.assistants.singleOrNull { it.id == execution.ownerAssistantId }
-            ?: return false
-        return when (execution.origin) {
-            RunOrigin.SUB_AGENT -> LocalToolOption.SubAgents in assistant.localTools
-            RunOrigin.CRON -> LocalToolOption.CronJobs in assistant.localTools
-        }
+        return headlessFeatureEnabled(execution, assistant) { externalAutomationConfig.isEnabled() }
     }
 
     suspend fun authorize(execution: RunExecutionContext, name: String, arguments: JsonElement): Boolean {
@@ -125,13 +125,7 @@ class HeadlessRuntimeBindings(
                 if (workspace?.shellStatus != WorkspaceShellStatus.READY.name) return "workspace_unavailable"
             }
             name.startsWith("mcp__") -> {
-                val enabled = config?.mcpServers ?: assistant.mcpServers
-                val present = settings.mcpServers.any { server ->
-                    server.id in enabled && server.commonOptions.enable && server.commonOptions.tools.any { tool ->
-                        tool.enable && name == "mcp__${server.commonOptions.name}__${tool.name}"
-                    }
-                }
-                if (!present) return "tool_feature_disabled"
+                if (!isHeadlessMcpToolEnabled(settings, assistant, execution, name)) return "tool_feature_disabled"
             }
             name == "memory_tool" && !assistant.enableMemory -> return "tool_feature_disabled"
             name in setOf("search_web", "scrape_web") && !(config?.enableWebSearch ?: assistant.enableWebSearch) -> return "tool_feature_disabled"
@@ -154,8 +148,39 @@ class HeadlessRuntimeBindings(
         ContextCompat.checkSelfPermission(androidContext, permission) == PackageManager.PERMISSION_GRANTED
 }
 
+/** Every check reads live state; trusted callers never grant an assistant capability. */
+internal suspend fun headlessFeatureEnabled(
+    execution: RunExecutionContext,
+    assistant: Assistant?,
+    externalAutomationEnabled: suspend () -> Boolean,
+): Boolean {
+    if (!execution.runStillAllowed() || assistant == null || assistant.id != execution.ownerAssistantId) return false
+    return when (execution.origin) {
+        RunOrigin.SUB_AGENT -> LocalToolOption.SubAgents in assistant.localTools
+        RunOrigin.CRON -> LocalToolOption.CronJobs in assistant.localTools
+        RunOrigin.EXTERNAL_AUTOMATION -> LocalToolOption.ExternalAutomation in assistant.localTools && externalAutomationEnabled()
+    }
+}
+
+internal fun isHeadlessMcpToolEnabled(settings: Settings, assistant: Assistant, execution: RunExecutionContext, name: String): Boolean {
+    val enabled = execution.callerConversationConfig?.mcpServers ?: assistant.mcpServers
+    return settings.mcpServers.any { server ->
+        server.id in enabled && server.commonOptions.enable && server.commonOptions.tools.any { tool ->
+            tool.enable && name == buildMcpToolName(server.id, server.commonOptions.name, tool.name)
+        }
+    }
+}
+
 /** Current capability switch is rechecked even when the tools were created before a settings change. */
 internal fun localOptionForHeadlessTool(name: String): LocalToolOption? = when (name) {
+    "termux_run_command", "termux_session_start", "termux_session_send", "termux_session_read",
+    "termux_session_kill", "termux_session_list" -> LocalToolOption.Termux
+    "ssh_exec", "save_ssh_host", "list_ssh_hosts", "delete_ssh_host", "ssh_exec_saved",
+    "ssh_forget_host_key", "ssh_upload", "ssh_download" -> LocalToolOption.Ssh
+    "mcp_list", "mcp_get", "mcp_add", "mcp_update", "mcp_delete", "mcp_set_enabled",
+    "mcp_test", "mcp_list_tools", "mcp_set_tool_approval" -> LocalToolOption.McpControl
+    "external_automation_status", "external_automation_set_enabled", "external_automation_add_trusted_package",
+    "external_automation_remove_trusted_package" -> LocalToolOption.ExternalAutomation
     "list_files", "read_file", "write_binary_file", "delete_file", "move_file", "copy_file", "create_directory",
     "file_info", "find_files", "show_image", "open_file", "batch_copy", "batch_move", "batch_delete" -> LocalToolOption.Files
     "list_storage_volumes", "list_granted_directories", "grant_directory_access" -> LocalToolOption.ExternalStorage

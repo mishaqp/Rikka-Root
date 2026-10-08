@@ -17,6 +17,11 @@ object ToolPermissionPolicy {
             tool.toolName != "ask_user"
 
     val registry: Map<String, String> = linkedMapOf(
+        "external_automation_status" to "настройки и история внешних запусков",
+        "external_automation_set_enabled" to "включение внешней автоматизации",
+        "external_automation_add_trusted_package" to "доверие вызывающему приложению",
+        "external_automation_remove_trusted_package" to "отзыв доверия вызывающему приложению",
+
         "mcp_list" to "список серверов MCP",
         "mcp_get" to "чтение конфигурации MCP",
         "mcp_add" to "добавление сервера MCP",
@@ -140,9 +145,28 @@ object ToolPermissionPolicy {
     )
 
     fun mandatoryConfirmation(name: String, input: JsonElement): Boolean {
-        if (name != "root_exec") return false
-        val command = ((input as? JsonObject)?.get("command") as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
-        return command.isNullOrBlank() || RootApprovalPolicy.reason(command) != null
+        if (name == "ssh_forget_host_key") return true
+        val args = input as? JsonObject
+        fun text(key: String): String? = (args?.get(key) as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+        val command = text("command")
+        if (name == "root_exec") return command.isNullOrBlank() || RootApprovalPolicy.reason(command) != null
+        val commands = when (name) {
+            "ssh_exec", "ssh_exec_saved" -> command?.let {
+                me.rerere.rikkahub.data.ai.tools.local.sshCommandInputs(it, text("stdin"))
+            }.orEmpty()
+            "termux_run_command" -> buildList {
+                command?.let(::add)
+                val argv = (args?.get("arguments") as? kotlinx.serialization.json.JsonArray)?.mapNotNull {
+                    (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.contentOrNull
+                }.orEmpty()
+                text("executable")?.let { add((listOf(it) + argv).joinToString(" ")) }
+                argv.forEachIndexed { index, value -> if (value == "-c") argv.getOrNull(index + 1)?.let(::add) }
+            }
+            "termux_session_start" -> listOfNotNull(command)
+            "termux_session_send" -> listOfNotNull(text("input"))
+            else -> emptyList()
+        }
+        return commands.any { RootApprovalPolicy.reason(it) != null }
     }
 
     fun sideEffect(name: String, input: JsonElement): Boolean = when (name) {
@@ -168,6 +192,7 @@ object ToolPermissionPolicy {
             "Также будут автоодобряться подключённые MCP-инструменты, для которых настроено подтверждение. Вопросы пользователю остаются интерактивными.\n\n" +
             "Автоодобрение и «Всегда разрешать» не обходят подтверждение массового удаления защищённых каталогов, форматирования, записи в разделы, " +
             "изменения загрузчика, сброса устройства, отключения SELinux/проверки загрузки и remount рабочих разделов. " +
+            "Сброс доверенного ключа SSH-сервера также всегда требует явного подтверждения. " +
             "Подтверждения после веб-поиска возвращаются только при включённом переключателе «Спрашивать после веб-контента». " +
             "Запретный список не разбирает shell-обёртки (sh -c, eval) и содержимое скриптов.\n\n" +
             "Это опасная функция. Включайте, только если доверяете модели, конфигурации ассистента и своим запросам."

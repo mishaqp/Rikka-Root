@@ -73,10 +73,10 @@ class GenerationLoopRootApprovalTest {
                     onWebContentRead = { webSeen = true },
                     isToolAutoApproved = { name, _ -> resolveToolAutoApproval(approvals.preferences, id, name, webSeen) },
                 )
-                assertEquals(names - "ask_user", runs)
+                assertEquals(names - setOf("ask_user", "ssh_forget_host_key"), runs)
                 assertEquals(listOf("id -u"), fixture.commands)
                 val result = fixture.latest.last().getTools()
-                assertEquals(setOf("dangerous", "ask_user"), result.filter { it.isPending }.map { it.toolCallId }.toSet())
+                assertEquals(setOf("dangerous", "ask_user", "ssh_forget_host_key"), result.filter { it.isPending }.map { it.toolCallId }.toSet())
                 assertTrue(result.filter { !it.isPending }.all { it.isExecuted && it.approvalState == ToolApprovalState.Auto })
                 assertEquals(1, fixture.requests.get())
                 val approved = fixture.latest.dropLast(1) + fixture.latest.last().copy(parts = fixture.latest.last().parts.map {

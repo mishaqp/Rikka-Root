@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 sealed class LocalToolOption {
+    @Serializable @SerialName("external_automation") data object ExternalAutomation : LocalToolOption()
     @Serializable @SerialName("mcp_control") data object McpControl : LocalToolOption()
     @Serializable @SerialName("ssh") data object Ssh : LocalToolOption()
     @Serializable @SerialName("termux") data object Termux : LocalToolOption()

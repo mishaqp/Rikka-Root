@@ -57,4 +57,29 @@ class ToolPermissionPolicyTest {
             assertFalse(command, ToolPermissionPolicy.canGrantAlways("root_exec", args))
         }
     }
+
+    @Test fun sshAndTermuxCannotBypassHardlineOrResetHostTrustAutomatically() {
+        for (name in listOf("ssh_exec", "ssh_exec_saved", "termux_run_command", "termux_session_start")) {
+            val dangerous = buildJsonObject { put("command", "setenforce 0") }
+            assertTrue(name, ToolPermissionPolicy.mandatoryConfirmation(name, dangerous))
+            assertFalse(name, ToolPermissionPolicy.canGrantAlways(name, dangerous))
+            assertFalse(name, ToolPermissionPolicy.mandatoryConfirmation(name, buildJsonObject { put("command", "echo hello") }))
+        }
+        assertTrue(ToolPermissionPolicy.mandatoryConfirmation("ssh_forget_host_key", empty))
+        assertFalse(ToolPermissionPolicy.canGrantAlways("ssh_forget_host_key", empty))
+        assertNotNull(HeadlessToolPolicy.blockReason("ssh_forget_host_key", empty))
+        assertTrue(ToolPermissionPolicy.mandatoryConfirmation("ssh_exec",
+            buildJsonObject { put("command", "sh"); put("stdin", "setenforce 0") }))
+        for (name in listOf("ssh_exec", "ssh_exec_saved")) {
+            for (command in listOf("env sh", "/bin/busybox ash", "sudo -u root bash")) {
+                val protected = buildJsonObject { put("command", command); put("stdin", "setenforce 0") }
+                assertTrue(ToolPermissionPolicy.mandatoryConfirmation(name, protected))
+                assertEquals("mandatory_confirmation", HeadlessToolPolicy.blockReason(name, protected))
+                assertEquals("root_command_blocked", HeadlessToolPolicy.blockReason(name,
+                    buildJsonObject { put("command", command); put("stdin", "reboot") }))
+            }
+        }
+        assertTrue(ToolPermissionPolicy.mandatoryConfirmation("termux_run_command",
+            Json.parseToJsonElement("""{"executable":"/data/data/com.termux/files/usr/bin/bash","arguments":["-c","setenforce 0"]}""")))
+    }
 }

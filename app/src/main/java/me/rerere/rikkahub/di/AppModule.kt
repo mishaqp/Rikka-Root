@@ -60,7 +60,9 @@ val appModule = module {
     single { ScheduledJobRepository(get(), get()) }
     single { ScheduledJobRunRepository(get()) }
     single { CronJobScheduler(get(), get(), get(), get()) }
-    single { HeadlessRuntimeBindings(get(), get(), get(), get(), get(), get(), get()) }
+    single { me.rerere.rikkahub.automation.ExternalAutomationConfig(get()) }
+    single { me.rerere.rikkahub.automation.ExternalAutomationDispatcher(get(), get(), get(), get(), get(), get()) }
+    single { HeadlessRuntimeBindings(get(), get(), get(), get(), get(), get(), get(), get()) }
     single<HeadlessTaskRunner> { get<HeadlessRuntimeBindings>().createRunner(get(), get()) }
     single {
         val bindings = get<HeadlessRuntimeBindings>()

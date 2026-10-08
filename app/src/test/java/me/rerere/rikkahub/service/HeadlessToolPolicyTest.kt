@@ -9,6 +9,8 @@ import org.junit.Rule
 import org.junit.rules.TemporaryFolder
 import kotlin.uuid.Uuid
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.putJsonArray
 import me.rerere.rikkahub.data.ai.tools.HeadlessToolPolicy
 import me.rerere.rikkahub.data.ai.tools.RunWebTaint
 import org.junit.Assert.*
@@ -80,6 +82,52 @@ class HeadlessToolPolicyTest {
             assertNull(HeadlessToolPolicy.blockReason(name, buildJsonObject { put("command", "pwd") }))
         }
         assertNull(HeadlessToolPolicy.blockReason("write_text_file", buildJsonObject { put("command", "rm -rf /system") }))
+    }
+
+    @Test fun yoloCannotGrantExternalCallerTrustOrBypassShellConfirmation() = runBlocking {
+        ToolApprovalTestStore(folder.newFolder()).use { store ->
+            store.preferences.setYolo(true)
+            val context = RunExecutionContext(Uuid.random(), Uuid.random(), RunOrigin.EXTERNAL_AUTOMATION)
+            for (name in listOf("external_automation_set_enabled", "external_automation_add_trusted_package",
+                "external_automation_remove_trusted_package", "mcp_set_tool_approval")) {
+                assertFalse(resolveHeadlessAutoApproval(store.preferences, context, name, buildJsonObject {}, false))
+            }
+            for (name in listOf("ssh_exec", "ssh_exec_saved", "termux_run_command", "termux_session_start")) {
+                assertEquals("root_command_blocked", HeadlessToolPolicy.blockReason(name, buildJsonObject { put("command", "rm -rf /system") }))
+                assertFalse(resolveHeadlessAutoApproval(store.preferences, context, name,
+                    buildJsonObject { put("command", "rm -rf /system") }, false))
+                assertEquals("mandatory_confirmation", HeadlessToolPolicy.blockReason(name, buildJsonObject { put("command", "setenforce 0") }))
+                assertFalse(resolveHeadlessAutoApproval(store.preferences, context, name,
+                    buildJsonObject { put("command", "setenforce 0") }, false))
+                assertNull(HeadlessToolPolicy.blockReason(name, buildJsonObject { put("command", "echo ready") }))
+            }
+        }
+    }
+
+    @Test fun termuxExecutableArgumentsAndSessionKeysCannotHideDangerousCommands() {
+        assertEquals("root_command_blocked", HeadlessToolPolicy.blockReason("termux_run_command", buildJsonObject {
+            put("executable", "/data/data/com.termux/files/usr/bin/bash")
+            putJsonArray("arguments") { add("-c"); add("rm -rf /system") }
+        }))
+        assertEquals("mandatory_confirmation", HeadlessToolPolicy.blockReason("termux_run_command", buildJsonObject {
+            put("executable", "/data/data/com.termux/files/usr/bin/bash")
+            putJsonArray("arguments") { add("-c"); add("setenforce 0") }
+        }))
+        assertEquals("root_command_blocked", HeadlessToolPolicy.blockReason("termux_session_send", buildJsonObject { put("input", "rm -rf /system") }))
+        assertEquals("mandatory_confirmation", HeadlessToolPolicy.blockReason("termux_session_send", buildJsonObject { put("input", "setenforce 0") }))
+        assertEquals("mandatory_confirmation", HeadlessToolPolicy.blockReason("termux_session_send", buildJsonObject {
+            putJsonArray("keys") { "setenforce".forEach { add(it.toString()) }; add("Space"); add("0"); add("Enter") }
+        }))
+        assertEquals("interactive_tool", HeadlessToolPolicy.blockReason("termux_session_send", buildJsonObject {
+            putJsonArray("keys") { add("Up"); add("Enter") }
+        }))
+        assertEquals("interactive_tool", HeadlessToolPolicy.blockReason("termux_run_command", buildJsonObject {
+            put("command", "echo ready"); put("interactive", true)
+        }))
+        assertNull(HeadlessToolPolicy.blockReason("termux_session_send", buildJsonObject { put("input", "echo ready") }))
+        assertNull(HeadlessToolPolicy.blockReason("termux_session_send", buildJsonObject {
+            put("enter", false); putJsonArray("keys") { add("C-c") }
+        }))
     }
 
 }

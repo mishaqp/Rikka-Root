@@ -310,5 +310,6 @@ private fun AssistantLocalToolContent(
         PersonalLocalToolSettings(assistant, onUpdate)
         FileLocalToolSettings(assistant, onUpdate)
         AgentLocalToolSettings(assistant, onUpdate)
+        ShellLocalToolSettings(assistant, onUpdate)
     }
 }

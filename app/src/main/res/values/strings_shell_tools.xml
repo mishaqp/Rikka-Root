@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="shell_tools_title">Оболочки и сеть</string>
+    <string name="shell_tools_termux_desc">Выполнение команд в Termux с получением вывода и интерактивные сессии tmux.</string>
+    <string name="assistant_page_local_tools_ssh_title">SSH</string>
+    <string name="assistant_page_local_tools_ssh_desc">Команды оболочки и передача файлов на удалённых устройствах через SSH/SFTP. Сохранённые серверы, вход по паролю или закрытому ключу, проверка ключа сервера accept-new.</string>
+    <string name="assistant_page_local_tools_mcp_control_title">Управление MCP</string>
+    <string name="assistant_page_local_tools_mcp_control_desc">Позволяет ассистенту добавлять, изменять и удалять серверы MCP. Ассистент может установить MCP в Termux или на сервере SSH и подключить его к приложению из чата.</string>
+    <string name="assistant_page_local_tools_external_automation_title">Внешняя автоматизация</string>
+    <string name="assistant_page_local_tools_external_automation_desc">Управление Intent API для запуска задач через Tasker, MacroDroid, Locale и ADB. По умолчанию выключено. Ассистент может включить API, настроить доверенные пакеты и прочитать журнал запусков.</string>
+    <string name="shell_tools_open_termux_settings">Настройки Termux</string>
+    <string name="shell_tools_open_ssh_settings">Серверы SSH</string>
+    <string name="shell_tools_permission_denied">Доступ для функции «%1$s» не предоставлен. Функция выключена. Повторите включение, чтобы запросить разрешение; при постоянном отказе разрешите доступ в настройках приложения Android.</string>
+    <string name="shell_tools_termux_permission_rationale">Разрешение RUN_COMMAND позволяет ассистенту выполнять команды в Termux и получать их результат. Оно запрашивается только при включении функции. Каждый вызов инструмента также проходит через разрешения инструментов и запретный список root-команд. Если отказать, функция останется выключенной.</string>
+    <string name="shell_tools_ssh_permission_rationale">Android требует доступ к локальной сети для подключения SSH к устройствам в вашей сети или VPN. Разрешение запрашивается только при включении SSH. Если отказать, функция останется выключенной.</string>
+    <string name="shell_tools_dismiss">Закрыть</string>
+</resources>

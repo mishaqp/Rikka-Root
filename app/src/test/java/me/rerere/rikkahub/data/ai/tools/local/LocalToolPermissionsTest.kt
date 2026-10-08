@@ -62,4 +62,35 @@ class LocalToolPermissionsTest {
         assertNull(localPermissionGrantCommand("me.app;reboot", LocalToolOption.Brightness, 37, 0))
         assertNull(localPermissionGrantCommand("me.app", LocalToolOption.Volume, 37, 0))
     }
+
+    @Test fun packageFRequestsOnlyTheEnabledFunctionsRuntimePermission() {
+        for (sdk in listOf(26, 28, 33, 36, 37)) {
+            assertEquals(listOf("com.termux.permission.RUN_COMMAND"),
+                localToolRuntimePermissions(LocalToolOption.Termux, sdk))
+            assertEquals(if (sdk >= 37) listOf("android.permission.ACCESS_LOCAL_NETWORK") else emptyList<String>(),
+                localToolRuntimePermissions(LocalToolOption.Ssh, sdk))
+            assertTrue(localToolRuntimePermissions(LocalToolOption.McpControl, sdk).isEmpty())
+            assertTrue(localToolRuntimePermissions(LocalToolOption.ExternalAutomation, sdk).isEmpty())
+        }
+    }
+
+    @Test fun refusedAndRevokedShellPermissionsStayMissingUntilGranted() {
+        val termux = "com.termux.permission.RUN_COMMAND"
+        val network = "android.permission.ACCESS_LOCAL_NETWORK"
+        assertEquals(listOf(termux), missingRuntimePermissions(LocalToolOption.Termux, 37) { it == network })
+        assertEquals(listOf(network), missingRuntimePermissions(LocalToolOption.Ssh, 37) { it == termux })
+        assertTrue(missingRuntimePermissions(LocalToolOption.Termux, 37) { it == termux }.isEmpty())
+        assertTrue(missingRuntimePermissions(LocalToolOption.Ssh, 37) { it == network }.isEmpty())
+        assertTrue(missingRuntimePermissions(LocalToolOption.Ssh, 36) { false }.isEmpty())
+    }
+
+    @Test fun shellRootGrantCommandsAreScopedToTheSelectedFeature() {
+        assertEquals("pm grant --user 0 me.app com.termux.permission.RUN_COMMAND",
+            localPermissionGrantCommand("me.app", LocalToolOption.Termux, 37, 0))
+        assertEquals("pm grant --user 10 me.app android.permission.ACCESS_LOCAL_NETWORK",
+            localPermissionGrantCommand("me.app", LocalToolOption.Ssh, 37, 10))
+        assertNull(localPermissionGrantCommand("me.app", LocalToolOption.Ssh, 36, 0))
+        assertNull(localPermissionGrantCommand("me.app", LocalToolOption.McpControl, 37, 0))
+        assertNull(localPermissionGrantCommand("me.app", LocalToolOption.ExternalAutomation, 37, 0))
+    }
 }

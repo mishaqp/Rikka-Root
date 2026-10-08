@@ -99,6 +99,28 @@
     android:theme="@style/Theme.Rikkahub"
     android:usesCleartextTraffic="true"
     tools:targetApi="33">
+    <!-- Package F: disabled by default; requires verified Android caller and explicit trust. -->
+    <activity
+      android:name=".automation.ExternalAutomationActivity"
+      android:exported="true"
+      android:excludeFromRecents="true"
+      android:noHistory="true"
+      android:theme="@android:style/Theme.Translucent.NoTitleBar">
+      <intent-filter>
+        <action android:name="me.rerere.rikkahub.RUN_TASK" />
+        <action android:name="me.rerere.rikkahub.RUN_CHAT" />
+        <category android:name="android.intent.category.DEFAULT" />
+      </intent-filter>
+    </activity>
+
+    <receiver
+      android:name=".automation.ExternalAutomationReceiver"
+      android:exported="true">
+      <intent-filter>
+        <action android:name="me.rerere.rikkahub.RUN_TASK" />
+      </intent-filter>
+    </receiver>
+
     <activity
       android:name=".ui.activity.SafeModeActivity"
       android:exported="false"
