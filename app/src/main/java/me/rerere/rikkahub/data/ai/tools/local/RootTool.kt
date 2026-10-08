@@ -18,6 +18,7 @@ import me.rerere.rikkahub.root.RootAccessStore
 import me.rerere.rikkahub.root.RootApprovalPolicy
 import me.rerere.rikkahub.root.RootInvocation
 import me.rerere.rikkahub.root.RootShellManager
+import me.rerere.rikkahub.data.ai.tools.RunExecutionContext
 
 /** Ordinary mode retains its consent gate; automatic permission is global on this device. */
 fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = null, assistantId: String? = null): Tool = Tool(
@@ -46,6 +47,7 @@ fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = nul
         val timeout = if (timeoutValue == null) 30_000 else (timeoutValue as? JsonPrimitive)?.takeIf { !it.isString }?.intOrNull
         // Trusted invocation provenance survives revocation between journal acknowledgment and entry.
         val invocation = currentCoroutineContext()[RootInvocation]
+        val headless = currentCoroutineContext()[RunExecutionContext] != null
         suspend fun automaticAllowed(): Boolean = invocation?.automaticAllowed?.invoke()
             ?: (assistantId != null && accessStore?.isAllowed("root_exec") == true)
         val automaticAtStart = if (invocation?.automatic == false) false else automaticAllowed()
@@ -56,7 +58,7 @@ fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = nul
                 put("reason", "command must be a non-empty string and timeout_ms must be an integer.")
             }
             // An Approved invocation has already passed the explicit confirmation in the loop.
-            invocation == null && !automaticAtStart && !automaticInvocation && RootCommandGuard.check(command) != null -> buildJsonObject {
+            (headless || invocation == null && !automaticAtStart && !automaticInvocation) && RootCommandGuard.check(command) != null -> buildJsonObject {
                 put("error", "root_command_blocked")
                 put("reason", RootCommandGuard.check(command))
             }
@@ -70,7 +72,7 @@ fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = nul
                 var status = "failed"
                 var journalError = false
                 val executed = try {
-                    manager.exec(command, timeout.coerceIn(1_000, 300_000)) {
+                    manager.exec(command, timeout.coerceIn(1_000, 300_000), headless = headless) {
                         !automaticInvocation || automaticAllowed() && RootApprovalPolicy.reason(command) == null
                     }.also {
                         exitCode = it.exitCode

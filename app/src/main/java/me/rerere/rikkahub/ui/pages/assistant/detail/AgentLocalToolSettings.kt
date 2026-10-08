@@ -44,6 +44,17 @@ internal fun AgentLocalToolSettings(assistant: Assistant, onUpdate: (Assistant) 
     }
     AgentFeatureCard(assistant, onUpdate, LocalToolOption.Reliability,
         R.string.agent_tools_reliability_title, R.string.agent_tools_reliability_desc)
+    AgentFeatureCard(assistant, onUpdate, LocalToolOption.SubAgents,
+        R.string.agent_tools_subagent_title, R.string.agent_tools_subagent_desc)
+    if (LocalToolOption.SubAgents in assistant.localTools) CardGroup {
+        item(headlineContent = {
+            OutlinedTextField(value = assistant.subAgentConcurrencyLimit.toString(),
+                onValueChange = { input -> input.toIntOrNull()?.takeIf { it in 1..8 }?.let {
+                    onUpdate(assistant.copy(subAgentConcurrencyLimit = it))
+                } }, label = { Text(stringResource(R.string.agent_tools_subagent_concurrency)) },
+                singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+        })
+    }
 }
 
 @Composable

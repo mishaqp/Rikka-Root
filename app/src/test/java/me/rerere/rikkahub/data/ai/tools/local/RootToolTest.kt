@@ -1,14 +1,33 @@
 package me.rerere.rikkahub.data.ai.tools.local
 
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.root.RootShellManager
 import me.rerere.rikkahub.root.RootStatus
+import me.rerere.rikkahub.root.RootInvocation
+import me.rerere.rikkahub.data.ai.tools.RunExecutionContext
+import me.rerere.rikkahub.data.ai.tools.RunOrigin
 import org.junit.Assert.*
 import org.junit.Test
+import kotlin.uuid.Uuid
 
 class RootToolTest {
+    @Test fun `headless automatic root retains forbidden commands and never probes without a session`() = runBlocking {
+        val manager = RootShellManager(suExecutable = "/nonexistent/root-su")
+        val tool = buildRootTool(manager)
+        val trusted = RunExecutionContext(Uuid.random(), Uuid.random(), RunOrigin.SUB_AGENT)
+        withContext(trusted + RootInvocation(automatic = true, automaticAllowed = { true })) {
+            val blocked = tool.execute(buildJsonObject { put("command", "rm -rf /system") })
+            assertEquals("root_command_blocked", Json.parseToJsonElement((blocked.single() as UIMessagePart.Text).text)
+                .jsonObject["error"]!!.jsonPrimitive.content)
+            val safe = tool.execute(buildJsonObject { put("command", "id -u") })
+            assertEquals("root_interaction_required", Json.parseToJsonElement((safe.single() as UIMessagePart.Text).text)
+                .jsonObject["error"]!!.jsonPrimitive.content)
+            assertEquals(RootStatus.UNCHECKED, manager.status.value)
+        }
+    }
     @Test fun `requires approval directly for every argument set`() {
         val tool = buildRootTool(RootShellManager(suExecutable = "/nonexistent/root-su"))
         assertEquals("root_exec", tool.name)

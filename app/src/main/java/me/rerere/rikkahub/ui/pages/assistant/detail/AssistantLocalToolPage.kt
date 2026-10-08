@@ -176,6 +176,22 @@ private fun AssistantLocalToolContent(
                     }
                 },
             )
+            if (LocalToolOption.Root in assistant.localTools &&
+                (LocalToolOption.SubAgents in assistant.localTools || LocalToolOption.CronJobs in assistant.localTools)) {
+                item(headlineContent = { Text(stringResource(R.string.agent_tools_root_headless_title)) },
+                    supportingContent = { Text(stringResource(R.string.agent_tools_root_headless_desc)) },
+                    trailingContent = {
+                        TextButton(enabled = rootStatus != RootStatus.CHECKING,
+                            onClick = { scope.launch {
+                                rootShellManager.verifyRoot(force = true, prepareHeadless = true)
+                                android.widget.Toast.makeText(context,
+                                    if (rootShellManager.isHeadlessReady()) R.string.agent_tools_root_headless_opened
+                                    else R.string.agent_tools_root_headless_failed, android.widget.Toast.LENGTH_LONG).show()
+                            } }) {
+                            Text(stringResource(R.string.agent_tools_root_headless_prepare))
+                        }
+                    })
+            }
             item(
                 headlineContent = {
                     Text(stringResource(R.string.assistant_page_local_tools_javascript_engine_title))

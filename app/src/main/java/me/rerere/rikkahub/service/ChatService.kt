@@ -41,6 +41,8 @@ import me.rerere.rikkahub.costguards.TokenBudgetContext
 import me.rerere.rikkahub.costguards.TokenBudgetLedger
 import me.rerere.rikkahub.costguards.TokenBudgetStore
 import me.rerere.rikkahub.costguards.boundedCustomBodies
+import me.rerere.rikkahub.subagent.SubAgentRegistry
+import me.rerere.rikkahub.subagent.SubAgentOwner
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
@@ -297,6 +299,7 @@ class ChatService(
     private val folderRepository: FolderRepository,
     private val toolApprovalPreferences: ToolApprovalPreferences,
     private val tokenBudgetStore: TokenBudgetStore,
+    private val subAgentRegistry: SubAgentRegistry,
 ) {
     // workspace 系统提示注入 (依赖 workspaceRepository, 故在类内构造)
     private val workspaceReminderTransformer = WorkspaceReminderTransformer(workspaceRepository)
@@ -1724,8 +1727,10 @@ class ChatService(
             session.messageQueue.pause()
             session.cancelJobs()
         }
-        if (jobs.isEmpty()) return
         jobs.forEach { it.join() }
+        // Stop the producer first: while it is alive it can still attach another child.
+        subAgentRegistry.cancelAllAndJoin(SubAgentOwner(session.state.value.assistantId.toString(), conversationId.toString()))
+        if (jobs.isEmpty()) return
         finishInterruptedPendingTools(conversationId)
     }
 }

@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string translatable="false" name="agent_tools_root_headless_opened">Root-сессия для фоновых задач открыта. Проверьте разрешения инструментов.</string>
+    <string translatable="false" name="agent_tools_root_headless_failed">Root-сессия не открыта. Разрешите доступ в root-менеджере и повторите проверку. Если устройство или root-менеджер не поддерживает фоновую сессию, задачи вернут статус отказа без скрытых запросов.</string>
+    <string translatable="false" name="agent_tools_subagent_title">Субагенты</string>
+    <string translatable="false" name="agent_tools_subagent_desc">Выполняют задачи в отдельном контексте, с выбором модели при запуске. Используют общий бюджет родителя и действующие разрешения. Фоновые субагенты работают, пока жив процесс приложения.</string>
+    <string translatable="false" name="agent_tools_subagent_concurrency">Параллельных субагентов (1–8)</string>
+    <string translatable="false" name="agent_tools_root_headless_title">Root для фоновых задач</string>
+    <string translatable="false" name="agent_tools_root_headless_desc">Откройте root-сессию этой кнопкой: здесь может появиться запрос root-менеджера. Субагенты и расписания используют её без скрытых запросов. После перезапуска приложения откройте снова. Разрешения инструментов проверяются отдельно.</string>
+    <string translatable="false" name="agent_tools_root_headless_prepare">Открыть root-сессию</string>
     <string translatable="false" name="agent_tools_report_share">Отправить отчёт</string>
     <string translatable="false" name="agent_tools_report_share_file">Отправить %1$s</string>
     <string translatable="false" name="agent_tools_report_share_failed">Нет приложения для отправки ZIP. Установите файловый менеджер или приложение для отправки файлов.</string>

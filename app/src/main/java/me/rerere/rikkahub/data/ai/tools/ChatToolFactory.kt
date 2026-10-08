@@ -21,12 +21,32 @@ import me.rerere.workspace.WorkspaceShellStatus
 import me.rerere.rikkahub.root.RootAccessStore
 import me.rerere.rikkahub.data.preferences.ToolApprovalPreferences
 import me.rerere.rikkahub.costguards.TokenBudgetLedger
+import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
+import me.rerere.rikkahub.data.model.ConversationConfig
+import me.rerere.rikkahub.service.HeadlessRuntimeBindings
+import me.rerere.rikkahub.subagent.SubAgentCaller
+import me.rerere.rikkahub.subagent.SubAgentEngine
+import me.rerere.rikkahub.subagent.SubAgentOwner
+import me.rerere.rikkahub.subagent.SubAgentRegistry
+import me.rerere.rikkahub.subagent.subagentDispatchTool
+import me.rerere.rikkahub.subagent.subagentGetTool
+import me.rerere.rikkahub.subagent.subagentListTool
+import me.rerere.rikkahub.subagent.subagentCancelTool
+import kotlin.uuid.Uuid
 
 private const val TAG = "ChatToolFactory"
 
 internal fun shouldUseExternalWebSearch(assistant: Assistant, model: Model): Boolean {
     return assistant.enableWebSearch && BuiltInTools.Search !in model.tools
 }
+
+/** Freeze the complete advertised capability set after workspace/skills/MCP tools were added. */
+internal fun subAgentToolAllowlist(
+    advertisedToolNames: Collection<String>,
+    allowExternalSearchReplacement: Boolean,
+    externalSearchToolNames: Collection<String> = emptyList(),
+): Set<String> = advertisedToolNames.toSet() +
+    if (allowExternalSearchReplacement) externalSearchToolNames.toSet() else emptySet()
 
 class InvalidMcpServerNamesException(val names: List<String>) :
     IllegalStateException("Invalid MCP server names: ${names.joinToString(", ")}")
@@ -42,6 +62,9 @@ class ChatToolFactory(
     private val workspaceRepository: WorkspaceRepository,
     private val rootAccessStore: RootAccessStore,
     private val toolApprovalPreferences: ToolApprovalPreferences,
+    private val runtimeBindings: HeadlessRuntimeBindings,
+    private val subAgentEngine: () -> SubAgentEngine,
+    private val subAgentRegistry: SubAgentRegistry,
 ) {
     suspend fun createTools(
         settings: Settings,
@@ -51,6 +74,7 @@ class ChatToolFactory(
         conversationId: String? = null,
         messages: List<UIMessage> = emptyList(),
         tokenBudget: TokenBudgetLedger? = null,
+        executionContext: RunExecutionContext? = null,
     ): List<Tool> = buildList {
         if (assistant.enableMemory) {
             val memoryAssistantId = if (assistant.useGlobalMemory) {
@@ -75,7 +99,7 @@ class ChatToolFactory(
             workspaceCwd, wallpaperChatImages(messages), workspaceId?.let { id ->
                 { path -> workspaceRepository.resolveRootfsFile(id, path) }
             }, modelCanReadImages = Modality.IMAGE in model.inputModalities,
-            callerAssistant = assistant, tokenBudget = tokenBudget))
+            callerAssistant = assistant, tokenBudget = tokenBudget ?: executionContext?.costBudget))
         if (assistant.enableRecentChatsReference) {
             addAll(createConversationTools(conversationRepository, assistant.id))
         }
@@ -108,6 +132,37 @@ class ChatToolFactory(
                 )
             )
         }
+        if (executionContext == null && LocalToolOption.SubAgents in assistant.localTools && conversationId != null) {
+            val conversationUuid = runCatching { Uuid.parse(conversationId) }.getOrNull()
+            val conversation = conversationUuid?.let { conversationRepository.getConversationById(it) }
+            // Owner comes from trusted generation/DB state, never model arguments or the selected assistant.
+            if (conversationUuid != null && (conversation == null || conversation.assistantId == assistant.id)) {
+                if (WebContentGuard.hasWebContent(messages)) runtimeBindings.markWebContent(conversationId)
+                val owner = SubAgentOwner(assistant.id.toString(), conversationId)
+                val caller = SubAgentCaller(
+                    owner = owner,
+                    // The assistant/model passed to this factory are the effective caller configuration.
+                    conversationConfig = ConversationConfig(
+                        chatModelId = model.id, reasoningLevel = assistant.reasoningLevel,
+                        enableWebSearch = assistant.enableWebSearch, builtInSearch = BuiltInTools.Search in model.tools,
+                        mcpServers = assistant.mcpServers, workspaceId = assistant.workspaceId,
+                        enabledSkills = assistant.enabledSkills,
+                    ),
+                    workspaceCwd = workspaceCwd,
+                    webTaint = runtimeBindings.webTaintFor(conversationId),
+                    allowedTools = subAgentToolAllowlist(
+                        advertisedToolNames = map { it.name },
+                        allowExternalSearchReplacement = assistant.enableWebSearch && BuiltInTools.Search in model.tools,
+                        externalSearchToolNames = if (assistant.enableWebSearch && BuiltInTools.Search in model.tools)
+                            createSearchTools(settings).map { it.name } else emptyList(),
+                    ),
+                )
+                add(subagentDispatchTool(subAgentEngine(), caller))
+                add(subagentListTool(subAgentRegistry, owner))
+                add(subagentGetTool(subAgentRegistry, owner))
+                add(subagentCancelTool(subAgentRegistry, owner))
+            }
+        }
     }.map { ToolPermissionPolicy.apply(it) }
 
     suspend fun restoreWebContentGuard(conversationId: String, messages: List<UIMessage>) {
@@ -115,10 +170,10 @@ class ChatToolFactory(
     }
 
     suspend fun markWebContent(conversationId: String) {
-        if (toolApprovalPreferences.currentAskAfterWebContent()) rootAccessStore.markWebContent(conversationId)
+        runtimeBindings.markWebContent(conversationId)
     }
 
-    fun hasWebContent(conversationId: String): Boolean = rootAccessStore.isWebTainted(conversationId)
+    fun hasWebContent(conversationId: String): Boolean = runtimeBindings.hasWebContent(conversationId)
 
     private suspend fun createWorkspaceToolsIfReady(workspaceId: String?, cwd: String?): List<Tool> {
         if (workspaceId.isNullOrBlank()) return emptyList()

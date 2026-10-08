@@ -40,6 +40,7 @@ data class Assistant(
     val maxTokens: Int? = null,
     val tokenBudgetSoftCap: Int? = null,
     val tokenBudgetHardCap: Int? = null,
+    val subAgentConcurrencyLimit: Int = 3,
     val customHeaders: List<CustomHeader> = emptyList(),
     val customBodies: List<CustomBody> = emptyList(),
     val mcpServers: Set<Uuid> = emptySet(),

@@ -4,6 +4,10 @@ import kotlinx.serialization.json.Json
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.costguards.TokenBudgetStore
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.service.HeadlessRuntimeBindings
+import me.rerere.rikkahub.service.HeadlessTaskRunner
+import me.rerere.rikkahub.subagent.SubAgentEngine
+import me.rerere.rikkahub.subagent.SubAgentRegistry
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.ai.tools.ChatToolFactory
 import me.rerere.rikkahub.data.event.AppEventBus
@@ -30,13 +34,24 @@ val appModule = module {
         AppEventBus()
     }
 
-    single { RootShellManager(controlDirectory = get<android.content.Context>().cacheDir) }
+    single { RootShellManager(controlDirectory = get<android.content.Context>().noBackupFilesDir) }
     single { RootAccessStore(java.io.File(get<android.content.Context>().noBackupFilesDir, "root-control")) }
     single { ToolApprovalPreferences(get(), get()) }
     single {
         val settings = get<SettingsStore>()
         TokenBudgetStore(java.io.File(get<android.content.Context>().noBackupFilesDir, "token-budgets"),
             assistantSource = { id -> settings.settingsFlow.value.assistants.singleOrNull { it.id == id } })
+    }
+
+    single { SubAgentRegistry() }
+    single { HeadlessRuntimeBindings(get(), get(), get(), get(), get(), get(), get()) }
+    single<HeadlessTaskRunner> { get<HeadlessRuntimeBindings>().createRunner(get(), get()) }
+    single {
+        val bindings = get<HeadlessRuntimeBindings>()
+        val settings = get<SettingsStore>()
+        SubAgentEngine(registry = get(), runner = get(), settings = { settings.settingsFlow.value },
+            scope = get<AppScope>(), enabled = { bindings.subAgentsEnabled(it) },
+            concurrencyLimit = { bindings.subAgentConcurrency(it) })
     }
 
     single {
@@ -92,6 +107,9 @@ val appModule = module {
             workspaceRepository = get(),
             rootAccessStore = get(),
             toolApprovalPreferences = get(),
+            runtimeBindings = get(),
+            subAgentEngine = { get<SubAgentEngine>() },
+            subAgentRegistry = get(),
         )
     }
 
@@ -114,6 +132,7 @@ val appModule = module {
             folderRepository = get(),
             toolApprovalPreferences = get(),
             tokenBudgetStore = get(),
+            subAgentRegistry = get(),
         )
     }
 

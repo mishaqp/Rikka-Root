@@ -17,6 +17,10 @@ object ToolPermissionPolicy {
             tool.toolName != "ask_user"
 
     val registry: Map<String, String> = linkedMapOf(
+        "subagent_dispatch" to "запуск субагента",
+        "subagent_list" to "список собственных субагентов",
+        "subagent_get" to "чтение результатов собственного субагента",
+        "subagent_cancel" to "остановка собственного субагента",
         "generate_bug_report" to "создание безопасного отчёта об ошибках",
         "check_token_usage" to "расход токенов текущего чата",
         "list_files" to "список файлов",
