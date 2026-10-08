@@ -33,6 +33,12 @@ import me.rerere.tts.provider.TTSManager
 import org.koin.dsl.module
 
 val appModule = module {
+    includes(workflowModule)
+    single { me.rerere.rikkahub.browser.BrowserPreferences(get()) }
+    single { me.rerere.rikkahub.skills.SkillUrlImporter(skillManager = get<me.rerere.rikkahub.data.files.SkillManager>()) }
+    single { me.rerere.rikkahub.skills.js.JsSkillRunner(get()) }
+    single { me.rerere.rikkahub.skills.js.SkillSecretsStore(get()) }
+    single { me.rerere.rikkahub.skills.SkillTestRunner(get<HeadlessTaskRunner>(), get(), get(), get<AppScope>()) }
     single<Json> { JsonInstant }
 
     single {
@@ -73,7 +79,7 @@ val appModule = module {
     }
 
     single {
-        LocalTools(get(), get(), get(), get(), get(), get(), get(), get(), get())
+        LocalTools(get(), get(), get(), get(), get(), get(), get(), get(), get(), get())
     }
 
     single {

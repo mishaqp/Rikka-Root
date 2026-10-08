@@ -24,13 +24,15 @@ class WebContentGuardTest {
     }
 
     @Test fun executedSearchAndPageReadsTaintTheConversationButOtherToolsDoNot() {
-        for (name in listOf("search_web", "scrape_web")) {
+        for (name in listOf("search_web", "scrape_web", "browser_open", "browser_get_text", "browser_get_links", "browser_click_and_read", "run_js", "skill_install_from_url")) {
             val result = UIMessagePart.Tool("id", name, "{}", output = listOf(UIMessagePart.Text("external content")))
             assertTrue(name, WebContentGuard.hasWebContent(listOf(UIMessage.assistant("").copy(parts = listOf(result)))))
             assertFalse("unexecuted request is not read content", WebContentGuard.hasWebContent(listOf(UIMessage.assistant("").copy(parts = listOf(result.copy(output = emptyList()))))))
         }
         assertFalse(WebContentGuard.hasWebContent(listOf(UIMessage.user("search_web https://example.test"))))
         assertFalse(WebContentGuard.hasWebContent(emptyList()))
+        assertFalse(WebContentGuard.isClientReader("browser_done"))
+        assertFalse(WebContentGuard.isClientReader("skill_install_from_text"))
     }
 
     @Test fun providerSearchResultsAndCitationsAlsoCountAsWebContent() {

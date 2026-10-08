@@ -374,7 +374,9 @@ private fun MessagePartsBlock(
                 when (val part = block.part) {
                     is UIMessagePart.Text -> {
                         val textContent = @Composable {
-                            if (role == MessageRole.USER) {
+                            if (role != MessageRole.USER && SkillWebviewCardOrNull(part)) {
+                                // Agent's skill result viewer has rendered this text part.
+                            } else if (role == MessageRole.USER) {
                                 ChatMessageBubble(
                                     role = role,
                                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = settings.displaySetting.bubbleOpacity),

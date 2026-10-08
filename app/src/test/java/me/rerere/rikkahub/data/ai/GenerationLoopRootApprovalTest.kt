@@ -53,7 +53,7 @@ class GenerationLoopRootApprovalTest {
     @get:Rule val folder = TemporaryFolder()
 
     @Test(timeout = 15_000)
-    fun `yolo after search executes all capabilities but keeps dangerous root and ask user pending`() = runBlocking {
+    fun `yolo after search executes capabilities but keeps mandatory confirmations pending`() = runBlocking {
         ToolApprovalTestStore(folder.newFolder()).use { approvals ->
             approvals.preferences.setYolo(true)
             val id = Uuid.random()
@@ -73,10 +73,13 @@ class GenerationLoopRootApprovalTest {
                     onWebContentRead = { webSeen = true },
                     isToolAutoApproved = { name, _ -> resolveToolAutoApproval(approvals.preferences, id, name, webSeen) },
                 )
-                assertEquals(names - setOf("ask_user", "ssh_forget_host_key"), runs)
+                val mandatory = setOf("ask_user", "ssh_forget_host_key", "browser_click", "browser_type",
+                    "browser_scroll", "browser_submit", "browser_select", "browser_press_key", "browser_click_and_read",
+                    "skill_install_from_url", "skill_install_from_text")
+                assertEquals(names - mandatory, runs)
                 assertEquals(listOf("id -u"), fixture.commands)
                 val result = fixture.latest.last().getTools()
-                assertEquals(setOf("dangerous", "ask_user", "ssh_forget_host_key"), result.filter { it.isPending }.map { it.toolCallId }.toSet())
+                assertEquals(mandatory + "dangerous", result.filter { it.isPending }.map { it.toolCallId }.toSet())
                 assertTrue(result.filter { !it.isPending }.all { it.isExecuted && it.approvalState == ToolApprovalState.Auto })
                 assertEquals(1, fixture.requests.get())
                 val approved = fixture.latest.dropLast(1) + fixture.latest.last().copy(parts = fixture.latest.last().parts.map {

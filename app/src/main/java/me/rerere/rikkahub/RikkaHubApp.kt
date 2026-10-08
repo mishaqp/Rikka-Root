@@ -114,6 +114,7 @@ class RikkaHubApp : Application() {
 
         // Reconcile interrupted claimed occurrences before rearming schedules.
         restoreScheduledJobs()
+        restoreAgentExtensions()
 
         // Resume media generations interrupted by the last process death
         resumeMediaCreations()
@@ -155,6 +156,31 @@ class RikkaHubApp : Application() {
             } catch (_: Exception) {
                 // Never log task text, tool arguments, encrypted payloads or provider errors.
                 Log.w(TAG, "Восстановление расписаний отложено до следующего запуска.")
+            }
+        }
+    }
+
+    private fun restoreAgentExtensions() {
+        // Each extension has its own supervised task so a failed asset/DB cannot stop cron recovery.
+        val scope = get<AppScope>()
+        scope.launch(Dispatchers.IO) {
+            try {
+                get<SettingsStore>().settingsFlow.first { !it.init }
+                get<SkillManager>().seedDefaultSkillsIfNeeded()
+            } catch (cancel: kotlinx.coroutines.CancellationException) {
+                throw cancel
+            } catch (_: Exception) {
+                Log.w(TAG, "Подготовка встроенных навыков отложена до следующего запуска.")
+            }
+        }
+        scope.launch(Dispatchers.IO) {
+            try {
+                get<SettingsStore>().settingsFlow.first { !it.init }
+                get<me.rerere.rikkahub.workflow.trigger.TriggerRegistry>().start()
+            } catch (cancel: kotlinx.coroutines.CancellationException) {
+                throw cancel
+            } catch (_: Exception) {
+                Log.w(TAG, "Восстановление рабочих процессов отложено до следующего запуска.")
             }
         }
     }

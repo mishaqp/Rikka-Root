@@ -17,6 +17,43 @@ object ToolPermissionPolicy {
             tool.toolName != "ask_user"
 
     val registry: Map<String, String> = linkedMapOf(
+        "browser_open" to "открытие страницы браузера",
+        "browser_current_url" to "адрес страницы браузера",
+        "browser_get_text" to "текст страницы браузера",
+        "browser_get_links" to "ссылки страницы браузера",
+        "browser_back" to "переход назад в браузере",
+        "browser_forward" to "переход вперёд в браузере",
+        "browser_wait_for" to "ожидание содержимого страницы",
+        "browser_click" to "нажатие на странице",
+        "browser_type" to "ввод на странице",
+        "browser_scroll" to "прокрутка страницы",
+        "browser_submit" to "отправка формы страницы",
+        "browser_select" to "выбор значения на странице",
+        "browser_press_key" to "нажатие клавиши в браузере",
+        "browser_click_and_read" to "нажатие и чтение страницы",
+        "browser_done" to "завершение задачи браузера",
+        "skill_install_from_url" to "установка навыка по URL",
+        "skill_install_from_text" to "установка навыка из текста",
+        "skill_get_content" to "чтение файлов навыка",
+        "run_js" to "исполнение JS-навыка",
+        "tap" to "нажатие на экране",
+        "long_press" to "долгое нажатие на экране",
+        "swipe" to "свайп на экране",
+        "read_window_tree" to "чтение дерева экрана",
+        "find_node" to "поиск элемента экрана",
+        "click_node" to "нажатие элемента экрана",
+        "set_text" to "ввод текста в элемент экрана",
+        "scroll" to "прокрутка экрана",
+        "global_action" to "системное действие экрана",
+        "take_screenshot" to "снимок экрана телефона",
+        "wake_screen" to "включение экрана телефона",
+        "workflow_create" to "создание рабочего процесса",
+        "workflow_list" to "список рабочих процессов",
+        "workflow_get" to "чтение рабочего процесса и истории",
+        "workflow_update" to "изменение рабочего процесса",
+        "workflow_delete" to "удаление рабочего процесса",
+        "workflow_set_enabled" to "включение рабочего процесса",
+        "workflow_run" to "запуск рабочего процесса",
         "external_automation_status" to "настройки и история внешних запусков",
         "external_automation_set_enabled" to "включение внешней автоматизации",
         "external_automation_add_trusted_package" to "доверие вызывающему приложению",
@@ -145,6 +182,8 @@ object ToolPermissionPolicy {
     )
 
     fun mandatoryConfirmation(name: String, input: JsonElement): Boolean {
+        if (name in me.rerere.rikkahub.browser.BrowserToolDefaults.WRITE_TOOLS ||
+            name in setOf("skill_install_from_url", "skill_install_from_text")) return true
         if (name == "ssh_forget_host_key") return true
         val args = input as? JsonObject
         fun text(key: String): String? = (args?.get(key) as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull

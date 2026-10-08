@@ -51,6 +51,7 @@ class LocalTools(
     private val filesManager: FilesManager,
     private val termuxPreferences: me.rerere.rikkahub.data.preferences.TermuxPreferences,
     private val sshHostRepository: me.rerere.rikkahub.data.repository.SshHostRepository,
+    private val browserPreferences: me.rerere.rikkahub.browser.BrowserPreferences? = null,
 ) {
     private val keystoreCrypto by lazy { KeystoreCrypto(AndroidToolKeyStore(context)) }
     val javascriptTool by lazy { buildJavascriptTool() }
@@ -79,8 +80,40 @@ class LocalTools(
         callerAssistant: Assistant? = null,
         tokenBudget: TokenBudgetLedger? = null,
         mcpCaller: McpControlCaller? = null,
+        skillCaller: me.rerere.rikkahub.skills.SkillInstallCaller? = null,
+        knownToolNames: (() -> Collection<String>)? = null,
     ): List<Tool> {
         val tools = mutableListOf<Tool>()
+        if (LocalToolOption.Browser in options) {
+            val enabled = (browserPreferences ?: get().get<me.rerere.rikkahub.browser.BrowserPreferences>()).snapshotBlocking()
+            val invocation = me.rerere.rikkahub.browser.ToolInvocationContext(
+                callerAssistantId = assistantId, callerConversationId = conversationId, modelCanSeeImages = modelCanReadImages)
+            me.rerere.rikkahub.browser.BrowserToolDefaults.ALL_TOOLS.forEach { name ->
+                if (enabled[name] == true) createBrowserTool(name, context, invocation)?.let(tools::add)
+            }
+        }
+        if (LocalToolOption.SkillImport in options) {
+            val manager = get().get<me.rerere.rikkahub.data.files.SkillManager>()
+            val caller = skillCaller ?: me.rerere.rikkahub.skills.SkillInstallCaller(
+                enabledSkills = { callerAssistant?.enabledSkills ?: emptySet() },
+                saveEnabledSkills = { error("Для установки навыка нужен подтверждённый контекст текущего чата.") })
+            val importer = get().get<me.rerere.rikkahub.skills.SkillUrlImporter>()
+            tools.add(me.rerere.rikkahub.skills.skillInstallFromUrlTool(importer, caller, manager))
+            tools.add(me.rerere.rikkahub.skills.skillInstallFromTextTool(importer, caller, manager))
+        }
+        if (LocalToolOption.JsSkills in options) tools.add(me.rerere.rikkahub.skills.js.runJsTool(
+            context, get().get(), get().get(), get().get()))
+        if (LocalToolOption.ScreenAutomation in options) tools.addAll(createScreenAutomationTools(context, rootShellManager) { name, input ->
+            val live = settingsStore.settingsFlow.value.assistants.singleOrNull { it.id.toString() == assistantId }
+            if (live == null || LocalToolOption.ScreenAutomation !in live.localTools) false
+            else {
+                val execution = kotlinx.coroutines.currentCoroutineContext()[me.rerere.rikkahub.data.ai.tools.RunExecutionContext]
+                if (execution == null) true
+                else get().get<me.rerere.rikkahub.service.HeadlessRuntimeBindings>().let { bindings ->
+                    bindings.preflight(execution, name) == null && bindings.authorize(execution, name, input)
+                }
+            }
+        })
         if (LocalToolOption.ExternalAutomation in options) {
             val config = get().get<me.rerere.rikkahub.automation.ExternalAutomationConfig>()
             tools.addAll(listOf(me.rerere.rikkahub.automation.externalAutomationStatusTool(config),
@@ -206,6 +239,21 @@ class LocalTools(
         }
         if (options.contains(LocalToolOption.ChartDisplay)) {
             tools.add(chartDisplayTool)
+        }
+        if (LocalToolOption.Workflows in options) {
+            val repo = get().get<me.rerere.rikkahub.workflow.repository.WorkflowRepository>()
+            val engine = get().get<me.rerere.rikkahub.workflow.execution.WorkflowEngine>()
+            val config = callerAssistant?.let { me.rerere.rikkahub.data.model.ConversationConfig(
+                chatModelId = it.chatModelId, reasoningLevel = it.reasoningLevel, enableWebSearch = it.enableWebSearch,
+                mcpServers = it.mcpServers, workspaceId = it.workspaceId, enabledSkills = it.enabledSkills) }
+            val registered = { knownToolNames?.invoke()?.toList() ?: tools.map { it.name } }
+            tools.addAll(listOf(
+                me.rerere.rikkahub.workflow.tools.workflowCreateTool(repo, registered, assistantId, conversationId, config),
+                me.rerere.rikkahub.workflow.tools.workflowUpdateTool(repo, registered, assistantId, conversationId, config),
+                me.rerere.rikkahub.workflow.tools.workflowListTool(repo), me.rerere.rikkahub.workflow.tools.workflowGetTool(repo),
+                me.rerere.rikkahub.workflow.tools.workflowDeleteTool(repo, assistantId),
+                me.rerere.rikkahub.workflow.tools.workflowSetEnabledTool(repo, assistantId),
+                me.rerere.rikkahub.workflow.tools.workflowRunTool(engine, repo, assistantId)))
         }
         return tools
     }

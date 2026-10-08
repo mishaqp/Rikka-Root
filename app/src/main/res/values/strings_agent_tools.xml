@@ -8,7 +8,7 @@
     <string translatable="false" name="agent_tools_subagent_desc">Выполняют задачи в отдельном контексте, с выбором модели при запуске. Используют общий бюджет родителя и действующие разрешения. Фоновые субагенты работают, пока жив процесс приложения.</string>
     <string translatable="false" name="agent_tools_subagent_concurrency">Параллельных субагентов (1–8)</string>
     <string translatable="false" name="agent_tools_root_headless_title">Root для фоновых задач</string>
-    <string translatable="false" name="agent_tools_root_headless_desc">Откройте root-сессию этой кнопкой: здесь может появиться запрос root-менеджера. Субагенты и расписания используют её без скрытых запросов. После перезапуска приложения откройте снова. Разрешения инструментов проверяются отдельно.</string>
+    <string translatable="false" name="agent_tools_root_headless_desc">Откройте root-сессию этой кнопкой: здесь может появиться запрос root-менеджера. Субагенты, расписания, workflows и тестер навыков используют её без скрытых запросов. После перезапуска приложения откройте снова. Разрешения инструментов проверяются отдельно.</string>
     <string translatable="false" name="agent_tools_root_headless_prepare">Открыть root-сессию</string>
     <string translatable="false" name="agent_tools_report_share">Отправить отчёт</string>
     <string translatable="false" name="agent_tools_report_share_file">Отправить %1$s</string>

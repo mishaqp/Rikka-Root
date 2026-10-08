@@ -114,7 +114,7 @@ class HeadlessRuntimeBindings(
         }
         val config = execution.callerConversationConfig
         when {
-            name == "root_exec" && !rootShellManager.isHeadlessReady() -> return "root_interaction_required"
+            (name == "root_exec" || option == LocalToolOption.ScreenAutomation) && !rootShellManager.isHeadlessReady() -> return "root_interaction_required"
             name == "calendar_query" && !granted(Manifest.permission.READ_CALENDAR) -> return "android_permission_required"
             name == "calendar_create" && (!granted(Manifest.permission.READ_CALENDAR) || !granted(Manifest.permission.WRITE_CALENDAR)) -> return "android_permission_required"
             name == "set_brightness" && !android.provider.Settings.System.canWrite(androidContext) -> return "android_permission_required"
@@ -130,7 +130,7 @@ class HeadlessRuntimeBindings(
             name == "memory_tool" && !assistant.enableMemory -> return "tool_feature_disabled"
             name in setOf("search_web", "scrape_web") && !(config?.enableWebSearch ?: assistant.enableWebSearch) -> return "tool_feature_disabled"
             name in setOf("recent_chats", "conversation_search") && !assistant.enableRecentChatsReference -> return "tool_feature_disabled"
-            name == "use_skill" && (config?.enabledSkills ?: assistant.enabledSkills).isEmpty() -> return "tool_feature_disabled"
+            name in setOf("use_skill", "skill_get_content") && (config?.enabledSkills ?: assistant.enabledSkills).isEmpty() -> return "tool_feature_disabled"
         }
         return null
     }
@@ -159,6 +159,8 @@ internal suspend fun headlessFeatureEnabled(
         RunOrigin.SUB_AGENT -> LocalToolOption.SubAgents in assistant.localTools
         RunOrigin.CRON -> LocalToolOption.CronJobs in assistant.localTools
         RunOrigin.EXTERNAL_AUTOMATION -> LocalToolOption.ExternalAutomation in assistant.localTools && externalAutomationEnabled()
+        RunOrigin.WORKFLOW -> LocalToolOption.Workflows in assistant.localTools
+        RunOrigin.SKILL_TEST -> true // Explicit UI test; tools still pass live feature and permission checks.
     }
 }
 
@@ -173,6 +175,16 @@ internal fun isHeadlessMcpToolEnabled(settings: Settings, assistant: Assistant, 
 
 /** Current capability switch is rechecked even when the tools were created before a settings change. */
 internal fun localOptionForHeadlessTool(name: String): LocalToolOption? = when (name) {
+    "browser_open", "browser_current_url", "browser_get_text",
+    "browser_get_links", "browser_back", "browser_forward", "browser_wait_for", "browser_click", "browser_type",
+    "browser_scroll", "browser_submit", "browser_select", "browser_press_key",
+    "browser_click_and_read", "browser_done" -> LocalToolOption.Browser
+    "skill_install_from_url", "skill_install_from_text" -> LocalToolOption.SkillImport
+    "run_js" -> LocalToolOption.JsSkills
+    "tap", "long_press", "swipe", "read_window_tree", "find_node", "click_node", "set_text", "scroll",
+    "global_action", "take_screenshot", "wake_screen" -> LocalToolOption.ScreenAutomation
+    "workflow_create", "workflow_list", "workflow_get", "workflow_update", "workflow_delete",
+    "workflow_set_enabled", "workflow_run" -> LocalToolOption.Workflows
     "termux_run_command", "termux_session_start", "termux_session_send", "termux_session_read",
     "termux_session_kill", "termux_session_list" -> LocalToolOption.Termux
     "ssh_exec", "save_ssh_host", "list_ssh_hosts", "delete_ssh_host", "ssh_exec_saved",

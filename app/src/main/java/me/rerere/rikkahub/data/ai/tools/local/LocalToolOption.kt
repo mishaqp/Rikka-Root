@@ -5,6 +5,11 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 sealed class LocalToolOption {
+    @Serializable @SerialName("browser") data object Browser : LocalToolOption()
+    @Serializable @SerialName("skill_import") data object SkillImport : LocalToolOption()
+    @Serializable @SerialName("js_skills") data object JsSkills : LocalToolOption()
+    @Serializable @SerialName("screen_automation") data object ScreenAutomation : LocalToolOption()
+    @Serializable @SerialName("workflows") data object Workflows : LocalToolOption()
     @Serializable @SerialName("external_automation") data object ExternalAutomation : LocalToolOption()
     @Serializable @SerialName("mcp_control") data object McpControl : LocalToolOption()
     @Serializable @SerialName("ssh") data object Ssh : LocalToolOption()

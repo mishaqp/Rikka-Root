@@ -41,6 +41,8 @@ val viewModelModule = module {
     }
     viewModelOf(::ChatDrawerVM)
     viewModel { me.rerere.rikkahub.ui.pages.setting.termux.SettingTermuxViewModel(get()) }
+    viewModel { me.rerere.rikkahub.ui.pages.setting.browser.SettingBrowserViewModel(get()) }
+    viewModel { me.rerere.rikkahub.workflow.ui.WorkflowsViewModel(get(), get()) }
     viewModelOf(::SettingVM)
     viewModelOf(::DebugVM)
     viewModelOf(::HistoryVM)

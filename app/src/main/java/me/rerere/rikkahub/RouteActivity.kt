@@ -520,6 +520,15 @@ class RouteActivity : ComponentActivity() {
                             entry<Screen.SettingTermux> {
                                 me.rerere.rikkahub.ui.pages.setting.termux.SettingTermuxPage()
                             }
+                            entry<Screen.SettingBrowser> {
+                                me.rerere.rikkahub.ui.pages.setting.browser.SettingBrowserPage()
+                            }
+                            entry<Screen.Workflows> {
+                                me.rerere.rikkahub.workflow.ui.WorkflowsScreen()
+                            }
+                            entry<Screen.WorkflowDetail> { key ->
+                                me.rerere.rikkahub.workflow.ui.WorkflowDetailScreen(key.id)
+                            }
 
                             entry<Screen.SettingMcp> {
                                 SettingMcpPage()
@@ -764,6 +773,12 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingSsh : Screen
+    @Serializable
+    data object SettingBrowser : Screen
+    @Serializable
+    data object Workflows : Screen
+    @Serializable
+    data class WorkflowDetail(val id: String) : Screen
 
     @Serializable
     data object SettingDonate : Screen

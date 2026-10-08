@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="assistant_page_local_tools_browser_desc" translatable="false">Веб-браузер на основе ИИ. 17 индивидуально переключаемых инструментов — настройте доступ на чтение/запись в Настройки → Браузер.</string>
+    <string name="assistant_page_local_tools_browser_title" translatable="false">Браузер</string>
+    <string name="assistant_page_local_tools_js_skills_desc" translatable="false">Позволяет ассистенту запускать JavaScript-навыки (вычисление хеша, запрос к Википедии, генерация QR-кодов, отрисовка карт и т. д.) внутри скрытого WebView. Код навыка определяет, что он делает; одобрение для каждого вызова каждый раз. Совместимо с навыками, написанными для Google AI Edge Gallery — поместите их в папку навыков, и они просто работают.</string>
+    <string name="assistant_page_local_tools_js_skills_title" translatable="false">JS-навыки</string>
+    <string name="assistant_page_local_tools_screen_automation_desc" translatable="false">Позволяет LLM нажимать, проводить, прокручивать, читать содержимое экрана и делать снимки через root (input, screencap, su). Требуется проверенный Root; используйте кнопку проверки Root выше. Доступ специальных возможностей не требуется. Для set_text поддерживается только печатный ASCII; кириллицу вводите вручную.</string>
+    <string name="assistant_page_local_tools_screen_automation_title" translatable="false">Автоматизация экрана</string>
+    <string name="assistant_page_local_tools_skill_import_desc" translatable="false">Позволяет ассистенту устанавливать навыки из URL ИЛИ из уже имеющегося текста (например, полученного через SSH / curl / MCP для серверов с аутентификацией). Форматы Native, openclaw и Hermes. Для каждой установки требуется одобрение каждого вызова («Всегда разрешать» отключено — вы проверяете источник каждый раз).</string>
+    <string name="assistant_page_local_tools_skill_import_title" translatable="false">Импорт навыков</string>
+    <string name="assistant_page_local_tools_workflows_desc" translatable="false">Позволяет ассистенту создавать автоматизации, запускаемые по триггерам — подключение WiFi, расписание, Bluetooth, питание, экран и батарея. Геозоны, уведомления и запуск приложений недоступны без специальных доступов, которые здесь не подключены.</string>
+    <string name="assistant_page_local_tools_workflows_hint_message" translatable="false">Рабочие процессы включены. Ручной запуск, расписание, WiFi, наушники, питание, включение/выключение экрана и батарея не требуют новых специальных доступов.\n\nДля Bluetooth-триггеров на Android 12 и новее нужен доступ к устройствам поблизости. Если эти триггеры нужны, нажмите «Разрешить Bluetooth» в этой карточке; отказ не отключает остальные рабочие процессы.\n\nГеозоны, события уведомлений, запуск/закрытие приложений, условия текущего приложения и восхода/заката здесь недоступны: соответствующие специальные доступы не добавлены.</string>
+    <string name="assistant_page_local_tools_workflows_hint_title" translatable="false">Рабочим процессам нужна доп. настройка</string>
+    <string name="assistant_page_local_tools_workflows_title" translatable="false">Рабочие процессы</string>
+    <string name="large_tools_group_title" translatable="false">Браузер, навыки и автоматизация</string>
+    <string name="large_tools_open_browser_settings" translatable="false">Настройки браузера</string>
+    <string name="large_tools_open_workflows" translatable="false">Открыть рабочие процессы</string>
+    <string name="large_tools_bluetooth_title" translatable="false">Bluetooth-триггеры</string>
+    <string name="large_tools_bluetooth_request" translatable="false">Разрешить Bluetooth</string>
+    <string name="large_tools_bluetooth_rationale" translatable="false">Для событий подключения и отключения Bluetooth-устройства нужен доступ к устройствам поблизости (BLUETOOTH_CONNECT). Разрешение запрашивается только по вашему нажатию при включённых рабочих процессах. При отказе остальные триггеры продолжают работать.</string>
+    <string name="large_tools_bluetooth_denied" translatable="false">Доступ к Bluetooth не предоставлен. Bluetooth-триггеры недоступны; ручной запуск и другие поддерживаемые триггеры продолжают работать. Разрешение можно выдать позднее в настройках приложения.</string>
+    <string name="large_tools_bluetooth_granted" translatable="false">Доступ для Bluetooth-триггеров предоставлен.</string>
+    <string name="large_tools_dismiss" translatable="false">Понятно</string>
+    <string name="large_tools_cancel" translatable="false">Отмена</string>
+</resources>

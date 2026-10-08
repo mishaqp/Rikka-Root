@@ -34,7 +34,7 @@ data class RunExecutionContext(
 ) : AbstractCoroutineContextElement(Key) {
     companion object Key : CoroutineContext.Key<RunExecutionContext>
 }
-enum class RunOrigin { SUB_AGENT, CRON, EXTERNAL_AUTOMATION }
+enum class RunOrigin { SUB_AGENT, CRON, EXTERNAL_AUTOMATION, WORKFLOW, SKILL_TEST }
 class RunExecutionState {
     @Volatile var effectsInFlight: Boolean = false
         internal set
@@ -49,6 +49,8 @@ object HeadlessToolPolicy {
         "external_automation_set_enabled", "external_automation_add_trusted_package",
         "external_automation_remove_trusted_package",
         "mcp_set_tool_approval",
+        "skill_install_from_url", "skill_install_from_text",
+        "workflow_create", "workflow_update", "workflow_delete", "workflow_set_enabled", "workflow_run",
     )
     private val interactive = setOf(
         "ask_user", "grant_directory_access", "verify_fingerprint", "take_photo", "record_audio",

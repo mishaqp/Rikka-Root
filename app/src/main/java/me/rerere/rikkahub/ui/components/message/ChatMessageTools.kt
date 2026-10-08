@@ -137,9 +137,10 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     val isPending = tool.isPending
     val isDenied = tool.approvalState is ToolApprovalState.Denied
     val images = tool.output.filterIsInstance<UIMessagePart.Image>()
+    val webviewParts = tool.output.filterIsInstance<UIMessagePart.Text>().filter { it.hasSkillWebviewMeta() }
 
     // 摘要由注册的渲染器决定; 图片输出与拒绝原因为所有工具通用
-    val hasExtraContent = renderer.hasSummary(context) || isDenied || images.isNotEmpty()
+    val hasExtraContent = renderer.hasSummary(context) || isDenied || images.isNotEmpty() || webviewParts.isNotEmpty()
 
     ControlledChainOfThoughtStep(
         expanded = expanded,
@@ -189,6 +190,12 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                         }
                     }
                     val broaderScopesAllowed = ToolPermissionPolicy.canGrantAlways(tool.toolName, tool.inputAsJson())
+                    if (me.rerere.rikkahub.workflow.tools.WorkflowApprovalRenderer.isWorkflowTool(tool.toolName)) {
+                        val preview = runCatching {
+                            me.rerere.rikkahub.workflow.tools.WorkflowApprovalRenderer.renderPlain(tool.toolName, tool.input)
+                        }.getOrNull()
+                        if (!preview.isNullOrBlank()) Text(preview, style = MaterialTheme.typography.labelSmall)
+                    }
                     if (!broaderScopesAllowed) Text(
                         "Этот инструмент всегда требует отдельного подтверждения.",
                         color = MaterialTheme.colorScheme.error,
@@ -221,6 +228,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
             {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     renderer.Summary(context)
+                    webviewParts.forEach { SkillWebviewCardOrNull(it) }
                     if (images.isNotEmpty()) {
                         LazyRow(
                             horizontalArrangement = Arrangement.spacedBy(4.dp),

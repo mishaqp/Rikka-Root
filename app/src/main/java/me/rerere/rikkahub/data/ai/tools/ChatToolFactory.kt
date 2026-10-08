@@ -25,6 +25,7 @@ import me.rerere.rikkahub.data.preferences.ToolApprovalPreferences
 import me.rerere.rikkahub.costguards.TokenBudgetLedger
 import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
 import me.rerere.rikkahub.data.model.ConversationConfig
+import me.rerere.rikkahub.data.model.getAssistantOf
 import me.rerere.rikkahub.service.HeadlessRuntimeBindings
 import me.rerere.rikkahub.subagent.SubAgentCaller
 import me.rerere.rikkahub.data.ai.tools.local.createCronJobTools
@@ -103,6 +104,14 @@ class ChatToolFactory(
             addAll(createSearchTools(settings))
         }
         val workspaceId = assistant.workspaceId?.toString()
+        val skillCaller = createSkillInstallCaller(assistant.id,
+            conversationId?.let { runCatching { Uuid.parse(it) }.getOrNull() }, executionContext != null,
+            loadAssistant = { id ->
+                val live = GlobalContext.get().get<me.rerere.rikkahub.service.ChatService>().getConversationFlow(id).value
+                check(live.assistantId == assistant.id) { "Владелец чата изменился." }
+                settingsStoreSnapshot().getAssistantOf(live)
+            },
+            updateAssistant = { id, transform -> GlobalContext.get().get<me.rerere.rikkahub.service.ChatService>().updateChatAssistant(id, transform) })
         val mcpCaller = me.rerere.rikkahub.data.ai.mcp.control.createMcpControlCaller(
             callerAssistant = assistant,
             conversationId = conversationId?.let { runCatching { Uuid.parse(it) }.getOrNull() },
@@ -115,7 +124,8 @@ class ChatToolFactory(
             workspaceCwd, wallpaperChatImages(messages), workspaceId?.let { id ->
                 { path -> workspaceRepository.resolveRootfsFile(id, path) }
             }, modelCanReadImages = Modality.IMAGE in model.inputModalities,
-            callerAssistant = assistant, tokenBudget = tokenBudget ?: executionContext?.costBudget, mcpCaller = mcpCaller))
+            callerAssistant = assistant, tokenBudget = tokenBudget ?: executionContext?.costBudget, mcpCaller = mcpCaller,
+            skillCaller = skillCaller, knownToolNames = { map { it.name } }))
         if (assistant.enableRecentChatsReference) {
             addAll(createConversationTools(conversationRepository, assistant.id))
         }
@@ -125,6 +135,7 @@ class ChatToolFactory(
                 createSkillTools(
                     enabledSkills = assistant.enabledSkills,
                     allSkills = skillManager.listSkills(),
+                    skillManager = skillManager,
                 )
             )
         }
@@ -210,6 +221,9 @@ class ChatToolFactory(
     suspend fun markWebContent(conversationId: String) {
         runtimeBindings.markWebContent(conversationId)
     }
+
+    private fun settingsStoreSnapshot(): Settings = GlobalContext.get()
+        .get<me.rerere.rikkahub.data.datastore.SettingsStore>().settingsFlow.value
 
     fun hasWebContent(conversationId: String): Boolean = runtimeBindings.hasWebContent(conversationId)
 

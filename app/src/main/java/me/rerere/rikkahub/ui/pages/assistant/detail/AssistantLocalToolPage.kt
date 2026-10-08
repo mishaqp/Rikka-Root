@@ -177,7 +177,8 @@ private fun AssistantLocalToolContent(
                 },
             )
             if (LocalToolOption.Root in assistant.localTools &&
-                (LocalToolOption.SubAgents in assistant.localTools || LocalToolOption.CronJobs in assistant.localTools)) {
+                assistant.localTools.any { it in setOf(LocalToolOption.SubAgents, LocalToolOption.CronJobs,
+                    LocalToolOption.Workflows, LocalToolOption.ScreenAutomation, LocalToolOption.JsSkills) }) {
                 item(headlineContent = { Text(stringResource(R.string.agent_tools_root_headless_title)) },
                     supportingContent = { Text(stringResource(R.string.agent_tools_root_headless_desc)) },
                     trailingContent = {
@@ -311,5 +312,6 @@ private fun AssistantLocalToolContent(
         FileLocalToolSettings(assistant, onUpdate)
         AgentLocalToolSettings(assistant, onUpdate)
         ShellLocalToolSettings(assistant, onUpdate)
+        LargeLocalToolSettings(assistant, onUpdate)
     }
 }
