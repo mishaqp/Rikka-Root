@@ -4,6 +4,7 @@ import android.content.Context
 import me.rerere.ai.core.Tool
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.event.AppEventBus
+import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.root.RootShellManager
 import me.rerere.rikkahub.root.RootAccessStore
 import me.rerere.tts.provider.TTSManager
@@ -16,7 +17,9 @@ class LocalTools(
     private val settingsStore: SettingsStore,
     private val rootShellManager: RootShellManager,
     private val rootAccessStore: RootAccessStore,
+    private val filesManager: FilesManager,
 ) {
+    private val keystoreCrypto by lazy { KeystoreCrypto(AndroidToolKeyStore(context)) }
     val javascriptTool by lazy { buildJavascriptTool() }
 
     val timeTool by lazy { buildTimeInfoTool() }
@@ -41,6 +44,16 @@ class LocalTools(
         resolveWorkspacePath: (suspend (String) -> File)? = null,
     ): List<Tool> {
         val tools = mutableListOf<Tool>()
+        if (LocalToolOption.Location in options) tools.add(locationTool(context))
+        if (LocalToolOption.Contacts in options) { tools.add(listContactsTool(context)); tools.add(searchContactsTool(context)) }
+        if (LocalToolOption.CallLog in options) tools.add(callLogTool(context))
+        if (LocalToolOption.SmsInbox in options) { tools.add(listSmsInboxTool(context)); tools.add(searchSmsTool(context)) }
+        if (LocalToolOption.SmsSend in options) tools.add(smsSendTool(context))
+        if (LocalToolOption.CameraPhoto in options) tools.add(cameraPhotoTool(context, filesManager))
+        if (LocalToolOption.MicRecorder in options) tools.add(micRecorderTool(context, filesManager))
+        if (LocalToolOption.SpeechToText in options) tools.add(speechToTextTool(context))
+        if (LocalToolOption.Fingerprint in options) tools.add(fingerprintTool(context))
+        if (LocalToolOption.Keystore in options) tools.addAll(keystoreTools(context, keystoreCrypto))
         if (LocalToolOption.Battery in options) tools.add(batteryTool(context))
         if (LocalToolOption.AudioInfo in options) tools.add(audioInfoTool(context))
         if (LocalToolOption.TelephonyInfo in options) tools.add(telephonyInfoTool(context))

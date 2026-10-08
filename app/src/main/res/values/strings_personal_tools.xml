@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Fork UI is intentionally Russian, matching strings_root.xml. -->
+  <string translatable="false" name="personal_tools_location_title">Геолокация</string>
+  <string translatable="false" name="personal_tools_location_desc">Координаты после одобрения, только когда приложение открыто. Достаточно приблизительного местоположения; точность будет указана в результате. Разрешение запрашивается при включении функции.</string>
+  <string translatable="false" name="personal_tools_contacts_title">Контакты</string>
+  <string translatable="false" name="personal_tools_contacts_desc">Чтение и поиск имён, телефонов и адресов почты после одобрения. При включении запрашивается доступ к контактам.</string>
+  <string translatable="false" name="personal_tools_call_log_title">Журнал звонков</string>
+  <string translatable="false" name="personal_tools_call_log_desc">Последние звонки после одобрения. При включении запрашивается доступ к журналу звонков; Android или установщик могут ограничивать выдачу этого разрешения.</string>
+  <string translatable="false" name="personal_tools_sms_inbox_title">Чтение SMS</string>
+  <string translatable="false" name="personal_tools_sms_inbox_desc">Чтение и поиск входящих SMS после одобрения. При включении запрашивается доступ к SMS; Android или установщик могут ограничивать выдачу этого разрешения.</string>
+  <string translatable="false" name="personal_tools_sms_send_title">Отправка SMS</string>
+  <string translatable="false" name="personal_tools_sms_send_desc">Отправка одного SMS после одобрения. Возможна плата оператору. При включении запрашивается разрешение отправки SMS. Используется выбранная в Android SIM или указанная SIM-подписка. Подтверждение отправки не означает доставку адресату.</string>
+  <string translatable="false" name="personal_tools_camera_title">Фото с камеры</string>
+  <string translatable="false" name="personal_tools_camera_desc">После одобрения откроется системная камера: снимок делает пользователь. Доступ к камере запрашивается при включении. Фото сохраняется во вложениях чата; автоматической копии в галерее нет.</string>
+  <string translatable="false" name="personal_tools_mic_title">Запись микрофона</string>
+  <string translatable="false" name="personal_tools_mic_desc">Запись звука до 5 минут после одобрения на видимом экране с кнопкой отмены. Доступ к микрофону запрашивается при включении. Уход в фон останавливает запись и удаляет незавершённый файл.</string>
+  <string translatable="false" name="personal_tools_speech_title">Распознавание речи</string>
+  <string translatable="false" name="personal_tools_speech_desc">После одобрения системная служба Android распознаёт речь. Доступ к микрофону запрашивается при включении. Предпочитается распознавание на устройстве; выбранная служба может использовать сеть. Уход в фон отменяет сеанс.</string>
+  <string translatable="false" name="personal_tools_fingerprint_title">Подтверждение личности</string>
+  <string translatable="false" name="personal_tools_fingerprint_desc">Системная проверка сильной биометрии после одобрения. По явному параметру можно разрешить PIN, пароль или графический ключ. Отпечатки и биометрические данные приложению не передаются.</string>
+  <string translatable="false" name="personal_tools_keystore_title">Криптография AndroidKeyStore</string>
+  <string translatable="false" name="personal_tools_keystore_desc">Создание, подпись, проверка, шифрование, расшифрование, удаление и список ключей после одобрения. Закрытые и симметричные ключи не экспортируются. Секретный ввод и расшифрованный текст показываются только на защищённом экране, не передаются модели и не сохраняются в чате или бэкапе. Ключи привязаны к этой установке приложения.</string>
+  <string translatable="false" name="personal_tools_permission_denied">«%1$s»: доступ не выдан или отозван. Функция не включена. Разрешите доступ при повторном включении или в настройках Android. Для SMS и журнала звонков ограничения могут зависеть от установщика.</string>
+  <string translatable="false" name="personal_tools_access_revoked">Доступ Android отозван. Инструмент вернёт понятную ошибку. Выключите функцию и включите снова, чтобы запросить доступ.</string>
+  <string translatable="false" name="personal_tools_unavailable">На устройстве нет оборудования для этой функции.</string>
+  <string translatable="false" name="personal_tools_recording_notice">Идёт запись микрофона. Отмена или уход в фон останавливает запись и удаляет незавершённый файл.</string>
+  <string translatable="false" name="personal_tools_recording_progress">Записано %1$d из %2$d с</string>
+  <string translatable="false" name="personal_tools_speech_notice">Говорите. Отмена или уход в фон закрывает микрофон и службу распознавания.</string>
+  <string translatable="false" name="personal_tools_camera_notice">Сделайте снимок в системной камере или отмените. Фото будет добавлено во вложения чата.</string>
+  <string translatable="false" name="personal_tools_biometric_notice">Подтвердите личность в системном окне Android. Отмена не считается успешной проверкой.</string>
+  <string translatable="false" name="personal_tools_encrypt_title">Шифрование секретных данных</string>
+  <string translatable="false" name="personal_tools_decrypt_title">Расшифрованные данные</string>
+  <string translatable="false" name="personal_tools_secret_input_notice">Введите данные здесь. Они не попадут в сообщения чата и не будут переданы модели. В чат вернётся только шифротекст.</string>
+  <string translatable="false" name="personal_tools_secret_base64">Формат ввода: Base64, до 64 КиБ после декодирования.</string>
+  <string translatable="false" name="personal_tools_secret_text">Формат ввода: текст UTF-8, до 16 000 символов.</string>
+  <string translatable="false" name="personal_tools_secret_label">Секретные данные</string>
+  <string translatable="false" name="personal_tools_secret_invalid">Данные слишком велики или Base64 некорректен.</string>
+  <string translatable="false" name="personal_tools_encrypt">Зашифровать</string>
+  <string translatable="false" name="personal_tools_secret_output_notice">Эти данные видны только вам на защищённом экране. Модель получит только статус операции. Двоичные данные показываются в Base64.</string>
+  <string translatable="false" name="personal_tools_done">Закрыть</string>
+</resources>

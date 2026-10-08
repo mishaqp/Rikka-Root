@@ -8,6 +8,13 @@ import androidx.core.content.ContextCompat
 
 /** Dangerous permissions only; normal permissions are declared for their specific API. */
 internal fun localToolRuntimePermissions(option: LocalToolOption, sdkInt: Int): List<String> = when (option) {
+    LocalToolOption.Location -> listOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)
+    LocalToolOption.Contacts -> listOf(Manifest.permission.READ_CONTACTS)
+    LocalToolOption.CallLog -> listOf(Manifest.permission.READ_CALL_LOG)
+    LocalToolOption.SmsInbox -> listOf(Manifest.permission.READ_SMS)
+    LocalToolOption.SmsSend -> listOf(Manifest.permission.SEND_SMS)
+    LocalToolOption.CameraPhoto -> listOf(Manifest.permission.CAMERA)
+    LocalToolOption.MicRecorder, LocalToolOption.SpeechToText -> listOf(Manifest.permission.RECORD_AUDIO)
     LocalToolOption.Torch -> listOf(Manifest.permission.CAMERA)
     LocalToolOption.TelephonyInfo -> listOf(Manifest.permission.READ_PHONE_STATE)
     // Android 12+ requires requesting coarse and fine together, even for precise-only use.
@@ -17,10 +24,13 @@ internal fun localToolRuntimePermissions(option: LocalToolOption, sdkInt: Int): 
     else -> emptyList()
 }
 
+internal fun missingRuntimePermissions(option: LocalToolOption, sdkInt: Int, granted: (String) -> Boolean): List<String> {
+    if (option == LocalToolOption.Location && (granted(Manifest.permission.ACCESS_COARSE_LOCATION) || granted(Manifest.permission.ACCESS_FINE_LOCATION))) return emptyList()
+    return localToolRuntimePermissions(option, sdkInt).filterNot(granted)
+}
+
 internal fun missingLocalToolPermissions(context: Context, option: LocalToolOption): List<String> =
-    localToolRuntimePermissions(option, Build.VERSION.SDK_INT).filter {
-        ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
-    }
+    missingRuntimePermissions(option, Build.VERSION.SDK_INT) { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
 
 /** No shell input from the model: only a validated app ID, own user and this feature's allowlist. */
 internal fun localPermissionGrantCommand(packageName: String, option: LocalToolOption, sdkInt: Int, userId: Int): String? {

@@ -5,6 +5,13 @@
   <uses-permission android:name="android.permission.INTERNET" />
   <uses-permission android:name="android.permission.CAMERA" />
   <uses-permission android:name="android.permission.RECORD_AUDIO" />
+  <!-- Package C: requested only when enabling the corresponding personal-data tool. -->
+  <uses-permission android:name="android.permission.READ_CONTACTS" />
+  <uses-permission android:name="android.permission.READ_CALL_LOG" />
+  <uses-permission android:name="android.permission.READ_SMS" />
+  <uses-permission android:name="android.permission.SEND_SMS" />
+  <!-- Biometric prompt; USE_FINGERPRINT for Android 8 is merged from AndroidX Biometric. -->
+  <uses-permission android:name="android.permission.USE_BIOMETRIC" />
   <uses-permission
     android:name="android.permission.WRITE_EXTERNAL_STORAGE"
     android:maxSdkVersion="28" />
@@ -52,6 +59,12 @@
 
   <queries>
     <intent>
+      <action android:name="android.media.action.IMAGE_CAPTURE" />
+    </intent>
+    <intent>
+      <action android:name="android.speech.RecognitionService" />
+    </intent>
+    <intent>
       <action android:name="android.intent.action.TTS_SERVICE" />
     </intent>
     <!-- 用于解析屏幕使用时间里各 App 的名称(可见性受 Android 11+ 包可见性限制) -->
@@ -90,6 +103,15 @@
       android:exported="false"
       android:configChanges="keyboardHidden|orientation|screenSize"
       android:theme="@style/Theme.Rikkahub" />
+    <activity
+      android:name=".ui.activity.PersonalToolActivity"
+      android:exported="false"
+      android:configChanges="keyboardHidden|orientation|screenSize"
+      android:windowSoftInputMode="adjustResize"
+      android:theme="@style/Theme.Rikkahub" />
+    <receiver
+      android:name=".ui.activity.SmsSentReceiver"
+      android:exported="false" />
     <activity
       android:name=".ui.activity.CodexOAuthRedirectActivity"
       android:exported="true"

@@ -14,8 +14,12 @@ internal fun deviceToolError(message: String, permission: String? = null): JsonO
 
 /** Revoked permissions and absent hardware must not crash an ongoing generation. */
 internal suspend fun deviceToolResult(read: suspend () -> JsonObject): List<UIMessagePart> {
-    val payload = try {
-        read()
+    return deviceToolParts { listOf(UIMessagePart.Text(read().toString())) }
+}
+
+internal suspend fun deviceToolParts(read: suspend () -> List<UIMessagePart>): List<UIMessagePart> {
+    val error = try {
+        return read()
     } catch (error: CancellationException) {
         throw error
     } catch (_: SecurityException) {
@@ -24,7 +28,7 @@ internal suspend fun deviceToolResult(read: suspend () -> JsonObject): List<UIMe
         // Do not expose exception text, which may contain private input or device details.
         deviceToolError("Функция недоступна на устройстве или Android отклонил запрос.")
     }
-    return listOf(UIMessagePart.Text(payload.toString()))
+    return listOf(UIMessagePart.Text(error.toString()))
 }
 
 internal fun JsonObject.textArgument(name: String): String? =

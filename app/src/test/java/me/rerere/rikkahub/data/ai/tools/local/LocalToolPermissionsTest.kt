@@ -5,6 +5,26 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LocalToolPermissionsTest {
+    @Test fun personalFeaturesRequestOnlyTheirOwnRuntimePermissions() {
+        assertEquals(listOf(Manifest.permission.READ_CONTACTS), localToolRuntimePermissions(LocalToolOption.Contacts, 37))
+        assertEquals(listOf(Manifest.permission.READ_CALL_LOG), localToolRuntimePermissions(LocalToolOption.CallLog, 37))
+        assertEquals(listOf(Manifest.permission.READ_SMS), localToolRuntimePermissions(LocalToolOption.SmsInbox, 37))
+        assertEquals(listOf(Manifest.permission.SEND_SMS), localToolRuntimePermissions(LocalToolOption.SmsSend, 37))
+        assertEquals(listOf(Manifest.permission.CAMERA), localToolRuntimePermissions(LocalToolOption.CameraPhoto, 26))
+        assertEquals(listOf(Manifest.permission.RECORD_AUDIO), localToolRuntimePermissions(LocalToolOption.MicRecorder, 37))
+        assertEquals(listOf(Manifest.permission.RECORD_AUDIO), localToolRuntimePermissions(LocalToolOption.SpeechToText, 26))
+        assertEquals(listOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION), localToolRuntimePermissions(LocalToolOption.Location, 37))
+        assertTrue(localToolRuntimePermissions(LocalToolOption.Fingerprint, 26).isEmpty())
+        assertTrue(localToolRuntimePermissions(LocalToolOption.Keystore, 37).isEmpty())
+    }
+
+    @Test fun approximateLocationIsUsableAndRevocationIsDetected() {
+        assertTrue(missingRuntimePermissions(LocalToolOption.Location, 37) { it == Manifest.permission.ACCESS_COARSE_LOCATION }.isEmpty())
+        assertTrue(missingRuntimePermissions(LocalToolOption.Location, 26) { it == Manifest.permission.ACCESS_FINE_LOCATION }.isEmpty())
+        assertEquals(2, missingRuntimePermissions(LocalToolOption.Location, 37) { false }.size)
+        assertEquals(listOf(Manifest.permission.ACCESS_FINE_LOCATION), missingRuntimePermissions(LocalToolOption.WifiInfo, 37) { it == Manifest.permission.ACCESS_COARSE_LOCATION })
+    }
+
     @Test fun wifiRequestsBothLocationPermissionsButNeverPhoneOrActivity() {
         val permissions = localToolRuntimePermissions(LocalToolOption.WifiInfo, 37)
         assertEquals(listOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION), permissions)

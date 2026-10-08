@@ -5,6 +5,17 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 sealed class LocalToolOption {
+    @Serializable @SerialName("location") data object Location : LocalToolOption()
+    @Serializable @SerialName("contacts") data object Contacts : LocalToolOption()
+    @Serializable @SerialName("call_log") data object CallLog : LocalToolOption()
+    @Serializable @SerialName("sms_inbox") data object SmsInbox : LocalToolOption()
+    @Serializable @SerialName("sms_send") data object SmsSend : LocalToolOption()
+    @Serializable @SerialName("camera_photo") data object CameraPhoto : LocalToolOption()
+    @Serializable @SerialName("mic_recorder") data object MicRecorder : LocalToolOption()
+    @Serializable @SerialName("speech_to_text") data object SpeechToText : LocalToolOption()
+    @Serializable @SerialName("fingerprint") data object Fingerprint : LocalToolOption()
+    @Serializable @SerialName("keystore") data object Keystore : LocalToolOption()
+
     @Serializable
     @SerialName("root")
     data object Root : LocalToolOption()
