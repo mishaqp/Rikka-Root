@@ -73,6 +73,8 @@ class RikkaHubApp : Application() {
             Log.e(TAG, "Backup restore rolled back", e)
             Toast.makeText(this, "备份恢复失败，已保留原数据。请重新导入备份。", Toast.LENGTH_LONG).show()
         }
+        // Remove legacy plaintext roulette cache even when no provider/chat is opened.
+        runBlocking(Dispatchers.IO) { me.rerere.ai.util.KeyRoulette.lru(this@RikkaHubApp) }
         startKoin {
             androidLogger()
             androidContext(this@RikkaHubApp)
