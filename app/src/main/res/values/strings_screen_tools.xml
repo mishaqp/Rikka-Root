@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="local_tool_screen_automation_title" translatable="false">Автоматизация экрана</string>
+    <string name="local_tool_screen_automation_description" translatable="false">Управление экраном через root: тапы, свайпы, ввод, дерево интерфейса и снимки. Требует проверенного Root. Чтение экрана и действия проходят через разрешения инструментов. Доступ специальных возможностей не требуется; кириллица через Android input не поддерживается.</string>
+</resources>
