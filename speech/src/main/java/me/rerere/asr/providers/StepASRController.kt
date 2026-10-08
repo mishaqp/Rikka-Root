@@ -16,6 +16,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -74,10 +76,12 @@ class StepASRController(
 
     private var recorderJob: Job? = null
     private var audioRecord: AudioRecord? = null
+    private val recorderLock = Any()
     private var onTranscriptChange: ((String) -> Unit)? = null
 
     // 同一时刻只允许一个 flush 协程在跑, 避免乱序拼结果
     private var flushJob: Job? = null
+    @Volatile private var activeCall: okhttp3.Call? = null
 
     private val bufferLock = Any()
     private var currentBuffer = ByteArrayOutputStream()
@@ -114,19 +118,25 @@ class StepASRController(
     }
 
     override fun stop() {
-        recorderJob?.cancel()
+        if (state.value.status == ASRStatus.Stopping) return
+        val recording = recorderJob
+        recording?.cancel()
         releaseRecorder()
         _state.update { it.copy(status = ASRStatus.Stopping) }
 
         // 把剩余 PCM 做最后一次 flush, 完成后切回 Idle
         scope.launch(Dispatchers.IO) {
             try {
+                // No capture thread may append bytes after the final buffer snapshot.
+                recording?.join()
                 // 等当前正在跑的 flushJob 完成, 避免并发 flush 导致缓冲区竞争
                 flushJob?.join()
                 flushSegment()
             } catch (e: Exception) {
-                Log.e(TAG, "Final flush failed", e)
-                setError(e.message ?: "Step ASR final flush failed")
+                if (isActive) {
+                    Log.e(TAG, "Final flush failed", e)
+                    setError(e.message ?: "Step ASR final flush failed")
+                }
             } finally {
                 _state.update { it.copy(status = ASRStatus.Idle) }
             }
@@ -134,41 +144,49 @@ class StepASRController(
     }
 
     override fun dispose() {
+        scope.cancel()
+        activeCall?.cancel()
         recorderJob?.cancel()
         flushJob?.cancel()
         releaseRecorder()
-        scope.cancel()
     }
 
     @SuppressLint("MissingPermission")
     private fun startRecorder() {
         recorderJob?.cancel()
         recorderJob = scope.launch(Dispatchers.IO) {
-            val sampleRate = provider.sampleRate
-            val minBufferSize = AudioRecord.getMinBufferSize(
-                sampleRate,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT
-            )
-            val bufferSize = minBufferSize
-                .coerceAtLeast(sampleRate / 10 * 2)
-                .coerceAtLeast(4096)
-
-            val recorder = AudioRecord(
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-                sampleRate,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT,
-                bufferSize * 2
-            )
-            audioRecord = recorder
-
+            var recorder: AudioRecord? = null
             try {
-                recorder.startRecording()
+                ensureActive()
+                val sampleRate = provider.sampleRate
+                val minBufferSize = AudioRecord.getMinBufferSize(
+                    sampleRate,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT
+                )
+                require(minBufferSize > 0)
+                val bufferSize = minBufferSize
+                    .coerceAtLeast(sampleRate / 10 * 2)
+                    .coerceAtLeast(4096)
+                val currentRecorder = AudioRecord(
+                    MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                    sampleRate,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    bufferSize * 2
+                )
+                recorder = currentRecorder
+                // Pair startup with disposal: a cancelled job cannot acquire a new microphone.
+                synchronized(recorderLock) {
+                    ensureActive()
+                    audioRecord = currentRecorder
+                    currentRecorder.startRecording()
+                }
                 val buffer = ByteArray(bufferSize)
                 val segmentMs = provider.segmentDurationSec.coerceAtLeast(0) * 1000L
                 while (isActive) {
-                    val read = recorder.read(buffer, 0, buffer.size)
+                    val read = currentRecorder.read(buffer, 0, buffer.size)
+                    ensureActive()
                     if (read > 0) {
                         val amplitude = calculateRmsAmplitude(buffer, read)
                         _state.update { it.copy(amplitudes = it.amplitudes.appendAmplitude(amplitude)) }
@@ -192,10 +210,12 @@ class StepASRController(
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Audio recording failed", e)
-                setError(e.message ?: "Audio recording failed")
+                if (isActive) {
+                    Log.e(TAG, "Audio recording failed", e)
+                    setError("Не удалось настроить микрофон или записать звук. Проверьте параметры записи и доступ к микрофону.")
+                }
             } finally {
-                releaseRecorder()
+                recorder?.let { releaseRecorder(it) }
             }
         }
     }
@@ -205,7 +225,7 @@ class StepASRController(
         if (flushJob?.isActive == true) return
         flushJob = scope.launch(Dispatchers.IO) {
             runCatching { flushSegment() }
-                .onFailure { Log.e(TAG, "Segment flush failed", it) }
+                .onFailure { if (isActive) Log.e(TAG, "Segment flush failed", it) }
         }
     }
 
@@ -284,14 +304,23 @@ class StepASRController(
         for (attempt in 1..MAX_RETRY) {
             try {
                 return withContext(Dispatchers.IO) {
-                    httpClient.newCall(request).execute().use { resp ->
-                        if (!resp.isSuccessful) {
-                            throw IOException("Step ASR HTTP ${resp.code}: ${resp.body.string()}")
+                    val call = httpClient.newCall(request)
+                    activeCall = call
+                    try {
+                        ensureActive()
+                        call.execute().use { resp ->
+                            if (!resp.isSuccessful) {
+                                throw IOException("Step ASR HTTP ${resp.code}: ${resp.body.string()}")
+                            }
+                            parseSseTranscript(resp.body.source())
                         }
-                        parseSseTranscript(resp.body.source())
+                    } finally {
+                        if (!isActive) call.cancel()
+                        if (activeCall === call) activeCall = null
                     }
                 }
             } catch (e: IOException) {
+                currentCoroutineContext().ensureActive()
                 lastError = e
                 Log.w(TAG, "flushSegment attempt $attempt/$MAX_RETRY failed: ${e.message}")
                 if (attempt < MAX_RETRY) {
@@ -431,11 +460,14 @@ class StepASRController(
         }
     }
 
-    private fun releaseRecorder() {
-        recorderJob = null
-        runCatching { audioRecord?.stop() }
-        runCatching { audioRecord?.release() }
-        audioRecord = null
+    private fun releaseRecorder(expected: AudioRecord? = null) {
+        synchronized(recorderLock) {
+            val recorder = expected ?: audioRecord
+            if (expected == null) recorderJob = null
+            if (audioRecord === recorder) audioRecord = null
+            runCatching { recorder?.stop() }
+            runCatching { recorder?.release() }
+        }
     }
 
     companion object {

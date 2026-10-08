@@ -42,6 +42,7 @@ class PersonalToolActivity : FragmentActivity() {
     private var waitingExternal=false
     private var cameraUri: Uri?=null
     private var elapsedMs by mutableIntStateOf(0)
+    private var speechStatus by mutableStateOf("")
 
     private val camera=registerForActivityResult(ActivityResultContracts.TakePicture()) { success ->
         waitingExternal=false
@@ -88,7 +89,10 @@ class PersonalToolActivity : FragmentActivity() {
                                 LinearProgressIndicator(progress={ elapsedMs.toFloat()/request.durationMs }, modifier=Modifier.fillMaxWidth())
                                 Text(stringResource(R.string.personal_tools_recording_progress,elapsedMs/1000,request.durationMs/1000))
                             }
-                            is PersonalUiRequest.Speech -> Text(stringResource(R.string.personal_tools_speech_notice))
+                            is PersonalUiRequest.Speech -> {
+                                Text(stringResource(R.string.personal_tools_speech_notice))
+                                if (speechStatus.isNotBlank()) Text(speechStatus)
+                            }
                             is PersonalUiRequest.Camera -> Text(stringResource(R.string.personal_tools_camera_notice))
                             is PersonalUiRequest.Biometric -> Text(stringResource(R.string.personal_tools_biometric_notice))
                         }
@@ -118,7 +122,7 @@ class PersonalToolActivity : FragmentActivity() {
                     try { camera.launch(uri) } catch (_: Exception) { waitingExternal=false; complete(PersonalUiResult.Error("В Android нет доступного приложения камеры.")) }
                 }
                 is PersonalUiRequest.Record -> startWorker { capturePersonalAudio(this,request.durationMs) { elapsedMs=it } }
-                is PersonalUiRequest.Speech -> startWorker { capturePersonalSpeech(this,request) }
+                is PersonalUiRequest.Speech -> startWorker { capturePersonalSpeech(this,request) { speechStatus=it } }
                 is PersonalUiRequest.Biometric -> authenticate(request)
                 is PersonalUiRequest.Encrypt, is PersonalUiRequest.Reveal -> Unit
             }

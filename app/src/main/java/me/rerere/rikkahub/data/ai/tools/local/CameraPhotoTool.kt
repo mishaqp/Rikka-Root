@@ -19,20 +19,26 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 
 fun cameraPhotoTool(context: Context, files: FilesManager): Tool = Tool(
-    name="take_photo", description="Open the system camera so the user explicitly takes a photo. Requires foreground app and CAMERA permission. Saves a durable image attachment to this chat's upload area and returns file_uri, workspace_path (/upload/...), width and height. Cancelled/empty photos are removed; no automatic gallery copy.",
+    name="take_photo", description="After approval, open a visible camera preview and automatically take one photo when ready. If in-app capture fails, open the system camera for the user to take a photo manually. Requires foreground app and CAMERA permission. Saves a durable image attachment to this chat's upload area and returns file_uri, workspace_path (/upload/...), width, height and capture_method. Cancelled/empty photos are removed; no automatic gallery copy.",
     parameters={ InputSchema.Obj(buildJsonObject {}) }, needsApproval={ true }, execute={ input -> deviceToolParts {
         if (input !is JsonObject) return@deviceToolParts listOf(UIMessagePart.Text(deviceToolError("Параметры должны быть объектом.").toString()))
         val missing=missingLocalToolPermissions(context,LocalToolOption.CameraPhoto)
         if (missing.isNotEmpty()) return@deviceToolParts listOf(UIMessagePart.Text(deviceToolError("Разрешите камеру в настройках функции.",missing.first()).toString()))
         val directory=File(context.cacheDir,"tool-photos").apply { mkdirs() }
         val temporary=File.createTempFile("photo_", ".jpg",directory)
+        val request=PersonalUiRequest.Camera(temporary)
         try {
-            val result=awaitPersonalToolUi(context,PersonalUiRequest.Camera(temporary),300000)
-            if (result !is PersonalUiResult.Photo) return@deviceToolParts listOf(UIMessagePart.Text(personalUiError(result).toString()))
+            val result=awaitPersonalToolUi(context,request,300000)
+            if (result !is PersonalUiResult.Photo) return@deviceToolParts listOf(UIMessagePart.Text(buildJsonObject {
+                val error = if (result == PersonalUiResult.Cancelled) deviceToolError("Съёмка отменена пользователем.") else personalUiError(result)
+                error.forEach { (key,value) -> put(key,value) }
+                request.captureState.failure?.let { put("camera_diagnostic", cameraDiagnostic(it)) }
+            }.toString()))
+            val captured=result.file
             withContext(Dispatchers.IO) {
-                if (!temporary.isFile || temporary.length() !in 1..33_554_432L) return@withContext listOf(UIMessagePart.Text(deviceToolError("Камера не создала допустимое фото. Пустой или слишком большой файл удалён.").toString()))
+                if (!captured.isFile || captured.length() !in 1..33_554_432L) return@withContext listOf(UIMessagePart.Text(deviceToolError("Камера не создала допустимое фото. Пустой или слишком большой файл удалён.").toString()))
                 try {
-                    val bytes=temporary.inputStream().use { readBoundedImage(it,33_554_432) }
+                    val bytes=captured.inputStream().use { readBoundedImage(it,33_554_432) }
                     val bounds=BitmapFactory.Options().apply { inJustDecodeBounds=true }
                     BitmapFactory.decodeByteArray(bytes,0,bytes.size,bounds)
                     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@withContext listOf(UIMessagePart.Text(deviceToolError("Камера вернула повреждённое изображение.").toString()))
@@ -40,7 +46,7 @@ fun cameraPhotoTool(context: Context, files: FilesManager): Tool = Tool(
                         inSampleSize=wallpaperSampleSize(bounds.outWidth,bounds.outHeight); inScaled=false
                     }) ?: return@withContext listOf(UIMessagePart.Text(deviceToolError("Не удалось обработать фото.").toString()))
                     val bitmap=try {
-                        val orientation=temporary.inputStream().use { ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION,ExifInterface.ORIENTATION_NORMAL) }
+                        val orientation=captured.inputStream().use { ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION,ExifInterface.ORIENTATION_NORMAL) }
                         val matrix=Matrix()
                         when (orientation) {
                             ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
@@ -63,10 +69,17 @@ fun cameraPhotoTool(context: Context, files: FilesManager): Tool = Tool(
                         listOf(UIMessagePart.Image(file.toUri().toString()),UIMessagePart.Text(buildJsonObject {
                             put("success",true); put("file_uri",file.toUri().toString()); put("workspace_path","/upload/${file.name}")
                             put("width",bitmap.width); put("height",bitmap.height); put("saved_to","chat_attachment")
+                            put("capture_method",result.method)
+                            put("camera",result.camera)
+                            result.diagnostic?.let { put("camera_diagnostic",cameraDiagnostic(it)) }
                         }.toString()))
                     } finally { bitmap.recycle() }
                 } catch (_: OutOfMemoryError) { listOf(UIMessagePart.Text(deviceToolError("Недостаточно памяти для фото. Выберите меньший размер в приложении камеры.").toString())) }
             }
-        } finally { temporary.delete() }
+        } finally { request.captureState.cleanupFiles() }
     } },
 )
+
+private fun cameraDiagnostic(failure: CameraCaptureFailure): JsonObject = buildJsonObject {
+    put("stage",failure.stage); put("code",failure.code); put("elapsed_ms",failure.elapsedMs); put("camera",failure.camera)
+}

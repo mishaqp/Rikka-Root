@@ -16,6 +16,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -55,6 +56,7 @@ class DashScopeASRController(
     private var recorderJob: Job? = null
     private var finishTimeoutJob: Job? = null
     private var audioRecord: AudioRecord? = null
+    private val recorderLock = Any()
     private var onTranscriptChange: ((String) -> Unit)? = null
     private val completedTranscripts = Collections.synchronizedList(mutableListOf<String>())
     private val partialTranscripts = ConcurrentHashMap<String, String>()
@@ -136,7 +138,7 @@ class DashScopeASRController(
 
     override fun pauseCapture() {
         recorderJob?.cancel()
-        runCatching { audioRecord?.stop() }
+        synchronized(recorderLock) { runCatching { audioRecord?.stop() } }
     }
 
     override fun stop() {
@@ -152,7 +154,7 @@ class DashScopeASRController(
         _state.update { it.copy(status = ASRStatus.Stopping) }
         activeRecorderJob?.cancel()
         // AudioRecord.read() is blocking, so stop it to let the cancelled recorder job finish.
-        runCatching { audioRecord?.stop() }
+        synchronized(recorderLock) { runCatching { audioRecord?.stop() } }
 
         finishTimeoutJob?.cancel()
         finishTimeoutJob = scope.launch {
@@ -193,42 +195,48 @@ class DashScopeASRController(
     }
 
     override fun dispose() {
+        scope.cancel()
         recorderJob?.cancel()
         releaseRecorder()
         finishTimeoutJob?.cancel()
         finishTimeoutJob = null
         webSocket?.cancel()
         webSocket = null
-        scope.cancel()
     }
 
     @SuppressLint("MissingPermission")
     private fun startRecorder(socket: WebSocket) {
         recorderJob?.cancel()
         recorderJob = scope.launch(Dispatchers.IO) {
-            val minBufferSize = AudioRecord.getMinBufferSize(
-                provider.sampleRate,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT
-            )
-            val bufferSize = minBufferSize
-                .coerceAtLeast(provider.sampleRate / 10 * 2)
-                .coerceAtLeast(4096)
-
-            val recorder = AudioRecord(
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-                provider.sampleRate,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT,
-                bufferSize * 2
-            )
-            audioRecord = recorder
-
+            var recorder: AudioRecord? = null
             try {
-                recorder.startRecording()
+                ensureActive()
+                val minBufferSize = AudioRecord.getMinBufferSize(
+                    provider.sampleRate,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT
+                )
+                require(minBufferSize > 0)
+                val bufferSize = minBufferSize
+                    .coerceAtLeast(provider.sampleRate / 10 * 2)
+                    .coerceAtLeast(4096)
+                val currentRecorder = AudioRecord(
+                    MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                    provider.sampleRate,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    bufferSize * 2
+                )
+                recorder = currentRecorder
+                synchronized(recorderLock) {
+                    ensureActive()
+                    audioRecord = currentRecorder
+                    currentRecorder.startRecording()
+                }
                 val buffer = ByteArray(bufferSize)
                 while (isActive) {
-                    val read = recorder.read(buffer, 0, buffer.size)
+                    val read = currentRecorder.read(buffer, 0, buffer.size)
+                    ensureActive()
                     if (read > 0) {
                         val amplitude = calculateRmsAmplitude(buffer, read)
                         _state.update { it.copy(amplitudes = it.amplitudes.appendAmplitude(amplitude)) }
@@ -249,10 +257,10 @@ class DashScopeASRController(
             } catch (e: Exception) {
                 if (isActive) {
                     Log.e(TAG, "Audio recording failed", e)
-                    setError(e.message ?: "Audio recording failed")
+                    setError("Не удалось настроить микрофон или записать звук. Проверьте параметры записи и доступ к микрофону.")
                 }
             } finally {
-                releaseRecorder()
+                recorder?.let { releaseRecorder(it) }
             }
         }
     }
@@ -351,11 +359,14 @@ class DashScopeASRController(
         }
     }
 
-    private fun releaseRecorder() {
-        recorderJob = null
-        runCatching { audioRecord?.stop() }
-        runCatching { audioRecord?.release() }
-        audioRecord = null
+    private fun releaseRecorder(expected: AudioRecord? = null) {
+        synchronized(recorderLock) {
+            val recorder = expected ?: audioRecord
+            if (expected == null) recorderJob = null
+            if (audioRecord === recorder) audioRecord = null
+            runCatching { recorder?.stop() }
+            runCatching { recorder?.release() }
+        }
     }
 }
 

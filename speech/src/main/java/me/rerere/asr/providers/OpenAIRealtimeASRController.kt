@@ -16,6 +16,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -53,6 +54,7 @@ class OpenAIRealtimeASRController(
     private var webSocket: WebSocket? = null
     private var recorderJob: Job? = null
     private var audioRecord: AudioRecord? = null
+    private val recorderLock = Any()
     private var onTranscriptChange: ((String) -> Unit)? = null
     private val completedTranscripts = Collections.synchronizedList(mutableListOf<String>())
     private val partialTranscripts = ConcurrentHashMap<String, String>()
@@ -122,7 +124,7 @@ class OpenAIRealtimeASRController(
 
     override fun pauseCapture() {
         recorderJob?.cancel()
-        runCatching { audioRecord?.stop() }
+        synchronized(recorderLock) { runCatching { audioRecord?.stop() } }
     }
 
     override fun stop() {
@@ -145,12 +147,12 @@ class OpenAIRealtimeASRController(
     }
 
     override fun dispose() {
+        scope.cancel()
         recorderJob?.cancel()
         val socket = webSocket
         webSocket = null
         socket?.cancel()
         releaseRecorder()
-        scope.cancel()
     }
 
     @SuppressLint("MissingPermission")
@@ -160,29 +162,35 @@ class OpenAIRealtimeASRController(
     ) {
         recorderJob?.cancel()
         recorderJob = scope.launch(Dispatchers.IO) {
-            val minBufferSize = AudioRecord.getMinBufferSize(
-                provider.sampleRate,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT
-            )
-            val bufferSize = minBufferSize
-                .coerceAtLeast(provider.sampleRate / 10 * 2)
-                .coerceAtLeast(4096)
-
-            val recorder = AudioRecord(
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-                provider.sampleRate,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT,
-                bufferSize * 2
-            )
-            audioRecord = recorder
-
+            var recorder: AudioRecord? = null
             try {
-                recorder.startRecording()
+                ensureActive()
+                val minBufferSize = AudioRecord.getMinBufferSize(
+                    provider.sampleRate,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT
+                )
+                require(minBufferSize > 0)
+                val bufferSize = minBufferSize
+                    .coerceAtLeast(provider.sampleRate / 10 * 2)
+                    .coerceAtLeast(4096)
+                val currentRecorder = AudioRecord(
+                    MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                    provider.sampleRate,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    bufferSize * 2
+                )
+                recorder = currentRecorder
+                synchronized(recorderLock) {
+                    ensureActive()
+                    audioRecord = currentRecorder
+                    currentRecorder.startRecording()
+                }
                 val buffer = ByteArray(bufferSize)
                 while (isActive) {
-                    val read = recorder.read(buffer, 0, buffer.size)
+                    val read = currentRecorder.read(buffer, 0, buffer.size)
+                    ensureActive()
                     if (read > 0) {
                         val amplitude = calculateRmsAmplitude(buffer, read)
                         _state.update { it.copy(amplitudes = it.amplitudes.appendAmplitude(amplitude)) }
@@ -202,10 +210,10 @@ class OpenAIRealtimeASRController(
             } catch (e: Exception) {
                 if (isActive) {
                     Log.e(TAG, "Audio recording failed", e)
-                    setError(e.message ?: "Audio recording failed")
+                    setError("Не удалось настроить микрофон или записать звук. Проверьте параметры записи и доступ к микрофону.")
                 }
             } finally {
-                releaseRecorder()
+                recorder?.let { releaseRecorder(it) }
             }
         }
     }
@@ -281,11 +289,14 @@ class OpenAIRealtimeASRController(
         }
     }
 
-    private fun releaseRecorder() {
-        recorderJob = null
-        runCatching { audioRecord?.stop() }
-        runCatching { audioRecord?.release() }
-        audioRecord = null
+    private fun releaseRecorder(expected: AudioRecord? = null) {
+        synchronized(recorderLock) {
+            val recorder = expected ?: audioRecord
+            if (expected == null) recorderJob = null
+            if (audioRecord === recorder) audioRecord = null
+            runCatching { recorder?.stop() }
+            runCatching { recorder?.release() }
+        }
     }
 }
 

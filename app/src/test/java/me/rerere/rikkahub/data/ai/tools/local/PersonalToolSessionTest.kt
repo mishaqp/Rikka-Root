@@ -3,8 +3,25 @@ package me.rerere.rikkahub.data.ai.tools.local
 import kotlinx.coroutines.*
 import org.junit.Assert.*
 import org.junit.Test
+import java.io.File
 
 class PersonalToolSessionTest {
+    @Test fun cameraHostCanReattachWithoutDiscardingItsPendingResult() = runBlocking {
+        val buffer = PersonalToolSessions()
+        val output = File.createTempFile("camera-session", ".jpg")
+        try {
+            val session = buffer.register(PersonalUiRequest.Camera(output))
+            assertTrue(buffer.claim(session.id))
+            // Android recreates the host while its external camera is still open.
+            assertTrue(buffer.claim(session.id))
+            assertTrue(buffer.isActive(session.id))
+            output.writeBytes(byteArrayOf(1, 2, 3))
+            assertTrue(buffer.complete(session.id, PersonalUiResult.Photo(output)))
+            assertEquals(PersonalUiResult.Photo(output), session.await())
+            assertTrue(output.isFile)
+        } finally { output.delete() }
+    }
+
     @Test fun aSecretCompletedAfterItsWaiterIsCancelledIsStillWiped() = runBlocking {
         val session=PersonalUiSession("test", PersonalUiRequest.Record(1000))
         session.destroyUndeliveredResult()

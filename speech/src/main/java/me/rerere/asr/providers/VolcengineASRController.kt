@@ -56,6 +56,7 @@ class VolcengineASRController(
     private var webSocket: WebSocket? = null
     private var recorderJob: Job? = null
     private var audioRecord: AudioRecord? = null
+    private val recorderLock = Any()
     private var onTranscriptChange: ((String) -> Unit)? = null
     private var finishJob: Job? = null
 
@@ -135,7 +136,7 @@ class VolcengineASRController(
 
     override fun pauseCapture() {
         recorderJob?.cancel()
-        runCatching { audioRecord?.stop() }
+        synchronized(recorderLock) { runCatching { audioRecord?.stop() } }
     }
 
     override fun stop() {
@@ -170,12 +171,16 @@ class VolcengineASRController(
     }
 
     override fun dispose() {
+        scope.cancel()
         pauseCapture()
+        synchronized(recorderLock) {
+            runCatching { audioRecord?.release() }
+            audioRecord = null
+        }
         finishJob?.cancel()
         val socket = webSocket
         webSocket = null
         socket?.cancel()
-        scope.cancel()
     }
 
     private fun handleBinaryResponse(socket: WebSocket, data: ByteArray) {
@@ -205,28 +210,33 @@ class VolcengineASRController(
     private fun startRecorder(socket: WebSocket) {
         recorderJob?.cancel()
         recorderJob = scope.launch(Dispatchers.IO) {
-            val minBufferSize = AudioRecord.getMinBufferSize(
-                SAMPLE_RATE,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT
-            )
-            val chunkSize = (SAMPLE_RATE * 2 * 200 / 1000).coerceAtLeast(minBufferSize)
-
-            val recorder = AudioRecord(
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-                SAMPLE_RATE,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT,
-                chunkSize * 2
-            )
-            audioRecord = recorder
-
+            var recorder: AudioRecord? = null
             try {
                 ensureActive()
-                recorder.startRecording()
+                val minBufferSize = AudioRecord.getMinBufferSize(
+                    SAMPLE_RATE,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT
+                )
+                require(minBufferSize > 0)
+                val chunkSize = (SAMPLE_RATE * 2 * 200 / 1000).coerceAtLeast(minBufferSize)
+                val currentRecorder = AudioRecord(
+                    MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                    SAMPLE_RATE,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    chunkSize * 2
+                )
+                recorder = currentRecorder
+                synchronized(recorderLock) {
+                    ensureActive()
+                    audioRecord = currentRecorder
+                    currentRecorder.startRecording()
+                }
                 val buffer = ByteArray(chunkSize)
                 while (isActive) {
-                    val read = recorder.read(buffer, 0, buffer.size)
+                    val read = currentRecorder.read(buffer, 0, buffer.size)
+                    ensureActive()
                     if (read > 0) {
                         val amplitude = calculateRmsAmplitude(buffer, read)
                         _state.update { it.copy(amplitudes = it.amplitudes.appendAmplitude(amplitude)) }
@@ -242,12 +252,16 @@ class VolcengineASRController(
                 }
             } catch (e: Exception) {
                 if (isActive) scope.launch(Dispatchers.Main.immediate) {
-                    if (webSocket === socket) setError(e.message ?: "Audio recording failed")
+                    if (webSocket === socket) setError("Не удалось настроить микрофон или записать звук. Проверьте параметры записи и доступ к микрофону.")
                 }
             } finally {
-                runCatching { recorder.stop() }
-                runCatching { recorder.release() }
-                if (audioRecord === recorder) audioRecord = null
+                recorder?.let { currentRecorder ->
+                    synchronized(recorderLock) {
+                        runCatching { currentRecorder.stop() }
+                        runCatching { currentRecorder.release() }
+                        if (audioRecord === currentRecorder) audioRecord = null
+                    }
+                }
             }
         }
     }

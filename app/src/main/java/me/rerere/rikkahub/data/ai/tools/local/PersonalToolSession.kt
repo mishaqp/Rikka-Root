@@ -7,13 +7,17 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import android.content.Context
 import android.content.Intent
+import androidx.core.content.FileProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
 import me.rerere.rikkahub.ui.activity.PersonalToolActivity
+import me.rerere.rikkahub.ui.activity.CameraToolActivity
 import kotlinx.serialization.json.JsonObject
 
 internal sealed interface PersonalUiRequest {
-    data class Camera(val output: File) : PersonalUiRequest
+    data class Camera(val output: File) : PersonalUiRequest {
+        val captureState = CameraCaptureState(output)
+    }
     data class Record(val durationMs: Int) : PersonalUiRequest
     data class Speech(val language: String, val timeoutMs: Int, val preferOffline: Boolean) : PersonalUiRequest
     data class Biometric(val title: String, val subtitle: String?, val allowCredential: Boolean) : PersonalUiRequest
@@ -27,7 +31,7 @@ internal sealed interface PersonalUiResult {
     data object Acknowledged : PersonalUiResult
     data object Cancelled : PersonalUiResult
     data class Error(val message: String) : PersonalUiResult
-    data class Photo(val file: File) : PersonalUiResult
+    data class Photo(val file: File, val method: String = "system_camera", val diagnostic: CameraCaptureFailure? = null, val camera: String = "system_camera") : PersonalUiResult
     data class Recording(val file: File, val durationMs: Int) : PersonalUiResult
     data class Speech(val text: String) : PersonalUiResult
     data class Authentication(val method: String) : PersonalUiResult
@@ -66,7 +70,7 @@ internal class PersonalToolSessions {
     @Synchronized fun isActive(id: String): Boolean = get(id)?.isClosing == false
     @Synchronized fun claim(id: String): Boolean {
         val session=get(id) ?: return false
-        if (session.claimed || session.isClosing) return false
+        if (session.isClosing || (session.claimed && session.request !is PersonalUiRequest.Camera)) return false
         session.claimed=true; return true
     }
     @Synchronized fun setCancellationAction(id: String, cleanup: suspend () -> Unit): Boolean {
@@ -123,7 +127,22 @@ internal suspend fun awaitPersonalToolUi(context: Context, request: PersonalUiRe
         isForeground={ withContext(Dispatchers.Main.immediate) { ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) } },
         startUi={ id -> withContext(Dispatchers.Main.immediate) {
             check(ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && sharedPersonalSessions.isActive(id))
-            context.startActivity(Intent(context,PersonalToolActivity::class.java).apply { putExtra(PersonalToolActivity.EXTRA_REQUEST_ID,id); addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
+            val host = if (request is PersonalUiRequest.Camera) {
+                val application = context.applicationContext
+                check(sharedPersonalSessions.setCancellationAction(id) {
+                    withContext(Dispatchers.Main.immediate) {
+                        request.captureState.externalAttempt?.file?.let { file ->
+                            runCatching {
+                                val uri = FileProvider.getUriForFile(application,"${application.packageName}.fileprovider",file)
+                                application.revokeUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                            }
+                        }
+                        request.captureState.cancel()
+                    }
+                })
+                CameraToolActivity::class.java
+            } else PersonalToolActivity::class.java
+            context.startActivity(Intent(context,host).apply { putExtra(PersonalToolActivity.EXTRA_REQUEST_ID,id); addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
         } })
 
 internal fun personalUiError(result: PersonalUiResult): JsonObject = deviceToolError(when (result) {

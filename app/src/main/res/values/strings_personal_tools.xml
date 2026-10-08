@@ -12,11 +12,16 @@
   <string translatable="false" name="personal_tools_sms_send_title">Отправка SMS</string>
   <string translatable="false" name="personal_tools_sms_send_desc">Отправка одного SMS после одобрения. Возможна плата оператору. При включении запрашивается разрешение отправки SMS. Используется выбранная в Android SIM или указанная SIM-подписка. Подтверждение отправки не означает доставку адресату.</string>
   <string translatable="false" name="personal_tools_camera_title">Фото с камеры</string>
-  <string translatable="false" name="personal_tools_camera_desc">После одобрения откроется системная камера: снимок делает пользователь. Доступ к камере запрашивается при включении. Фото сохраняется во вложениях чата; автоматической копии в галерее нет.</string>
+  <string translatable="false" name="personal_tools_camera_desc">После одобрения камера автоматически сделает снимок на видимом экране. При ошибке откроется системная камера, где снимок делает пользователь. Доступ к камере запрашивается при включении. Фото сохраняется во вложениях чата.</string>
   <string translatable="false" name="personal_tools_mic_title">Запись микрофона</string>
   <string translatable="false" name="personal_tools_mic_desc">Запись звука до 5 минут после одобрения на видимом экране с кнопкой отмены. Доступ к микрофону запрашивается при включении. Уход в фон останавливает запись и удаляет незавершённый файл.</string>
   <string translatable="false" name="personal_tools_speech_title">Распознавание речи</string>
-  <string translatable="false" name="personal_tools_speech_desc">После одобрения системная служба Android распознаёт речь. Доступ к микрофону запрашивается при включении. Предпочитается распознавание на устройстве; выбранная служба может использовать сеть. Уход в фон отменяет сеанс.</string>
+  <string translatable="false" name="personal_tools_speech_desc">После одобрения речь распознаёт Android; при ошибке используется ASR, выбранный для микрофона чата. Сетевой ASR отправляет звук настроенному провайдеру. Доступ к микрофону запрашивается при включении. Уход в фон отменяет сеанс.</string>
+  <string translatable="false" name="personal_tools_camera_auto_notice">Снимок будет сделан автоматически после готовности камеры. Фото появится во вложениях чата.</string>
+  <string translatable="false" name="personal_tools_camera_fallback_notice">Автосъёмка не удалась. Откроется системная камера — нажмите её кнопку съёмки.</string>
+  <string translatable="false" name="personal_tools_camera_initializing">Подготовка камеры…</string>
+  <string translatable="false" name="personal_tools_camera_capturing">Съёмка…</string>
+  <string translatable="false" name="personal_tools_camera_paused">Камера приостановлена. Вернитесь на экран для продолжения.</string>
   <string translatable="false" name="personal_tools_fingerprint_title">Подтверждение личности</string>
   <string translatable="false" name="personal_tools_fingerprint_desc">Системная проверка сильной биометрии после одобрения. По явному параметру можно разрешить PIN, пароль или графический ключ. Отпечатки и биометрические данные приложению не передаются.</string>
   <string translatable="false" name="personal_tools_keystore_title">Криптография AndroidKeyStore</string>

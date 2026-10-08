@@ -15,13 +15,9 @@ import kotlinx.coroutines.flow.StateFlow
 import me.rerere.asr.ASRController
 import me.rerere.asr.ASRProviderSetting
 import me.rerere.asr.ASRState
-import me.rerere.asr.providers.DashScopeASRController
-import me.rerere.asr.providers.MiMoASRController
-import me.rerere.asr.providers.OpenAIRealtimeASRController
-import me.rerere.asr.providers.StepASRController
-import me.rerere.asr.providers.VolcengineASRController
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.getSelectedASRProvider
+import me.rerere.rikkahub.utils.createAsrController
 import okhttp3.OkHttpClient
 import org.koin.compose.koinInject
 
@@ -80,7 +76,7 @@ private class CustomAsrStateImpl(
 
     fun updateProvider(provider: ASRProviderSetting?) {
         controller?.dispose()
-        controller = provider?.let { createController(it) }
+        controller = provider?.let { createAsrController(context, httpClient, it) }
         if (controller == null) {
             idleState.value = ASRState()
         }
@@ -104,32 +100,4 @@ private class CustomAsrStateImpl(
         audioManager.abandonAudioFocusRequest(audioFocusRequest)
     }
 
-    private fun createController(provider: ASRProviderSetting): ASRController? {
-        return when (provider) {
-            is ASRProviderSetting.OpenAIRealtime -> {
-                if (provider.apiKey.isBlank()) return null
-                OpenAIRealtimeASRController(context, httpClient, provider)
-            }
-
-            is ASRProviderSetting.DashScope -> {
-                if (provider.apiKey.isBlank()) return null
-                DashScopeASRController(context, httpClient, provider)
-            }
-
-            is ASRProviderSetting.Volcengine -> {
-                if (provider.apiKey.isBlank()) return null
-                VolcengineASRController(context, httpClient, provider)
-            }
-
-            is ASRProviderSetting.MiMo -> {
-                if (provider.apiKey.isBlank()) return null
-                MiMoASRController(context, httpClient, provider)
-            }
-
-            is ASRProviderSetting.Step -> {
-                if (provider.apiKey.isBlank()) return null
-                StepASRController(context, httpClient, provider)
-            }
-        }
-    }
 }
