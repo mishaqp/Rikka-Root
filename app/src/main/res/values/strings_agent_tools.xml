@@ -14,7 +14,7 @@
     <string translatable="false" name="agent_tools_report_share_file">Отправить %1$s</string>
     <string translatable="false" name="agent_tools_report_share_failed">Нет приложения для отправки ZIP. Установите файловый менеджер или приложение для отправки файлов.</string>
     <string translatable="false" name="agent_tools_reliability_title">Отчёт об ошибках</string>
-    <string translatable="false" name="agent_tools_reliability_desc">Создаёт небольшой ZIP с версией приложения, разрешёнными сведениями об устройстве и безопасной диагностикой. Диалоги, настройки, команды, пароли и произвольные логи не включаются.</string>
+    <string translatable="false" name="agent_tools_reliability_desc">Создаёт ZIP с версией приложения, журналом нашего процесса и полными ошибками ChatService. Известные формы секретов скрываются редактором. Перед отправкой проверьте отчёт на личные данные; журналы могут содержать фрагменты переписки.</string>
     <string translatable="false" name="agent_tools_cost_title">Расход и лимиты токенов</string>
     <string translatable="false" name="agent_tools_cost_desc">Показывает расход текущего чата, ограничивает новые запросы и продолжение работы. Субагенты используют общий бюджет родителя.</string>
     <string translatable="false" name="agent_tools_soft_cap">Порог предупреждения, токенов</string>

@@ -3,160 +3,166 @@ package me.rerere.rikkahub.reliability
 
 import android.content.Context
 import android.os.Build
-import kotlinx.coroutines.CancellationException
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.BuildConfig
+import java.io.BufferedReader
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStreamReader
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
-import kotlin.coroutines.coroutineContext
 
-/** Only stable application-owned codes are accepted; raw error text is never exported. */
-enum class ReportErrorCode { NETWORK, PROVIDER, TOOL_EXECUTION, STORAGE, UNKNOWN }
-
-data class ReportDiagnostic(val code: ReportErrorCode, val frames: List<StackTraceElement> = emptyList()) {
-    companion object {
-        /** Throwable messages, causes, suppressed exceptions and filenames are not serialized. */
-        fun fromThrowable(code: ReportErrorCode, error: Throwable): ReportDiagnostic =
-            ReportDiagnostic(code, error.stackTrace.take(MAX_FRAMES))
-    }
-}
-
-internal data class BugReportMetadata(
-    val versionName: String,
-    val versionCode: String,
-    val buildType: String,
-    val manufacturer: String,
-    val androidSdk: Int,
-    val cpuAbis: List<String>,
-    val processors: Int,
-)
-
-private const val MAX_DIAGNOSTICS = 16
-private const val MAX_FRAMES = 16
-private const val MAX_CONTENT_BYTES = 65_536
-private const val MAX_ZIP_BYTES = 131_072L
-
-// Prefix matching would allow arbitrary secrets hidden in a class/method name.
-// Emit only these exact application-owned symbols, never filenames or freeform stack text.
-private val knownFrames = mapOf(
-    "me.rerere.rikkahub.data.ai.GenerationLoop" to setOf(
-        "generateText", "generateInternal", "executeProviderRequestWithRetry", "awaitNetworkRetryOrThrow"
-    ),
-)
-private val manufacturers = setOf(
-    "google", "samsung", "xiaomi", "oneplus", "oppo", "vivo", "motorola", "sony", "huawei", "honor",
-    "asus", "realme", "nokia", "nothing", "lenovo", "zte", "htc", "amazon",
-)
-private val allowedAbis = setOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64", "riscv64")
-private val versionPattern = Regex("[0-9]{1,4}\\.[0-9]{1,4}\\.[0-9]{1,4}(?:-root\\.[0-9]{1,4})?")
-private val versionCodePattern = Regex("[0-9]{1,10}")
+private const val TAG = "BugReportBuilder"
 
 /**
- * Creates a bounded, allowlisted ZIP under managed cache. No process execution or user data reads.
- * The optional loader is trusted application code that returns typed diagnostic records, never logs.
+ * Builds a redacted bug-report ZIP suitable for sharing via the system share sheet.
+ *
+ * Contents (subject to availability):
+ *   - meta.txt — version, device model, Android version, locale, timezone
+ *   - logcat.txt — last 5000 logcat lines from this process, redacted by [SecretRedactor]
+ *   - errors.txt — complete ChatService exceptions through the same redactor
+ *
+ * NOT included (deliberate):
+ *   - Conversation dumps (logs and exception messages can still include fragments)
+ *   - DataStore / Room dumps (would expose tokens, hosts, memories)
+ *   - Files outside the app package
+ *   - Tokens or keys (filtered by [SecretRedactor])
+ *
+ * Output goes to the app's cache directory under `bug_reports/` so the share sheet's
+ * tempfile lifecycle handles cleanup. Caller is responsible for invoking
+ * `ACTION_SEND` with the resulting URI.
  */
-class BugReportBuilder private constructor(
-    private val cacheDirectory: () -> File,
-    private val metadata: () -> BugReportMetadata,
-    private val diagnosticLoader: suspend () -> List<ReportDiagnostic>,
+class BugReportBuilder(
+    private val context: Context,
+    private val errorsLoader: () -> List<Throwable> = { emptyList() },
 ) {
-    // Defer context/metadata access until build, so initialization errors use the same safe boundary.
-    constructor(context: Context, diagnosticLoader: suspend () -> List<ReportDiagnostic> = { emptyList() }) :
-        this({ context.cacheDir }, {
-            BugReportMetadata(
-                BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE.toString(), BuildConfig.BUILD_TYPE,
-                Build.MANUFACTURER, Build.VERSION.SDK_INT, Build.SUPPORTED_ABIS.toList(),
-                Runtime.getRuntime().availableProcessors(),
-            )
-        }, diagnosticLoader)
+    // The command stays production logcat; JVM tests supply an in-memory Process.
+    internal var logcatProcess: (List<String>) -> java.lang.Process = { command ->
+        ProcessBuilder(command).redirectErrorStream(true).start()
+    }
 
-    internal constructor(cacheDir: File, metadata: BugReportMetadata,
-        diagnosticLoader: suspend () -> List<ReportDiagnostic> = { emptyList() }) :
-        this({ cacheDir }, { metadata }, diagnosticLoader)
+    suspend fun build(): File = withContext(Dispatchers.IO) {
+        val ts = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+        val outDir = File(context.cacheDir, "bug_reports").apply { mkdirs() }
+        val zipFile = File(outDir, "rikkahub-agent-bug-$ts.zip")
 
-    suspend fun build(): File {
-        var ownedFile: File? = null
-        try {
-            // Catch outside withContext too: cancellation during dispatch back must delete the ZIP.
-            return withContext(Dispatchers.IO) {
-                coroutineContext.ensureActive()
-                val cache = cacheDirectory().canonicalFile
-                val directory = File(cache, "bug_reports")
-                check(directory.canonicalFile == directory && (directory.isDirectory || directory.mkdirs()))
-                check(directory.canonicalFile.parentFile == cache)
-                val output = File.createTempFile("rikka-root-report-", ".zip", directory)
-                ownedFile = output
-                val contents = linkedMapOf(
-                    "meta.txt" to metadataText(metadata()),
-                    "diagnostics.txt" to diagnosticText(diagnosticLoader()),
-                    "README.txt" to REPORT_README,
-                )
-                var totalBytes = 0
-                ZipOutputStream(FileOutputStream(output)).use { zip ->
-                    for ((name, text) in contents) {
-                        coroutineContext.ensureActive()
-                        val bytes = text.toByteArray(Charsets.UTF_8)
-                        check(bytes.size <= MAX_CONTENT_BYTES - totalBytes)
-                        totalBytes += bytes.size
-                        zip.putNextEntry(ZipEntry(name))
-                        zip.write(bytes)
-                        zip.closeEntry()
-                    }
-                }
-                check(output.length() <= MAX_ZIP_BYTES)
-                coroutineContext.ensureActive()
-                output
+        ZipOutputStream(FileOutputStream(zipFile)).use { zip ->
+            zip.putEntry("meta.txt", buildMeta())
+            zip.putEntry("logcat.txt", captureLogcat())
+            zip.putEntry("errors.txt", SecretRedactor.redact(errorsLoader().joinToString("\n\n") {
+                it.stackTraceToString()
+            }.ifEmpty { "Ошибок ChatService нет." }))
+            zip.putEntry("README.txt", buildReadme())
+        }
+        Log.i(TAG, "build: wrote ${zipFile.length()} bytes to ${zipFile.absolutePath}")
+        zipFile
+    }
+
+    private fun ZipOutputStream.putEntry(name: String, content: String) {
+        putNextEntry(ZipEntry(name))
+        write(content.toByteArray(Charsets.UTF_8))
+        closeEntry()
+    }
+
+    private fun buildMeta(): String = buildString {
+        append("App: Rikka-Root\n")
+        append("Version: ${BuildConfig.VERSION_NAME} (versionCode ${BuildConfig.VERSION_CODE})\n")
+        append("Build type: ${BuildConfig.BUILD_TYPE}\n")
+        append("Application ID: ${BuildConfig.APPLICATION_ID}\n")
+        append("Device: ${Build.MANUFACTURER} ${Build.MODEL} (${Build.DEVICE})\n")
+        append("Android: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})\n")
+        append("Locale: ${Locale.getDefault()}\n")
+        append("Timezone: ${java.util.TimeZone.getDefault().id}\n")
+        append("Generated at: ${Date()}\n")
+    }
+
+    private fun buildReadme(): String =
+        """
+        Отчёт об ошибке Rikka-Root
+        =========================
+
+        Этот ZIP создан локально на устройстве. Он содержит:
+          * meta.txt   — версию приложения, устройство и сведения об Android
+          * logcat.txt — последние до 5000 строк журнала нашего процесса;
+                          известные формы секретов скрыты редактором
+          * errors.txt — полные тексты ошибок ChatService: тип, сообщение и стек;
+                         известные формы секретов скрыты тем же редактором
+
+        Отдельно в отчёт НЕ добавляются:
+          * Ваши диалоги
+          * Сохранённые SSH-хосты, токен Telegram, API-ключи, настройки MCP
+          * Память и настройки ассистентов
+          * Файлы за пределами процесса приложения
+
+        Журналы провайдеров и сообщения исключений могут содержать фрагменты
+        переписки. Перед публичной отправкой проверьте meta.txt, errors.txt и
+        последние строки logcat.txt на личные данные и строки, похожие на ключи.
+        Редактор скрывает распространённые формы, но не все возможные секреты.
+        """.trimIndent()
+
+    private fun captureLogcat(): String {
+        // -t 5000: last ~5000 lines. -v threadtime: timestamps + thread/proc.
+        // --pid limits the original Agent command to this process, without root/READ_LOGS.
+        return try {
+            val proc = logcatProcess(listOf("logcat", "-d", "-t", "5000", "-v", "threadtime",
+                "--pid=${android.os.Process.myPid()}"))
+            val raw = BufferedReader(InputStreamReader(proc.inputStream)).useLines { lines ->
+                lines.joinToString("\n")
             }
-        } catch (cancelled: CancellationException) {
-            ownedFile?.delete()
-            throw cancelled
-        } catch (_: Exception) {
-            ownedFile?.delete()
-            // Never retain raw cause/message: they can contain URLs, keys, commands or local paths.
-            throw IllegalStateException("Не удалось создать диагностический отчёт в кэше приложения.")
+            proc.waitFor()
+            SecretRedactor.redact(raw)
+        } catch (t: Throwable) {
+            Log.w(TAG, "captureLogcat failed", t)
+            "(Не удалось прочитать logcat: ${t.message ?: t.javaClass.simpleName})"
         }
     }
 }
 
-private fun metadataText(meta: BugReportMetadata): String = buildString {
-    val version = meta.versionName.takeIf { it.length <= 32 && versionPattern.matches(it) } ?: "unknown"
-    val versionCode = meta.versionCode.takeIf { versionCodePattern.matches(it) } ?: "unknown"
-    val buildType = meta.buildType.takeIf { it in setOf("debug", "release") } ?: "unknown"
-    val manufacturer = meta.manufacturer.takeIf { it.length <= 32 }?.lowercase(Locale.ROOT)
-        ?.takeIf { it in manufacturers } ?: "unknown"
-    append("App: Rikka-Root\nVersion: $version\nVersion code: $versionCode\nBuild type: $buildType\n")
-    append("Manufacturer: $manufacturer\n")
-    append("Android SDK: ${meta.androidSdk.takeIf { it in 1..100 } ?: 0}\n")
-    append("CPU ABI: ${meta.cpuAbis.take(8).filter { it in allowedAbis }.distinct().joinToString(",").ifEmpty { "unknown" }}\n")
-    append("Processors: ${meta.processors.takeIf { it in 1..1024 } ?: 0}\n")
-}
+/**
+ * Pattern-based redactor for known secret shapes appearing in logcat. Aggressive on
+ * false positives — if a token-looking string slips through, that's a leak; if a
+ * legitimate hex string gets blanked, that's just noise.
+ */
+object SecretRedactor {
 
-private suspend fun diagnosticText(diagnostics: List<ReportDiagnostic>): String = buildString {
-    if (diagnostics.isEmpty()) append("Диагностические коды отсутствуют.\n")
-    for ((index, diagnostic) in diagnostics.take(MAX_DIAGNOSTICS).withIndex()) {
-        coroutineContext.ensureActive()
-        append("Error ${index + 1}: ${diagnostic.code.name}\n")
-        for (frame in diagnostic.frames.take(MAX_FRAMES)) {
-            val knownMethods = knownFrames[frame.className] ?: continue
-            if (frame.methodName !in knownMethods) continue
-            append("  at ${frame.className}.${frame.methodName}")
-            if (frame.lineNumber in 1..1_000_000) append(":${frame.lineNumber}")
-            append('\n')
+    private val patterns: List<Pair<Regex, String>> = listOf(
+        // Telegram bot tokens: <int>:<35-char alnum>
+        Regex("""\b\d{8,12}:[A-Za-z0-9_-]{30,40}\b""") to "[redacted-telegram-token]",
+        // Bearer / API-key-ish headers — captures `Authorization: Bearer XYZ` AND
+        // `X-Api-Key: XYZ` as one unit so the value after the optional Bearer/Token
+        // prefix gets redacted along with the header. Stops at newline so multi-line
+        // logcat entries don't bleed into following lines.
+        Regex("""(?i)(authorization|proxy-authorization|x-api-key|x-api-token|x-auth-token|x-access-token|cookie|set-cookie)\s*[:=]\s*(?:Bearer\s+|Token\s+)?[^\r\n,;]+""") to "$1: [redacted]",
+        // 30+ char hex strings (likely keys / hashes)
+        Regex("""\b[a-fA-F0-9]{32,}\b""") to "[redacted-hex]",
+        // 30+ char base64-shaped tokens (alnum + + / =) — broad catch for raw tokens
+        // logged outside a header context. Avoids matching `[redacted]`-style markers
+        // because those are short.
+        Regex("""\b[A-Za-z0-9+/]{30,}={0,2}\b""") to "[redacted-b64]",
+        // ssh:// or sftp:// urls with embedded creds
+        Regex("""(ssh|sftp)://[^\s/@]+@""") to "$1://[redacted]@",
+    )
+
+    // Added for Rikka-Root providers. Keep the original Agent patterns above unchanged.
+    // Run these first so the broad original hex/base64 rules cannot split a key's suffix.
+    private val providerPatterns: List<Pair<Regex, String>> = listOf(
+        Regex("""(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----""") to "[redacted-private-key]",
+        Regex("""\b(?:sk-|tp-|gsk_|xai-|AIza)[A-Za-z0-9._-]+""") to "[redacted-provider-key]",
+        Regex("""(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+""") to "Bearer [redacted]",
+        Regex("""(?i)(x-goog-api-key|xi-api-key|api-key|x-subscription-token|ocp-apim-subscription-key)\s*[:=]\s*[^\r\n,;]+""") to "$1: [redacted]",
+        Regex("""(?i)(["']?\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|passwd|pwd|client[_-]?secret|private[_-]?key|secret[_-]?key|key)["']?\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|(?!\[redacted[^\]]*\])[^\s,;&}\]\r\n]+)""") to "$1[redacted]",
+    )
+
+    fun redact(input: String): String {
+        var out = input
+        for ((re, replacement) in providerPatterns + patterns) {
+            out = re.replace(out, replacement)
         }
+        return out
     }
 }
-
-private val REPORT_README = """
-    Диагностический отчёт Rikka-Root
-
-    meta.txt: разрешённые поля версии приложения, производителя, Android и среды выполнения.
-    diagnostics.txt: коды ошибок и известные символы стека без имён файлов и сообщений исключений.
-
-    В отчёт не включаются журналы logcat, диалоги, настройки, ключи, пароли, команды,
-    вывод команд, адреса серверов и произвольные пути. Файл хранится в кэше приложения.
-""".trimIndent()

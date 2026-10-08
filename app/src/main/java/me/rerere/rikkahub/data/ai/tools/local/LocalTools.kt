@@ -16,8 +16,8 @@ import me.rerere.rikkahub.data.repository.ConversationRepository
 import org.koin.core.context.GlobalContext.get
 import kotlin.uuid.Uuid
 import me.rerere.rikkahub.reliability.generateBugReportTool
-import me.rerere.rikkahub.reliability.ReportDiagnostic
-import me.rerere.rikkahub.reliability.ReportErrorCode
+import me.rerere.rikkahub.reliability.BugReportBuilder
+import me.rerere.rikkahub.reliability.copyBugReportToWorkspace
 import me.rerere.rikkahub.service.ChatService
 
 /** The file-backed tool dispatcher shares one scoped resolver for the selected workspace. */
@@ -77,12 +77,14 @@ class LocalTools(
         tokenBudget: TokenBudgetLedger? = null,
     ): List<Tool> {
         val tools = mutableListOf<Tool>()
-        if (LocalToolOption.Reliability in options) tools.add(generateBugReportTool(context) {
-            // Only typed codes and exact allowlisted stack symbols leave the builder.
-            get().get<ChatService>().errors.value.takeLast(16).map {
-                ReportDiagnostic.fromThrowable(ReportErrorCode.UNKNOWN, it.error)
-            }
-        })
+        if (LocalToolOption.Reliability in options) tools.add(generateBugReportTool(
+            context, BugReportBuilder(context) {
+                get().get<ChatService>().errors.value.map { it.error }
+            }, copyToWorkspace = resolveWorkspacePath?.let { resolver ->
+                { zip -> copyBugReportToWorkspace(zip,
+                    LocalFileAccess(context, workspaceCwd = "/workspace", resolveWorkspacePath = resolver)) }
+            },
+        ))
         if (LocalToolOption.CostGuards in options) {
             val caller = callerAssistant ?: Assistant(
                 id = assistantId?.let { runCatching { Uuid.parse(it) }.getOrNull() } ?: Uuid.random(),

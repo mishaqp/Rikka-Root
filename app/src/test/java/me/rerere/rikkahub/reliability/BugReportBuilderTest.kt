@@ -1,159 +1,156 @@
 package me.rerere.rikkahub.reliability
 
+import android.content.Context
 import android.content.ContextWrapper
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.*
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.ai.tools.local.LocalFileAccess
+import me.rerere.rikkahub.data.ai.tools.local.listZipContentsTool
+import me.rerere.rikkahub.utils.JsonInstant
 import org.junit.Assert.*
 import org.junit.Test
-import java.io.File
+import java.io.*
 import java.nio.file.Files
 import java.util.zip.ZipFile
 
 class BugReportBuilderTest {
-    private val metadata = BugReportMetadata("2.5.6-root.2", "256", "debug", "Google", 35, listOf("arm64-v8a"), 8)
-    private val safeFrame = StackTraceElement("me.rerere.rikkahub.data.ai.GenerationLoop", "generateInternal", "/private/very-secret/path.kt", 42)
-    private val secrets = listOf("qx", "s!", "short password", "sk-not_a_standard-secret-shape-123456789", "/data/private/customer.keys")
-
+    private class ReportContext(private val root: File) : ContextWrapper(null) {
+        override fun getCacheDir(): File = File(root, "cache").apply { mkdirs() }
+        override fun getFilesDir(): File = File(root, "files").apply { mkdirs() }
+        override fun getApplicationContext(): Context = this
+        override fun getPackageName(): String = "me.rerere.rikkahub"
+    }
+    private class LogcatProcess(text: String) : Process() {
+        private val source = ByteArrayInputStream(text.toByteArray())
+        override fun getInputStream(): InputStream = source
+        override fun getErrorStream(): InputStream = ByteArrayInputStream(byteArrayOf())
+        override fun getOutputStream(): OutputStream = ByteArrayOutputStream()
+        override fun waitFor(): Int = 0
+        override fun exitValue(): Int = 0
+        override fun destroy() {}
+    }
     private fun entries(file: File): Map<String, String> = ZipFile(file).use { zip ->
         zip.entries().asSequence().associate { entry ->
             entry.name to zip.getInputStream(entry).bufferedReader().use { it.readText() }
         }
     }
+    private fun builder(context: Context, logs: String = "ReportMarker: diagnostic line", errors: List<Throwable> = emptyList()) =
+        BugReportBuilder(context) { errors }.apply { logcatProcess = { LogcatProcess(logs) } }
+    private fun access(context: Context, workspace: File) = LocalFileAccess(context,
+        workspaceCwd = "/workspace/project", resolveWorkspacePath = { path ->
+            File(workspace, path.removePrefix("/workspace").trimStart('/'))
+        })
 
-    @Test fun zipContainsOnlyAllowedMetadataCodesAndKnownStackSymbols() = runBlocking {
-        val dir = Files.createTempDirectory("report-privacy").toFile()
+    @Test fun logcatAndCompleteErrorsAreInZipWithSecretsRedacted() = runBlocking {
+        val root = Files.createTempDirectory("report-logcat").toFile()
         try {
-            val error = IllegalStateException(secrets.joinToString(" ")).apply {
-                stackTrace = arrayOf(safeFrame,
-                    StackTraceElement("private.qx", "s!", secrets.last(), 1),
-                    StackTraceElement("me.rerere.rikkahub.data.ai.qx", "generateInternal", "qx", 2),
-                    StackTraceElement("me.rerere.rikkahub.data.ai.GenerationLoop", "qx", "qx", 3))
+            val logs = "ReportMarker: network failure sk-synthetic-secret\nBearer synthetic.jwt.secret\npassword=synthetic-password"
+            val error = IllegalStateException("connection failed password=synthetic-password", IllegalArgumentException("upstream details")).apply {
+                stackTrace = arrayOf(StackTraceElement("example.CustomProvider", "readResponse", "CustomProvider.kt", 27))
+                addSuppressed(IllegalArgumentException("suppressed details"))
             }
-            val file = BugReportBuilder(dir, metadata) {
-                listOf(ReportDiagnostic.fromThrowable(ReportErrorCode.PROVIDER, error))
-            }.build()
-            val report = entries(file)
-            assertEquals(setOf("meta.txt", "diagnostics.txt", "README.txt"), report.keys)
-            assertTrue(file.canonicalPath.startsWith(File(dir, "bug_reports").canonicalPath + File.separator))
-            assertTrue(report.getValue("meta.txt").contains("2.5.6-root.2"))
-            assertTrue(report.getValue("meta.txt").contains("SDK: 35"))
-            assertTrue(report.getValue("diagnostics.txt").contains("PROVIDER"))
-            assertTrue(report.getValue("diagnostics.txt").contains("GenerationLoop.generateInternal:42"))
-            val all = report.values.joinToString("\n")
-            (secrets + listOf("IllegalStateException", "/private/very-secret/path.kt", dir.absolutePath)).forEach {
-                assertFalse("Unsafe diagnostic input leaked: $it", all.contains(it))
-            }
-            assertFalse(report.keys.any { it.contains("logcat") })
-        } finally { dir.deleteRecursively() }
+            val report = entries(builder(ReportContext(root), logs, listOf(error)).build())
+            assertEquals(setOf("meta.txt", "logcat.txt", "errors.txt", "README.txt"), report.keys)
+            assertTrue(report.getValue("logcat.txt").contains("ReportMarker: network failure"))
+            val diagnostics = report.getValue("errors.txt")
+            assertTrue(diagnostics.contains("java.lang.IllegalStateException"))
+            assertTrue(diagnostics.contains("connection failed"))
+            assertTrue(diagnostics.contains("example.CustomProvider.readResponse(CustomProvider.kt:27)"))
+            assertTrue(diagnostics.contains("upstream details"))
+            assertTrue(diagnostics.contains("suppressed details"))
+            val text = report.values.joinToString("\n")
+            for (secret in listOf("sk-synthetic-secret", "synthetic.jwt.secret", "synthetic-password")) assertFalse(text.contains(secret))
+            assertTrue(report.getValue("README.txt").contains("5000"))
+            assertTrue(report.getValue("README.txt").contains("фрагменты"))
+        } finally { root.deleteRecursively() }
     }
 
-    @Test fun metadataRejectsFreeformDeviceAndBuildFields() = runBlocking {
-        val dir = Files.createTempDirectory("report-meta").toFile()
+    @Test fun captureUsesOriginalLogcatFlagsAndCurrentProcessFilterWithoutSu() = runBlocking {
+        val root = Files.createTempDirectory("report-command").toFile()
         try {
-            val report = entries(BugReportBuilder(dir, metadata.copy(versionName = secrets[0], versionCode = secrets[1],
-                buildType = secrets[2], manufacturer = secrets[3], cpuAbis = secrets)).build()).values.joinToString("\n")
-            secrets.forEach { assertFalse(report.contains(it)) }
-            assertTrue(report.contains("unknown"))
-        } finally { dir.deleteRecursively() }
+            var command: List<String> = emptyList()
+            val reportBuilder = BugReportBuilder(ReportContext(root)).apply {
+                logcatProcess = { command = it; LogcatProcess("ReportMarker") }
+            }
+            reportBuilder.build()
+            assertEquals(listOf("logcat", "-d", "-t", "5000", "-v", "threadtime"), command.take(6))
+            assertEquals("--pid=${android.os.Process.myPid()}", command.last())
+            assertFalse(command.any { it == "su" })
+        } finally { root.deleteRecursively() }
     }
 
-    @Test fun repeatedReportsHaveExclusiveNamesAndBoundedContent() = runBlocking {
-        val dir = Files.createTempDirectory("report-bounds").toFile()
+    @Test fun captureFailureKeepsAgentDiagnosticAndReportRemainsReadable() = runBlocking {
+        val root = Files.createTempDirectory("report-capture-failure").toFile()
         try {
-            val builder = BugReportBuilder(dir, metadata) {
-                List(500) { ReportDiagnostic(ReportErrorCode.TOOL_EXECUTION, List(500) { safeFrame }) }
+            val reportBuilder = BugReportBuilder(ReportContext(root)).apply {
+                logcatProcess = { throw IllegalStateException("logcat unavailable") }
             }
-            val first = builder.build()
-            val bytes = first.readBytes()
-            val second = builder.build()
-            assertNotEquals(first.name, second.name)
-            assertArrayEquals(bytes, first.readBytes())
-            assertEquals(2, File(dir, "bug_reports").listFiles()?.size)
-            listOf(first, second).forEach {
-                assertTrue(it.length() <= 131072L)
-                assertTrue(entries(it).values.sumOf { text -> text.toByteArray().size } <= 65536)
-                assertTrue(entries(it).getValue("diagnostics.txt").lines().count { line -> line.startsWith("  at ") } <= 256)
-            }
-        } finally { dir.deleteRecursively() }
+            val logs = entries(reportBuilder.build()).getValue("logcat.txt")
+            assertTrue(logs.contains("logcat unavailable"))
+        } finally { root.deleteRecursively() }
     }
 
-    @Test fun cancellationRemovesPartialArchiveAndPropagates() = runBlocking {
-        val dir = Files.createTempDirectory("report-cancel").toFile()
+    @Test fun toolReturnsOriginalAgentFieldsAndWorkspaceCopyReadableByArchiveTool() = runBlocking {
+        val root = Files.createTempDirectory("report-workspace").toFile()
         try {
-            val started = CompletableDeferred<Unit>()
-            val builder = BugReportBuilder(dir, metadata) {
-                started.complete(Unit)
-                CompletableDeferred<List<ReportDiagnostic>>().await()
+            val context = ReportContext(root)
+            val chatWorkspace = File(root, "chat-workspace").apply { mkdirs() }
+            val selectedOtherWorkspace = File(root, "selected-other-workspace").apply { mkdirs() }
+            val fileAccess = access(context, chatWorkspace)
+            val tool = generateBugReportTool(context, builder(context), copyToWorkspace = { copyBugReportToWorkspace(it, fileAccess) })
+            assertEquals("generate_bug_report", tool.name)
+            assertTrue(tool.needsApproval(buildJsonObject {}))
+            assertTrue((tool.parameters() as InputSchema.Obj).properties.isEmpty())
+            val result = tool.execute(buildJsonObject {}).filterIsInstance<UIMessagePart.Text>().single()
+            val payload = JsonInstant.parseToJsonElement(result.text).jsonObject
+            val cacheFile = File(payload.getValue("path").jsonPrimitive.content)
+            assertEquals(cacheFile.length(), payload.getValue("size_bytes").jsonPrimitive.long)
+            assertEquals("application/zip", payload.getValue("mime_type").jsonPrimitive.content)
+            assertEquals("android.intent.action.SEND", payload.getValue("share_intent_action").jsonPrimitive.content)
+            val path = payload.getValue("workspace_path").jsonPrimitive.content
+            assertEquals("/workspace/reports/${cacheFile.name}", path)
+            assertArrayEquals(cacheFile.readBytes(), File(chatWorkspace, "reports/${cacheFile.name}").readBytes())
+            assertEquals(0, selectedOtherWorkspace.listFiles()?.size)
+            val listing = listZipContentsTool(context, fileAccess).execute(buildJsonObject { put("source", path) })
+                .filterIsInstance<UIMessagePart.Text>().single().text
+            assertTrue(listing.contains("logcat.txt"))
+            assertTrue(listing.contains("errors.txt"))
+            assertFalse(listing.contains("\"error\""))
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun absentOrFailedWorkspaceDoesNotClaimCopyOrDiscardCacheReport() = runBlocking {
+        val root = Files.createTempDirectory("report-no-workspace").toFile()
+        try {
+            val context = ReportContext(root)
+            val tools = listOf(generateBugReportTool(context, builder(context)), generateBugReportTool(context, builder(context),
+                copyToWorkspace = { error("workspace missing") }))
+            for (tool in tools) {
+                val payload = JsonInstant.parseToJsonElement(tool.execute(buildJsonObject {}).filterIsInstance<UIMessagePart.Text>().single().text).jsonObject
+                assertFalse("workspace_path" in payload)
+                assertTrue("workspace_copy_error" in payload)
+                assertTrue(File(payload.getValue("path").jsonPrimitive.content).isFile)
             }
-            val job = launch { builder.build() }
-            started.await()
-            job.cancelAndJoin()
-            assertTrue(job.isCancelled)
-            assertEquals(0, File(dir, "bug_reports").listFiles()?.size ?: 0)
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun workspaceSymlinkCannotOverwriteAnOutsideFile() = runBlocking {
+        val root = Files.createTempDirectory("report-symlink").toFile()
+        try {
+            val context = ReportContext(root)
+            val workspace = File(root, "workspace").apply { mkdirs() }
+            val outside = File(root, "outside").apply { mkdirs() }
+            val zip = builder(context).build()
+            val sentinel = File(outside, zip.name).apply { writeText("preserved") }
+            Files.createSymbolicLink(File(workspace, "reports").toPath(), outside.toPath())
             try {
-                BugReportBuilder(dir, metadata) { throw CancellationException("qx") }.build()
-                fail("Cancellation was swallowed")
-            } catch (_: CancellationException) { }
-            assertEquals(0, File(dir, "bug_reports").listFiles()?.size ?: 0)
-        } finally { dir.deleteRecursively() }
-    }
-
-    @Test fun loaderAndDirectoryFailuresAreSanitizedAndCleanedUp() = runBlocking {
-        val dir = Files.createTempDirectory("report-failure").toFile()
-        try {
-            var loaderInvoked = false
-            var partialFileObserved = false
-            try {
-                BugReportBuilder(dir, metadata) {
-                    loaderInvoked = true
-                    partialFileObserved = File(dir, "bug_reports").listFiles()?.singleOrNull()?.isFile == true
-                    throw IllegalArgumentException(secrets.joinToString(" "))
-                }.build()
-                fail("Loader failure was swallowed")
-            } catch (failure: IllegalStateException) {
-                assertTrue(failure.message.orEmpty().contains("отчёт", ignoreCase = true))
-                secrets.forEach { assertFalse(failure.message.orEmpty().contains(it)) }
-                assertNull(failure.cause)
-            }
-            assertTrue("Failure path never invoked the diagnostic loader", loaderInvoked)
-            assertTrue("Failure path never created an owned partial ZIP", partialFileObserved)
-            assertEquals(0, File(dir, "bug_reports").listFiles()?.size ?: 0)
-            val reports = File(dir, "bug_reports")
-            reports.deleteRecursively()
-            reports.writeText("preexisting")
-            try {
-                BugReportBuilder(dir, metadata).build()
-                fail("Non-directory cache entry was accepted")
-            } catch (failure: IllegalStateException) {
-                assertFalse(failure.message.orEmpty().contains(dir.absolutePath))
-                assertNull(failure.cause)
-            }
-            assertEquals("preexisting", reports.readText())
-        } finally { dir.deleteRecursively() }
-    }
-
-    @Test fun toolRequiresApprovalHasNoInputsAndSanitizesInitializationErrors() = runBlocking {
-        val context = object : ContextWrapper(null) {
-            override fun getCacheDir(): File = error("qx /private/path")
-        }
-        val tool = generateBugReportTool(context)
-        assertEquals("generate_bug_report", tool.name)
-        assertTrue(tool.needsApproval(buildJsonObject {}))
-        assertTrue((tool.parameters() as InputSchema.Obj).properties.isEmpty())
-        val invalid = tool.execute(JsonObject(mapOf("logcat" to JsonPrimitive("qx")))).single() as UIMessagePart.Text
-        assertTrue(invalid.text.contains("error"))
-        assertFalse(invalid.text.contains("qx"))
-        val failure = tool.execute(buildJsonObject {}).single() as UIMessagePart.Text
-        assertTrue(failure.text.contains("error"))
-        assertFalse(failure.text.contains("qx"))
-        assertFalse(failure.text.contains("/private/path"))
+                copyBugReportToWorkspace(zip, access(context, workspace))
+                fail("Symlink outside workspace was accepted")
+            } catch (_: IllegalArgumentException) {}
+            assertEquals("preserved", sentinel.readText())
+            assertTrue(zip.isFile)
+        } finally { root.deleteRecursively() }
     }
 }
