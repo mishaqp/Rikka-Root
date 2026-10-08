@@ -146,4 +146,48 @@ class LocalFileAccessTest {
         try { access.createNewChild(parent, "folder", isDirectory = true); fail("existing directory returned") } catch (_: IllegalArgumentException) { }
         assertTrue(access.isDirectory(directory))
     }
+
+    @Test fun opaqueAncestryIsProvenByEnumeratedEdgesAndCyclesDoNotRepeatQueries() = runBlocking {
+        val graph = mapOf(
+            "root" to listOf(DocumentChild("dir-X", true)),
+            "dir-X" to listOf(DocumentChild("root", true), DocumentChild("file-Y", false)),
+        )
+        val calls = mutableListOf<String>()
+        assertTrue(boundedDocumentReachable("root", "file-Y") { id, _ -> calls += id; graph[id].orEmpty() })
+        assertEquals(listOf("root", "dir-X"), calls)
+        calls.clear()
+        assertFalse(boundedDocumentReachable("root", "absent") { id, _ -> calls += id; graph[id].orEmpty() })
+        assertEquals(listOf("root", "dir-X"), calls)
+    }
+
+    @Test fun ancestryEnumerationCannotTreatExhaustedBudgetOrProviderFailureAsUnrelated() = runBlocking {
+        try {
+            boundedDocumentReachable("root", "absent", maxEntries = 2) { _, remaining ->
+                assertEquals(2, remaining)
+                listOf(DocumentChild("a", false), DocumentChild("b", false), DocumentChild("c", false))
+            }
+            fail("entry budget ignored")
+        } catch (_: IllegalStateException) { }
+        try {
+            boundedDocumentReachable("root", "absent", maxDepth = 1) { id, _ -> listOf(DocumentChild("$id-next", true)) }
+            fail("depth budget ignored")
+        } catch (_: IllegalStateException) { }
+        try {
+            boundedDocumentReachable("root", "absent") { _, _ -> throw java.io.IOException("provider rejected query") }
+            fail("provider failure became false")
+        } catch (_: java.io.IOException) { }
+    }
+
+    @Test fun ancestryEnumerationCountsDuplicateRowsAndPropagatesCancellation() = runBlocking {
+        val budgets = mutableListOf<Int>()
+        assertFalse(boundedDocumentReachable("root", "absent", maxEntries = 3) { id, remaining ->
+            budgets += remaining
+            if (id == "root") listOf(DocumentChild("dir", true), DocumentChild("dir", true)) else listOf(DocumentChild("root", true))
+        })
+        assertEquals(listOf(3, 1), budgets)
+        try {
+            boundedDocumentReachable("root", "absent") { _, _ -> throw CancellationException("cancelled query") }
+            fail("cancellation swallowed")
+        } catch (_: CancellationException) { }
+    }
 }

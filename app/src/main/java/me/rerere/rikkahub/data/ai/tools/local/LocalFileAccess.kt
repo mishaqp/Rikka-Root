@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.ai.tools.local
 
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
@@ -111,18 +112,56 @@ class LocalFileAccess internal constructor(
         return canonical
     }
 
-    private fun checkGrant(source: LocalFileSource.Content, write: Boolean) {
+    private suspend fun checkGrant(source: LocalFileSource.Content, write: Boolean) {
         require(androidContext.contentResolver.persistedUriPermissions.any {
             (if (write) it.isWritePermission else it.isReadPermission) && (
                 contentTreeGrantCovers(it.uri.toString(), source.reference) ||
-                contentTreeComponentsMatch(it.uri.toString(), source.reference) && runCatching {
+                contentTreeComponentsMatch(it.uri.toString(), source.reference) && try {
                     // Cloud providers can use opaque IDs without a path prefix. Their own
                     // DocumentsProvider relation plus the exact held tree is authoritative.
-                    DocumentsContract.isChildDocument(androidContext.contentResolver,
-                        DocumentsContract.buildDocumentUriUsingTree(it.uri, DocumentsContract.getTreeDocumentId(it.uri)),
-                        documentUri(source.uri))
-                }.getOrDefault(false))
+                    providerContains(it.uri, source.uri)
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { false })
         }) { "Нет ${if (write) "записи" else "чтения"} в выбранной папке. Сначала вызовите grant_directory_access." }
+    }
+
+    /** API 26–28 providers prove opaque ancestry through bounded child enumeration. */
+    private suspend fun providerContains(parent: Uri, target: Uri): Boolean {
+        currentCoroutineContext().ensureActive()
+        if (parent.authority != target.authority) return false
+        val parentDocument = documentUri(parent)
+        val targetDocument = documentUri(target)
+        val rootId = DocumentsContract.getDocumentId(parentDocument)
+        val targetId = DocumentsContract.getDocumentId(targetDocument)
+        if (rootId == targetId) return true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                val contained = DocumentsContract.isChildDocument(androidContext.contentResolver, parentDocument, targetDocument)
+                currentCoroutineContext().ensureActive()
+                return contained
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { /* Unsupported provider: enumerate rather than guess. */ }
+        }
+        return boundedDocumentReachable(rootId, targetId) { id, remaining ->
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(parent, id)
+            val projection = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_MIME_TYPE)
+            val found = mutableListOf<DocumentChild>()
+            androidContext.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+                val idColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                val mimeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                while (cursor.moveToNext()) {
+                    currentCoroutineContext().ensureActive()
+                    check(found.size < remaining) { "Слишком много документов для подтверждения границ папки SAF." }
+                    val childId = cursor.getString(idColumn)
+                    check(!childId.isNullOrBlank() && childId.length <= 8192) { "Провайдер SAF вернул некорректный идентификатор." }
+                    val mime = cursor.getString(mimeColumn)
+                    check(!mime.isNullOrBlank()) { "Провайдер SAF не подтвердил тип дочернего документа." }
+                    found += DocumentChild(childId, mime == DocumentsContract.Document.MIME_TYPE_DIR)
+                }
+            } ?: error("Провайдер SAF не разрешил подтвердить границы папки.")
+            currentCoroutineContext().ensureActive()
+            found
+        }
     }
 
     private fun documentUri(uri: Uri): Uri {
@@ -130,7 +169,7 @@ class LocalFileAccess internal constructor(
         return if ("document" in rawParts) uri else DocumentsContract.buildDocumentUriUsingTree(uri, DocumentsContract.getTreeDocumentId(uri))
     }
 
-    private fun document(source: LocalFileSource.Content, write: Boolean = false): DocumentFile {
+    private suspend fun document(source: LocalFileSource.Content, write: Boolean = false): DocumentFile {
         checkGrant(source, write)
         return requireNotNull(DocumentFile.fromSingleUri(androidContext, documentUri(source.uri))) { "Документ недоступен." }
     }
@@ -322,9 +361,10 @@ class LocalFileAccess internal constructor(
         true
     }
 
-    private fun isTreeRoot(source: LocalFileSource.Content): Boolean = runCatching {
+    private suspend fun isTreeRoot(source: LocalFileSource.Content): Boolean = try {
         DocumentsContract.getTreeDocumentId(source.uri) == DocumentsContract.getDocumentId(document(source).uri)
-    }.getOrDefault(true)
+    } catch (cancelled: CancellationException) { throw cancelled }
+    catch (_: Exception) { true }
 
     suspend fun copy(from: LocalFileSource, to: LocalFileSource, overwrite: Boolean = false): Long = withContext(Dispatchers.IO) {
         val same = when {
@@ -339,9 +379,9 @@ class LocalFileAccess internal constructor(
             if (from is LocalFileSource.Content && to is LocalFileSource.Content) {
                 val sourceId = DocumentsContract.getDocumentId(documentUri(from.uri))
                 val targetId = DocumentsContract.getDocumentId(documentUri(to.uri))
-                val nested = from.uri.authority == to.uri.authority && (sourceId == targetId || targetId.startsWith("$sourceId/") || runCatching {
-                    DocumentsContract.isChildDocument(androidContext.contentResolver, documentUri(from.uri), documentUri(to.uri))
-                }.getOrDefault(false))
+                // A failed or incomplete opaque-ID traversal must abort before creating
+                // destination entries; treating it as false could copy a directory into itself.
+                val nested = from.uri.authority == to.uri.authority && (sourceId == targetId || targetId.startsWith("$sourceId/") || providerContains(from.uri, to.uri))
                 require(!nested) { "Нельзя копировать папку внутрь себя." }
             }
             walk(from) // Validate the complete source before creating destination entries.
@@ -520,6 +560,42 @@ internal fun contentDocumentIsWithin(parent: String, child: String): Boolean {
     val a = documentIdentity(parent) ?: return false
     val b = documentIdentity(child) ?: return false
     return a.first == b.first && (a.second == b.second || b.second.startsWith("${a.second}/"))
+}
+
+internal data class DocumentChild(val id: String, val isDirectory: Boolean)
+
+internal suspend fun boundedDocumentReachable(
+    rootId: String,
+    targetId: String,
+    maxEntries: Int = LocalFileAccess.MAX_ENTRIES,
+    maxDepth: Int = LocalFileAccess.MAX_DEPTH,
+    children: suspend (String, Int) -> List<DocumentChild>,
+): Boolean {
+    require(rootId.isNotBlank() && targetId.isNotBlank() && maxEntries >= 0 && maxDepth >= 0)
+    currentCoroutineContext().ensureActive()
+    if (rootId == targetId) return true
+    val visited = mutableSetOf(rootId)
+    val pending = ArrayDeque<Pair<String, Int>>()
+    pending.addLast(rootId to 0)
+    var remaining = maxEntries
+    while (pending.isNotEmpty()) {
+        currentCoroutineContext().ensureActive()
+        val (id, depth) = pending.removeFirst()
+        val entries = children(id, remaining)
+        currentCoroutineContext().ensureActive()
+        check(entries.size <= remaining) { "Слишком много документов для подтверждения границ папки SAF." }
+        remaining -= entries.size // Duplicate rows consume budget too.
+        for (entry in entries) {
+            currentCoroutineContext().ensureActive()
+            check(entry.id.isNotBlank() && entry.id.length <= 8192) { "Провайдер SAF вернул некорректный идентификатор." }
+            if (entry.id == targetId) return true
+            if (entry.isDirectory && visited.add(entry.id)) {
+                check(depth < maxDepth) { "Структура SAF слишком глубокая для подтверждения границ папки." }
+                pending.addLast(entry.id to depth + 1)
+            }
+        }
+    }
+    return false // Complete traversal proves that the target is unrelated.
 }
 
 internal class FileCreationCleanupFailedException(val created: LocalFileSource, cause: Exception) :

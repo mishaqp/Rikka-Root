@@ -10,6 +10,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -40,6 +41,7 @@ private val fileToolSettings=listOf(
 @Composable
 internal fun FileLocalToolSettings(assistant: Assistant,onUpdate:(Assistant)->Unit) {
     val context=LocalContext.current; val toaster=LocalToaster.current; val scope=rememberCoroutineScope(); val root=koinInject<RootShellManager>()
+    val resources=LocalResources.current
     val current by rememberUpdatedState(assistant); val update by rememberUpdatedState(onUpdate)
     var pending by rememberSaveable(assistant.id.toString()) { mutableStateOf(false) }
     var showRationale by rememberSaveable(assistant.id.toString()) { mutableStateOf(false) }
@@ -54,7 +56,7 @@ internal fun FileLocalToolSettings(assistant: Assistant,onUpdate:(Assistant)->Un
         pending=false; revision++
         val granted=missingLocalToolPermissions(context,LocalToolOption.Download).isEmpty()
         denied=!granted; setEnabled(LocalToolOption.Download,granted)
-        if(!granted) toaster.show(context.getString(R.string.file_tools_permission_denied),type=ToastType.Warning)
+        if(!granted) toaster.show(resources.getString(R.string.file_tools_permission_denied),type=ToastType.Warning)
     }
     val launcher=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { finishRequest() }
     CardGroup {
@@ -73,9 +75,9 @@ internal fun FileLocalToolSettings(assistant: Assistant,onUpdate:(Assistant)->Un
                                 revision++
                                 val granted=result?.error==null&&result?.exitCode==0&&missingLocalToolPermissions(context,LocalToolOption.Download).isEmpty()
                                 if(granted) denied=false
-                                toaster.show(context.getString(if(granted) R.string.assistant_page_local_tools_root_granted else R.string.assistant_page_local_tools_root_grant_failed),type=if(granted) ToastType.Success else ToastType.Warning)
+                                toaster.show(resources.getString(if(granted) R.string.assistant_page_local_tools_root_granted else R.string.assistant_page_local_tools_root_grant_failed),type=if(granted) ToastType.Success else ToastType.Warning)
                             } catch(cancelled:CancellationException) { throw cancelled }
-                            catch(_:Exception) { toaster.show(context.getString(R.string.assistant_page_local_tools_root_grant_failed),type=ToastType.Warning) }
+                            catch(_:Exception) { toaster.show(resources.getString(R.string.assistant_page_local_tools_root_grant_failed),type=ToastType.Warning) }
                             finally { rootBusy=false }
                         }
                     }) { Text(stringResource(R.string.assistant_page_local_tools_grant_root)) }
