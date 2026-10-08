@@ -193,6 +193,7 @@ fun DefaultToolPreview(
                                 val uri = Uri.parse(part.url)
                                 if (context.tool.toolName == "generate_bug_report" && uri.scheme == "content" &&
                                     uri.authority == "${androidContext.packageName}.fileprovider") {
+                                    val chooserTitle = stringResource(R.string.agent_tools_report_share)
                                     TextButton(onClick = {
                                         val send = Intent(Intent.ACTION_SEND).apply {
                                             type = part.mime
@@ -202,7 +203,7 @@ fun DefaultToolPreview(
                                         }
                                         try {
                                             androidContext.startActivity(Intent.createChooser(send,
-                                                androidContext.getString(R.string.agent_tools_report_share))
+                                                chooserTitle)
                                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION))
                                         } catch (_: android.content.ActivityNotFoundException) {
                                             Toast.makeText(androidContext, R.string.agent_tools_report_share_failed,
