@@ -19,6 +19,8 @@ import io.pebbletemplates.pebble.PebbleEngine
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.retryWhen
 import kotlinx.serialization.SerialName
@@ -270,6 +272,7 @@ class SettingsStore(
 
     private val dataStore = context.settingsStore
     private val mcpSecretStore = McpControlSecretStore(context)
+    private val updateMutex = Mutex()
 
     // 读取失败时绝不能回退为空配置, 否则默认值会被当成用户数据写回, 覆盖全部设置
     // 偶发 IO 错误重试, 仍失败则向上抛出 (文件损坏由 corruptionHandler 处理)
@@ -479,7 +482,11 @@ class SettingsStore(
         .distinctUntilChanged()
         .toMutableStateFlow(scope, Settings.dummy())
 
-    suspend fun update(settings: Settings) {
+    suspend fun update(settings: Settings) = updateMutex.withLock {
+        updateLocked(settings)
+    }
+
+    private suspend fun updateLocked(settings: Settings) {
         if(settings.init) {
             Log.w(TAG, "Cannot update dummy settings")
             return
@@ -489,8 +496,8 @@ class SettingsStore(
         settingsFlow.value = protected
     }
 
-    suspend fun update(fn: (Settings) -> Settings) {
-        update(fn(settingsFlow.value))
+    suspend fun update(fn: (Settings) -> Settings) = updateMutex.withLock {
+        updateLocked(fn(settingsFlow.value))
     }
 
     // 只原子地修改单个 key, 不能用 update() 写回整份快照

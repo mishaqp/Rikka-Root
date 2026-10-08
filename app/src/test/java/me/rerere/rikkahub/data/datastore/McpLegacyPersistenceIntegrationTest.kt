@@ -20,16 +20,21 @@ import java.util.Collections
 import java.util.Date
 import java.util.Enumeration
 import javax.crypto.KeyGenerator
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import me.rerere.rikkahub.data.ai.mcp.McpCommonOptions
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.mcp.McpOAuthState
@@ -152,8 +157,65 @@ class McpLegacyPersistenceIntegrationTest {
         }
     }
 
-    private suspend fun settingsStoreForUpdates(current: Settings): SettingsStore {
+    @Test
+    fun `concurrent functional updates retain both changes when first persistence is suspended`() = runBlocking {
+        val current = Settings(dynamicColor = false, developerMode = false)
+        lateinit var barrier: FirstWriteBarrierStore
+        val settingsStore = settingsStoreForUpdates(current) { delegate ->
+            FirstWriteBarrierStore(delegate).also { barrier = it }
+        }
+        // The first public update has already transformed the snapshot when it reaches
+        // the real persistence boundary. Keep it there while invoking the second update,
+        // as happens when two settings screens or background consumers save together.
+        val first = async(start = CoroutineStart.UNDISPATCHED) {
+            settingsStore.update { it.copy(dynamicColor = true) }
+        }
+        try {
+            withTimeout(5_000) { barrier.firstWriteEntered.await() }
+            val second = async(start = CoroutineStart.UNDISPATCHED) {
+                settingsStore.update { it.copy(developerMode = true) }
+            }
+            barrier.resumeFirstWrite.complete(Unit)
+            withTimeout(5_000) { awaitAll(first, second) }
+
+            val published = settingsStore.settingsFlow.value
+            assertTrue("Concurrent functional update lost the dynamic-color change", published.dynamicColor)
+            assertTrue("Concurrent functional update lost the developer-mode change", published.developerMode)
+            val persisted = barrier.data.first()
+            assertEquals(true, persisted[SettingsStore.DYNAMIC_COLOR])
+            assertEquals(true, persisted[SettingsStore.DEVELOPER_MODE])
+        } finally {
+            barrier.resumeFirstWrite.complete(Unit)
+            first.cancelAndJoin()
+        }
+    }
+
+    /** Pauses I/O only; production SettingsStore still transforms, protects and persists. */
+    private class FirstWriteBarrierStore(private val delegate: DataStore<Preferences>) : DataStore<Preferences> {
+        val firstWriteEntered = CompletableDeferred<Unit>()
+        val resumeFirstWrite = CompletableDeferred<Unit>()
+        private val calls = java.util.concurrent.atomic.AtomicInteger()
+        override val data = delegate.data
+
+        override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
+            if (calls.incrementAndGet() == 1) {
+                firstWriteEntered.complete(Unit)
+                resumeFirstWrite.await()
+            }
+            return delegate.updateData(transform)
+        }
+    }
+
+    private suspend fun settingsStoreForUpdates(
+        current: Settings,
+        decorateDataStore: ((DataStore<Preferences>) -> DataStore<Preferences>)? = null,
+    ): SettingsStore {
         SettingsStore.restoreBeforeInitialization(context, current)
+        if (decorateDataStore != null) {
+            @Suppress("UNCHECKED_CAST")
+            val persisted = singletonField().get(null) as DataStore<Preferences>
+            singletonField().set(null, decorateDataStore(persisted))
+        }
         // An already cancelled scope prevents the constructor's background collector
         // from starting. The real constructor, public update, persistence and vault run;
         // the read model's initial snapshot is controlled without Koin or background UI.
