@@ -17,6 +17,7 @@ object ToolPermissionPolicy {
             tool.toolName != "ask_user"
 
     val registry: Map<String, String> = linkedMapOf(
+        "check_token_usage" to "расход токенов текущего чата",
         "list_files" to "список файлов",
         "read_file" to "чтение файлов",
         "write_binary_file" to "запись двоичных файлов",

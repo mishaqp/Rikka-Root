@@ -20,6 +20,7 @@ import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.workspace.WorkspaceShellStatus
 import me.rerere.rikkahub.root.RootAccessStore
 import me.rerere.rikkahub.data.preferences.ToolApprovalPreferences
+import me.rerere.rikkahub.costguards.TokenBudgetLedger
 
 private const val TAG = "ChatToolFactory"
 
@@ -49,6 +50,7 @@ class ChatToolFactory(
         workspaceCwd: String? = null,
         conversationId: String? = null,
         messages: List<UIMessage> = emptyList(),
+        tokenBudget: TokenBudgetLedger? = null,
     ): List<Tool> = buildList {
         if (assistant.enableMemory) {
             val memoryAssistantId = if (assistant.useGlobalMemory) {
@@ -72,7 +74,8 @@ class ChatToolFactory(
         addAll(localTools.getTools(assistant.localTools, assistant.id.toString(), conversationId,
             workspaceCwd, wallpaperChatImages(messages), workspaceId?.let { id ->
                 { path -> workspaceRepository.resolveRootfsFile(id, path) }
-            }, modelCanReadImages = Modality.IMAGE in model.inputModalities))
+            }, modelCanReadImages = Modality.IMAGE in model.inputModalities,
+            callerAssistant = assistant, tokenBudget = tokenBudget))
         if (assistant.enableRecentChatsReference) {
             addAll(createConversationTools(conversationRepository, assistant.id))
         }

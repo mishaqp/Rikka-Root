@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
@@ -28,6 +29,14 @@ import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.StreamChunk
+import me.rerere.rikkahub.costguards.TokenBudgetContext
+import me.rerere.rikkahub.costguards.TokenBudgetLedger
+import me.rerere.rikkahub.costguards.TokenBudgetTracker
+import me.rerere.rikkahub.costguards.TokenBudgetPersistenceException
+import me.rerere.rikkahub.costguards.TokenBudgetExceededException
+import me.rerere.rikkahub.costguards.boundedCustomBodies
+import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.StreamChunkHandler
@@ -105,10 +114,19 @@ class GenerationLoop(
         onWebContentRead: suspend () -> Unit = {},
         onAutoCompress: suspend (List<UIMessage>) -> List<UIMessage>? = { null },
         isToolAutoApproved: suspend (toolName: String, input: JsonElement) -> Boolean = { _, _ -> false },
+        tokenBudget: TokenBudgetLedger? = null,
+        beforeModelRequest: suspend () -> Unit = {},
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
 
+        val inheritedBudget = currentCoroutineContext()[TokenBudgetContext]?.ledger
+        val budget = tokenBudget ?: inheritedBudget
+            ?: if (assistant.localTools.contains(LocalToolOption.CostGuards)) TokenBudgetLedger(
+                enabled = true, softCap = assistant.tokenBudgetSoftCap,
+                hardCap = assistant.tokenBudgetHardCap, initialMessages = messages,
+            ) else null
+        budget?.ensureCanContinue()
         var messages: List<UIMessage> = messages
         if (WebContentGuard.hasWebContent(messages)) onWebContentRead()
 
@@ -120,6 +138,7 @@ class GenerationLoop(
         }
 
         for (stepIndex in 0 until maxSteps) {
+            budget?.ensureCanContinue()
             Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
 
             // Check if we have tool calls ready to continue after user interaction.
@@ -136,7 +155,12 @@ class GenerationLoop(
                 if (AutoContextCompression.plan(messages, assistant) != null) {
                     // Flush buffered tool results before the service inserts a stored checkpoint.
                     awaitRootCheckpoint { ack -> emit(GenerationChunk.RootExecutionCheckpoint(messages, ack)) }
-                    onAutoCompress(messages)?.let { messages = it }
+                    val compressed = if (budget != null) withContext(TokenBudgetContext(budget)) {
+                        budget.ensureCanContinue()
+                        onAutoCompress(messages)
+                    } else onAutoCompress(messages)
+                    compressed?.let { messages = it }
+                    budget?.ensureCanContinue()
                 }
                 generateInternal(
                     assistant = assistant,
@@ -174,6 +198,8 @@ class GenerationLoop(
                     conversationSystemPrompt = conversationSystemPrompt,
                     conversationId = conversationId,
                     workspaceCwd = workspaceCwd,
+                    tokenBudget = budget,
+                    beforeModelRequest = beforeModelRequest,
                 )
                 messages = messages.visualTransforms(
                     transformers = outputTransformers,
@@ -254,6 +280,7 @@ class GenerationLoop(
             // Handle tools (execute approved tools, handle denied tools)
             val executedTools = arrayListOf<UIMessagePart.Tool>()
             toolsToProcess.forEach { tool ->
+                budget?.ensureCanContinue()
                 when (tool.approvalState) {
                     is ToolApprovalState.Denied -> {
                         // Tool was denied by user
@@ -315,9 +342,18 @@ class GenerationLoop(
                                 }
                                 messages = checkpoint
                             }
+                            suspend fun executeWithBudget(): List<UIMessagePart> {
+                                budget?.ensureCanContinue()
+                                return if (budget == null) toolDef.execute(args) else
+                                    withContext(TokenBudgetContext(budget)) {
+                                        budget.ensureCanContinue()
+                                        toolDef.execute(args)
+                                    }
+                            }
+                            budget?.ensureCanContinue()
                             val result = if (tool.toolName == "root_exec") {
                                 executeRootToolOnce(tool, persistStarted = ::persistStarted,
-                                    automaticAllowed = { !needsApproval(tool, toolDef) }) { toolDef.execute(args) }
+                                    automaticAllowed = { !needsApproval(tool, toolDef) }) { executeWithBudget() }
                             } else {
                                 persistStarted(tool.copy(output = listOf(UIMessagePart.Text(buildJsonObject {
                                     put("error", "tool_execution_indeterminate")
@@ -327,7 +363,7 @@ class GenerationLoop(
                                 check(tool.approvalState == ToolApprovalState.Approved || !needsApproval(tool, toolDef)) {
                                     "Automatic permission revoked before launch"
                                 }
-                                toolDef.execute(args)
+                                executeWithBudget()
                             }
                             // Apply the guard before the next sibling, not after the entire batch.
                             if (WebContentGuard.isClientReader(tool.toolName)) onWebContentRead()
@@ -338,7 +374,7 @@ class GenerationLoop(
                             )
                         }.onFailure {
                             // 取消必须向上传播，否则停止生成会被误报为工具执行错误
-                            if (it is CancellationException) throw it
+                            if (it is CancellationException || it is TokenBudgetExceededException || it is TokenBudgetPersistenceException) throw it
                             // Root input may contain credentials; neither exception details nor arguments belong in logs.
                             if (tool.toolName != "root_exec") it.printStackTrace()
                             executedTools += tool.copy(
@@ -414,6 +450,8 @@ class GenerationLoop(
         conversationSystemPrompt: String? = null,
         conversationId: Uuid? = null,
         workspaceCwd: String? = null,
+        tokenBudget: TokenBudgetLedger? = null,
+        beforeModelRequest: suspend () -> Unit = {},
     ) {
         val internalMessages = buildList {
             val system = buildString {
@@ -471,6 +509,20 @@ class GenerationLoop(
             },
             sessionId = (conversationId ?: Uuid.random()).toString(),
         )
+        // Approximate transformed text/tool prompt, not a provider tokenizer or image bill.
+        // Actual late usage is authoritative; reservations serialize competing child requests.
+        val estimatedInput = internalMessages.fold(0L) { count, message ->
+            TokenBudgetTracker.saturatedAdd(count, message.toText().toByteArray().size.toLong() / 3 + 16)
+        }.let { textTokens -> tools.fold(textTokens) { count, tool ->
+            TokenBudgetTracker.saturatedAdd(count,
+                (tool.name.length.toLong() + tool.description.length + tool.parameters().toString().length) / 3 + 16)
+        } }
+        fun requestParams(reservation: TokenBudgetLedger.Reservation?): TextGenerationParams {
+            if (reservation == null) return params
+            val bounded = params.copy(maxTokens = reservation.maxTokens)
+            return if (tokenBudget?.enabled == true && tokenBudget.hardCap != null) bounded.copy(
+                customBody = boundedCustomBodies(bounded.customBody, reservation.maxTokens)) else bounded
+        }
         try {
             if (stream) {
                 // 每次重试都从本次模型调用开始前的消息快照重新合并，避免将重试响应
@@ -491,18 +543,27 @@ class GenerationLoop(
                 while (true) {
                     val streamChunkHandler = StreamChunkHandler(model)
                     var attemptMessages = responseBaseMessages
+                    val reservation = tokenBudget?.reserve(estimatedInput, params.maxTokens)
                     try {
+                        currentCoroutineContext().ensureActive()
+                        tokenBudget?.ensureCanContinue()
+                        beforeModelRequest()
+                        currentCoroutineContext().ensureActive()
+                        tokenBudget?.ensureCanContinue()
+                        reservation?.markSubmitted()
                         providerImpl.streamText(
                             providerSetting = provider,
                             messages = internalMessages,
-                            params = params
+                            params = requestParams(reservation)
                         ).collect { chunk ->
                             try {
                                 if (retryCount > 0) {
                                     processingStatus.value = null
                                 }
+                                if (chunk is StreamChunk.Usage) reservation?.observe(chunk.usage)
                                 attemptMessages = streamChunkHandler.handle(attemptMessages, chunk)
                                 onUpdateMessages(attemptMessages)
+                                tokenBudget?.ensureCanContinue()
                             } catch (error: CancellationException) {
                                 throw error
                             } catch (error: Throwable) {
@@ -510,18 +571,29 @@ class GenerationLoop(
                                 throw StreamChunkHandlingException(error)
                             }
                         }
+                        reservation?.markCompleted()
                         messages = attemptMessages
                         break
                     } catch (error: Throwable) {
-                        if (error is StreamChunkHandlingException) {
-                            throw error.cause ?: error
+                        // Charge a launched request lacking usage before deciding whether a retry fits.
+                        val primary = try {
+                            currentCoroutineContext().ensureActive()
+                            error
+                        } catch (cancelled: CancellationException) { cancelled }
+                        val cleanupSucceeded = reservation?.closePreserving(primary) ?: true
+                        if (primary is CancellationException || !cleanupSucceeded) throw primary
+                        tokenBudget?.ensureCanContinue()
+                        if (primary is StreamChunkHandlingException) {
+                            throw primary.cause ?: primary
                         }
                         retryCount = awaitNetworkRetryOrThrow(
-                            error = error,
+                            error = primary,
                             retryCount = retryCount,
                             processingStatus = processingStatus,
                             enabled = settings.networkSetting.enableAutoRetry,
                         )
+                    } finally {
+                        reservation?.close()
                     }
                 }
             } else {
@@ -529,14 +601,38 @@ class GenerationLoop(
                     processingStatus = processingStatus,
                     enabled = settings.networkSetting.enableAutoRetry,
                 ) {
-                    providerImpl.generateText(
-                        providerSetting = provider,
-                        messages = internalMessages,
-                        params = params,
-                    )
+                    val reservation = tokenBudget?.reserve(estimatedInput, params.maxTokens)
+                    try {
+                        currentCoroutineContext().ensureActive()
+                        tokenBudget?.ensureCanContinue()
+                        beforeModelRequest()
+                        currentCoroutineContext().ensureActive()
+                        tokenBudget?.ensureCanContinue()
+                        reservation?.markSubmitted()
+                        providerImpl.generateText(
+                            providerSetting = provider,
+                            messages = internalMessages,
+                            params = requestParams(reservation),
+                        ).also {
+                            reservation?.observe(it.usage)
+                            reservation?.markCompleted()
+                        }
+                    } catch (error: Throwable) {
+                        val primary = try {
+                            currentCoroutineContext().ensureActive()
+                            error
+                        } catch (cancelled: CancellationException) { cancelled }
+                        val cleanupSucceeded = reservation?.closePreserving(primary) ?: true
+                        if (primary is CancellationException || !cleanupSucceeded) throw primary
+                        tokenBudget?.ensureCanContinue()
+                        throw primary
+                    } finally {
+                        reservation?.close()
+                    }
                 }
                 messages = messages.handleTextGenerationResult(result = result, model = model)
                 onUpdateMessages(messages)
+                tokenBudget?.ensureCanContinue()
             }
         } finally {
             processingStatus.value = null
@@ -569,10 +665,11 @@ class GenerationLoop(
         processingStatus: MutableStateFlow<String?>,
         enabled: Boolean,
     ): Int {
+        if (error is CancellationException) throw error
         // 用户主动停止生成时，底层连接也可能以 IOException("canceled") 收尾；
         // 先检查协程状态，确保取消不会被当作网络波动重新拉起。
         currentCoroutineContext().ensureActive()
-        if (!enabled || error !is IOException || retryCount >= MAX_PROVIDER_NETWORK_RETRIES) {
+        if (!enabled || error is TokenBudgetPersistenceException || error !is IOException || retryCount >= MAX_PROVIDER_NETWORK_RETRIES) {
             throw error
         }
 

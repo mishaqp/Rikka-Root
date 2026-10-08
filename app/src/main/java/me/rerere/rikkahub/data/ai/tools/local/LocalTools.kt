@@ -9,6 +9,12 @@ import me.rerere.rikkahub.root.RootShellManager
 import me.rerere.rikkahub.root.RootAccessStore
 import me.rerere.tts.provider.TTSManager
 import java.io.File
+import me.rerere.rikkahub.costguards.TokenBudgetLedger
+import me.rerere.rikkahub.costguards.checkTokenUsageTool
+import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.repository.ConversationRepository
+import org.koin.core.context.GlobalContext.get
+import kotlin.uuid.Uuid
 
 /** The file-backed tool dispatcher shares one scoped resolver for the selected workspace. */
 internal fun scopedFileTools(
@@ -63,8 +69,20 @@ class LocalTools(
         workspaceCwd: String? = null, chatImages: List<String> = emptyList(),
         resolveWorkspacePath: (suspend (String) -> File)? = null,
         modelCanReadImages: Boolean = false,
+        callerAssistant: Assistant? = null,
+        tokenBudget: TokenBudgetLedger? = null,
     ): List<Tool> {
         val tools = mutableListOf<Tool>()
+        if (LocalToolOption.CostGuards in options) {
+            val caller = callerAssistant ?: Assistant(
+                id = assistantId?.let { runCatching { Uuid.parse(it) }.getOrNull() } ?: Uuid.random(),
+                localTools = options,
+            )
+            tools.add(checkTokenUsageTool(callerAssistant = caller,
+                conversationId = conversationId?.let { runCatching { Uuid.parse(it) }.getOrNull() },
+                tokenBudget = tokenBudget,
+                loadConversation = { id -> get().get<ConversationRepository>().getConversationById(id) }))
+        }
         tools.addAll(scopedFileTools(context, options, workspaceCwd, chatImages, resolveWorkspacePath, modelCanReadImages))
         if (LocalToolOption.ExternalStorage in options) tools.addAll(listOf(listStorageVolumesTool(context), listGrantedDirectoriesTool(context), grantDirectoryAccessTool(context)))
         if (LocalToolOption.SystemIntents in options) tools.addAll(systemIntentTools(context))

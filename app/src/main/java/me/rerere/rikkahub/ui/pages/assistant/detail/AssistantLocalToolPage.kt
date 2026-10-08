@@ -293,5 +293,6 @@ private fun AssistantLocalToolContent(
         HardwareLocalToolSettings(assistant, onUpdate)
         PersonalLocalToolSettings(assistant, onUpdate)
         FileLocalToolSettings(assistant, onUpdate)
+        AgentLocalToolSettings(assistant, onUpdate)
     }
 }

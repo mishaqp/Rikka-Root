@@ -33,7 +33,14 @@ import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderManager
+import me.rerere.ai.provider.Provider
+import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.TextGenerationResult
+import me.rerere.rikkahub.costguards.TokenBudgetContext
+import me.rerere.rikkahub.costguards.TokenBudgetLedger
+import me.rerere.rikkahub.costguards.TokenBudgetStore
+import me.rerere.rikkahub.costguards.boundedCustomBodies
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
@@ -103,6 +110,34 @@ import java.util.Locale
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatService"
+
+internal suspend fun generateBackgroundWithBudget(
+    provider: Provider<ProviderSetting>,
+    providerSetting: ProviderSetting,
+    messages: List<UIMessage>,
+    params: TextGenerationParams,
+    budget: TokenBudgetLedger,
+): TextGenerationResult {
+    val reservation = budget.reserve(AutoContextCompression.estimateTokens(messages), params.maxTokens)
+    var failure: Throwable? = null
+    try {
+        currentCoroutineContext().ensureActive()
+        budget.ensureCanContinue()
+        reservation.markSubmitted()
+        val bounded = params.copy(maxTokens = reservation.maxTokens,
+            customBody = if (budget.enabled && budget.hardCap != null)
+                boundedCustomBodies(params.customBody, reservation.maxTokens) else params.customBody)
+        return provider.generateText(providerSetting, messages, bounded).also {
+            reservation.observe(it.usage)
+            reservation.markCompleted()
+        }
+    } catch (error: Throwable) {
+        failure = error
+        throw error
+    } finally {
+        reservation.closePreserving(failure)
+    }
+}
 
 internal fun backgroundTextGenerationParams(
     model: Model,
@@ -261,6 +296,7 @@ class ChatService(
     private val workspaceRepository: WorkspaceRepository,
     private val folderRepository: FolderRepository,
     private val toolApprovalPreferences: ToolApprovalPreferences,
+    private val tokenBudgetStore: TokenBudgetStore,
 ) {
     // workspace 系统提示注入 (依赖 workspaceRepository, 故在类内构造)
     private val workspaceReminderTransformer = WorkspaceReminderTransformer(workspaceRepository)
@@ -746,6 +782,12 @@ class ChatService(
         val initialConversation = getConversationFlow(conversationId).value
         // 模型、思考级别、搜索、工具等以会话上固定的配置为准
         val assistant = settings.getAssistantOf(initialConversation)
+        val generationBudget = try {
+            tokenBudgetStore.getLedger(assistant, conversationId, initialConversation.currentMessages)
+        } catch (error: java.io.IOException) {
+            addError(error, conversationId, title = context.getString(R.string.error_title_generation))
+            return
+        }
         val model = settings.getChatModelOf(initialConversation)
             ?: throw IllegalStateException("No chat model selected")
 
@@ -793,6 +835,7 @@ class ChatService(
                     workspaceCwd = conversation.workspaceCwd,
                     conversationId = conversationId.toString(),
                     messages = requestMessages(conversation),
+                    tokenBudget = generationBudget,
                 )
             } catch (error: InvalidMcpServerNamesException) {
                 sessionManager.get(conversationId)?.messageQueue?.pause()
@@ -820,6 +863,7 @@ class ChatService(
                 conversationId = conversationId,
                 conversationSystemPrompt = conversation.customSystemPrompt,
                 workspaceCwd = conversation.workspaceCwd,
+                tokenBudget = generationBudget,
                 memories = if (assistant.useGlobalMemory) {
                     memoryRepository.getGlobalMemories()
                 } else {
@@ -918,10 +962,10 @@ class ChatService(
             val finalConversation = getConversationFlow(conversationId).value
 
             sessionManager.launchWithSession(conversationId) {
-                generateTitle(conversationId, finalConversation)
+                withContext(TokenBudgetContext(generationBudget)) { generateTitle(conversationId, finalConversation) }
             }
             sessionManager.launchWithSession(conversationId) {
-                generateSuggestion(conversationId, finalConversation)
+                withContext(TokenBudgetContext(generationBudget)) { generateSuggestion(conversationId, finalConversation) }
             }
         }
     }
@@ -984,7 +1028,10 @@ class ChatService(
                 ?: throw IllegalStateException(context.getString(R.string.error_fast_model_provider_not_found))
 
             val providerHandler = providerManager.getProviderByType(provider)
-            val result = providerHandler.generateText(
+            val result = generateBackgroundWithBudget(
+                provider = providerHandler,
+                budget = currentCoroutineContext()[TokenBudgetContext]?.ledger
+                    ?: tokenBudgetStore.getLedger(settings.getAssistantOf(conversation), conversationId, conversation.currentMessages),
                 providerSetting = provider,
                 messages = listOf(
                     UIMessage.user(
@@ -1036,7 +1083,10 @@ class ChatService(
             }
 
             val providerHandler = providerManager.getProviderByType(provider)
-            val result = providerHandler.generateText(
+            val result = generateBackgroundWithBudget(
+                provider = providerHandler,
+                budget = currentCoroutineContext()[TokenBudgetContext]?.ledger
+                    ?: tokenBudgetStore.getLedger(settings.getAssistantOf(conversation), conversationId, conversation.currentMessages),
                 providerSetting = provider,
                 messages = listOf(
                     UIMessage.user(
@@ -1142,7 +1192,10 @@ class ChatService(
                 "locale" to Locale.getDefault().displayName
             )
 
-            val result = providerHandler.generateText(
+            val result = generateBackgroundWithBudget(
+                provider = providerHandler,
+                budget = currentCoroutineContext()[TokenBudgetContext]?.ledger
+                    ?: tokenBudgetStore.getLedger(settings.getAssistantOf(conversation), conversationId, conversation.currentMessages),
                 providerSetting = provider,
                 messages = listOf(UIMessage.user(prompt)),
                 params = backgroundTextGenerationParams(model, conversationId).let {

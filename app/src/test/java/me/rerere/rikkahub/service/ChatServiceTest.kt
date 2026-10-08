@@ -1,6 +1,23 @@
 package me.rerere.rikkahub.service
 
+import java.io.IOException
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import me.rerere.ai.core.TokenUsage
+import me.rerere.ai.provider.Provider
+import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.TextGenerationResult
+import me.rerere.ai.ui.StreamChunk
+import me.rerere.rikkahub.costguards.TokenBudgetExceededException
+import me.rerere.rikkahub.costguards.TokenBudgetLedger
+import me.rerere.rikkahub.data.ai.AutoContextCompression
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.CustomBody
@@ -20,6 +37,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 import kotlin.uuid.Uuid
 
@@ -182,5 +200,148 @@ class ChatServiceTest {
         val model = Model(tools = setOf(BuiltInTools.UrlContext))
 
         assertTrue(shouldUseExternalWebSearch(assistant, model))
+    }
+}
+
+/** Exercises the background SDK request boundary without constructing Android ChatService. */
+class BudgetedBackgroundGenerationTest {
+    private val setting: ProviderSetting = ProviderSetting.OpenAI()
+    private val model = Model(modelId = "background-test")
+
+    @Test fun `cancellation survives a failed cleanup write and later requests stay blocked`() = runBlocking {
+        var writes = 0
+        val budget = TokenBudgetLedger(enabled = true, hardCap = 100,
+            durableCallback = { _, _ -> if (++writes > 1) throw IOException("Cleanup write failed") })
+        val cancelled = kotlinx.coroutines.CancellationException("Request cancelled")
+        val provider = RecordingProvider { _, _ -> throw cancelled }
+        try {
+            generateBackgroundWithBudget(provider, setting, listOf(UIMessage.user("title")),
+                TextGenerationParams(model = model, maxTokens = 20), budget)
+            fail("Cancellation was swallowed")
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            assertTrue(error === cancelled)
+            assertTrue(error.suppressed.any { it is me.rerere.rikkahub.costguards.TokenBudgetPersistenceException })
+        }
+        try {
+            generateBackgroundWithBudget(provider, setting, listOf(UIMessage.user("title")),
+                TextGenerationParams(model = model), budget)
+            fail("A failed durable write allowed another request")
+        } catch (_: me.rerere.rikkahub.costguards.TokenBudgetPersistenceException) { }
+        assertEquals(1, provider.requests.size)
+    }
+
+    @Test fun `disabled cost controls never write or block background requests`() = runBlocking {
+        var writes = 0
+        val budget = TokenBudgetLedger(enabled = false, hardCap = 1,
+            durableCallback = { _, _ -> writes++; throw IOException("Unavailable budget storage") })
+        val provider = RecordingProvider { _, _ ->
+            TextGenerationResult("uncontrolled", "background-test", UIMessage.assistant("title"), usage = TokenUsage(5, 5))
+        }
+        val params = TextGenerationParams(model = model, maxTokens = 50,
+            customBody = listOf(CustomBody("max_tokens", JsonPrimitive(80))))
+        assertEquals("title", generateBackgroundWithBudget(provider, setting,
+            listOf(UIMessage.user("title")), params, budget).message.toText())
+        assertEquals(0, writes)
+        assertEquals(params, provider.requests.single().second)
+    }
+
+    private class RecordingProvider(
+        private val response: suspend (List<UIMessage>, TextGenerationParams) -> TextGenerationResult,
+    ) : Provider<ProviderSetting> {
+        val requests = mutableListOf<Pair<List<UIMessage>, TextGenerationParams>>()
+        override suspend fun listModels(providerSetting: ProviderSetting): List<Model> = emptyList()
+        override suspend fun streamText(providerSetting: ProviderSetting, messages: List<UIMessage>,
+            params: TextGenerationParams): Flow<StreamChunk> = error("Background requests must not stream")
+        override suspend fun generateText(providerSetting: ProviderSetting, messages: List<UIMessage>,
+            params: TextGenerationParams): TextGenerationResult {
+            requests.add(messages to params)
+            return response(messages, params)
+        }
+    }
+
+    @Test fun `title compression and suggestion requests share usage and cap request overrides`() = runBlocking {
+        val budget = TokenBudgetLedger(enabled = true, hardCap = 300)
+        val provider = RecordingProvider { messages, _ ->
+            TextGenerationResult(id = "response", model = "background-test", message = UIMessage.assistant("generated"),
+                usage = TokenUsage(promptTokens = AutoContextCompression.estimateTokens(messages).toInt(), completionTokens = 10))
+        }
+        val params = TextGenerationParams(model = model, maxTokens = 9999, customBody = listOf(
+            CustomBody("max_tokens", JsonPrimitive(99999)),
+            CustomBody("max_completion_tokens", JsonPrimitive(99999)),
+            CustomBody("generationConfig", buildJsonObject { put("maxOutputTokens", 99999) }),
+            CustomBody("gateway_mode", JsonPrimitive("strict")),
+        ))
+        var expectedSpent = 0L
+        val prompts = listOf("Suggest a short conversation title", "Compress the old messages into a reusable summary", "Suggest three follow-up questions")
+        for (prompt in prompts) {
+            val messages = listOf(UIMessage.user(prompt))
+            val estimate = AutoContextCompression.estimateTokens(messages)
+            val expectedMax = (300L - expectedSpent - estimate).toInt()
+            val result = generateBackgroundWithBudget(provider, setting, messages, params, budget)
+            assertEquals("generated", result.message.toText())
+            val sent = provider.requests.last()
+            assertEquals(messages, sent.first)
+            assertEquals(expectedMax, sent.second.maxTokens)
+            val overrides = sent.second.customBody.associate { it.key to it.value }
+            assertEquals(expectedMax, overrides.getValue("max_tokens").jsonPrimitive.int)
+            assertEquals(expectedMax, overrides.getValue("max_completion_tokens").jsonPrimitive.int)
+            assertEquals(expectedMax, overrides.getValue("generationConfig").jsonObject.getValue("maxOutputTokens").jsonPrimitive.int)
+            assertEquals(JsonPrimitive("strict"), overrides.getValue("gateway_mode"))
+            expectedSpent += estimate + 10L
+            assertEquals(expectedSpent, budget.snapshot().spentTokens)
+            assertEquals(0L, budget.snapshot().reservedTokens)
+        }
+        assertEquals(3, provider.requests.size)
+        assertEquals(300L - expectedSpent, budget.snapshot().remainingTokens)
+        // The shared params/model configuration must remain reusable and unmodified.
+        assertEquals(9999, params.maxTokens)
+        assertEquals(JsonPrimitive(99999), params.customBody.first().value)
+    }
+
+    @Test fun `exhausted history and unaffordable input stop before the provider`() = runBlocking {
+        for (spent in listOf(100, 90)) {
+            val budget = TokenBudgetLedger(enabled = true, hardCap = 100,
+                initialMessages = listOf(UIMessage.assistant("history").copy(usage = TokenUsage(promptTokens = spent))))
+            val provider = RecordingProvider { _, _ ->
+                TextGenerationResult("unexpected", "background-test", UIMessage.assistant("unexpected"), usage = TokenUsage(1, 1))
+            }
+            try {
+                generateBackgroundWithBudget(provider, setting, listOf(UIMessage.user("next title")),
+                    TextGenerationParams(model = model), budget)
+                fail("A background request crossed the hard budget")
+            } catch (_: TokenBudgetExceededException) { }
+            assertTrue(provider.requests.isEmpty())
+            assertEquals(spent.toLong(), budget.snapshot().spentTokens)
+            assertEquals(0L, budget.snapshot().reservedTokens)
+        }
+    }
+
+    @Test fun `failed and unmetered paid requests consume reservation and block hidden retries`() = runBlocking {
+        val messages = listOf(UIMessage.user("background compression"))
+        val cap = AutoContextCompression.estimateTokens(messages).toInt() + 20
+        for (failRequest in listOf(true, false)) {
+            val budget = TokenBudgetLedger(enabled = true, hardCap = cap)
+            val provider = RecordingProvider { _, _ ->
+                if (failRequest) throw IOException("Provider request failed after submission")
+                TextGenerationResult("unmetered", "background-test", UIMessage.assistant("summary"), usage = null)
+            }
+            val params = TextGenerationParams(model = model, maxTokens = 20)
+            if (failRequest) {
+                try {
+                    generateBackgroundWithBudget(provider, setting, messages, params, budget)
+                    fail("The provider failure was swallowed")
+                } catch (_: IOException) { }
+            } else {
+                assertEquals("summary", generateBackgroundWithBudget(provider, setting, messages, params, budget).message.toText())
+            }
+            assertEquals(cap.toLong(), budget.snapshot().spentTokens)
+            assertEquals(0L, budget.snapshot().reservedTokens)
+            assertEquals(0L, budget.snapshot().remainingTokens)
+            try {
+                generateBackgroundWithBudget(provider, setting, messages, params, budget)
+                fail("Retry evaded the shared background budget")
+            } catch (_: TokenBudgetExceededException) { }
+            assertEquals(1, provider.requests.size)
+        }
     }
 }

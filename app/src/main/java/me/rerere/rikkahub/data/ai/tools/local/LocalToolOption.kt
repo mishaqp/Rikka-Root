@@ -105,4 +105,7 @@ sealed class LocalToolOption {
 
     @Serializable @SerialName("nfc")
     data object Nfc : LocalToolOption()
+
+    @Serializable @SerialName("cost_guards")
+    data object CostGuards : LocalToolOption()
 }

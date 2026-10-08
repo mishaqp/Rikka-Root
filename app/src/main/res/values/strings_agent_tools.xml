@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string translatable="false" name="agent_tools_cost_title">Расход и лимиты токенов</string>
+    <string translatable="false" name="agent_tools_cost_desc">Показывает расход текущего чата, ограничивает новые запросы и продолжение работы. Субагенты используют общий бюджет родителя.</string>
+    <string translatable="false" name="agent_tools_soft_cap">Порог предупреждения, токенов</string>
+    <string translatable="false" name="agent_tools_hard_cap">Предел остановки, токенов</string>
+    <string translatable="false" name="agent_tools_caps_note">Пустое поле — без лимита. Учитываются доступные метрики; при их отсутствии оценка консервативная. Провайдер может сообщить расход после ответа, поэтому один уже отправленный запрос способен превысить предел.</string>
+</resources>

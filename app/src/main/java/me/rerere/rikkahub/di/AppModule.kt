@@ -2,6 +2,8 @@ package me.rerere.rikkahub.di
 
 import kotlinx.serialization.json.Json
 import me.rerere.rikkahub.AppScope
+import me.rerere.rikkahub.costguards.TokenBudgetStore
+import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.ai.tools.ChatToolFactory
 import me.rerere.rikkahub.data.event.AppEventBus
@@ -31,6 +33,11 @@ val appModule = module {
     single { RootShellManager(controlDirectory = get<android.content.Context>().cacheDir) }
     single { RootAccessStore(java.io.File(get<android.content.Context>().noBackupFilesDir, "root-control")) }
     single { ToolApprovalPreferences(get(), get()) }
+    single {
+        val settings = get<SettingsStore>()
+        TokenBudgetStore(java.io.File(get<android.content.Context>().noBackupFilesDir, "token-budgets"),
+            assistantSource = { id -> settings.settingsFlow.value.assistants.singleOrNull { it.id == id } })
+    }
 
     single {
         LocalTools(get(), get(), get(), get(), get(), get(), get())
@@ -106,6 +113,7 @@ val appModule = module {
             workspaceRepository = get(),
             folderRepository = get(),
             toolApprovalPreferences = get(),
+            tokenBudgetStore = get(),
         )
     }
 
