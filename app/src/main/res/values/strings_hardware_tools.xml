@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Fork UI is intentionally Russian, matching strings_root.xml. -->
+  <string translatable="false" name="assistant_page_local_tools_torch_title">Фонарик</string>
+  <string translatable="false" name="assistant_page_local_tools_torch_desc">Включает и выключает вспышку после одобрения. При включении функции запрашивается доступ к камере; фото не снимаются.</string>
+  <string translatable="false" name="assistant_page_local_tools_vibrate_title">Вибрация</string>
+  <string translatable="false" name="assistant_page_local_tools_vibrate_desc">Короткая вибрация или шаблон до 5 секунд. Каждый вызов требует одобрения.</string>
+  <string translatable="false" name="assistant_page_local_tools_brightness_title">Яркость</string>
+  <string translatable="false" name="assistant_page_local_tools_brightness_desc">Чтение и изменение системной яркости после одобрения. Для изменения нужен доступ «Изменение системных настроек»; установка яркости отключает авторегулировку.</string>
+  <string translatable="false" name="assistant_page_local_tools_volume_title">Громкость</string>
+  <string translatable="false" name="assistant_page_local_tools_volume_desc">Чтение и изменение громкости после одобрения. Звонок, уведомления и системный звук требуют доступа к «Не беспокоить»: Android защищает переход в беззвучный режим, а системный звук на телефонах связан со звонком. Медиа, будильник и разговор доступны без этого доступа.</string>
+  <string translatable="false" name="assistant_page_local_tools_wallpaper_title">Обои</string>
+  <string translatable="false" name="assistant_page_local_tools_wallpaper_desc">Меняет обои рабочего стола, экрана блокировки или обоих экранов из локального file:// изображения до 16 МиБ. Требует одобрения.</string>
+  <string translatable="false" name="assistant_page_local_tools_nfc_title">NFC-метки</string>
+  <string translatable="false" name="assistant_page_local_tools_nfc_desc">Чтение и запись NDEF после одобрения. Откроется экран ожидания: приложите метку к телефону. Запись заменяет содержимое метки; отмена закрывает сеанс.</string>
+  <string translatable="false" name="hardware_tools_unavailable">На устройстве нет оборудования для этой функции.</string>
+  <string translatable="false" name="hardware_tools_open_settings">Открыть настройки Android</string>
+  <string translatable="false" name="hardware_tools_open_nfc">Открыть настройки NFC</string>
+  <string translatable="false" name="hardware_tools_dnd_request">Разрешить звонок, уведомления и системный звук</string>
+  <string translatable="false" name="hardware_tools_without_dnd">Включить медиа, будильник и разговор</string>
+  <string translatable="false" name="hardware_tools_dnd_denied">Доступ к «Не беспокоить» не выдан. Для звонка, уведомлений и системного звука он нужен; медиа, будильник и разговор можно включить отдельной кнопкой в диалоге.</string>
+  <string translatable="false" name="hardware_tools_permission_denied">«%1$s»: доступ не выдан. Разрешите его при включении функции или в настройках Android. Действие без доступа вернёт понятную ошибку.</string>
+  <string translatable="false" name="hardware_tools_dnd_granted">Доступ к «Не беспокоить» выдан. Доступны звонок, уведомления и системный звук.</string>
+  <string translatable="false" name="nfc_tool_read_title">Чтение NFC-метки</string>
+  <string translatable="false" name="nfc_tool_write_title">Запись NFC-метки</string>
+  <string translatable="false" name="nfc_tool_read_prompt">Приложите метку к NFC-антенне телефона и удерживайте её до завершения чтения.</string>
+  <string translatable="false" name="nfc_tool_write_prompt">Приложите записываемую метку к NFC-антенне телефона и удерживайте её до завершения. Запись заменит содержимое метки.</string>
+  <string translatable="false" name="nfc_tool_timeout">Сеанс завершится автоматически через %1$d с. Можно отменить кнопкой или вернуться назад.</string>
+  <string translatable="false" name="nfc_tool_unavailable">NFC недоступен или выключен. Проверьте настройки Android.</string>
+  <string translatable="false" name="nfc_tool_tag_lost">Метку убрали слишком рано. Приложите её снова и удерживайте до завершения.</string>
+  <string translatable="false" name="nfc_tool_io_error">Не удалось прочитать или записать метку. Проверьте её совместимость и удерживайте у NFC-антенны.</string>
+  <string translatable="false" name="nfc_tool_failed">Android отклонил операцию NFC или данные метки некорректны.</string>
+  <string translatable="false" name="nfc_tool_read_only">Метка доступна только для чтения. Запись не выполнена.</string>
+  <string translatable="false" name="nfc_tool_too_small">На метке недостаточно места для этих записей. Запись не выполнена.</string>
+  <string translatable="false" name="nfc_tool_not_ndef">Метка не поддерживает NDEF и не может быть подготовлена для записи.</string>
+</resources>

@@ -47,8 +47,10 @@ fun telephonyInfoTool(context: Context): Tool = Tool(
         buildJsonObject {
             put("has_sim", tm.simState == TelephonyManager.SIM_STATE_READY)
             put("sim_operator", tm.simOperator.orEmpty())
+            put("sim_operator_name", runCatching { tm.simOperatorName.orEmpty() }.getOrDefault(""))
             put("sim_country", tm.simCountryIso.orEmpty())
             put("network_operator", tm.networkOperator.orEmpty())
+            put("network_operator_name", runCatching { tm.networkOperatorName.orEmpty() }.getOrDefault(""))
             put("network_country", tm.networkCountryIso.orEmpty())
             put("network_type", networkTypeName(tm.dataNetworkType))
             put("phone_type", when (tm.phoneType) { 0 -> "none"; 1 -> "gsm"; 2 -> "cdma"; 3 -> "sip"; else -> "unknown" })

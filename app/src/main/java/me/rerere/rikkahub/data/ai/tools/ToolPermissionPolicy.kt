@@ -30,6 +30,15 @@ object ToolPermissionPolicy {
         "show_toast" to "всплывающие сообщения",
         "post_notification" to "публикация уведомлений",
         "share" to "открытие системного меню отправки",
+        "set_torch" to "управление фонариком",
+        "vibrate" to "вибрация устройства",
+        "get_brightness" to "чтение яркости экрана",
+        "set_brightness" to "изменение яркости экрана",
+        "get_volume" to "чтение громкости",
+        "set_volume" to "изменение громкости",
+        "set_wallpaper" to "смена обоев",
+        "nfc_read_tag" to "чтение NFC-меток",
+        "nfc_write_tag" to "запись NFC-меток",
     )
 
     fun mandatoryConfirmation(name: String, input: JsonElement): Boolean {

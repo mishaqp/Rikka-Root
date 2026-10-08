@@ -30,4 +30,16 @@ class LocalToolPermissionsTest {
         assertNull(localPermissionGrantCommand("me.app", LocalToolOption.WifiInfo, 37, -1))
         assertNull(localPermissionGrantCommand("me.app", LocalToolOption.Root, 37, 0))
     }
+
+    @Test fun equipmentOnlyRequestsTheRelevantPermission() {
+        assertEquals(listOf(Manifest.permission.CAMERA), localToolRuntimePermissions(LocalToolOption.Torch, 37))
+        listOf(LocalToolOption.Vibrate, LocalToolOption.Volume, LocalToolOption.Brightness,
+            LocalToolOption.Wallpaper, LocalToolOption.Nfc).forEach {
+            assertTrue(localToolRuntimePermissions(it, 37).isEmpty())
+        }
+        assertEquals("pm grant --user 0 me.app android.permission.CAMERA", localPermissionGrantCommand("me.app", LocalToolOption.Torch, 37, 0))
+        assertEquals("appops set --user 10 me.app WRITE_SETTINGS allow", localPermissionGrantCommand("me.app", LocalToolOption.Brightness, 37, 10))
+        assertNull(localPermissionGrantCommand("me.app;reboot", LocalToolOption.Brightness, 37, 0))
+        assertNull(localPermissionGrantCommand("me.app", LocalToolOption.Volume, 37, 0))
+    }
 }

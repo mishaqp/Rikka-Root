@@ -48,6 +48,21 @@ class LocalTools(
         if (LocalToolOption.Toast in options) tools.add(toastTool(context))
         if (LocalToolOption.Notification in options) tools.add(notificationTool(context, conversationId))
         if (LocalToolOption.Share in options) tools.add(shareTool(context))
+        if (LocalToolOption.Torch in options) tools.add(torchTool(context))
+        if (LocalToolOption.Vibrate in options) tools.add(vibrateTool(context))
+        if (LocalToolOption.Brightness in options) {
+            tools.add(getBrightnessTool(context))
+            tools.add(setBrightnessTool(context))
+        }
+        if (LocalToolOption.Volume in options) {
+            tools.add(getVolumeTool(context))
+            tools.add(setVolumeTool(context))
+        }
+        if (LocalToolOption.Wallpaper in options) tools.add(setWallpaperTool(context))
+        if (LocalToolOption.Nfc in options) {
+            tools.add(nfcReadTagTool(context))
+            tools.add(nfcWriteTagTool(context))
+        }
         if (options.contains(LocalToolOption.Root)) {
             tools.add(buildRootTool(rootShellManager, rootAccessStore, assistantId))
         }

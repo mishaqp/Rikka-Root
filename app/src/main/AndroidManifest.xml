@@ -18,6 +18,14 @@
   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
   <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+  <!-- Package B: requested only when enabling brightness / ring-notification volume. -->
+  <uses-permission android:name="android.permission.WRITE_SETTINGS"
+    tools:ignore="ProtectedPermissions" />
+  <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+  <!-- Package B: normal permissions for vibration, wallpaper and foreground NFC. -->
+  <uses-permission android:name="android.permission.VIBRATE" />
+  <uses-permission android:name="android.permission.SET_WALLPAPER" />
+  <uses-permission android:name="android.permission.NFC" />
   <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
@@ -31,6 +39,9 @@
 
   <uses-feature
     android:name="android.hardware.telephony"
+    android:required="false" />
+  <uses-feature
+    android:name="android.hardware.nfc"
     android:required="false" />
   <uses-feature
     android:name="android.hardware.camera"
@@ -73,6 +84,11 @@
       android:name=".ui.activity.SafeModeActivity"
       android:exported="false"
       android:label="@string/title_activity_safe_mode"
+      android:theme="@style/Theme.Rikkahub" />
+    <activity
+      android:name=".ui.activity.NfcToolActivity"
+      android:exported="false"
+      android:configChanges="keyboardHidden|orientation|screenSize"
       android:theme="@style/Theme.Rikkahub" />
     <activity
       android:name=".ui.activity.CodexOAuthRedirectActivity"

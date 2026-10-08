@@ -67,4 +67,22 @@ sealed class LocalToolOption {
 
     @Serializable @SerialName("share")
     data object Share : LocalToolOption()
+
+    @Serializable @SerialName("torch")
+    data object Torch : LocalToolOption()
+
+    @Serializable @SerialName("vibrate")
+    data object Vibrate : LocalToolOption()
+
+    @Serializable @SerialName("brightness")
+    data object Brightness : LocalToolOption()
+
+    @Serializable @SerialName("volume")
+    data object Volume : LocalToolOption()
+
+    @Serializable @SerialName("wallpaper")
+    data object Wallpaper : LocalToolOption()
+
+    @Serializable @SerialName("nfc")
+    data object Nfc : LocalToolOption()
 }
