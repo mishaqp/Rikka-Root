@@ -112,6 +112,7 @@ android {
     }
     // Protocol tests exercise real OkHttp/Responses code; Android logging is incidental.
     testOptions {
+        unitTests.isIncludeAndroidResources = true
         unitTests.isReturnDefaultValues = true
     }
     androidResources {
@@ -173,6 +174,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.process)
     implementation(libs.androidx.work.runtime.ktx)
+    implementation("androidx.webkit:webkit:1.16.0")
     implementation(libs.androidx.browser)
     implementation(libs.androidx.profileinstaller)
     implementation(libs.termux.terminal.view)

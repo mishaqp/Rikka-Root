@@ -40,6 +40,7 @@ enum class HeadlessTaskStatus { SUCCEEDED, FAILED, BLOCKED, TIMED_OUT, CANCELLED
 data class HeadlessTaskResult(
     val status: HeadlessTaskStatus, val output: String? = null, val errorCode: String? = null,
     val tokensIn: Long = 0, val tokensOut: Long = 0, val steps: Int = 0, val webTainted: Boolean = false,
+    val imageUrls: List<String> = emptyList(),
 )
 data class HeadlessToolAction(val name: String, val arguments: JsonElement)
 sealed interface HeadlessTaskRequest {
@@ -202,7 +203,8 @@ class HeadlessTaskRunner internal constructor(
                             if (latest.lastOrNull()?.getTools()?.isNotEmpty() == true) stop(HeadlessTaskStatus.FAILED, "step_limit")
                             if (latest.lastOrNull()?.role != MessageRole.ASSISTANT) stop(HeadlessTaskStatus.FAILED, "no_response")
                             HeadlessTaskResult(HeadlessTaskStatus.SUCCEEDED,
-                                output = latest.last().parts.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text })
+                                output = latest.last().parts.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text },
+                                imageUrls = latest.last().parts.filterIsInstance<UIMessagePart.Image>().map { it.url })
                         }
                         is HeadlessTaskRequest.DirectActions -> {
                             if (request.actions.isEmpty() || request.actions.size > execution.maxSteps) stop(HeadlessTaskStatus.BLOCKED, "invalid_actions")

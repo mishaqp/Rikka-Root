@@ -154,6 +154,7 @@ class SettingsStore(
 
         // MCP
         val MCP_SERVERS = stringPreferencesKey("mcp_servers")
+        val DELETED_BUNDLED_SKILLS = stringPreferencesKey("deleted_bundled_skills")
 
         // WebDAV
         val WEBDAV_CONFIG = stringPreferencesKey("webdav_config")
@@ -238,6 +239,7 @@ class SettingsStore(
                 preferences[SEARCH_SELECTED] = settings.searchServiceSelected.coerceIn(0, (settings.searchServices.size - 1).coerceAtLeast(0))
 
                 preferences[MCP_SERVERS] = JsonInstant.encodeToString(protectedMcpServers)
+                preferences[DELETED_BUNDLED_SKILLS] = JsonInstant.encodeToString(settings.deletedBundledSkills)
                 preferences[WEBDAV_CONFIG] = JsonInstant.encodeToString(settings.webDavConfig)
                 preferences[S3_CONFIG] = JsonInstant.encodeToString(settings.s3Config)
                 preferences[UPLOAD_S3_CONFIG] = JsonInstant.encodeToString(settings.uploadS3Config)
@@ -328,6 +330,9 @@ class SettingsStore(
                 mcpServers = preferences[MCP_SERVERS]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
+                deletedBundledSkills = preferences[DELETED_BUNDLED_SKILLS]?.let {
+                    JsonInstant.decodeFromString(it)
+                } ?: emptySet(),
                 webDavConfig = preferences[WEBDAV_CONFIG]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: WebDavConfig(),
@@ -586,6 +591,7 @@ class SettingsStore(
 
 @Serializable
 data class Settings(
+    val deletedBundledSkills: Set<String> = emptySet(),
     @Transient
     val init: Boolean = false,
     val dynamicColor: Boolean = true,

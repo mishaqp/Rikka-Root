@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "updated_at": "2026-05-07",
+  "skills": [
+    {
+      "name": "auto-reply",
+      "title": "Автоответ",
+      "description": "Ответ на уведомления контакта через экран приложения сообщений.",
+      "category": "automation",
+      "license": "Apache-2.0",
+      "size_kb": 4,
+      "compatibility": "any",
+      "is_bundled": true
+    },
+    {
+      "name": "morning-briefing",
+      "title": "Утренний обзор",
+      "description": "Обзор погоды, календаря и непрочитанной почты после пробуждения.",
+      "category": "productivity",
+      "license": "Apache-2.0",
+      "size_kb": 4,
+      "compatibility": "any",
+      "is_bundled": true
+    },
+    {
+      "name": "smart-forward",
+      "title": "Умная пересылка",
+      "description": "Получить уведомление, кратко изложить и переслать другому контакту.",
+      "category": "automation",
+      "license": "Apache-2.0",
+      "size_kb": 4,
+      "compatibility": "any",
+      "is_bundled": true
+    },
+    {
+      "name": "notification-summarise-and-act",
+      "title": "Обзор уведомлений",
+      "description": "Сгруппировать недавние уведомления по приложениям и предложить действия.",
+      "category": "productivity",
+      "license": "Apache-2.0",
+      "size_kb": 5,
+      "compatibility": "any",
+      "is_bundled": true
+    },
+    {
+      "name": "calculate-hash",
+      "title": "Хеш текста",
+      "description": "Вычислить SHA-1 текста через WebCrypto в WebView.",
+      "category": "demo",
+      "license": "Apache-2.0",
+      "size_kb": 12,
+      "compatibility": "js",
+      "is_bundled": true
+    },
+    {
+      "name": "interactive-map",
+      "title": "Интерактивная карта",
+      "description": "Показать место в Google Maps; возвращает ссылку для просмотрщика.",
+      "category": "demo",
+      "license": "Apache-2.0",
+      "size_kb": 8,
+      "compatibility": "js",
+      "is_bundled": true
+    },
+    {
+      "name": "kitchen-adventure",
+      "title": "Кухонное приключение",
+      "description": "Текстовая ролевая игра с ожившей кухонной техникой.",
+      "category": "demo",
+      "license": "Apache-2.0",
+      "size_kb": 4,
+      "compatibility": "any",
+      "is_bundled": true
+    },
+    {
+      "name": "mood-tracker",
+      "title": "Дневник настроения",
+      "description": "Оценки настроения от 1 до 10 и графики; хранение в localStorage навыка.",
+      "category": "demo",
+      "license": "Apache-2.0",
+      "size_kb": 36,
+      "compatibility": "js",
+      "is_bundled": true
+    },
+    {
+      "name": "qr-code",
+      "title": "QR-код",
+      "description": "Создать QR-код PNG 512×512 для ссылки; требуется интернет (cdnjs qrcode.js).",
+      "category": "demo",
+      "license": "Apache-2.0",
+      "size_kb": 8,
+      "compatibility": "js",
+      "is_bundled": true
+    },
+    {
+      "name": "query-wikipedia",
+      "title": "Поиск в Википедии",
+      "description": "Найти тему в Википедии и вернуть вступление с информационным блоком.",
+      "category": "demo",
+      "license": "Apache-2.0",
+      "size_kb": 12,
+      "compatibility": "js",
+      "is_bundled": true
+    },
+    {
+      "name": "text-spinner",
+      "title": "Вращающийся текст",
+      "description": "Показать вращающуюся 3D-надпись в просмотрщике.",
+      "category": "demo",
+      "license": "Apache-2.0",
+      "size_kb": 16,
+      "compatibility": "js",
+      "is_bundled": true
+    },
+    {
+      "name": "virtual-piano",
+      "title": "Виртуальное пианино",
+      "description": "Пианино на 88 клавиш с аудиосэмплами; в комплекте около 7,7 МБ MP3.",
+      "category": "demo",
+      "license": "Apache-2.0",
+      "size_kb": 7884,
+      "compatibility": "js",
+      "is_bundled": true
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_add_skill" translatable="false">Добавить навык</string>
+    <string name="skill_builtin_badge" translatable="false">Встроенный</string>
+    <string name="skill_catalog_category_size" translatable="false">%1$s · %2$d КБ</string>
+    <string name="skill_catalog_install" translatable="false">Установить</string>
+    <string name="skill_catalog_install_failed" translatable="false">Ошибка установки: %s</string>
+    <string name="skill_catalog_installed" translatable="false">Установлено</string>
+    <string name="skill_catalog_installing" translatable="false">Установка…</string>
+    <string name="skill_catalog_title" translatable="false">Рекомендуемые навыки</string>
+    <string name="skill_detail_builtin_readonly" translatable="false">Встроенный навык доступен только для чтения</string>
+    <string name="skill_detail_bytes" translatable="false">%1$d Б</string>
+    <string name="skill_detail_close" translatable="false">Закрыть</string>
+    <string name="skill_detail_name_immutable" translatable="false">Изменение имени навыка не допускается (поле name должно быть “%1$s”)</string>
+    <string name="skill_detail_save_failed" translatable="false">Не удалось сохранить</string>
+    <string name="skill_import_empty_file" translatable="false">Файл пуст — нечего импортировать.</string>
+    <string name="skill_import_from_file_label" translatable="false">Импорт из файла</string>
+    <string name="skill_import_md_too_large" translatable="false">Файл слишком большой (лимит 1 МБ для файлов .md).</string>
+    <string name="skill_import_missing_skill_md" translatable="false">Внутри zip не найден SKILL.md.</string>
+    <string name="skill_import_path_traversal" translatable="false">Zip содержит небезопасный путь; извлечение отклонено.</string>
+    <string name="skill_import_unsupported_file_type" translatable="false">Неподдерживаемый файл. Используйте файл .md или .zip с SKILL.md внутри.</string>
+    <string name="skill_import_zip_too_large" translatable="false">Zip слишком большой (лимит 20 МБ / 200 файлов).</string>
+    <string name="skill_search_clear" translatable="false">Очистить поиск</string>
+    <string name="skill_tester_done_no_text" translatable="false">(Нет текстового ответа — см. части с изображениями выше.)</string>
+    <string name="skill_tester_image_parts" translatable="false">Изображений: %1$d</string>
+    <string name="skill_tester_prompt_placeholder" translatable="false">Введите запрос для тестирования этого навыка…</string>
+    <string name="skill_tester_run" translatable="false">Запустить</string>
+    <string name="skill_tester_running" translatable="false">Запуск навыка…</string>
+    <string name="skill_tester_timeout_error" translatable="false">Тайм-аут через 2 минуты. Проверка навыка остановлена; уже выполненные действия не отменяются.</string>
+    <string name="skill_tester_title" translatable="false">Тест %s</string>
+    <string name="skill_webview_card_default_title" translatable="false">Открыть в просмотрщике</string>
+    <string name="skill_webview_card_direct" translatable="false">Прямой просмотрщик</string>
+    <string name="skill_webview_card_embedded" translatable="false">Встроенный просмотрщик</string>
+    <string name="skill_webview_card_open" translatable="false">Открыть в браузере</string>
+    <string name="skill_import_invalid_url" translatable="false">Неверная ссылка. Используйте полный адрес http:// или https://</string>
+    <string name="skill_import_private_host" translatable="false">Адреса localhost и приватной сети недоступны для импорта навыков</string>
+    <string name="skill_import_fetch_failed" translatable="false">Не удалось скачать навык. Проверьте адрес и подключение</string>
+    <string name="skill_import_html_response" translatable="false">По ссылке получена HTML-страница. Укажите прямую ссылку на SKILL.md, например raw.githubusercontent.com</string>
+    <string name="skill_import_transcode_failed" translatable="false">Не удалось преобразовать файл навыка из формата openclaw или Hermes</string>
+    <string name="skill_import_invalid_name" translatable="false">В навыке отсутствует корректное поле name (1–40 символов a–z, 0–9, дефис или подчёркивание)</string>
+    <string name="skill_import_failed_generic" translatable="false">Не удалось импортировать навык</string>
+    <string name="skill_tester_too_large" translatable="false">Файл навыка превышает допустимый размер</string>
+    <string name="skill_tester_read_failed" translatable="false">Не удалось прочитать файл навыка. Проверьте, что навык установлен</string>
+    <string name="skill_tester_empty_prompt" translatable="false">Введите запрос для проверки навыка</string>
+    <string name="skill_tester_no_response" translatable="false">Модель не вернула текст или изображения</string>
+    <string name="skill_tester_failed_generic" translatable="false">Проверка навыка завершилась с ошибкой</string>
+    <string name="skill_tester_error_detail" translatable="false">Проверка навыка не завершена (%1$s): %2$s</string>
+</resources>

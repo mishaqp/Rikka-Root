@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.extensions.skills
 
+import android.content.Context
+import me.rerere.rikkahub.R
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -29,6 +31,7 @@ sealed class SkillFileNode {
 }
 
 class SkillDetailVM(
+    private val context: Context,
     private val skillManager: SkillManager,
 ) : ViewModel() {
 
@@ -87,19 +90,19 @@ class SkillDetailVM(
     fun saveFile(relativePath: String, content: String, onResult: (String?) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
             if (_readOnly.value) {
-                withContext(Dispatchers.Main) { onResult("内置技能不可修改") }
+                withContext(Dispatchers.Main) { onResult(context.getString(R.string.skill_detail_builtin_readonly)) }
                 return@launch
             }
             if (relativePath == "SKILL.md") {
                 val name = SkillFrontmatterParser.parse(content)["name"]
                 if (name != skillName) {
-                    withContext(Dispatchers.Main) { onResult("不允许修改技能名称（name 字段必须为 \"$skillName\"）") }
+                    withContext(Dispatchers.Main) { onResult(context.getString(R.string.skill_detail_name_immutable, skillName)) }
                     return@launch
                 }
             }
             val success = skillManager.saveSkillFile(skillName, relativePath, content)
             loadFiles()
-            withContext(Dispatchers.Main) { onResult(if (success) null else "保存失败") }
+            withContext(Dispatchers.Main) { onResult(if (success) null else context.getString(R.string.skill_detail_save_failed)) }
         }
     }
 
