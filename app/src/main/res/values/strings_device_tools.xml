@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Fork UI is intentionally Russian, matching strings_root.xml. -->
+  <string translatable="false" name="assistant_page_local_tools_battery_title">Батарея</string>
+  <string translatable="false" name="assistant_page_local_tools_battery_desc">Заряд, питание, температура и состояние батареи. Только чтение.</string>
+  <string translatable="false" name="assistant_page_local_tools_audio_info_title">Состояние звука</string>
+  <string translatable="false" name="assistant_page_local_tools_audio_info_desc">Режим звонка, воспроизведение музыки и подключённые аудиоустройства. Только чтение.</string>
+  <string translatable="false" name="assistant_page_local_tools_telephony_info_title">Мобильная сеть</string>
+  <string translatable="false" name="assistant_page_local_tools_telephony_info_desc">SIM, оператор и тип мобильной сети. Требуется разрешение «Телефон». Номера, звонки и сообщения не читаются.</string>
+  <string translatable="false" name="assistant_page_local_tools_wifi_info_title">Wi-Fi</string>
+  <string translatable="false" name="assistant_page_local_tools_wifi_info_desc">Подключение, SSID/BSSID, IP и уровень сигнала. Для имени сети нужна точная геолокация и включённое местоположение в Android. Местоположение устройства не запрашивается.</string>
+  <string translatable="false" name="assistant_page_local_tools_sensors_title">Датчики</string>
+  <string translatable="false" name="assistant_page_local_tools_sensors_desc">Список датчиков и короткие измерения. На Android 10+ запрашивается «Физическая активность» для шагомера. Только чтение.</string>
+  <string translatable="false" name="assistant_page_local_tools_storage_info_title">Место на накопителях</string>
+  <string translatable="false" name="assistant_page_local_tools_storage_info_desc">Объём, свободное и занятое место. Содержимое файлов не читается.</string>
+  <string translatable="false" name="assistant_page_local_tools_toast_title">Всплывающие сообщения</string>
+  <string translatable="false" name="assistant_page_local_tools_toast_desc">Короткие системные сообщения toast. Каждый вызов проходит через разрешения инструментов.</string>
+  <string translatable="false" name="assistant_page_local_tools_notification_title">Уведомления</string>
+  <string translatable="false" name="assistant_page_local_tools_notification_desc">Уведомления ассистента с переходом в исходный чат. На Android 13+ нужно разрешение уведомлений. Каждый вызов проходит через разрешения инструментов.</string>
+  <string translatable="false" name="assistant_page_local_tools_notification_channel">Уведомления ассистента</string>
+  <string translatable="false" name="assistant_page_local_tools_share_title">Поделиться</string>
+  <string translatable="false" name="assistant_page_local_tools_share_desc">Открывает системное меню отправки текста или ссылки после одобрения инструмента. Приложение и получателя выбираете вы.</string>
+  <string translatable="false" name="assistant_page_local_tools_permission_title">Разрешение для функции</string>
+  <string translatable="false" name="assistant_page_local_tools_permission_explanation">Разрешение запрашивается только при включении этой функции. Если отказать, функция останется выключенной. Разрешения инструментов на выполнение действий настраиваются отдельно.</string>
+  <string translatable="false" name="assistant_page_local_tools_permission_request">Запросить разрешение</string>
+  <string translatable="false" name="assistant_page_local_tools_permission_cancel">Отмена</string>
+  <string translatable="false" name="assistant_page_local_tools_permission_denied">«%1$s» выключена: нужное разрешение не выдано. Нажмите переключатель снова или разрешите доступ в настройках Android → Приложения → Rikka-Root → Разрешения. Для Wi-Fi выберите точную геолокацию.</string>
+  <string translatable="false" name="assistant_page_local_tools_grant_root">Выдать через root</string>
+  <string translatable="false" name="assistant_page_local_tools_root_granted">Разрешения выданы. Теперь можно включить функцию.</string>
+  <string translatable="false" name="assistant_page_local_tools_root_grant_failed">Не удалось выдать все разрешения через root. Проверьте доступ su или используйте обычный запрос Android.</string>
+</resources>

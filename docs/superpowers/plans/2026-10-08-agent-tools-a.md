@@ -53,7 +53,7 @@
 
 ## Task 3: интерфейс, проверки и доставка
 
-**Files:** `AssistantLocalToolPage.kt`, новый компонент `DeviceLocalToolSettings.kt`, русские строки в `values/strings.xml` и `values-ru/strings.xml`.
+**Files:** `AssistantLocalToolPage.kt`, новый компонент `DeviceLocalToolSettings.kt`, русские строки в `values/strings_device_tools.xml`.
 
 **Interfaces:** список `assistant.localTools`, `onUpdate(Assistant)`, существующий `RootShellManager`.
 
@@ -72,3 +72,5 @@ RED: пять тестов совместимости/одобрений — т�
 Независимый обзор выявил пересечение ID уведомлений с уведомлениями приложения и повторение автоматических ID после рестарта/сдвига часов. Уведомления инструментов получили отдельный tag и постоянный монотонный счётчик, запись которого должна завершиться до публикации; тесты проверяют новый экземпляр счётчика, конкурентные вызовы и ошибку сохранения. Существенных замечаний по остальному коду не осталось.
 
 После исправлений: `:app:compileDebugKotlin` и семь выбранных JUnit-классов — 23 теста, 0 ошибок; BUILD SUCCESSFUL. Изменено 28 файлов. Полный набор тестов, lint и APK выполняются в Daily Build.
+
+Первый Daily Build `37711661096`: все unit-тесты прошли; lint дал 83 ошибки (51 прежняя + 27 MissingTranslation + 5 LocalContextGetResourceValueCall в новом интерфейсе). Исправление: отдельные русские ресурсы `translatable=false` по существующему формату форка и `LocalResources.current` для сообщений в Compose. Унаследованные ошибки не подавляются и лимит не меняется.

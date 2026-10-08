@@ -19,6 +19,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -53,6 +54,7 @@ private val deviceToolSettings = listOf(
 @Composable
 internal fun DeviceLocalToolSettings(assistant: Assistant, onUpdate: (Assistant) -> Unit) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val toaster = LocalToaster.current
     val root = koinInject<RootShellManager>()
     val scope = rememberCoroutineScope()
@@ -77,7 +79,7 @@ internal fun DeviceLocalToolSettings(assistant: Assistant, onUpdate: (Assistant)
     fun explainDenial(index: Int) {
         deniedIndex = index
         toaster.show(
-            message = context.getString(R.string.assistant_page_local_tools_permission_denied, context.getString(deviceToolSettings[index].title)),
+            message = resources.getString(R.string.assistant_page_local_tools_permission_denied, resources.getString(deviceToolSettings[index].title)),
             type = ToastType.Warning,
         )
     }
@@ -123,14 +125,14 @@ internal fun DeviceLocalToolSettings(assistant: Assistant, onUpdate: (Assistant)
                                             if (result?.error == null && result?.exitCode == 0 && missingLocalToolPermissions(context, setting.option).isEmpty()) {
                                                 deniedIndex = null
                                                 // Issuing permission does not implicitly toggle the feature on.
-                                                toaster.show(message = context.getString(R.string.assistant_page_local_tools_root_granted), type = ToastType.Success)
+                                                toaster.show(message = resources.getString(R.string.assistant_page_local_tools_root_granted), type = ToastType.Success)
                                             } else {
-                                                toaster.show(message = context.getString(R.string.assistant_page_local_tools_root_grant_failed), type = ToastType.Warning)
+                                                toaster.show(message = resources.getString(R.string.assistant_page_local_tools_root_grant_failed), type = ToastType.Warning)
                                             }
                                         } catch (error: CancellationException) {
                                             throw error
                                         } catch (_: Exception) {
-                                            toaster.show(message = context.getString(R.string.assistant_page_local_tools_root_grant_failed), type = ToastType.Warning)
+                                            toaster.show(message = resources.getString(R.string.assistant_page_local_tools_root_grant_failed), type = ToastType.Warning)
                                         } finally {
                                             rootBusy = false
                                         }
