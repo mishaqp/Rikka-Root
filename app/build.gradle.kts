@@ -84,6 +84,9 @@ android {
             signingConfig = signingConfigs.getByName("release")
             optimization {
                 enable = true
+                keepRules {
+                    files.add(project.file("jsch-rules.pro"))
+                }
             }
             buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")

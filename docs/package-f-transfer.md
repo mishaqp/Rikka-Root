@@ -13,6 +13,7 @@
 - Termux/SSH проходят RootCommandGuard и обязательное подтверждение защищённых команд; headless не обходит HARDLINE. Сброс доверенного SSH host key всегда требует отдельного подтверждения.
 - Использованы актуальные исходные исправления Termux `1ea13e5b`, `87a9fdd9`, `6a0b6001` и MCP `6991b23e`: перенос сделан с текущего дерева Agent, в котором они уже присутствуют.
 - Новые SSH/MCP секреты шифруются AES-GCM ключами AndroidKeyStore; шифротекст находится в `noBackupFilesDir`. В Room/FTS/settings сохраняются только метаданные/непрозрачные ссылки, экспорт их не раскрывает. Секреты вносятся через защищённые поля настроек; утраченный vault после переноса бэкапа требует повторного ввода.
+- Проверка опубликованного release APK выявила удаление R8 реализаций JSch при сохранённых строках reflection. В `app/build.gradle.kts` Agent также включена оптимизация без keep-правил. Для работоспособности порта в Root добавлены правила сохранения классов/конструкторов JSch; логика SSH не изменена.
 - SSH saved-host credentials связаны с конкретными host/port/user: конкурентная замена alias, ошибка записи Room или восстановление старой metadata не должны отправить пароль другого endpoint. Общий `sshCommandInputs` одинаково проверяет stdin при запуске shell через `env`/`sudo`/`su`/`busybox`/`toybox` в интерактивной и headless политике.
 - MCP control пишет в текущий `ConversationConfig`, а не в выбранного глобально ассистента. В headless изменения allowlist остаются в side-context, creator-chat не меняется. Управляемые из чата серверы используют public-only DNS/URL проверку каждого запроса, включая SSE POST и OAuth, и не следуют redirects.
 
@@ -157,6 +158,7 @@
 | Файл Agent | Файл Rikka-Root | Статус и необходимые изменения |
 | --- | --- | --- |
 | `app/build.gradle.kts` | `app/build.gradle.kts` | адаптировано (исходная зависимость SSH/SFTP com.github.mwiede:jsch:0.2.21; kotlinx-coroutines-test для JVM проверки реальной регистрации LocalTools) |
+| `app/build.gradle.kts` (оптимизация без правил JSch) | `app/jsch-rules.pro` | адаптировано (новая обязательная release-совместимость: сохранение имён классов и всех конструкторов, которые JSch загружает через reflection; только точечные R8-предупреждения об отсутствующих optional BC/JGSS/Windows/junixsocket/Log4j адаптерах, которые SSH-инструменты не включают) |
 | `app/schemas/me.rerere.rikkahub.data.db.AppDatabase/29.json` | `app/schemas/me.rerere.rikkahub.data.db.AppDatabase/29.json` | адаптировано (сгенерированная схема Room Root для metadata-only таблицы SSH) |
 | `app/src/main/AndroidManifest.xml` | `app/src/main/AndroidManifest.xml` | адаптировано (Agent RUN_COMMAND и query com.termux; исходные exported automation action surfaces с проверенным caller; новых спецдоступов нет) |
 | `app/src/main/java/me/rerere/rikkahub/RikkaHubApp.kt` | `app/src/main/java/me/rerere/rikkahub/RikkaHubApp.kt` | адаптировано (подключение исходного NetworkChangeMonitor при старте) |
@@ -212,7 +214,7 @@
 
 ## Локальная проверка и Daily Build
 
-Локально прошли `:app:compileDebugKotlin`, `:ai:compileDebugKotlin` и выбранные unit-тесты затронутых классов: app — 500, ai — 14; ошибок, пропусков и падений нет. Отдельно проверен цикл red/green регрессий отчёта и утечки журналов. Первая Daily Build прошла полный набор тестов, но выявила 104 новых замечания lint: 92 объявления русских строк и 12 обращений к ресурсам Compose; исправлены только эти адаптации без подавления существующих ошибок. Полная сборка APK и lint выполняются только в Daily Build; точные коммиты, ссылка завершённого Actions run и APK этой ревизии приводятся в итоговом сообщении после единственного общего push.
+Локально прошли `:app:compileDebugKotlin`, `:ai:compileDebugKotlin` и выбранные unit-тесты затронутых классов: app — 500, ai — 14; ошибок, пропусков и падений нет. Отдельно проверен цикл red/green регрессий отчёта и утечки журналов. Первая Daily Build прошла полный набор тестов, но выявила 104 новых замечания lint: 92 объявления русских строк и 12 обращений к ресурсам Compose; исправлены только эти адаптации без подавления существующих ошибок. При проверке опубликованного APK второй сборки обнаружено удаление R8 reflective SSH классов, не выявляемое JVM-тестами; добавлена обязательная release-совместимость JSch. Проверка DEX подтверждает наличие классов и конструкторов алгоритмов/аутентификации непосредственно в опубликованном APK. Полная сборка APK и lint выполняются только в Daily Build. Все подсистемы отправлены одним первоначальным push; последующие push содержат только исправления lint и release-совместимости. Точные коммиты, ссылка завершённого Actions run и APK этой ревизии приводятся в итоговом сообщении.
 
 ## Проверки на телефоне
 
