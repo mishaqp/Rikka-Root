@@ -5,6 +5,15 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 sealed class LocalToolOption {
+    @Serializable @SerialName("files") data object Files : LocalToolOption()
+    @Serializable @SerialName("external_storage") data object ExternalStorage : LocalToolOption()
+    @Serializable @SerialName("archive") data object Archive : LocalToolOption()
+    @Serializable @SerialName("media_player") data object MediaPlayer : LocalToolOption()
+    @Serializable @SerialName("media_scanner") data object MediaScanner : LocalToolOption()
+    @Serializable @SerialName("download") data object Download : LocalToolOption()
+    @Serializable @SerialName("system_intents") data object SystemIntents : LocalToolOption()
+    @Serializable @SerialName("app_launcher") data object AppLauncher : LocalToolOption()
+
     @Serializable @SerialName("location") data object Location : LocalToolOption()
     @Serializable @SerialName("contacts") data object Contacts : LocalToolOption()
     @Serializable @SerialName("call_log") data object CallLog : LocalToolOption()

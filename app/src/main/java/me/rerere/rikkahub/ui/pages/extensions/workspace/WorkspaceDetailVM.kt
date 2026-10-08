@@ -61,39 +61,35 @@ class WorkspaceDetailVM(
                     )
                     entries.forEachIndexed { index, entry ->
                         ensureActive()
-                        var destination: Uri? = null
                         try {
                             val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(
                                 entry.name.substringAfterLast('.', "").lowercase()
                             ) ?: "application/octet-stream"
-                            val document = DocumentsContract.createDocument(resolver, parent, mime, entry.name)
-                                ?: error("无法创建目标文件")
-                            destination = document
-                            val output = resolver.openOutputStream(document) ?: error("无法打开目标文件")
-                            output.use { repository.exportFile(id, area, entry.path, it) }
+                            exportCreatedDocument(
+                                create = { DocumentsContract.createDocument(resolver, parent, mime, entry.name) },
+                                open = { resolver.openOutputStream(it) },
+                                write = { repository.exportFile(id, area, entry.path, it) },
+                                delete = { DocumentsContract.deleteDocument(resolver, it) },
+                            )
                             succeeded++
-                            destination = null
                         } catch (error: CancellationException) {
                             throw error
                         } catch (error: Exception) {
-                            failures += "${entry.name}：${error.message ?: "导出失败"}"
-                        } finally {
-                            // 只清理本次创建但未完整写入的文件。
-                            destination?.let { runCatching { DocumentsContract.deleteDocument(resolver, it) } }
+                            failures += "${entry.name}: экспорт не выполнен (${error.javaClass.simpleName})."
                         }
                         _state.update { it.copy(exportCompleted = index + 1) }
                     }
                 }
                 _state.update {
                     it.copy(exportResult = buildString {
-                        append("已导出 $succeeded/${entries.size} 个文件")
+                        append("Экспортировано файлов: $succeeded/${entries.size}")
                         if (failures.isNotEmpty()) append("\n\n" + failures.joinToString("\n"))
                     })
                 }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                _state.update { it.copy(exportResult = "导出失败：${error.message}") }
+                _state.update { it.copy(exportResult = "Экспорт не выполнен. Проверьте доступ к папке назначения.") }
             } finally {
                 _state.update { it.copy(exporting = false) }
             }

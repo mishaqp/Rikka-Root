@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string translatable="false" name="file_tools_files_title">Файлы и пакетные операции</string>
+  <string translatable="false" name="file_tools_files_desc">После одобрения: чтение, запись, поиск, копирование, перемещение и удаление в workspace этого чата, рабочей папке, вложениях или папках SAF. Для внешних папок включите «Доступ к хранилищу» и выберите каталог.</string>
+  <string translatable="false" name="file_tools_storage_title">Доступ к хранилищу через SAF</string>
+  <string translatable="false" name="file_tools_storage_desc">Список накопителей и выбранных папок после одобрения. grant_directory_access открывает системный выбор каталога. Доступ действует только для выбранной папки; отозвать его можно в настройках Android.</string>
+  <string translatable="false" name="file_tools_archive_title">ZIP-архивы</string>
+  <string translatable="false" name="file_tools_archive_desc">Создание, просмотр и распаковка ZIP после одобрения. Доступны workspace, рабочая папка и каталоги SAF. Размер, количество и глубина файлов ограничены для защиты от повреждённых архивов.</string>
+  <string translatable="false" name="file_tools_player_title">Медиаплеер</string>
+  <string translatable="false" name="file_tools_player_desc">Воспроизведение, пауза, остановка, перемотка и статус после одобрения. Фоновое воспроизведение показывает уведомление. Сетевые адреса используют интернет.</string>
+  <string translatable="false" name="file_tools_scanner_title">Сканирование медиафайлов</string>
+  <string translatable="false" name="file_tools_scanner_desc">Передать локальные файлы или файлы SAF с накопителя системному медиасканеру после одобрения. Видимость файла в галерее зависит от его папки и ограничений Android.</string>
+  <string translatable="false" name="file_tools_download_title">Загрузка файлов и запись текста</string>
+  <string translatable="false" name="file_tools_download_desc">После одобрения: загрузка HTTP/HTTPS-файлов и запись текста. По умолчанию загрузки сохраняются в «Загрузки»; можно указать рабочую папку или SAF. Только Android 8–9 требует разрешение записи в общие «Загрузки».</string>
+  <string translatable="false" name="file_tools_intents_title">Системные действия</string>
+  <string translatable="false" name="file_tools_intents_desc">После одобрения открыть черновик события, контакта, письма или SMS, настройки Wi-Fi либо карту. Пользователь сам завершает действие в системном приложении.</string>
+  <string translatable="false" name="file_tools_launcher_title">Приложения и ссылки</string>
+  <string translatable="false" name="file_tools_launcher_desc">После одобрения: список видимых приложений и Activity, запуск приложений, экспортированных экранов и безопасных ссылок. Android может скрывать некоторые пакеты.</string>
+  <string translatable="false" name="file_tools_permission_denied">Доступ к общим загрузкам не выдан или отозван. На Android 8–9 повторно включите функцию и разрешите запись в хранилище. Отказ не приводит к отправке запроса или падению.</string>
+  <string translatable="false" name="file_tools_legacy_download_permission">На Android 8–9 сохранение файла в общую папку «Загрузки» требует разрешения записи в хранилище. Доступ будет запрошен только сейчас, при включении загрузки файлов.</string>
+</resources>

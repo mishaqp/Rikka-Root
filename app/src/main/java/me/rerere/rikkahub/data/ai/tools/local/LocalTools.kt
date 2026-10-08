@@ -42,8 +42,21 @@ class LocalTools(
         options: List<LocalToolOption>, assistantId: String? = null, conversationId: String? = null,
         workspaceCwd: String? = null, chatImages: List<String> = emptyList(),
         resolveWorkspacePath: (suspend (String) -> File)? = null,
+        modelCanReadImages: Boolean = false,
     ): List<Tool> {
         val tools = mutableListOf<Tool>()
+        if (options.any { it in listOf(LocalToolOption.Files, LocalToolOption.Archive,
+                LocalToolOption.MediaPlayer, LocalToolOption.MediaScanner, LocalToolOption.Download) }) {
+            val access = LocalFileAccess(context, workspaceCwd, chatImages, resolveWorkspacePath)
+            if (LocalToolOption.Files in options) tools.addAll(fileManagerTools(access, context, modelCanReadImages))
+            if (LocalToolOption.Archive in options) tools.addAll(listOf(zipFilesTool(context, access), unzipFileTool(context, access), listZipContentsTool(context, access)))
+            if (LocalToolOption.MediaPlayer in options) tools.addAll(listOf(playMediaTool(context, access), stopMediaTool(context), pauseMediaTool(context), resumeMediaTool(context, access), seekMediaTool(context), getMediaStatusTool()))
+            if (LocalToolOption.MediaScanner in options) tools.add(mediaScannerTool(context, access))
+            if (LocalToolOption.Download in options) tools.addAll(listOf(downloadTool(context, access), writeTextFileTool(access)))
+        }
+        if (LocalToolOption.ExternalStorage in options) tools.addAll(listOf(listStorageVolumesTool(context), listGrantedDirectoriesTool(context), grantDirectoryAccessTool(context)))
+        if (LocalToolOption.SystemIntents in options) tools.addAll(systemIntentTools(context))
+        if (LocalToolOption.AppLauncher in options) tools.addAll(appLauncherTools(context))
         if (LocalToolOption.Location in options) tools.add(locationTool(context))
         if (LocalToolOption.Contacts in options) { tools.add(listContactsTool(context)); tools.add(searchContactsTool(context)) }
         if (LocalToolOption.CallLog in options) tools.add(callLogTool(context))
