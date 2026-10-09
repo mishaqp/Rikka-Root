@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string translatable="false" name="agent_tools_cron_title">Задания по расписанию</string>
-    <string translatable="false" name="agent_tools_cron_desc">Задания текущего помощника сохраняются после перезагрузки. Время запуска приблизительное и зависит от Android. Каждое фоновое действие требует актуального допуска: «Всегда разрешать», «Я ГЛУПЫЙ» или разрешения workspace. Подтверждения только для чата не наследуются. Интерактивные действия блокируются. Промпты и аргументы зашифрованы ключом AndroidKeyStore.</string>
+    <string translatable="false" name="agent_tools_cron_desc">Задания текущего помощника сохраняются после перезагрузки. Точные будильники задают время запуска даже в Doze; без доступа к ним используется WorkManager, который Android может задержать. Каждое фоновое действие требует актуального допуска: «Всегда разрешать», «Я ГЛУПЫЙ» или разрешения workspace. Подтверждения только для чата не наследуются. Интерактивные действия блокируются. Промпты и аргументы зашифрованы ключом AndroidKeyStore.</string>
     <string translatable="false" name="agent_tools_root_headless_opened">Root-сессия для фоновых задач открыта. Проверьте разрешения инструментов.</string>
     <string translatable="false" name="agent_tools_root_headless_failed">Root-сессия не открыта. Разрешите доступ в root-менеджере и повторите проверку. Если устройство или root-менеджер не поддерживает фоновую сессию, задачи вернут статус отказа без скрытых запросов.</string>
     <string translatable="false" name="agent_tools_subagent_title">Субагенты</string>

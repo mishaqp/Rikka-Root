@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="schedule_execution_exact_ready" translatable="false">Точные будильники разрешены. Расписание будит устройство даже в Doze.</string>
+    <string name="schedule_execution_exact_rationale" translatable="false">Для точного времени запуска разрешите Rikka-Root «Будильники и напоминания». Если отказать, задания сохранятся, но Android может задержать их выполнение.</string>
+    <string name="schedule_execution_exact_denied" translatable="false">Точные будильники не разрешены. Используется запасной запуск через WorkManager; Android может задерживать задания. Разрешите «Будильники и напоминания» для точного расписания.</string>
+    <string name="schedule_execution_request_exact" translatable="false">Будильники и напоминания</string>
+    <string name="schedule_execution_exact_settings_unavailable" translatable="false">Не удалось открыть системный экран. Откройте настройки Android → Приложения → Специальный доступ → Будильники и напоминания → Rikka-Root. До выдачи доступа время запуска может сдвигаться.</string>
+    <string name="schedule_execution_battery_rationale" translatable="false">Отключите оптимизацию батареи, чтобы Android не задерживал фоновое выполнение после будильника. Root меняет список Doze только по нажатию кнопки ниже.</string>
+    <string name="schedule_execution_battery_ready" translatable="false">Оптимизация батареи для Rikka-Root отключена.</string>
+    <string name="schedule_execution_disable_battery_optimization" translatable="false">Отключить оптимизацию батареи</string>
+    <string name="schedule_execution_whitelist_root" translatable="false">Добавить в белый список Doze через root</string>
+    <string name="schedule_execution_battery_denied" translatable="false">Оптимизация батареи осталась включённой. Android может задерживать фоновые действия; настройку можно изменить позже кнопкой «Отключить оптимизацию батареи».</string>
+    <string name="schedule_execution_battery_settings_unavailable" translatable="false">Не удалось открыть системный запрос. Откройте настройки Android → Приложения → Rikka-Root → Батарея и отключите ограничения фоновой работы.</string>
+    <string name="schedule_execution_root_granted" translatable="false">Rikka-Root добавлен в белый список Doze.</string>
+    <string name="schedule_execution_root_failed" translatable="false">Не удалось добавить Rikka-Root в белый список Doze. Проверьте разрешение root в менеджере устройства. Настройку можно изменить стандартной кнопкой «Отключить оптимизацию батареи».</string>
+</resources>

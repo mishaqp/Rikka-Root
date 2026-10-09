@@ -15,6 +15,8 @@ import androidx.compose.ui.unit.dp
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.ui.components.ai.ScheduleExecutionSettings
+import me.rerere.rikkahub.ui.components.ai.rememberScheduleExecutionSettings
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 
 @Composable
@@ -62,12 +64,23 @@ internal fun AgentLocalToolSettings(assistant: Assistant, onUpdate: (Assistant) 
 @Composable
 private fun AgentFeatureCard(assistant: Assistant, onUpdate: (Assistant) -> Unit,
                              option: LocalToolOption, title: Int, description: Int) {
+    val scheduleSettings = if (option == LocalToolOption.CronJobs) rememberScheduleExecutionSettings() else null
     CardGroup {
         item(headlineContent = { Text(stringResource(title)) },
-            supportingContent = { Text(stringResource(description)) },
+            supportingContent = {
+                Column {
+                    Text(stringResource(description))
+                    if (scheduleSettings != null && option in assistant.localTools) {
+                        ScheduleExecutionSettings(scheduleSettings)
+                    }
+                }
+            },
             trailingContent = { Switch(checked = option in assistant.localTools,
-                onCheckedChange = { checked -> onUpdate(assistant.copy(localTools = if (checked)
-                    (assistant.localTools + option).distinct() else assistant.localTools - option)) }) })
+                onCheckedChange = { checked ->
+                    onUpdate(assistant.copy(localTools = if (checked)
+                        (assistant.localTools + option).distinct() else assistant.localTools - option))
+                    if (checked) scheduleSettings?.requestExactAlarms?.invoke()
+                }) })
     }
 }
 

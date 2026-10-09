@@ -30,6 +30,8 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.ui.components.ai.ScheduleExecutionSettings
+import me.rerere.rikkahub.ui.components.ai.rememberScheduleExecutionSettings
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
@@ -55,6 +57,7 @@ internal fun LargeLocalToolSettings(assistant: Assistant, onUpdate: (Assistant) 
     val resources = LocalResources.current
     val nav = LocalNavController.current
     val toaster = LocalToaster.current
+    val scheduleSettings = rememberScheduleExecutionSettings()
     val latestAssistant by rememberUpdatedState(assistant)
     val latestUpdate by rememberUpdatedState(onUpdate)
     var workflowsDialogShownThisVisit by remember(assistant.id) { mutableStateOf(false) }
@@ -85,6 +88,7 @@ internal fun LargeLocalToolSettings(assistant: Assistant, onUpdate: (Assistant) 
         val current = latestAssistant
         latestUpdate(current.copy(localTools = if (enabled) (current.localTools + option).distinct()
             else current.localTools - option))
+        if (enabled && option == LocalToolOption.Workflows) scheduleSettings.requestExactAlarms()
         if (enabled && option == LocalToolOption.Workflows && !workflowsDialogShownThisVisit) {
             workflowsDialogShownThisVisit = true
             showWorkflowsHintDialog = true
@@ -112,6 +116,7 @@ internal fun LargeLocalToolSettings(assistant: Assistant, onUpdate: (Assistant) 
                             TextButton(onClick = { nav.navigate(Screen.Workflows) }) {
                                 Text(stringResource(R.string.large_tools_open_workflows))
                             }
+                            if (enabled) ScheduleExecutionSettings(scheduleSettings)
                             if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                                 if (bluetoothGranted) Text(stringResource(R.string.large_tools_bluetooth_granted))
                                 else TextButton(onClick = { showBluetoothRationale = true },

@@ -39,6 +39,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.ui.components.ai.ScheduleExecutionSettings
+import me.rerere.rikkahub.ui.components.ai.rememberScheduleExecutionSettings
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -56,6 +58,7 @@ fun WorkflowsScreen(vm: WorkflowsViewModel = koinViewModel()) {
     val nav = LocalNavController.current
     val workflows by vm.workflows.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val scheduleSettings = rememberScheduleExecutionSettings()
     var showHowItWorks by remember { mutableStateOf(false) }
 
     if (showHowItWorks) {
@@ -83,39 +86,47 @@ fun WorkflowsScreen(vm: WorkflowsViewModel = koinViewModel()) {
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = CustomColors.topBarColors.containerColor,
     ) { innerPadding ->
-        if (workflows.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = stringResource(R.string.setting_page_workflows_empty),
-                    style = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = innerPadding + PaddingValues(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            item {
+                ScheduleExecutionSettings(scheduleSettings, Modifier.padding(8.dp))
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = innerPadding + PaddingValues(8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
+            if (workflows.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(32.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.setting_page_workflows_empty),
+                            style = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            } else {
                 items(workflows, key = { it.entity.id }) { loaded ->
                     WorkflowRow(
                         loaded = loaded,
-                        onToggle = { enabled -> vm.setEnabled(loaded.entity.id, enabled) },
+                        onToggle = { enabled ->
+                            vm.setEnabled(loaded.entity.id, enabled)
+                            if (enabled && loaded.definition.trigger is TriggerSpec.TimeCron) {
+                                scheduleSettings.requestExactAlarms()
+                            }
+                        },
                         onTap = { nav.navigate(Screen.WorkflowDetail(loaded.entity.id)) },
                     )
                 }
-                item {
-                    TextButton(
-                        onClick = { showHowItWorks = true },
-                        modifier = Modifier.padding(8.dp),
-                    ) {
-                        Text(stringResource(R.string.setting_page_workflows_how_it_works))
-                    }
+            }
+            item {
+                TextButton(
+                    onClick = { showHowItWorks = true },
+                    modifier = Modifier.padding(8.dp),
+                ) {
+                    Text(stringResource(R.string.setting_page_workflows_how_it_works))
                 }
             }
         }
