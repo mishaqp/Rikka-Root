@@ -57,6 +57,7 @@ class CronJobWorker(context: Context, parameters: WorkerParameters) : CoroutineW
         }
         var outcome = CronExecutionOutcome("indeterminate", "process_interrupted")
         try {
+            scheduler.onOccurrenceClaimed(claim.run)
             val payload = try { jobs.payload(claim.job) } catch (_: Exception) {
                 outcome = CronExecutionOutcome("blocked", "payload_unavailable")
                 return Result.success()
@@ -94,8 +95,6 @@ class CronJobWorker(context: Context, parameters: WorkerParameters) : CoroutineW
         } finally {
             withContext(NonCancellable) {
                 runs.finish(id, claim.token, outcome.status, outcome.code, System.currentTimeMillis())
-                // Only regular/catchup work advances; manual triggering preserves the existing cadence.
-                if (claim.run.kind != "manual") scheduler.afterOccurrence(claim.job.id, claim.job.revision)
             }
         }
         return Result.success()
@@ -106,4 +105,20 @@ class CronJobWorker(context: Context, parameters: WorkerParameters) : CoroutineW
     private fun isEnabled(job: ScheduledJobEntity): Boolean = job.enabled && !job.deleted &&
         settingsStore.settingsFlow.value.assistants.any { it.id.toString() == job.ownerAssistantId && LocalToolOption.CronJobs in it.localTools }
     companion object { const val WORKER_DEADLINE_MS = 450000L }
+}
+
+/** Delayed WorkManager is only a backup trigger, never a second owner of execution or claim. */
+class CronJobFallbackWorker(context: Context, parameters: WorkerParameters) : CoroutineWorker(context, parameters), KoinComponent {
+    private val scheduler: CronJobScheduler by inject()
+
+    override suspend fun doWork(): Result {
+        val id = inputData.getString(CronJobScheduler.OCCURRENCE_ID) ?: return Result.failure()
+        return try {
+            if (scheduler.dispatchDueOccurrence(id)) Result.success() else Result.retry()
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (_: Exception) {
+            Result.retry()
+        }
+    }
 }

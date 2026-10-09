@@ -17,7 +17,7 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 sealed class TriggerSpec {
-    /** Time-of-day or cron schedule. Reuses the scheduled-jobs WorkManager backend. */
+    /** Time-of-day or cron schedule. Exact alarms determine time; WorkManager executes actions. */
     @Serializable
     @SerialName("time_cron")
     data class TimeCron(

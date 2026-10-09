@@ -1,178 +1,159 @@
 package me.rerere.rikkahub.workflow.trigger
 
 import android.content.Context
-import android.util.Log
-import androidx.work.Constraints
-import androidx.work.Data
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.ExistingWorkPolicy
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.WorkInfo
-import androidx.work.WorkManager
-import androidx.work.workDataOf
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import me.rerere.rikkahub.workflow.model.TriggerSpec
 import me.rerere.rikkahub.workflow.model.WorkflowDefinition
 import java.time.DayOfWeek
-import java.time.LocalDate
-import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
-import java.util.concurrent.TimeUnit
 
-/**
- * Phase 12 — time / cron family.
- *
- * Reuses WorkManager (same backend as scheduled jobs) but with workflow-scoped unique-work
- * names so one workflow's schedule doesn't collide with another's, and so unsync removes
- * exactly the disabled workflow's worker without touching anything else.
- *
- * v1 supports the time_of_day + days_of_week subset. The `cron` field is also accepted
- * (per spec — same dialect as scheduled jobs): `@every Ns`, `@hourly`, `@daily`, `@weekly`
- * map to fixed periods, and arbitrary 5-field cron runs on the one-shot chain with the next
- * fire computed exactly via [me.rerere.rikkahub.service.CronExpressionParser] (shared with
- * scheduled jobs). The validator rejects anything neither path can handle.
- *
- * We use [WorkflowTimeCronWorker] (separate file) which receives the workflow id and
- * dispatches into the engine.
- */
+/** Exact one-shot alarms determine time; WorkManager owns execution and delayed fallback. */
 internal class TimeCronTriggerFamily(
-    private val context: Context,
-    private val scope: CoroutineScope,
+    context: Context,
+    scope: CoroutineScope,
+    private val scheduling: WorkflowTimeCronScheduling = AndroidWorkflowTimeCronScheduling(context),
+    private val occurrences: WorkflowTimeCronOccurrenceStore = WorkflowTimeCronOccurrenceStore(context),
+    private val nowMillis: () -> Long = System::currentTimeMillis,
+    private val lookupEnabled: suspend (String) -> WorkflowDefinition? = { id ->
+        TimeCronWorkerHelper.repositoryLookup(id)?.takeIf { it.entity.enabled }?.let {
+            it.definition.copy(enabled = true, updatedAtMs = it.entity.updatedAtMs)
+        }
+    },
 ) : WorkflowTriggerFamily {
-
     override val name = "time_cron"
-
-    @Volatile private var lastSnapshot: List<WorkflowDefinition> = emptyList()
-    @Volatile private var fireCallback: TriggerFireCallback? = null
+    private val mutex = Mutex()
+    private var lastSnapshot: List<WorkflowDefinition> = emptyList()
+    private var fireCallback: TriggerFireCallback? = null
 
     override fun handles(spec: TriggerSpec): Boolean = spec is TriggerSpec.TimeCron
 
-    override suspend fun sync(matching: List<WorkflowDefinition>, callback: TriggerFireCallback) {
+    override suspend fun sync(matching: List<WorkflowDefinition>, callback: TriggerFireCallback) = mutex.withLock {
+        reconcile(matching, callback, rearmAll = false, resetForClockChange = false)
+    }
+
+    suspend fun restore(matching: List<WorkflowDefinition>, callback: TriggerFireCallback, resetForClockChange: Boolean) = mutex.withLock {
+        reconcile(matching, callback, rearmAll = true, resetForClockChange = resetForClockChange)
+    }
+
+    private fun reconcile(matching: List<WorkflowDefinition>, callback: TriggerFireCallback, rearmAll: Boolean, resetForClockChange: Boolean) {
         fireCallback = callback
-        val previous = lastSnapshot.associateBy { it.id }
-        val current = matching.associateBy { it.id }
-        // Cancel removed
-        for (id in previous.keys - current.keys) {
-            cancelWork(id)
-        }
-        // Schedule added or changed
+        val previousIds = lastSnapshot.map { it.id }.toSet()
+        val current = matching.filter { it.trigger is TriggerSpec.TimeCron }.associateBy { it.id }
+        for (id in (previousIds + occurrences.ids()) - current.keys) cancelWork(id)
         for ((id, wf) in current) {
-            val prev = previous[id]
-            if (prev == null
-                || prev.trigger != wf.trigger
-                || prev.updatedAtMs != wf.updatedAtMs
-                || !prev.enabled
-            ) {
-                scheduleWork(wf)
+            val old = occurrences.get(id)
+            val fingerprint = fingerprint(wf)
+            val definitionChanged = old == null || old.revision != wf.updatedAtMs || old.triggerFingerprint != fingerprint
+            val zoneChanged = old != null && old.zoneId != effectiveZone(wf.trigger as TriggerSpec.TimeCron).id
+            if (definitionChanged || zoneChanged || resetForClockChange) {
+                old?.let { scheduling.cancelTimer(id, it) }
+                // A wall-clock adjustment replaces future timers; it never cancels
+                // canonical executors whose actions have already started.
+                if (definitionChanged) scheduling.cancelAll(id)
+                val next = nextOccurrence(wf, nowMillis(),
+                    lastConsumedAtMillis = if (definitionChanged) null else old?.lastConsumedAtMillis)
+                occurrences.put(id, next)
+                scheduling.schedule(id, next)
+            } else if (rearmAll || id !in previousIds) {
+                // Preserve a due occurrence on boot/process restore; the worker's durable
+                // claim, not a fresh now-based timer, decides whether it may execute.
+                scheduling.schedule(id, old!!)
             }
         }
         lastSnapshot = matching
     }
 
-    override suspend fun shutdown() {
-        for (wf in lastSnapshot) cancelWork(wf.id)
+    override suspend fun shutdown() = mutex.withLock {
+        for (id in lastSnapshot.map { it.id }.toSet() + occurrences.ids()) cancelWork(id)
         lastSnapshot = emptyList()
         fireCallback = null
     }
 
-    fun cancelWork(workflowId: String) {
-        runCatching { WorkManager.getInstance(context).cancelUniqueWork(workName(workflowId)) }
-            .onFailure { Log.w(TAG, "time_cron: cancel work failed for $workflowId", it) }
+    private fun cancelWork(workflowId: String) {
+        occurrences.get(workflowId)?.let { scheduling.cancelTimer(workflowId, it) }
+        occurrences.remove(workflowId)
+        scheduling.cancelAll(workflowId)
     }
 
-    private fun scheduleWork(wf: WorkflowDefinition) {
-        val spec = wf.trigger as? TriggerSpec.TimeCron ?: return
-        val zone = spec.timezone?.let { runCatching { ZoneId.of(it) }.getOrNull() } ?: ZoneId.systemDefault()
-
-        // Periodic path: time_of_day-based or @every — both reduce to a 24h period for
-        // time_of_day, or the parsed N-second period for @every. WorkManager's smallest
-        // period is 15 minutes, so very-short cycles fall back to one-shot rescheduling
-        // from the worker (worker re-enqueues itself).
-        val periodMs = derivePeriodMs(spec)
-        if (periodMs != null && periodMs >= 15 * 60 * 1000L) {
-            val nextFireMs = computeNextFireMs(spec, zone, System.currentTimeMillis())
-            val delay = (nextFireMs - System.currentTimeMillis()).coerceAtLeast(0L)
-            val req = PeriodicWorkRequestBuilder<WorkflowTimeCronWorker>(periodMs, TimeUnit.MILLISECONDS)
-                .setInitialDelay(delay, TimeUnit.MILLISECONDS)
-                .setInputData(workDataOf(KEY_WORKFLOW_ID to wf.id))
-                .setConstraints(Constraints.NONE)
-                .build()
-            runCatching {
-                WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-                    workName(wf.id), ExistingPeriodicWorkPolicy.REPLACE, req,
-                )
-            }.onFailure { Log.w(TAG, "time_cron: periodic enqueue failed for ${wf.id}", it) }
-            return
-        }
-
-        // One-shot path: schedule the next fire; the worker re-enqueues itself on completion.
-        val nextFireMs = computeNextFireMs(spec, zone, System.currentTimeMillis())
-        val delay = (nextFireMs - System.currentTimeMillis()).coerceAtLeast(60_000L)
-        val req = OneTimeWorkRequestBuilder<WorkflowTimeCronWorker>()
-            .setInitialDelay(delay, TimeUnit.MILLISECONDS)
-            .setInputData(workDataOf(KEY_WORKFLOW_ID to wf.id))
-            .build()
-        runCatching {
-            WorkManager.getInstance(context).enqueueUniqueWork(
-                workName(wf.id), ExistingWorkPolicy.REPLACE, req,
-            )
-        }.onFailure { Log.w(TAG, "time_cron: one-shot enqueue failed for ${wf.id}", it) }
-    }
-
-    /** Internal — fires the workflow then re-enqueues if needed. Called from worker. */
-    suspend fun onWorkerFired(workflowId: String) {
-        val cb = fireCallback ?: return
-        // Post-boot or post-process-death race: WorkManager wakes the worker before
-        // [TriggerRegistry.start] has emitted from the repo's flow, leaving `lastSnapshot`
-        // empty. Fall back to a direct repository fetch so the fire isn't silently dropped.
-        // The engine still re-checks enabled / cooldown / conditions, so this is safe.
-        val wf = lastSnapshot.firstOrNull { it.id == workflowId }
-            ?: run {
-                val loaded = me.rerere.rikkahub.workflow.trigger.TimeCronWorkerHelper
-                    .repositoryLookup(workflowId)
-                if (loaded == null) return
-                if (!loaded.entity.enabled) return
-                loaded.definition
+    /** Claim + next occurrence commit before actions; an interrupted run is never replayed. */
+    suspend fun onWorkerFired(
+        workflowId: String,
+        atMillis: Long,
+        revision: Long,
+        callback: TriggerFireCallback? = fireCallback,
+    ): Boolean {
+        val fire = callback ?: return false
+        val definition = mutex.withLock {
+            val pending = occurrences.get(workflowId) ?: return@withLock null
+            if (pending.atMillis != atMillis || pending.revision != revision || nowMillis() < atMillis) return@withLock null
+            val wf = lookupEnabled(workflowId)
+            if (wf == null || wf.trigger !is TriggerSpec.TimeCron) {
+                cancelWork(workflowId)
+                return@withLock null
             }
-        // days_of_week gate. The time_of_day path runs as a fixed 24h PeriodicWorkRequest
-        // which fires every day; the day restriction is only honoured here. Without this
-        // gate a "Mondays 09:00" workflow fires daily after its first Monday.
-        val spec = wf.trigger as? TriggerSpec.TimeCron
-        if (spec != null && !spec.timeOfDay.isNullOrBlank() && spec.daysOfWeek.isNotEmpty()) {
-            val zone = spec.timezone?.let { runCatching { ZoneId.of(it) }.getOrNull() }
-                ?: ZoneId.systemDefault()
-            val today = ZonedDateTime.now(zone).dayOfWeek
-            if (today !in spec.daysOfWeek.map { isoDow(it) }) {
-                Log.d(TAG, "time_cron: $workflowId skipped, $today not in days_of_week")
-                return
+            val definitionChanged = wf.updatedAtMs != revision || fingerprint(wf) != pending.triggerFingerprint
+            val zoneChanged = effectiveZone(wf.trigger as TriggerSpec.TimeCron).id != pending.zoneId
+            if (definitionChanged || zoneChanged) {
+                scheduling.cancelTimer(workflowId, pending)
+                if (definitionChanged) scheduling.cancelAll(workflowId)
+                val next = nextOccurrence(wf, nowMillis(),
+                    lastConsumedAtMillis = if (definitionChanged) null else pending.lastConsumedAtMillis)
+                occurrences.put(workflowId, next)
+                scheduling.schedule(workflowId, next)
+                return@withLock null
             }
-        }
-        scope.launch(Dispatchers.IO) {
-            runCatching { cb.onFire(wf.id, wf.trigger) }
-                .onFailure { Log.w(TAG, "time_cron: fire callback failed for $workflowId", it) }
-        }
-        // For one-shot path (period < 15min or null), re-enqueue with the next fire.
-        val periodMs = (wf.trigger as? TriggerSpec.TimeCron)?.let { derivePeriodMs(it) }
-        if (periodMs == null || periodMs < 15 * 60 * 1000L) {
-            scheduleWork(wf)
-        }
+            val next = nextOccurrence(wf, nowMillis().coerceAtLeast(atMillis), intervalAnchor = atMillis, lastConsumedAtMillis = atMillis)
+            // A synchronous checked commit is both the occurrence claim and durable
+            // next-run recovery plan. Both alarm/fallback workers use this same CAS.
+            if (!occurrences.advance(workflowId, pending, next)) return@withLock null
+            scheduling.cancelTimer(workflowId, pending)
+            scheduling.schedule(workflowId, next)
+            wf
+        } ?: return false
+        // Await the engine in the WorkManager lifecycle. Its existing enabled/owner,
+        // conditions, cooldown, tool permissions and HARDLINE checks remain in force.
+        fire.onFire(definition.id, definition.trigger)
+        return true
     }
+
+    private fun nextOccurrence(
+        wf: WorkflowDefinition,
+        afterMillis: Long,
+        intervalAnchor: Long? = null,
+        lastConsumedAtMillis: Long? = null,
+    ): WorkflowTimeCronOccurrence {
+        val spec = wf.trigger as TriggerSpec.TimeCron
+        val zone = effectiveZone(spec)
+        // Never recreate a consumed logical occurrence when the user sets the clock back.
+        val after = afterMillis.coerceAtLeast(lastConsumedAtMillis ?: afterMillis)
+        val interval = if (spec.cron?.trim()?.startsWith("@every") == true) derivePeriodMs(spec) else null
+        val atMillis = if (intervalAnchor != null && interval != null && interval > 0L) {
+            val periods = Math.addExact(Math.subtractExact(after, intervalAnchor) / interval, 1L)
+            Math.addExact(intervalAnchor, Math.multiplyExact(periods, interval))
+        } else computeNextFireMs(spec, zone, after)
+        require(atMillis > after) { "Следующий запуск должен быть позже текущего времени; проверьте интервал расписания." }
+        return WorkflowTimeCronOccurrence(atMillis, wf.updatedAtMs, fingerprint(wf), zone.id, lastConsumedAtMillis)
+    }
+
+    private fun fingerprint(wf: WorkflowDefinition): String = wf.trigger.toString()
+
+    private fun effectiveZone(spec: TriggerSpec.TimeCron): ZoneId =
+        spec.timezone?.let { runCatching { ZoneId.of(it) }.getOrNull() } ?: ZoneId.systemDefault()
 
     companion object {
-        private const val TAG = "WorkflowTrigger"
         const val KEY_WORKFLOW_ID = "workflow_id"
+        const val KEY_OCCURRENCE_AT_MS = "occurrence_at_ms"
+        const val KEY_REVISION = "workflow_revision"
         fun workName(workflowId: String) = "wf_timecron_$workflowId"
 
         /**
          * Returns null for arbitrary cron (one-shot path) or the period in ms for the
-         * supported subset. Daily HH:mm = 24h. @every Ns = N seconds. @hourly = 1h.
-         * @daily = 24h. days_of_week with time_of_day still uses 24h period (worker's
-         * fire skips when day doesn't match).
+         * supported subset. Daily HH:mm = 24h for dialect validation only. @every Ns = N seconds. @hourly = 1h.
+         * @daily = 24h. Calendar scheduling itself always computes a one-shot occurrence in its timezone.
          */
         fun derivePeriodMs(spec: TriggerSpec.TimeCron): Long? {
             if (!spec.timeOfDay.isNullOrBlank()) return 24L * 60 * 60 * 1000
@@ -186,7 +167,7 @@ internal class TimeCronTriggerFamily(
                     // Sub-minute not supported (matches CronExpressionParser's @every Ns
                     // floor) — without this, WorkflowJson.validate() treats any positive
                     // n as valid since this function never returns null for "s", and the
-                    // schedule silently degrades to the one-shot path's 60s delay floor
+                    // schedule silently degrades to an invalid one-shot interval
                     // instead of surfacing a validation error at creation time.
                     "s" -> if (n < 60) null else n * 1000
                     "m" -> n * 60 * 1000
@@ -203,25 +184,27 @@ internal class TimeCronTriggerFamily(
             }
         }
 
-        /** Compute the next fire time. For unsupported cron forms, returns now+15 min. */
+        /** Compute the next calendar occurrence in its effective timezone. */
         fun computeNextFireMs(spec: TriggerSpec.TimeCron, zone: ZoneId, nowMs: Long): Long {
             val now = ZonedDateTime.ofInstant(java.time.Instant.ofEpochMilli(nowMs), zone)
             // time_of_day + optional days_of_week
             if (!spec.timeOfDay.isNullOrBlank()) {
                 val (h, m) = spec.timeOfDay.split(":").let { it[0].toInt() to it[1].toInt() }
-                var candidate = now.toLocalDate().atTime(LocalTime.of(h, m)).atZone(zone)
-                if (!candidate.isAfter(now)) candidate = candidate.plusDays(1)
-                if (spec.daysOfWeek.isNotEmpty()) {
-                    val allowed = spec.daysOfWeek.map { isoDow(it) }.toSet()
-                    var hops = 0
-                    while (candidate.dayOfWeek !in allowed && hops < 8) {
-                        candidate = candidate.plusDays(1); hops++
-                    }
+                val allowed = spec.daysOfWeek.map { isoDow(it) }.toSet()
+                // Rebuild each date from HH:mm. Carrying an atZone() DST-gap adjustment
+                // into plusDays() would move Monday 02:30 to 03:30 after a skipped Sunday.
+                for (daysAhead in 0L..8L) {
+                    val date = now.toLocalDate().plusDays(daysAhead)
+                    if (allowed.isNotEmpty() && date.dayOfWeek !in allowed) continue
+                    val candidate = date.atTime(LocalTime.of(h, m)).atZone(zone)
+                    if (candidate.isAfter(now)) return candidate.toInstant().toEpochMilli()
                 }
-                return candidate.toInstant().toEpochMilli()
+                error("Не удалось определить следующий день расписания.")
             }
             // @every Ns
-            derivePeriodMs(spec)?.let { return nowMs + it }
+            if (spec.cron?.trim()?.startsWith("@every") == true) {
+                derivePeriodMs(spec)?.let { return Math.addExact(nowMs, it) }
+            }
             // 5-field cron: compute the exact next execution via the shared parser
             // (same dialect as scheduled jobs). Without this, "0 9 * * 1" style
             // expressions silently degraded to hourly fires.

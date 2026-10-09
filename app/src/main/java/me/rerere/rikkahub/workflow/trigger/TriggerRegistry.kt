@@ -79,7 +79,9 @@ class TriggerRegistry(
         started = true
         appScope.launch(Dispatchers.IO) {
             workflowRepository.observeAll()
-                .map { loaded -> loaded.filter { it.entity.enabled }.map { it.definition } }
+                .map { loaded -> loaded.filter { it.entity.enabled }.map {
+                    it.definition.copy(enabled = true, updatedAtMs = it.entity.updatedAtMs)
+                } }
                 .distinctUntilChanged()
                 // 500 ms quiet window so a burst of edits in the workflow editor (10 rapid
                 // toggles, drag-to-reorder, paste-to-edit) coalesces into a single resync
@@ -135,8 +137,21 @@ class TriggerRegistry(
     }
 
     /** Called by [WorkflowTimeCronWorker] when its scheduled time arrives. */
-    suspend fun fireFromTimeCronWorker(workflowId: String) {
-        timeCron.onWorkerFired(workflowId)
+    suspend fun fireFromTimeCronWorker(workflowId: String, atMillis: Long, revision: Long) {
+        timeCron.onWorkerFired(workflowId, atMillis, revision, engineFire)
+    }
+
+    /** Boot/update retain due tokens; time/zone changes recompute the next wall-clock occurrence. */
+    suspend fun restoreTimeCronAlarms(resetForClockChange: Boolean = false) = syncMutex.withLock {
+        val fire = engineFire ?: return@withLock
+        val matching = workflowRepository.listEnabled().map {
+            it.definition.copy(enabled = true, updatedAtMs = it.entity.updatedAtMs)
+        }.filter {
+            it.trigger is TriggerSpec.TimeCron &&
+                me.rerere.rikkahub.workflow.execution.WorkflowAvailability.triggerReason(it.trigger) == null &&
+                me.rerere.rikkahub.workflow.execution.WorkflowAvailability.conditionReason(it.conditions) == null
+        }
+        timeCron.restore(matching, fire, resetForClockChange)
     }
 
     suspend fun shutdown() {

@@ -5,8 +5,13 @@
   <uses-permission android:name="android.permission.INTERNET" />
   <!-- Package F: request only when enabling Termux for an assistant. -->
   <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
-  <!-- Ordinary permission: reboot/update recovery only rearms WorkManager. -->
+  <!-- Recovery restores exact alarms and durable WorkManager fallback requests. -->
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+  <!-- Explicit user request: exact schedules in Doze; special-access fallback on Android 12+. -->
+  <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+  <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+  <!-- Requested only by the scheduling settings button, never automatically. -->
+  <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
   <uses-permission android:name="android.permission.CAMERA" />
   <uses-permission android:name="android.permission.RECORD_AUDIO" />
   <!-- Package C: requested only when enabling the corresponding personal-data tool. -->
@@ -163,8 +168,17 @@
       <intent-filter>
         <action android:name="android.intent.action.BOOT_COMPLETED" />
         <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+        <action android:name="android.intent.action.TIME_SET" />
+        <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+        <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
       </intent-filter>
     </receiver>
+    <receiver
+      android:name=".service.CronJobAlarmReceiver"
+      android:exported="false" />
+    <receiver
+      android:name=".workflow.trigger.WorkflowTimeCronAlarmReceiver"
+      android:exported="false" />
     <receiver
       android:name=".ui.activity.SmsSentReceiver"
       android:exported="false" />

@@ -87,7 +87,7 @@ fun createCronJobTools(
     }
     val schedule = Tool(
         name = "schedule_job", needsApproval = { true },
-        description = "Создать задание текущего помощника: mode llm с prompt или direct с actions [{tool,args}]. schedule_type once с at_unix_ms либо cron с cron_expression (пять полей, @daily, @every 30m). timezone — IANA. catchup skip/fire_once/fire_all (не более 20). max_runs ограничивает число попыток независимо от истории. Запуск WorkManager приблизительный; фоновые действия требуют действующих разрешений и могут быть заблокированы. Не передавайте пароли или ключи: используйте ссылки на AndroidKeyStore.",
+        description = "Создать задание текущего помощника: mode llm с prompt или direct с actions [{tool,args}]. schedule_type once с at_unix_ms либо cron с cron_expression (пять полей, @daily, @every 30m). timezone — IANA. catchup skip/fire_once/fire_all (не более 20). max_runs ограничивает число попыток независимо от истории. Время запуска задаёт точный будильник Android с пробуждением в Doze; WorkManager выполняет задание и служит запасным путём, если точные будильники недоступны. Система может задержать исполнение при исчерпании квоты фоновой работы. Фоновые действия требуют действующих разрешений и могут быть заблокированы. Не передавайте пароли или ключи: используйте ссылки на AndroidKeyStore.",
         parameters = { schema("name", "mode", "prompt", "actions", "schedule_type", "at_unix_ms", "cron_expression", "timezone", "start_at_unix_ms", "end_at_unix_ms", "max_runs", "catchup", required = listOf("name", "mode", "schedule_type")) },
         execute = { input ->
             val obj = input as? JsonObject ?: return@Tool error("invalid_arguments")
