@@ -168,45 +168,59 @@ class GenerationLoop(
                     compressed?.let { messages = it }
                     budget?.ensureCanContinue()
                 }
-                generateInternal(
-                    assistant = assistant,
-                    settings = settings,
-                    messages = messages,
-                    onUpdateMessages = {
-                        messages = it.transforms(
-                            transformers = outputTransformers,
-                            context = context,
-                            model = model,
-                            assistant = assistant,
-                            settings = settings
-                        )
-                        if (WebContentGuard.hasWebContent(messages)) onWebContentRead()
-                        emit(
-                            GenerationChunk.Messages(
-                                messages.visualTransforms(
-                                    transformers = outputTransformers,
-                                    context = context,
-                                    model = model,
-                                    assistant = assistant,
-                                    settings = settings
+                try {
+                    generateInternal(
+                        assistant = assistant,
+                        settings = settings,
+                        messages = messages,
+                        onUpdateMessages = {
+                            messages = it.transforms(
+                                transformers = outputTransformers,
+                                context = context,
+                                model = model,
+                                assistant = assistant,
+                                settings = settings
+                            )
+                            if (WebContentGuard.hasWebContent(messages)) onWebContentRead()
+                            emit(
+                                GenerationChunk.Messages(
+                                    messages.visualTransforms(
+                                        transformers = outputTransformers,
+                                        context = context,
+                                        model = model,
+                                        assistant = assistant,
+                                        settings = settings
+                                    )
                                 )
                             )
-                        )
-                    },
-                    transformers = inputTransformers,
-                    model = model,
-                    providerImpl = providerImpl,
-                    provider = provider,
-                    tools = tools,
-                    memories = memories ?: emptyList(),
-                    stream = assistant.streamOutput,
-                    processingStatus = processingStatus,
-                    conversationSystemPrompt = conversationSystemPrompt,
-                    conversationId = conversationId,
-                    workspaceCwd = workspaceCwd,
-                    tokenBudget = budget,
-                    beforeModelRequest = beforeModelRequest,
-                )
+                        },
+                        transformers = inputTransformers,
+                        model = model,
+                        providerImpl = providerImpl,
+                        provider = provider,
+                        tools = tools,
+                        memories = memories ?: emptyList(),
+                        stream = assistant.streamOutput,
+                        processingStatus = processingStatus,
+                        conversationSystemPrompt = conversationSystemPrompt,
+                        conversationId = conversationId,
+                        workspaceCwd = workspaceCwd,
+                        tokenBudget = budget,
+                        beforeModelRequest = beforeModelRequest,
+                    )
+                } catch (error: TokenBudgetExceededException) {
+                    // flowOn can discard buffered Messages when the producer fails. Await the
+                    // collector's durable write before stopping a response at the token cap.
+                    val checkpoint = messages.visualTransforms(
+                        transformers = outputTransformers,
+                        context = context,
+                        model = model,
+                        assistant = assistant,
+                        settings = settings,
+                    )
+                    awaitRootCheckpoint { ack -> emit(GenerationChunk.RootExecutionCheckpoint(checkpoint, ack)) }
+                    throw error
+                }
                 messages = messages.visualTransforms(
                     transformers = outputTransformers,
                     context = context,

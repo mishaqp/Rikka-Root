@@ -8,10 +8,12 @@ import java.util.concurrent.CountDownLatch
 import kotlinx.coroutines.CancellationException
 import kotlin.uuid.Uuid
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.selects.select
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
@@ -81,6 +83,44 @@ class GenerationLoopBudgetTest {
             assertEquals(0, executed)
             assertEquals(1, fixture.requests.size)
             assertTrue(fixture.latest.last().getTools().isNotEmpty())
+        }
+    }
+
+    @Test(timeout = 15000) fun `hard crossing awaits response persistence before surfacing budget failure`() = runBlocking {
+        Fixture(folder.newFolder(), toolResponse(100)).use { fixture ->
+            val ledger = TokenBudgetLedger(true, hardCap = 100)
+            val received = CompletableDeferred<GenerationChunk.RootExecutionCheckpoint>()
+            val persisted = CompletableDeferred<Unit>()
+            var executed = 0
+            val generation = async {
+                try {
+                    fixture.collect(assistant(100), budget = ledger,
+                        tools = listOf(Tool("side_effect", "test", execute = { executed++; emptyList() })),
+                        beforeCheckpoint = { checkpoint ->
+                            received.complete(checkpoint)
+                            persisted.await()
+                        })
+                    null
+                } catch (error: TokenBudgetExceededException) { error }
+            }
+            try {
+                val checkpoint = select<GenerationChunk.RootExecutionCheckpoint?> {
+                    received.onAwait { it }
+                    generation.onAwait { null }
+                }
+                assertNotNull("the received response must be acknowledged before the budget failure", checkpoint)
+                assertTrue(checkpoint!!.messages.last().getTools().isNotEmpty())
+                assertFalse("budget failure must wait until the collector persists the response", generation.isCompleted)
+                assertEquals(100L, ledger.snapshot().spentTokens)
+                assertEquals(0, executed)
+                assertEquals(1, fixture.requests.size)
+                persisted.complete(Unit)
+                assertTrue(generation.await() is TokenBudgetExceededException)
+                assertTrue(fixture.latest.last().getTools().isNotEmpty())
+            } finally {
+                persisted.complete(Unit)
+                generation.cancelAndJoin()
+            }
         }
     }
 
@@ -221,12 +261,17 @@ class GenerationLoopBudgetTest {
         private val loop = GenerationLoop(context, ProviderManager(client, context), Json { ignoreUnknownKeys = true })
         suspend fun collect(assistant: Assistant, messages: List<UIMessage> = listOf(UIMessage.user("test")),
                             tools: List<Tool> = emptyList(), budget: TokenBudgetLedger? = null,
-                            beforeModelRequest: suspend () -> Unit = {}) {
+                            beforeModelRequest: suspend () -> Unit = {},
+                            beforeCheckpoint: suspend (GenerationChunk.RootExecutionCheckpoint) -> Unit = {}) {
             latest = messages
             loop.generateText(settings, model, messages, assistant = assistant, tools = tools, maxSteps = 3,
                 tokenBudget = budget, beforeModelRequest = beforeModelRequest).collect { chunk -> when (chunk) {
                 is GenerationChunk.Messages -> latest = chunk.messages
-                is GenerationChunk.RootExecutionCheckpoint -> { latest = chunk.messages; chunk.ack.complete(Unit) }
+                is GenerationChunk.RootExecutionCheckpoint -> {
+                    beforeCheckpoint(chunk)
+                    latest = chunk.messages
+                    chunk.ack.complete(Unit)
+                }
             } }
         }
         override fun close() { client.dispatcher.executorService.shutdownNow(); client.connectionPool.evictAll() }
