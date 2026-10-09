@@ -9,6 +9,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.rikkahub.root.RootProcessResult
 import me.rerere.rikkahub.root.RootShellManager
+import me.rerere.rikkahub.root.clipboard.RootClipboardInput
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -22,6 +23,7 @@ import java.io.File
 class RootScreenServiceTest {
     private val context: Context get() = RuntimeEnvironment.getApplication()
     private val calls = mutableListOf<Pair<String, Int>>()
+    private val pastedTexts = mutableListOf<String>()
     private fun service(allowed: suspend () -> Boolean = { true },
         runner: suspend (String, Int) -> RootProcessResult = { command, _ ->
             when {
@@ -33,7 +35,16 @@ class RootScreenServiceTest {
                 }
                 else -> RootProcessResult(exitCode = 0)
             }
-        }): RootScreenService = RootScreenService(context, allowed) { command, timeout, _, freshPermission ->
+        }): RootScreenService = RootScreenService(context, allowed, RootClipboardInput { text, authorize, launch ->
+        pastedTexts.add(text)
+        var error: String? = null
+        for (command in listOf("input keycombination 113 29", "input keyevent 67", "input keyevent 279")) {
+            if (!authorize(command)) { error = "screen_permission_revoked"; break }
+            val result = launch(command, 10_000)
+            if (result.error != null || result.exitCode != 0) { error = result.error ?: "root_input_failed"; break }
+        }
+        error
+    }) { command, timeout, _, freshPermission ->
         calls.add(command to timeout)
         if (freshPermission()) runner(command, timeout) else RootProcessResult(error = "screen_permission_revoked")
     }
@@ -87,17 +98,49 @@ class RootScreenServiceTest {
         assertEquals(text, process.inputStream.bufferedReader().readText())
         assertEquals(0, process.waitFor())
     }
-    @Test fun `input text escapes spaces and rejects unsupported text before focus`() {
+    @Test fun `ASCII conversion escapes spaces and leaves clipboard text to alternate transport`() {
         assertEquals("hello%sworld", rootInputText("hello world"))
         assertEquals("", rootInputText(""))
         assertNull(rootInputText("Привет"))
         assertNull(rootInputText("literal%s"))
         assertNull(rootInputText("line\nnext"))
+    }
+    @Test fun `Unicode text reaches verified field instead of being rejected as ASCII`() = runBlocking {
         val svc = service()
-        val node = parseRootWindowXml(XML)[1]
-        runBlocking { assertFalse(svc.setText(node, "Привет")) }
+        assertTrue(svc.setText(parseRootWindowXml(XML)[1], "Привет 👩🏽‍💻"))
+        assertNull(svc.lastFailure)
+        assertEquals(listOf("Привет 👩🏽‍💻"), pastedTexts)
+        assertEquals(listOf("input tap 400 60", "input keycombination 113 29", "input keyevent 67", "input keyevent 279"),
+            calls.map { it.first }.filter { it.startsWith("input ") })
+        assertTrue(calls.none { it.first.startsWith("input text") })
+    }
+    @Test fun `Unicode cannot bypass HARDLINE literal preflight`() = runBlocking {
+        val svc = service()
+        assertFalse(svc.setText(parseRootWindowXml(XML)[1], "Привет $(reboot)"))
+        assertEquals("root_command_blocked", svc.lastFailure)
         assertTrue(calls.isEmpty())
-        assertEquals("input_text_unsupported", svc.lastFailure)
+        assertTrue(pastedTexts.isEmpty())
+    }
+    @Test fun `Unicode fresh permission stops between internal input steps`() = runBlocking {
+        var allowed = true
+        val svc = service(allowed = { allowed }, runner = { command, _ ->
+            when {
+                command == "wm size" -> RootProcessResult(exitCode = 0, stdout = "Physical size: 1080x2400")
+                command.startsWith("uiautomator dump") -> {
+                    File(command.substringAfter("uiautomator dump ").removeSurrounding("'"))
+                        .writeText(XML)
+                    RootProcessResult(exitCode = 0)
+                }
+                else -> {
+                    if (command == "input keycombination 113 29") allowed = false
+                    RootProcessResult(exitCode = 0)
+                }
+            }
+        })
+        assertFalse(svc.setText(parseRootWindowXml(XML)[1], "Привет"))
+        assertEquals("screen_permission_revoked", svc.lastFailure)
+        assertTrue(calls.any { it.first == "input keycombination 113 29" })
+        assertTrue(calls.none { it.first == "input keyevent 67" || it.first == "input keyevent 279" })
     }
     @Test fun `text rejected by HARDLINE cannot clear an existing field`() = runBlocking {
         val svc = service()
@@ -110,6 +153,7 @@ class RootScreenServiceTest {
         assertTrue(svc.setText(parseRootWindowXml(XML)[1], "hello world"))
         assertEquals(listOf("input tap 400 60", "input keycombination 113 29", "input keyevent 67", "input text 'hello%sworld'"),
             calls.map { it.first }.filter { it.startsWith("input ") })
+        assertTrue(pastedTexts.isEmpty())
     }
     @Test fun `unverified focus never selects or deletes another field`() = runBlocking {
         val svc = service(runner = { command, _ ->
@@ -170,6 +214,7 @@ class RootScreenServiceTest {
         assertEquals("input keyevent 223", rootGlobalActionCommand(RootScreenService.GLOBAL_ACTION_LOCK_SCREEN))
         assertNull(rootGlobalActionCommand(999))
     }
+
     companion object {
         private const val XML = """<?xml version="1.0" encoding="UTF-8"?><hierarchy rotation="0"><node package="org.test" class="android.widget.FrameLayout" bounds="[0,0][1080,2400]" enabled="true"><node package="org.test" class="android.widget.EditText" focused="true" text="Search" resource-id="org.test:id/query" bounds="[10,20][790,100]" clickable="true" enabled="true"/><node package="org.test" class="android.widget.Button" text="Go" content-desc="Go button" bounds="[800,20][1000,100]" clickable="true" enabled="true"/></node></hierarchy>"""
     }

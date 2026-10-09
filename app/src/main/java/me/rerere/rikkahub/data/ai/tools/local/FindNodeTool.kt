@@ -293,8 +293,10 @@ fun setTextTool(
         use termux_run_command if that tool is enabled, otherwise report that terminals cannot
         be typed into. Returns {success, set_to, ...} or a structured error. The result carries
         an "after" object; check screen_changed in the after object to confirm the text landed.
-        Root input supports printable ASCII only (no literal %s); other characters are rejected
-        before changing the field. Replacement needs Android input keycombination (Ctrl+A).
+        Printable ASCII uses root input text (no literal %s). Cyrillic and emoji use a temporary
+        clipboard and root PASTE, restoring the previous clipboard unless the user copied new data.
+        An existing content:// clipboard is preserved and rejected before clearing the field.
+        Replacement needs Android input keycombination (Ctrl+A).
     """.trimIndent().replace("\n", " "),
     needsApproval = { true },
     parameters = {

@@ -22,6 +22,8 @@ import me.rerere.rikkahub.data.ai.tools.RunExecutionContext
 import me.rerere.rikkahub.root.RootCommandGuard
 import me.rerere.rikkahub.root.RootProcessResult
 import me.rerere.rikkahub.root.RootShellManager
+import me.rerere.rikkahub.root.clipboard.AndroidRootClipboardInput
+import me.rerere.rikkahub.root.clipboard.RootClipboardInput
 import org.xmlpull.v1.XmlPullParser
 import java.io.File
 import java.io.StringReader
@@ -33,13 +35,15 @@ import kotlin.coroutines.CoroutineContext
 class RootScreenService internal constructor(
     internal val context: Context,
     private val mayExecute: suspend () -> Boolean,
+    clipboardInput: RootClipboardInput? = null,
     private val executeRoot: suspend (String, Int, Boolean, suspend () -> Boolean) -> RootProcessResult,
 ) {
     constructor(context: Context, manager: RootShellManager, mayExecute: suspend () -> Boolean = { true }) :
-        this(context, mayExecute, { command, timeout, headless, livePermission ->
+        this(context, mayExecute, executeRoot = { command, timeout, headless, livePermission ->
             manager.exec(command, timeout, headless, livePermission)
         })
     private val lock = Mutex()
+    private val clipboardInput = clipboardInput ?: AndroidRootClipboardInput(context)
     internal val displayMetrics = DisplayMetrics().apply { setTo(context.resources.displayMetrics) }
     internal var rootInActiveWindow: RootScreenNode? = null
         private set
@@ -83,7 +87,14 @@ class RootScreenService internal constructor(
             "su_not_available", "root_not_granted", "root_verification_timeout" -> "Root недоступен. Проверьте разрешение Rikka-Root в менеджере root и повторите проверку Root в настройках."
             "screen_permission_revoked" -> "Функция отключена или её разрешение отозвано; команда не выполнена."
             "root_command_blocked" -> "Команда отклонена запретным списком Root."
-            "input_text_unsupported" -> "Android input text поддерживает здесь только печатные ASCII-символы, без последовательности %s. Текст не введён; используйте ручной ввод для кириллицы и других символов."
+            "input_text_unsupported" -> "Для ASCII-ввода через input text нужны печатные символы без последовательности %s. Кириллица и эмодзи вводятся через временный буфер обмена и root-вставку."
+            "root_clipboard_unavailable" -> "Не удалось получить доступ к буферу обмена через root для ввода кириллицы или эмодзи. Поле не очищено. Проверьте Root; если прошивка ограничивает системный буфер, введите текст вручную."
+            "root_clipboard_uri_restore_unsupported" -> "В буфере обмена есть фото или другой content:// URI. Android отзывает его разрешения при замене буфера, поэтому надёжное восстановление невозможно. Буфер сохранён, поле не очищено; сначала скопируйте обычный текст или вводите вручную."
+            "root_clipboard_restore_failed" -> "Не удалось восстановить прежний буфер обмена после root-вставки. Проверьте содержимое буфера."
+            "root_clipboard_changed" -> "Во время ввода содержимое буфера изменилось. Новое содержимое сохранено; root-вставка остановлена."
+            "root_clipboard_text_too_large" -> "Текст превышает безопасный размер передачи через системный буфер (512 КБ UTF-8). Поле не очищено."
+            "root_clipboard_transaction_failed" -> "Связь с root-вставкой прервалась после начала ввода. Проверьте содержимое поля и буфера; прежний буфер восстанавливается при завершении помощника."
+            "root_clipboard_clear_unsupported" -> "Эта версия Android не умеет очищать буфер обмена через системный API. Пустой буфер сохранён, поле не очищено; сначала скопируйте обычный текст или введите вручную."
             "root_input_failed" -> "Android input отклонил действие. Для set_text требуется поддержка input keycombination (Ctrl+A); на старой версии Android замените текст вручную."
             "root_input_focus_unverified" -> "Не удалось подтвердить фокус выбранного текстового поля через root UIAutomator. Поле не очищено и текст не введён; откройте поле вручную и повторите чтение дерева."
             else -> "Не удалось выполнить root-команду автоматизации экрана ($code)."
@@ -181,8 +192,11 @@ class RootScreenService internal constructor(
 
     internal suspend fun setText(node: RootScreenNode, text: String): Boolean {
         val escapedText = rootInputText(text)
-        if (escapedText == null) { lastFailure = "input_text_unsupported"; return false }
-        val inputCommand = "input text ${rootScreenQuote(escapedText)}"
+        val unicode = text.any { it.code > 126 }
+        if (escapedText == null && !unicode) { lastFailure = "input_text_unsupported"; return false }
+        // Preserve HARDLINE for the actual text even when IPC, rather than a shell argument, carries
+        // Unicode. Adding Cyrillic to a forbidden literal must not bypass the existing floor.
+        val inputCommand = "input text ${rootScreenQuote(escapedText ?: text)}"
         // HARDLINE preflight must happen before focus/select/delete, even for literal input.
         if (RootCommandGuard.check(inputCommand) != null) { lastFailure = "root_command_blocked"; return false }
         if (!node.isEnabled) { lastFailure = "root_input_failed"; return false }
@@ -200,6 +214,15 @@ class RootScreenService internal constructor(
             if (!node.viewIdResourceName.isNullOrBlank()) target.viewIdResourceName == node.viewIdResourceName
             else target.bounds.contains(node.bounds.centerX(), node.bounds.centerY())
         if (!matches) { lastFailure = "root_input_focus_unverified"; return false }
+        if (unicode) {
+            // The bridge captures and verifies the old clipboard before any select/delete action.
+            // Its one bounded root operation also works through the serialized headless transport.
+            val error = clipboardInput.replaceText(text, authorizeCommand = { command ->
+                RootCommandGuard.check(command) == null && mayExecute()
+            }, launchRoot = { command, timeout -> exec(command, timeout) })
+            if (error != null) lastFailure = error
+            return error == null
+        }
         // Android's root input does not expose ACTION_SET_TEXT. Select/delete via keycombination,
         // then type exactly once; a rejected step must not continue or retry the text.
         if (!executeInput("input keycombination 113 29")) return false
