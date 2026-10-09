@@ -2,6 +2,7 @@
 package me.rerere.rikkahub.data.ai.mcp.control
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.net.InetAddress
@@ -172,6 +173,29 @@ class McpUrlGuardTest {
             dns.lookup("same.example")
             throw AssertionError("private lookup must fail")
         } catch (_: UnknownHostException) { }
+    }
+
+    @Test fun `unchecked DNS delegate failure becomes UnknownHostException with its cause`() {
+        val unavailable = IllegalStateException("DNS service has not started")
+        val guarded = McpUrlGuard.guardedDns(Dns { throw unavailable })
+        try {
+            guarded.lookup("remote.example")
+            throw AssertionError("Unavailable DNS must fail closed")
+        } catch (error: UnknownHostException) {
+            assertEquals("host_not_found: Не удалось проверить DNS сервера MCP", error.message)
+            assertEquals(unavailable, error.cause)
+        }
+    }
+
+    @Test fun `guarded DNS preserves an existing IO failure instance`() {
+        val unavailable = UnknownHostException("DNS is not ready")
+        val guarded = McpUrlGuard.guardedDns(Dns { throw unavailable })
+        try {
+            guarded.lookup("remote.example")
+            throw AssertionError("Unavailable DNS must fail closed")
+        } catch (error: UnknownHostException) {
+            assertSame(unavailable, error)
+        }
     }
 
     @Test fun `global unicast IPv6 allowed`() {

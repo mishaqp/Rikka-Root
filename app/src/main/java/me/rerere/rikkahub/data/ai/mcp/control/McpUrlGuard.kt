@@ -2,6 +2,7 @@
 package me.rerere.rikkahub.data.ai.mcp.control
 
 import okhttp3.Dns
+import java.io.IOException
 import java.net.InetAddress
 import java.net.URI
 import java.net.UnknownHostException
@@ -112,7 +113,15 @@ object McpUrlGuard {
 
     /** Guard at the actual OkHttp DNS lookup, so changing DNS cannot bypass add-time validation. */
     fun guardedDns(delegate: Dns = Dns.SYSTEM): Dns = Dns { hostname ->
-        val addresses = delegate.lookup(hostname)
+        val addresses = try {
+            delegate.lookup(hostname)
+        } catch (error: IOException) {
+            throw error
+        } catch (error: RuntimeException) {
+            throw UnknownHostException("host_not_found: Не удалось проверить DNS сервера MCP").apply {
+                initCause(error)
+            }
+        }
         if (addresses.isEmpty() || addresses.any { !isPublicAddress(it) }) {
             throw UnknownHostException("MCP: локальный или служебный адрес запрещён")
         }
