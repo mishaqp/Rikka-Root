@@ -3,7 +3,6 @@ package me.rerere.rikkahub.di
 import android.content.Context
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
-import io.ktor.http.HttpHeaders
 import io.pebbletemplates.pebble.PebbleEngine
 import kotlinx.serialization.json.Json
 import me.rerere.ai.provider.ProviderManager
@@ -13,6 +12,7 @@ import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.data.ai.AIRequestInterceptor
 import me.rerere.rikkahub.data.ai.RequestLoggingInterceptor
+import me.rerere.rikkahub.data.ai.networkSettingsRequestInterceptor
 import me.rerere.rikkahub.data.ai.transformers.AssistantTemplateLoader
 import me.rerere.rikkahub.data.ai.GenerationLoop
 import me.rerere.rikkahub.data.ai.TranslationHandler
@@ -147,30 +147,22 @@ val dataSourceModule = module {
             .followSslRedirects(true)
             .followRedirects(true)
             .retryOnConnectionFailure(true)
-            .addInterceptor { chain ->
-                val networkSetting = settingsStore.settingsFlow.value.networkSetting
-                val currentProxySetting = Triple(
-                    networkSetting.proxyUrl,
-                    networkSetting.proxyUsername,
-                    networkSetting.proxyPassword,
-                )
-                if (appliedProxySetting.getAndSet(currentProxySetting) != currentProxySetting) {
-                    client.connectionPool.evictAll()
-                }
-
-                val originalRequest = chain.request()
-                val requestBuilder = originalRequest.newBuilder()
-                    .addHeader(HttpHeaders.AcceptLanguage, acceptLang)
-
-                if (originalRequest.header(HttpHeaders.UserAgent) == null) {
-                    val userAgent = settingsStore.settingsFlow.value.networkSetting.userAgent
-                        .trim()
-                        .ifEmpty { "RikkaHub-Android/${BuildConfig.VERSION_NAME}" }
-                    requestBuilder.addHeader(HttpHeaders.UserAgent, userAgent)
-                }
-
-                chain.proceed(requestBuilder.build())
-            }
+            .addInterceptor(networkSettingsRequestInterceptor(
+                acceptLanguage = acceptLang,
+                defaultUserAgent = "RikkaHub-Android/${BuildConfig.VERSION_NAME}",
+                userAgent = { settingsStore.settingsFlow.value.networkSetting.userAgent },
+                applyProxyChanges = {
+                    val networkSetting = settingsStore.settingsFlow.value.networkSetting
+                    val currentProxySetting = Triple(
+                        networkSetting.proxyUrl,
+                        networkSetting.proxyUsername,
+                        networkSetting.proxyPassword,
+                    )
+                    if (appliedProxySetting.getAndSet(currentProxySetting) != currentProxySetting) {
+                        client.connectionPool.evictAll()
+                    }
+                },
+            ))
             .addNetworkInterceptor { chain ->
                 val request = chain.request()
                 val contentTypeHeader = request.header("Content-Type")

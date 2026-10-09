@@ -7,9 +7,9 @@ import okhttp3.Response
 import okio.Buffer
 
 class RequestLoggingInterceptor : Interceptor {
-    override fun intercept(chain: Interceptor.Chain): Response {
+    override fun intercept(chain: Interceptor.Chain): Response = withOkHttpIOException {
         if (!Logging.isRequestLoggingEnabled()) {
-            return chain.proceed(chain.request())
+            return@withOkHttpIOException chain.proceed(chain.request())
         }
 
         val request = chain.request()
@@ -59,7 +59,7 @@ class RequestLoggingInterceptor : Interceptor {
             )
         )
 
-        return response
+        response
     }
 
     private fun okhttp3.Headers.toMap(): Map<String, String> {
