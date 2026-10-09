@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Rect
 import android.util.DisplayMetrics
+import android.util.Log
 import android.util.Xml
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -24,8 +25,10 @@ import me.rerere.rikkahub.root.RootProcessResult
 import me.rerere.rikkahub.root.RootShellManager
 import me.rerere.rikkahub.root.clipboard.AndroidRootClipboardInput
 import me.rerere.rikkahub.root.clipboard.RootClipboardInput
+import me.rerere.rikkahub.reliability.SecretRedactor
 import org.xmlpull.v1.XmlPullParser
 import java.io.File
+import java.io.IOException
 import java.io.StringReader
 import java.util.UUID
 import kotlin.coroutines.AbstractCoroutineContextElement
@@ -57,20 +60,28 @@ class RootScreenService internal constructor(
         private set
     internal var shadeShown: Boolean = false
         private set
+    private var operationStage = "screen_action"
+    private var exceptionDetail: String? = null
+    private var exceptionStage: String? = null
 
     internal suspend fun withService(treeRequired: Boolean = true, block: suspend (RootScreenService) -> JsonObject): JsonObject =
         lock.withLock {
             if (!mayExecute()) return@withLock denied()
             try {
                 lastFailure = null
+                exceptionDetail = null
+                exceptionStage = null
                 refreshSnapshot(treeRequired)
                 if (lastFailure != null) return@withLock failure(lastFailure!!)
+                operationStage = "screen_action"
                 val payload = block(this)
                 // Preserve the action result, while explaining the root backend's exact failure.
-                if (lastFailure != null && payload["error"] == null) JsonObject(payload + failure(lastFailure!!)) else payload
+                val result = if (lastFailure != null && payload["error"] == null) JsonObject(payload + failure(lastFailure!!)) else payload
+                if (result["error"] != null && exceptionDetail != null) JsonObject(result + exceptionDiagnostic()) else result
             } catch (error: CancellationException) {
                 throw error
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                recordException(error)
                 failure("screen_backend_failed")
             }
         }
@@ -97,8 +108,25 @@ class RootScreenService internal constructor(
             "root_clipboard_clear_unsupported" -> "Эта версия Android не умеет очищать буфер обмена через системный API. Пустой буфер сохранён, поле не очищено; сначала скопируйте обычный текст или введите вручную."
             "root_input_failed" -> "Android input отклонил действие. Для set_text требуется поддержка input keycombination (Ctrl+A); на старой версии Android замените текст вручную."
             "root_input_focus_unverified" -> "Не удалось подтвердить фокус выбранного текстового поля через root UIAutomator. Поле не очищено и текст не введён; откройте поле вручную и повторите чтение дерева."
+            "screen_backend_failed" -> "Не удалось выполнить автоматизацию экрана через Root. Тип исключения указан в detail, этап — в stage; диагностическое сообщение сохранено в журнале приложения."
             else -> "Не удалось выполнить root-команду автоматизации экрана ($code)."
         })
+        exceptionDetail?.let { put("detail", it) }
+        exceptionStage?.let { put("stage", it) }
+    }
+
+    private fun exceptionDiagnostic() = buildJsonObject {
+        exceptionDetail?.let { put("detail", it) }
+        exceptionStage?.let { put("stage", it) }
+    }
+
+    private fun recordException(error: Exception) {
+        exceptionDetail = error.javaClass.name
+        exceptionStage = operationStage
+        // Do not pass a Throwable to Log: its unredacted message/stack could contain secrets.
+        Log.w("RootScreenService", SecretRedactor.redact(
+            "$operationStage: ${error.javaClass.name}: ${error.message.orEmpty()}"
+        ))
     }
 
     internal suspend fun exec(command: String, timeoutMs: Int = 10_000): RootProcessResult {
@@ -119,13 +147,18 @@ class RootScreenService internal constructor(
     internal suspend fun refreshSnapshot(includeTree: Boolean) {
         rootInActiveWindow = null
         lastTreeError = null
+        operationStage = "snapshot_wm_size"
         val display = exec("wm size")
         if (display.error != null || display.exitCode != 0) return
         parseRootDisplaySize(display.stdout)?.let { (w, h) -> displayMetrics.widthPixels = w; displayMetrics.heightPixels = h }
+        operationStage = "snapshot_window_state"
         val window = exec("dumpsys window windows | grep -E 'mCurrentFocus|mFocusedApp|mInputMethodWindow|mImeInputTarget|mShowingDream|mDisplayFrozen|isVisible=true|StatusBar|NotificationShade'")
         // grep has exit code 1 when an OEM omits these diagnostics. This cannot block gestures.
         if (window.error == null && window.exitCode != 0) lastFailure = null
-        currentFocus = Regex("mCurrentFocus=Window\\{[^}]*}").find(window.stdout)?.value.orEmpty()
+        operationStage = "snapshot_window_parse"
+        // Android's ICU regex rejects a bare closing brace; the desktop JVM accepts it.
+        currentFocus = Regex("mCurrentFocus=Window\\{[^}]*\\}").find(window.stdout)?.value.orEmpty()
+        operationStage = "snapshot_orientation"
         val orientation = exec("dumpsys input | grep -m 1 'SurfaceOrientation'")
         if (orientation.error == null && orientation.exitCode != 0) lastFailure = null
         val rotation = Regex("SurfaceOrientation:\\s*(\\d+)").find(orientation.stdout)?.groupValues?.get(1)?.toIntOrNull()
@@ -138,8 +171,10 @@ class RootScreenService internal constructor(
         imeShown = window.stdout.lineSequence().any { it.contains("mInputMethodWindow=") && it.contains("Window{") }
         shadeShown = currentFocus.contains("NotificationShade") || currentFocus.contains("StatusBar")
         if (!includeTree || lastFailure != null) return
+        operationStage = "snapshot_tree_file"
         val xmlFile = privateTemporaryFile(".xml")
         try {
+            operationStage = "snapshot_tree_dump"
             val result = exec("uiautomator dump ${rootScreenQuote(xmlFile.absolutePath)}", 15_000)
             if (result.error != null || result.exitCode != 0 || xmlFile.length() !in 1..MAX_XML_BYTES) {
                 lastTreeError = result.error ?: "ui_tree_unavailable"
@@ -147,6 +182,7 @@ class RootScreenService internal constructor(
                 if (lastFailure !in setOf("screen_permission_revoked", "root_interaction_required", "su_not_available", "root_not_granted", "root_verification_timeout")) lastFailure = null
                 return
             }
+            operationStage = "snapshot_tree_decode"
             val nodes = withContext(Dispatchers.IO) { parseRootWindowXml(xmlFile.readText()) }
             val root = nodes.firstOrNull() ?: return
             val windowId = (currentFocus.ifBlank { root.packageName.orEmpty() }).hashCode()
@@ -154,7 +190,8 @@ class RootScreenService internal constructor(
             rootInActiveWindow = root
         } catch (error: CancellationException) {
             throw error
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            recordException(error)
             lastTreeError = "ui_tree_decode_failed"
         } finally {
             xmlFile.delete()
@@ -170,11 +207,16 @@ class RootScreenService internal constructor(
     }
 
     private fun privateTemporaryFile(suffix: String): File {
-        val dir = File(context.cacheDir, "root-screen-control").apply { check(mkdirs() || isDirectory) }
+        val dir = File(context.cacheDir, "root-screen-control").apply {
+            if (!mkdirs() && !isDirectory) throw IOException("Не удалось создать приватный каталог автоматизации экрана")
+        }
         // Root writes an existing app-owned0600 inode; the resulting data stays readable by the app.
         return File(dir, "${UUID.randomUUID()}$suffix").also {
-            check(it.createNewFile())
-            check(it.setReadable(false, false) && it.setWritable(false, false) && it.setReadable(true, true) && it.setWritable(true, true))
+            if (!it.createNewFile()) throw IOException("Не удалось создать приватный временный файл автоматизации экрана")
+            if (!(it.setReadable(false, false) && it.setWritable(false, false) && it.setReadable(true, true) && it.setWritable(true, true))) {
+                it.delete()
+                throw IOException("Не удалось назначить права 0600 приватному временному файлу автоматизации экрана")
+            }
         }
     }
 
@@ -234,11 +276,14 @@ class RootScreenService internal constructor(
 
     internal suspend fun captureScreenshot(displayId: Int): ScreenshotOutcome {
         if (displayId != 0) return ScreenshotOutcome.Failure("Для root screencap доступен основной экран (display_id=0); физические ID других экранов отличаются от логических Android ID.")
+        operationStage = "screenshot_file"
         val file = privateTemporaryFile(".png")
         try {
+            operationStage = "screenshot_capture"
             val result = exec("screencap -p ${rootScreenQuote(file.absolutePath)}", 15_000)
             if (result.error != null || result.exitCode != 0) return ScreenshotOutcome.Failure(result.error ?: "screencap_failed")
             if (file.length() !in 1..MAX_PNG_BYTES) return ScreenshotOutcome.Failure("screenshot_empty_or_too_large")
+            operationStage = "screenshot_decode"
             return withContext(Dispatchers.IO) {
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeFile(file.absolutePath, bounds)

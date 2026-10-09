@@ -2,6 +2,8 @@ package me.rerere.rikkahub.data.ai.tools.local
 
 import android.content.Context
 import android.app.Application
+import android.graphics.Bitmap
+import android.os.PowerManager
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -15,8 +17,11 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.shadows.ShadowLog
 import org.robolectric.annotation.Config
 import java.io.File
+import java.util.regex.PatternSyntaxException
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], application = Application::class, manifest = Config.NONE)
@@ -28,6 +33,15 @@ class RootScreenServiceTest {
         runner: suspend (String, Int) -> RootProcessResult = { command, _ ->
             when {
                 command == "wm size" -> RootProcessResult(exitCode = 0, stdout = "Physical size: 1080x2400")
+                command.startsWith("dumpsys window") -> RootProcessResult(exitCode = 0, stdout = "mCurrentFocus=Window{abc123 u0 org.test/.MainActivity}\nmInputMethodWindow=Window{ime u0 InputMethod}")
+                command.startsWith("dumpsys input") -> RootProcessResult(exitCode = 0, stdout = "SurfaceOrientation: 0")
+                command.startsWith("screencap -p") -> {
+                    val path = command.substringAfter("screencap -p ").removeSurrounding("\'")
+                    val bitmap = Bitmap.createBitmap(2, 3, Bitmap.Config.ARGB_8888)
+                    File(path).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                    bitmap.recycle()
+                    RootProcessResult(exitCode = 0)
+                }
                 command.contains("uiautomator dump") -> {
                     val path = command.substringAfter("uiautomator dump ").removeSurrounding("'")
                     File(path).writeText(XML)
@@ -213,6 +227,96 @@ class RootScreenServiceTest {
     @Test fun `secure root keyguard is not bypassed with unlock commands`() {
         assertEquals("input keyevent 223", rootGlobalActionCommand(RootScreenService.GLOBAL_ACTION_LOCK_SCREEN))
         assertNull(rootGlobalActionCommand(999))
+    }
+
+    private fun assertToolWorks(tool: me.rerere.ai.core.Tool, input: String = "{}", commandPrefix: String? = null): String {
+        val result = runTool(tool, input)
+        assertFalse(result, result.contains("screen_backend_failed"))
+        assertFalse(result, result.contains("\"error\":"))
+        if (commandPrefix != null) assertTrue(calls.toString(), calls.any { it.first.startsWith(commandPrefix) })
+        return result
+    }
+    @Test fun `root executor reaches tap`() {
+        assertToolWorks(tapTool(service()), "{\"x\":10,\"y\":20}", "input tap 10 20")
+    }
+    @Test fun `root executor reaches long press`() {
+        assertToolWorks(longPressTool(service()), "{\"x\":10,\"y\":20}", "input swipe 10 20 10 20")
+    }
+    @Test fun `root executor reaches swipe`() {
+        assertToolWorks(swipeTool(service()), "{\"start_x\":10,\"start_y\":20,\"end_x\":30,\"end_y\":40}", "input swipe 10 20 30 40")
+    }
+    @Test fun `root executor reaches window tree and parses focus diagnostics`() {
+        val result = assertToolWorks(readWindowTreeTool(service()), commandPrefix = "uiautomator dump")
+        assertTrue(result, result.contains("org.test/.MainActivity"))
+        assertTrue(result, result.contains("org.test:id/query"))
+    }
+    @Test fun `root executor reaches node search`() {
+        val result = assertToolWorks(findNodeTool(service()), "{\"by\":\"text\",\"value\":\"Search\"}", "uiautomator dump")
+        assertTrue(result, result.contains("org.test:id/query"))
+    }
+    @Test fun `root executor reaches node click`() {
+        assertToolWorks(clickNodeTool(service()), "{\"by\":\"text\",\"value\":\"Go\"}", "input tap 900 60")
+    }
+    @Test fun `root executor reaches text replacement`() {
+        assertToolWorks(setTextTool(service()), "{\"by\":\"text\",\"value\":\"Search\",\"text\":\"hello\"}", "input text 'hello'")
+    }
+    @Test fun `root executor reaches scrolling`() {
+        assertToolWorks(scrollTool(service()), "{\"direction\":\"down\"}", "input swipe")
+    }
+    @Test fun `root executor reaches global action`() {
+        assertToolWorks(globalActionTool(service()), "{\"action\":\"home\"}", "input keyevent 3")
+    }
+    @Test fun `root executor reaches screenshot and returns image attachment`() {
+        val result = assertToolWorks(takeScreenshotTool(context, service()), commandPrefix = "screencap -p")
+        assertTrue(result, result.contains("file://"))
+        assertTrue(result, result.contains("gallery_path"))
+    }
+    @Test fun `root executor reaches screen wake`() {
+        shadowOf(context.getSystemService(PowerManager::class.java)).setIsInteractive(false)
+        val result = assertToolWorks(wakeScreenTool(context, service()), commandPrefix = "input keyevent 224")
+        assertTrue(result, result.contains("\"woke\":true"))
+    }
+    @Test fun `snapshot exception returns type and stage and logs only redacted diagnostic`() {
+        ShadowLog.clear()
+        val secret = "sk-test123456789012345678901234567890"
+        val svc = service(runner = { _, _ -> throw IllegalStateException("broken root session password=secret123 $secret Bearer token-123") })
+        val result = runTool(wakeScreenTool(context, svc))
+        assertTrue(result, result.contains("screen_backend_failed"))
+        assertTrue(result, result.contains("\"detail\":\"java.lang.IllegalStateException\""))
+        assertTrue(result, result.contains("\"stage\":\"snapshot_wm_size\""))
+        assertFalse(result, result.contains("password"))
+        val logs = ShadowLog.getLogsForTag("RootScreenService").joinToString("\n") { it.msg }
+        assertTrue(logs, logs.contains("IllegalStateException"))
+        assertTrue(logs, logs.contains("broken root session"))
+        assertFalse(logs, logs.contains("secret123"))
+        assertFalse(logs, logs.contains(secret))
+        assertFalse(logs, logs.contains("token-123"))
+    }
+    @Test fun `Android ICU pattern failure is visible instead of generic backend error`() {
+        val svc = service(runner = { command, _ ->
+            if (command.startsWith("dumpsys window")) throw PatternSyntaxException("Syntax error", "mCurrentFocus=Window\\{[^}]*}", 30)
+            RootProcessResult(exitCode = 0, stdout = "Physical size: 1080x2400")
+        })
+        val result = runTool(wakeScreenTool(context, svc))
+        assertTrue(result, result.contains("\"detail\":\"java.util.regex.PatternSyntaxException\""))
+        assertTrue(result, result.contains("\"stage\":\"snapshot_window_state\""))
+    }
+    @Test fun `invalid tree XML returns exception detail`() {
+        val svc = service(runner = { command, _ ->
+            if (command.startsWith("uiautomator dump")) {
+                File(command.substringAfter("uiautomator dump ").removeSurrounding("'")).writeText("<hierarchy><node></hierarchy>")
+            }
+            RootProcessResult(exitCode = 0, stdout = if (command == "wm size") "Physical size: 1080x2400" else "")
+        })
+        val result = runTool(readWindowTreeTool(svc))
+        assertTrue(result, result.contains("ui_tree_decode_failed"))
+        assertTrue(result, result.contains("detail"))
+        assertTrue(result, result.contains("snapshot_tree_decode"))
+    }
+    @Test fun `snapshot cancellation propagates without becoming a backend error`() = runBlocking {
+        val svc = service(runner = { _, _ -> throw kotlinx.coroutines.CancellationException("cancelled") })
+        try { svc.withService(treeRequired = false) { buildJsonObject { put("success", true) } }; fail("cancellation must propagate") }
+        catch (_: kotlinx.coroutines.CancellationException) { }
     }
 
     companion object {
