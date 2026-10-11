@@ -28,7 +28,6 @@ import me.rerere.rikkahub.ui.pages.chat.ChatDrawerBottomBar
 import me.rerere.rikkahub.ui.pages.chat.ChatDrawerFolderControls
 import me.rerere.rikkahub.ui.pages.chat.ChatDrawerFrame
 import me.rerere.rikkahub.ui.pages.chat.ChatDrawerHeaderContent
-import me.rerere.rikkahub.ui.pages.chat.ChatDrawerNewChatButton
 import me.rerere.rikkahub.ui.pages.chat.ChatDrawerSearchBar
 import me.rerere.rikkahub.ui.pages.chat.ChatDrawerTopArea
 import me.rerere.rikkahub.ui.pages.chat.ConversationList
@@ -84,15 +83,14 @@ internal fun DrawerScreenshotFixture() {
     Box(Modifier.fillMaxSize().testTag("drawer_fixture")) {
         ChatDrawerFrame {
             ConversationList(current = chats[1], conversations = paged, conversationJobs = emptyList(),
-                listState = rememberLazyListState(), modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 12.dp),
+                listState = rememberLazyListState(), modifier = Modifier.fillMaxWidth().weight(1f),
                 headerContent = {
                     ChatDrawerTopArea {
-                        ChatDrawerHeaderContent(nickname = "Пользователь", modelName = "GPT-6-Luna",
+                        ChatDrawerHeaderContent(nickname = "Пользователь",
                             rootChip = null, hasUpdate = false, onEditNickname = {}, onNavigate = {},
                             greeting = { Text("Добрый вечер", style = MaterialTheme.typography.bodySmall) },
                             avatar = { FixtureAvatar("П", it) })
-                        ChatDrawerNewChatButton(onClick = {})
-                        ChatDrawerSearchBar(onNavigate = {})
+                        ChatDrawerSearchBar(onNavigate = {}, onNewChat = {})
                         ChatDrawerAssistantCard(settings = settings, onUpdateSettings = {}, onNavigate = {},
                             avatarContent = { _, _, modifier, _ -> FixtureAvatar("А", modifier) })
                         ChatDrawerFolderControls(

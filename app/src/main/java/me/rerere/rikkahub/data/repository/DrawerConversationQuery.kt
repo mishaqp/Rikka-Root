@@ -51,24 +51,23 @@ internal fun drawerConversationQuery(
     val titleOrder = if (alphabetical) "c.title COLLATE LOCALIZED ASC, " else ""
     val previewProjection = if (includePreviews) {
         """
-            COALESCE((SELECT substr(group_concat(
-                CASE WHEN json_valid(part.value) THEN
-                    CASE json_extract(part.value, '$.type')
-                        WHEN 'text' THEN json_extract(part.value, '$.text')
-                        WHEN 'image' THEN 'Изображение'
-                        WHEN 'video' THEN 'Видео'
-                        WHEN 'audio' THEN 'Аудио'
-                        WHEN 'document' THEN 'Документ'
-                        WHEN 'tool' THEN 'Вызов инструмента'
-                        WHEN 'tool_call' THEN 'Вызов инструмента'
-                        WHEN 'tool_result' THEN 'Вызов инструмента'
-                        WHEN 'server_tool' THEN 'Вызов инструмента'
-                    END
-                END, ' '), 1, 240)
+            COALESCE((SELECT substr(json_extract(part.value, '$.text'), 1, 240)
                 FROM message_node mn, json_each($SELECTED_PARTS_JSON) part
-                WHERE mn.id = (SELECT last.id FROM message_node last
-                    WHERE last.conversation_id = c.id ORDER BY last.node_index DESC LIMIT 1)
-            ), '') AS previewText,
+                WHERE mn.conversation_id = c.id
+                    AND CASE WHEN json_valid(mn.messages) AND mn.select_index >= 0 THEN
+                        json_extract(mn.messages, '$[' || mn.select_index || '].role') IN ('user', 'assistant')
+                        ELSE 0 END
+                    AND CASE WHEN part.type = 'object' AND json_valid(part.value) THEN
+                        json_extract(part.value, '$.type') = 'text'
+                        AND json_type(part.value, '$.text') = 'text'
+                        -- Match Kotlin isNotBlank in the live conversation projection.
+                        AND trim(json_extract(part.value, '$.text'),
+                            char(9, 10, 11, 12, 13, 28, 29, 30, 31, 32, 160, 5760,
+                                8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202,
+                                8232, 8233, 8239, 8287, 12288)) != ''
+                        ELSE 0 END
+                ORDER BY mn.node_index DESC, CAST(part.key AS INTEGER) DESC LIMIT 1
+            ), 'Работа с инструментами') AS previewText,
             EXISTS(SELECT 1 FROM message_node mn, json_each($SELECTED_PARTS_JSON) part
                 WHERE mn.conversation_id = c.id AND ($EXECUTED_TOOL_SQL)) AS hasTools,
             EXISTS(SELECT 1 FROM message_node mn, json_each($SELECTED_PARTS_JSON) part

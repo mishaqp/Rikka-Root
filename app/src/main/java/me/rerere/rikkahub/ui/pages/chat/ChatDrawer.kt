@@ -1,7 +1,9 @@
 package me.rerere.rikkahub.ui.pages.chat
 
 import androidx.activity.ComponentActivity
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,10 +17,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -45,13 +48,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.onLongClick as onLongClickSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -73,7 +77,6 @@ import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Folder01
-import me.rerere.hugeicons.stroke.FolderAdd
 import me.rerere.hugeicons.stroke.PencilEdit01
 import me.rerere.hugeicons.stroke.Sorting01
 import me.rerere.hugeicons.stroke.Tick01
@@ -200,12 +203,11 @@ fun ChatDrawerContent(
             pendingRemovalIds = pendingRemovalIds,
             folderSelected = !showAllFolders,
             rowMetadata = currentRowMetadata,
-            modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 12.dp),
+            modifier = Modifier.fillMaxWidth().weight(1f),
             headerContent = {
                 ChatDrawerTopArea {
                     ChatDrawerHeader(
                         settings = settings,
-                        current = current,
                         onEditNickname = { nicknameEditState.open(settings.displaySetting.userNickname) },
                         onUpdateAvatar = { avatar ->
                             vm.updateSettings(settings.copy(displaySetting = settings.displaySetting.copy(userAvatar = avatar)))
@@ -213,9 +215,9 @@ fun ChatDrawerContent(
                         onNavigate = { navController.navigate(it) },
                         showUpdateStatus = updateChecksEnabled && !isPlayStore,
                     )
-                    ChatDrawerNewChatButton(onClick = { navigateToChatPage(navController) })
                     BackupReminderCard(settings, onClick = { navController.navigate(Screen.Backup) })
-                    ChatDrawerSearchBar(onNavigate = { navController.navigate(it) })
+                    ChatDrawerSearchBar(onNavigate = { navController.navigate(it) },
+                        onNewChat = { navigateToChatPage(navController) })
                     ChatDrawerAssistantCard(
                         settings = settings,
                         onUpdateSettings = { updated ->
@@ -630,7 +632,7 @@ internal fun FolderBar(
                 }
             }
         }
-        item(key = "create") { FolderChip("+ Папка", false, onCreate, null, HugeIcons.FolderAdd) }
+        item(key = "create") { FolderChip("+", false, onCreate, null) }
     }
 }
 
@@ -643,7 +645,7 @@ internal fun ConversationSortButton(
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     Box {
-        IconButton(onClick = { menuExpanded = true }) {
+        IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(40.dp)) {
             Icon(HugeIcons.Sorting01, "Сортировка чатов: ${presentationSort.label}")
         }
         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
@@ -674,25 +676,40 @@ private fun FolderChip(
     onLongClick: (() -> Unit)?,
     icon: ImageVector? = null,
 ) {
-    Box(Modifier.heightIn(min = 48.dp), contentAlignment = Alignment.Center) {
-        Surface(
-            shape = CircleShape,
-            color = if (selected) MaterialTheme.colorScheme.secondaryContainer
-                else MaterialTheme.colorScheme.surface.copy(alpha = 0f),
-            contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.clip(CircleShape).combinedClickable(
-                role = Role.Button, onClick = onClick, onLongClick = onLongClick,
-                onLongClickLabel = if (onLongClick != null) "Действия с папкой: $label" else null,
-            ).semantics { contentDescription = label; this.selected = selected },
-        ) {
-            Row(Modifier.heightIn(min = 32.dp).padding(horizontal = 10.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (icon != null) Icon(icon, null, Modifier.size(14.dp))
-                Text(label, style = MaterialTheme.typography.labelMedium)
+    val colors = MaterialTheme.colorScheme
+    val longPress = if (onLongClick == null) Modifier else Modifier.pointerInput(onLongClick) {
+        // Observe before the chip's click handler and consume release after a long press.
+        // This keeps Material 3 chip interaction while retaining folder actions.
+        awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            try {
+                withTimeout(viewConfiguration.longPressTimeoutMillis) {
+                    waitForUpOrCancellation(pass = PointerEventPass.Initial)
+                }
+            } catch (_: PointerEventTimeoutCancellationException) {
+                onLongClick()
+                waitForUpOrCancellation(pass = PointerEventPass.Initial)?.consume()
             }
         }
     }
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label, style = MaterialTheme.typography.labelMedium) },
+        leadingIcon = if (icon == null) null else ({ Icon(icon, null, Modifier.size(14.dp)) }),
+        shape = MaterialTheme.shapes.extraLarge,
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = colors.secondaryContainer,
+            selectedLabelColor = colors.onSecondaryContainer,
+            selectedLeadingIconColor = colors.onSecondaryContainer,
+            labelColor = colors.onSurfaceVariant,
+            iconColor = colors.onSurfaceVariant,
+        ),
+        modifier = Modifier.heightIn(min = 32.dp).then(longPress).semantics {
+            contentDescription = if (label == "+") "Создать папку" else label
+            if (onLongClick != null) onLongClickSemantics("Действия с папкой: $label") { onLongClick(); true }
+        },
+    )
 }
 
 @Composable

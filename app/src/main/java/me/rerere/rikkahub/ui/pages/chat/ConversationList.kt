@@ -69,7 +69,6 @@ import me.rerere.rikkahub.data.datastore.ConversationSortOrder
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.ui.pages.setting.SettingsIconCircle
 import me.rerere.rikkahub.ui.pages.setting.SettingsSectionTone
-import me.rerere.rikkahub.ui.theme.LocalAmoledDarkMode
 import me.rerere.rikkahub.utils.mirrorForRtl
 
 /** UI projection only: no changes to persisted conversations or backups. */
@@ -150,7 +149,7 @@ fun ColumnScope.ConversationList(
                 ConversationListItem.PinnedHeader -> DateHeaderItem("Закреплённые", Modifier.animateItem(), pinned = true)
                 is ConversationListItem.Item -> if (item.conversation.id !in pendingRemovalIds) {
                     val metadata = rowMetadata[item.conversation.id] ?: ChatDrawerRowMetadata(
-                        preview = item.previewText.ifBlank { "Сообщений пока нет" },
+                        preview = item.previewText.ifBlank { "Работа с инструментами" },
                         hasTools = item.hasTools,
                         hasWorkflows = item.hasWorkflows,
                     )
@@ -178,13 +177,13 @@ fun ColumnScope.ConversationList(
 @Composable
 internal fun DateHeaderItem(label: String, modifier: Modifier = Modifier, pinned: Boolean = false) {
     Row(
-        modifier.fillMaxWidth().padding(start = 12.dp, top = 16.dp, end = 12.dp, bottom = 4.dp),
+        modifier.fillMaxWidth().padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        if (pinned) Icon(HugeIcons.Pin, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(label, style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (pinned) Icon(HugeIcons.Pin, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -251,8 +250,7 @@ internal fun ConversationItem(
     val title = conversation.title.ifBlank { "Новый чат" }
     val time = chatDrawerRowTime(conversation.updateAt)
     val toolLabel = if (metadata.hasWorkflows) "Работали сценарии" else "Работали инструменты"
-    val selectedBackground = if (LocalAmoledDarkMode.current) MaterialTheme.colorScheme.surfaceContainerHigh
-        else MaterialTheme.colorScheme.secondaryContainer
+    val selectedBackground = MaterialTheme.colorScheme.secondaryContainer
     val foreground = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
         else MaterialTheme.colorScheme.onSurface
     val supportingForeground = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
@@ -287,7 +285,7 @@ internal fun ConversationItem(
             },
         contentAlignment = Alignment.CenterStart,
     ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp),
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 7.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(title, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,

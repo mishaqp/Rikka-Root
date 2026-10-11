@@ -23,7 +23,7 @@ class ChatDrawerRowPresentationTest {
                 UIMessagePart.ServerTool("server-test", "workflow_dispatch", status = status),
             ))
             val summary = metadata(node(message))
-            assertEquals("Вызов инструмента", summary.preview)
+            assertEquals("Работа с инструментами", summary.preview)
             assertTrue(summary.hasTools)
             assertTrue(summary.hasWorkflows)
         }
@@ -45,13 +45,74 @@ class ChatDrawerRowPresentationTest {
             role = MessageRole.ASSISTANT,
             parts = listOf(UIMessagePart.Reasoning(reasoning = "Скрытые рассуждения"), tool(input = "секрет")),
         )
-        assertEquals("Вызов инструмента", metadata(node(message)).preview)
+        assertEquals("Работа с инструментами", metadata(node(message)).preview)
     }
 
     @Test
-    fun `attachment only messages have a readable preview`() {
-        assertEquals("Изображение", metadata(node(UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Image("file://private"))))).preview)
-        assertEquals("Документ: инструкция.pdf", metadata(node(UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Document("file://private", "инструкция.pdf"))))).preview)
+    fun `attachment only messages use the no text fallback`() {
+        assertEquals("Работа с инструментами", metadata(node(UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Image("file://private"))))).preview)
+        assertEquals("Работа с инструментами", metadata(node(UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Document("file://private", "инструкция.pdf"))))).preview)
+    }
+
+    @Test
+    fun `tool only last message uses earlier user text and keeps workflow indicators`() {
+        val first = node(UIMessage.user("  Проверь\n\n заряд\tтелефона  "))
+        val last = node(UIMessage(role = MessageRole.ASSISTANT, parts = listOf(
+            tool(name = "workflow_run", input = "private arguments", output = listOf(UIMessagePart.Text("private result"))),
+        )))
+        val summary = metadata(first, last)
+        assertEquals("Проверь заряд телефона", summary.preview)
+        assertTrue(summary.hasTools)
+        assertTrue(summary.hasWorkflows)
+    }
+
+    @Test
+    fun `reasoning only last message keeps earlier text`() {
+        val first = node(UIMessage.assistant("Предыдущий ответ"))
+        val last = node(UIMessage(role = MessageRole.ASSISTANT, parts = listOf(
+            UIMessagePart.Reasoning(reasoning = "Скрытые рассуждения"),
+        )))
+        assertEquals("Предыдущий ответ", metadata(first, last).preview)
+    }
+
+    @Test
+    fun `unicode whitespace only text keeps earlier readable text`() {
+        val first = node(UIMessage.user("Последний текст чата"))
+        val last = node(UIMessage.assistant("\u00a0\u2003\u202f"))
+        assertEquals("Последний текст чата", metadata(first, last).preview)
+    }
+
+    @Test
+    fun `mixed message uses its last nonblank text part without tool output`() {
+        val last = node(UIMessage(role = MessageRole.ASSISTANT, parts = listOf(
+            UIMessagePart.Text("Первый фрагмент"),
+            tool(output = listOf(UIMessagePart.Text("private result"))),
+            UIMessagePart.Reasoning(reasoning = "Скрытые рассуждения"),
+            UIMessagePart.Text("  Последний\n фрагмент  "),
+            UIMessagePart.Text("\n\t  "),
+        )))
+        val summary = metadata(node(UIMessage.user("Старое сообщение")), last)
+        assertEquals("Последний фрагмент", summary.preview)
+        assertTrue(summary.hasTools)
+    }
+
+    @Test
+    fun `system and raw tool text do not replace the latest chat text`() {
+        val first = node(UIMessage.user("Последний текст чата"))
+        val system = node(UIMessage.system("private system prompt"))
+        val result = node(UIMessage(role = MessageRole.TOOL, parts = listOf(UIMessagePart.Text("private raw result"))))
+        assertEquals("Последний текст чата", metadata(first, system, result).preview)
+    }
+
+    @Test
+    fun `reasoning and blank text only use the no text fallback`() {
+        val message = UIMessage(role = MessageRole.ASSISTANT, parts = listOf(
+            UIMessagePart.Reasoning(reasoning = "Скрытые рассуждения"),
+            UIMessagePart.Text("\n\t  "),
+        ))
+        val summary = metadata(node(message))
+        assertEquals("Работа с инструментами", summary.preview)
+        assertFalse(summary.hasTools)
     }
 
     @Test
@@ -78,9 +139,9 @@ class ChatDrawerRowPresentationTest {
     }
 
     @Test
-    fun `broken branch and empty conversation have a safe empty preview`() {
-        assertEquals("Сообщений пока нет", metadata(MessageNode(messages = emptyList(), selectIndex = 4)).preview)
-        assertEquals("Сообщений пока нет", metadata().preview)
+    fun `broken branch and empty conversation use the no text fallback`() {
+        assertEquals("Работа с инструментами", metadata(MessageNode(messages = emptyList(), selectIndex = 4)).preview)
+        assertEquals("Работа с инструментами", metadata().preview)
     }
 
     @Test

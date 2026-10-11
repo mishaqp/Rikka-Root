@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.unit.dp
@@ -56,7 +57,7 @@ class UiScreenshotsTest internal constructor(
             ScreenshotTheme(theme, fontScale) {
                 val colors = MaterialTheme.colorScheme
                 drawerBackground = if (theme.amoled) colors.background else colors.surfaceContainerLow
-                selectedBackground = if (theme.amoled) colors.surfaceContainerHigh else colors.secondaryContainer
+                selectedBackground = colors.secondaryContainer
                 foreground = colors.onSurface
                 supportingForeground = colors.onSurfaceVariant
                 selectedForeground = colors.onSecondaryContainer
@@ -86,6 +87,13 @@ class UiScreenshotsTest internal constructor(
         if (screen == ScreenshotScreen.ChatDrawer) {
             val drawer = compose.onNodeWithTag("chat_drawer_sheet").fetchSemanticsNode().boundsInRoot
             assertEquals("411dp phone drawer must be capped at 320dp", 320f, drawer.width, .5f)
+            val headerBounds = compose.onNodeWithTag("chat_drawer_header").fetchSemanticsNode().boundsInRoot
+            assertEquals("Header must start on the shared 16dp grid", drawer.left + 16f, headerBounds.left, .5f)
+            val titleBounds = compose.onNodeWithText(drawerFixtureTitles.first(), useUnmergedTree = true)
+                .fetchSemanticsNode().boundsInRoot
+            assertEquals("Chat titles must start on the shared 16dp grid", drawer.left + 16f, titleBounds.left, .5f)
+            val dateBounds = compose.onNodeWithText("Сегодня", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertEquals("Date headings must share the chat-title grid", titleBounds.left, dateBounds.left, .5f)
             if (fontScale == 1f) {
                 val header = compose.onNodeWithTag("chat_drawer_header").fetchSemanticsNode().boundsInRoot
                 assertTrue("Default header exceeds 72dp: ${header.height}", header.height <= 72.5f)

@@ -5,6 +5,8 @@ import androidx.paging.PagingSource
 import androidx.room.Room
 import androidx.sqlite.db.SimpleSQLiteQuery
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonPrimitive
+import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.ServerToolStatus
@@ -87,7 +89,7 @@ class DrawerConversationQueryTest {
         assertEquals("pinned", load(query(alphabetical = true)).first().id)
     }
 
-    @Test fun previewUsesOnlyTheSelectedLastMessageAndDoesNotLoadPreviousHistory() = runBlocking {
+    @Test fun previewUsesTheLatestTextFromTheSelectedBranch() = runBlocking {
         insert("chat")
         node("chat", 0, listOf(UIMessage.user("старое сообщение")))
         node("chat", 1, listOf(UIMessage.assistant("скрытая ветка"), UIMessage.assistant("последнее сообщение")), selected = 1)
@@ -118,7 +120,7 @@ class DrawerConversationQueryTest {
             output = listOf(UIMessagePart.Text("private result")))
         node("tool-only", 0, listOf(UIMessage.assistant("").copy(parts = listOf(tool))))
         val row = load(query()).single()
-        assertEquals("Вызов инструмента", row.previewText)
+        assertEquals("Работа с инструментами", row.previewText)
         assertTrue(row.hasTools)
     }
 
@@ -129,7 +131,7 @@ class DrawerConversationQueryTest {
             node(status.name, 0, listOf(UIMessage.assistant("").copy(parts = listOf(tool))))
         }
         val rows = load(query()).associateBy { it.id }
-        assertEquals("Вызов инструмента", rows.getValue(ServerToolStatus.FAILED.name).previewText)
+        assertEquals("Работа с инструментами", rows.getValue(ServerToolStatus.FAILED.name).previewText)
         assertTrue(rows.getValue(ServerToolStatus.COMPLETED.name).hasTools)
         assertTrue(rows.getValue(ServerToolStatus.FAILED.name).hasTools)
         assertFalse(rows.getValue(ServerToolStatus.IN_PROGRESS.name).hasTools)
@@ -143,13 +145,100 @@ class DrawerConversationQueryTest {
             "[{\"parts\":[\"invalid JSON value\"]}]", 0))
         val result = load(query())
         assertEquals(3, result.size)
-        assertTrue(result.all { it.previewText.isEmpty() && !it.hasTools })
+        assertTrue(result.all { it.previewText == "Работа с инструментами" && !it.hasTools })
     }
 
-    @Test fun mediaPreviewIsReadableAndDoesNotContainTheAttachmentUrl() = runBlocking {
+    @Test fun mediaOnlyMessagesUseTheNoTextFallback() = runBlocking {
         insert("image")
         node("image", 0, listOf(UIMessage.user("").copy(parts = listOf(UIMessagePart.Image("file:///private/image.png")))))
-        assertEquals("Изображение", load(query()).single().previewText)
+        assertEquals("Работа с инструментами", load(query()).single().previewText)
+    }
+
+    @Test fun toolOnlyLastNodeKeepsEarlierTextAndSeparateWorkflowIndicators() = runBlocking {
+        insert("chat")
+        node("chat", 0, listOf(UIMessage.user("Проверь заряд телефона")))
+        val tool = UIMessagePart.Tool("call", "workflow_run", "private arguments",
+            output = listOf(UIMessagePart.Text("private result")))
+        node("chat", 1, listOf(UIMessage.assistant("").copy(parts = listOf(tool))))
+        val row = load(query()).single()
+        assertEquals("Проверь заряд телефона", row.previewText)
+        assertTrue(row.hasTools)
+        assertTrue(row.hasWorkflows)
+    }
+
+    @Test fun reasoningAndBlankTextInTheLastNodeKeepEarlierText() = runBlocking {
+        insert("chat")
+        node("chat", 0, listOf(UIMessage.assistant("Предыдущий ответ")))
+        node("chat", 1, listOf(UIMessage.assistant("").copy(parts = listOf(
+            UIMessagePart.Reasoning(reasoning = "private reasoning"),
+            UIMessagePart.Text("\n\t  "),
+        ))))
+        assertEquals("Предыдущий ответ", load(query()).single().previewText)
+    }
+
+    @Test fun unicodeWhitespaceOnlyTextKeepsEarlierReadableText() = runBlocking {
+        insert("chat")
+        node("chat", 0, listOf(UIMessage.user("Последний текст чата")))
+        node("chat", 1, listOf(UIMessage.assistant("\u00a0\u2003\u202f")))
+        assertEquals("Последний текст чата", load(query()).single().previewText)
+    }
+
+    @Test fun encodedJsonObjectInsideAStringPartUsesTheMalformedFallback() = runBlocking {
+        insert("chat")
+        val encodedPart = JsonInstant.encodeToString("""{"type":"text","text":"invalid embedded text"}""")
+        database.messageNodeDao().insert(MessageNodeEntity("malformed-part", "chat", 0,
+            """[{"role":"assistant","parts":[$encodedPart]}]""", 0))
+        assertEquals("Работа с инструментами", load(query()).single().previewText)
+    }
+
+    @Test fun mixedMessageUsesItsLastNonblankTopLevelTextPart() = runBlocking {
+        insert("chat")
+        node("chat", 0, listOf(UIMessage.user("Старое сообщение")))
+        node("chat", 1, listOf(UIMessage.assistant("").copy(parts = listOf(
+            UIMessagePart.Text("Первый фрагмент"),
+            UIMessagePart.Tool("call", "root_exec", "private arguments",
+                output = listOf(UIMessagePart.Text("private result"))),
+            UIMessagePart.Reasoning(reasoning = "private reasoning"),
+            UIMessagePart.Text("Последний\n фрагмент\tчата"),
+            UIMessagePart.Text("\n\t  "),
+        ))))
+        val row = load(query()).single()
+        assertEquals("Последний\n фрагмент\tчата", row.previewText)
+        assertTrue(row.hasTools)
+    }
+
+    @Test fun legacyCallsResultsAndRawToolMessagesNeverReplaceChatText() = runBlocking {
+        insert("chat")
+        node("chat", 0, listOf(UIMessage.user("Последний текст чата")))
+        node("chat", 1, listOf(UIMessage.assistant("").copy(parts = listOf(
+            UIMessagePart.ToolCall("call", "root_exec", "private arguments"),
+            UIMessagePart.ToolResult("call", "root_exec", JsonPrimitive("private result"), JsonPrimitive("private arguments")),
+        ))))
+        node("chat", 2, listOf(UIMessage.system("private system prompt")))
+        node("chat", 3, listOf(UIMessage(role = MessageRole.TOOL,
+            parts = listOf(UIMessagePart.Text("private raw result")))))
+        val row = load(query()).single()
+        assertEquals("Последний текст чата", row.previewText)
+        assertTrue(row.hasTools)
+    }
+
+    @Test fun unselectedTextInTheLastNodeIsIgnoredWhenScanningHistory() = runBlocking {
+        insert("chat")
+        node("chat", 0, listOf(UIMessage.user("Последний выбранный текст")))
+        node("chat", 1, listOf(UIMessage.assistant("Скрытая ветка"), UIMessage.assistant("").copy(parts = listOf(
+            UIMessagePart.Tool("call", "root_exec", "{}"),
+        ))), selected = 1)
+        assertEquals("Последний выбранный текст", load(query()).single().previewText)
+    }
+
+    @Test fun noTextAndEmptyConversationsUseTheSameFallback() = runBlocking {
+        insert("empty")
+        insert("reasoning")
+        node("reasoning", 0, listOf(UIMessage.assistant("").copy(parts = listOf(
+            UIMessagePart.Reasoning(reasoning = "private reasoning"),
+            UIMessagePart.Text("\n\t  "),
+        ))))
+        assertTrue(load(query()).all { it.previewText == "Работа с инструментами" && !it.hasTools })
     }
 
     @Test fun sqliteBuildsWithoutJsonCanStillLoadTheMetadataOnlyProjection() = runBlocking {

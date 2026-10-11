@@ -20,9 +20,12 @@ data class ChatDrawerRowMetadata(
         fun fromConversation(conversation: Conversation): ChatDrawerRowMetadata {
             val messages = conversation.messageNodes.mapNotNull { it.messages.getOrNull(it.selectIndex) }
             val visibleMessages = messages.filter { it.role != MessageRole.SYSTEM }
-            val last = visibleMessages.lastOrNull()
-            val text = last?.parts?.filterIsInstance<UIMessagePart.Text>()
-                ?.joinToString(" ") { it.text }.orEmpty()
+            val preview = visibleMessages.asReversed().firstNotNullOfOrNull { message ->
+                if (message.role == MessageRole.TOOL) null else {
+                    message.parts.asReversed().filterIsInstance<UIMessagePart.Text>()
+                        .firstOrNull { it.text.isNotBlank() }?.text
+                }
+            } ?: "Работа с инструментами"
             val executedToolNames = visibleMessages.flatMap { message ->
                 message.parts.mapNotNull { part ->
                     when (part) {
@@ -35,17 +38,6 @@ data class ChatDrawerRowMetadata(
                     }
                 }
             }
-            val preview = text.takeIf { it.isNotBlank() } ?: last?.parts?.firstNotNullOfOrNull { part ->
-                when (part) {
-                    is UIMessagePart.Image -> "Изображение"
-                    is UIMessagePart.Video -> "Видео"
-                    is UIMessagePart.Audio -> "Аудио"
-                    is UIMessagePart.Document -> "Документ: ${part.fileName}"
-                    is UIMessagePart.Tool, is UIMessagePart.ToolCall, is UIMessagePart.ToolResult,
-                    is UIMessagePart.ServerTool -> "Вызов инструмента"
-                    else -> null
-                }
-            } ?: "Сообщений пока нет"
             return ChatDrawerRowMetadata(
                 preview = chatDrawerCompactPreview(preview),
                 hasTools = executedToolNames.isNotEmpty(),

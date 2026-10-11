@@ -1,12 +1,6 @@
 package me.rerere.rikkahub.ui.pages.chat
 
-import me.rerere.ai.provider.Model
-import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.Screen
-import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.model.Assistant
-import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.model.ConversationConfig
 import me.rerere.rikkahub.root.RootStatus
 import me.rerere.rikkahub.ui.pages.setting.SettingsDashboardStatusTone
 import org.junit.Assert.assertEquals
@@ -44,26 +38,15 @@ class ChatDrawerChromeTest {
         assertEquals(SettingsDashboardStatusTone.Warning, chatDrawerRootStatus(RootStatus.TIMED_OUT)?.tone)
     }
 
-    @Test fun `model chip shows conversation snapshot instead of the current default`() {
-        val default = Model(modelId = "default", displayName = "Новая модель")
-        val pinned = Model(modelId = "pinned", displayName = "Модель этого чата")
-        val assistant = Assistant(chatModelId = default.id)
-        val settings = Settings(
-            assistantId = assistant.id, assistants = listOf(assistant), chatModelId = default.id,
-            providers = listOf(ProviderSetting.OpenAI(models = listOf(default, pinned))),
-        )
-        val conversation = Conversation(assistantId = assistant.id, messageNodes = emptyList(),
-            config = ConversationConfig(chatModelId = pinned.id))
-        assertEquals("Модель этого чата", chatDrawerModelName(settings, conversation))
+    @Test fun `assistant tool footer selection tracks the active assistant`() {
+        assertEquals("more", chatDrawerBottomSelection(Screen.AssistantLocalTool("current"), "current", moreExpanded = false))
+        assertNull(chatDrawerBottomSelection(Screen.AssistantLocalTool("other"), "current", moreExpanded = false))
     }
 
-    @Test fun `empty models hide the chip and unnamed models use their identifier`() {
-        val assistant = Assistant()
-        val settings = Settings(assistantId = assistant.id, assistants = listOf(assistant), providers = emptyList())
-        val conversation = Conversation(assistantId = assistant.id, messageNodes = emptyList())
-        assertNull(chatDrawerModelName(settings, conversation))
-        val model = Model(modelId = "gpt-model")
-        assertEquals("gpt-model", chatDrawerModelName(settings.copy(chatModelId = model.id,
-            providers = listOf(ProviderSetting.OpenAI(models = listOf(model)))), conversation))
+    @Test fun `cached root failure labels explain unavailable denied and timed out access`() {
+        assertEquals("Недоступен", chatDrawerRootStatus(RootStatus.UNAVAILABLE)?.text)
+        assertEquals("Нет доступа", chatDrawerRootStatus(RootStatus.DENIED_OR_FAILED)?.text)
+        assertEquals("Нет доступа", chatDrawerRootStatus(RootStatus.NOT_ROOT)?.text)
+        assertEquals("Таймаут", chatDrawerRootStatus(RootStatus.TIMED_OUT)?.text)
     }
 }

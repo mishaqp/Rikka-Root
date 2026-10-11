@@ -10,25 +10,30 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -48,20 +53,17 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.intl.LocaleList
 import androidx.compose.ui.text.style.Hyphens
 import androidx.compose.ui.text.style.LineBreak
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.Edit03
-import me.rerere.hugeicons.stroke.PlusSign
+import me.rerere.hugeicons.stroke.MessageAdd01
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Avatar
-import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.model.getChatModelOf
 import me.rerere.rikkahub.root.RootShellManager
 import me.rerere.rikkahub.root.RootStatus
 import me.rerere.rikkahub.ui.components.ui.Greeting
@@ -84,15 +86,9 @@ internal fun chatDrawerRootStatus(status: RootStatus): SettingsDashboardStatusCh
     RootStatus.TIMED_OUT -> SettingsDashboardStatusChip("Таймаут", SettingsDashboardStatusTone.Warning)
 }
 
-internal fun chatDrawerModelName(settings: Settings, current: Conversation): String? =
-    settings.getChatModelOf(current)?.let { model ->
-        model.displayName.ifBlank { model.modelId }.takeIf(String::isNotBlank)
-    }
-
 @Composable
 internal fun ChatDrawerHeader(
     settings: Settings,
-    current: Conversation,
     onEditNickname: () -> Unit,
     onUpdateAvatar: (Avatar) -> Unit,
     onNavigate: (Screen) -> Unit,
@@ -104,11 +100,9 @@ internal fun ChatDrawerHeader(
     val checker: UpdateChecker = koinInject()
     val update by checker.nightlyState.collectAsStateWithLifecycle()
     val nickname = settings.displaySetting.userNickname.ifBlank { stringResource(R.string.user_default_name) }
-    val modelName = chatDrawerModelName(settings, current)
     val rootChip = chatDrawerRootStatus(root)
     ChatDrawerHeaderContent(
         nickname = nickname,
-        modelName = modelName,
         rootChip = rootChip,
         hasUpdate = showUpdateStatus && update.hasUpdate,
         onEditNickname = onEditNickname,
@@ -128,7 +122,6 @@ internal fun ChatDrawerHeader(
 @Composable
 internal fun ChatDrawerHeaderContent(
     nickname: String,
-    modelName: String?,
     rootChip: SettingsDashboardStatusChip?,
     hasUpdate: Boolean,
     onEditNickname: () -> Unit,
@@ -141,7 +134,7 @@ internal fun ChatDrawerHeaderContent(
     fun navigate(id: String) { ChatDrawerNavigation.route(id)?.let(onNavigate) }
 
     Row(
-        modifier = modifier.fillMaxWidth().heightIn(min = 72.dp).testTag("chat_drawer_header"),
+        modifier = modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("chat_drawer_header"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -156,11 +149,8 @@ internal fun ChatDrawerHeaderContent(
                     greeting()
                 }
             }
-            if (modelName != null || rootChip != null || hasUpdate) {
+            if (rootChip != null || hasUpdate) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    modelName?.let { name ->
-                        ChatDrawerModelChip(name, Modifier.weight(1f)) { navigate("model") }
-                    }
                     rootChip?.let { chip ->
                         ChatDrawerStatusAction(ChatDrawerNavigation.item("root_status").icon, chip.tone,
                             "Root: ${chip.text}") { navigate("root_status") }
@@ -174,28 +164,10 @@ internal fun ChatDrawerHeaderContent(
                 }
             }
         }
-        IconButton(onClick = { navigate("header_settings") }) {
+        IconButton(onClick = { navigate("header_settings") }, modifier = Modifier.size(40.dp)) {
             Icon(ChatDrawerNavigation.item("header_settings").icon, "Настройки", Modifier.size(24.dp),
                 tint = colors.onSurfaceVariant)
         }
-    }
-}
-
-@Composable
-private fun ChatDrawerModelChip(name: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Row(
-        modifier.heightIn(min = 28.dp).clip(MaterialTheme.shapes.small)
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .clickable(role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = "Текущая модель: $name. Выбрать модель по умолчанию" }
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Icon(ChatDrawerNavigation.item("model").icon, null, Modifier.size(16.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(name, Modifier.weight(1f), style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -224,38 +196,52 @@ private fun ChatDrawerStatusAction(
 }
 
 @Composable
-internal fun ChatDrawerNewChatButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    FilledTonalButton(onClick = onClick, modifier = modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-        Icon(HugeIcons.PlusSign, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.width(8.dp))
-        Text("Новый чат")
-    }
-}
-
-@Composable
-internal fun ChatDrawerSearchBar(onNavigate: (Screen) -> Unit, modifier: Modifier = Modifier) {
+internal fun ChatDrawerSearchBar(
+    onNavigate: (Screen) -> Unit,
+    onNewChat: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    val searchShape = MaterialTheme.shapes.extraLarge
+    val newChatShape = RoundedCornerShape(12.dp)
     Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Box(
-            Modifier.weight(1f).heightIn(min = 48.dp).clip(MaterialTheme.shapes.large)
+            Modifier.weight(1f).height(48.dp).clip(searchShape)
                 .clickable(role = Role.Button) { ChatDrawerNavigation.route("search")?.let(onNavigate) }
                 .semantics { contentDescription = "Поиск по сообщениям" },
             contentAlignment = Alignment.Center,
         ) {
-            Surface(Modifier.fillMaxWidth().heightIn(min = 44.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = MaterialTheme.shapes.large) {
-                Row(Modifier.padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(ChatDrawerNavigation.item("search").icon, null, Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Поиск", style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Surface(Modifier.fillMaxWidth().height(44.dp), color = colors.surfaceContainerHigh, shape = searchShape) {}
+            Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(ChatDrawerNavigation.item("search").icon, null, Modifier.size(20.dp), tint = colors.onSurfaceVariant)
+                Text("Поиск", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium,
+                    color = colors.onSurfaceVariant)
+                IconButton(onClick = { ChatDrawerNavigation.route("history")?.let(onNavigate) }) {
+                    Icon(ChatDrawerNavigation.item("history").icon, "История чатов", Modifier.size(24.dp),
+                        tint = colors.onSurfaceVariant)
                 }
             }
         }
-        IconButton(onClick = { ChatDrawerNavigation.route("history")?.let(onNavigate) }) {
-            Icon(ChatDrawerNavigation.item("history").icon, "История чатов", Modifier.size(24.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        TooltipBox(
+            positionProvider = TooltipDefaults.rememberTooltipPositionProvider(),
+            tooltip = { PlainTooltip { Text("Новый чат") } },
+            state = rememberTooltipState(),
+        ) {
+            Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                FilledTonalIconButton(
+                    onClick = onNewChat,
+                    modifier = Modifier.size(44.dp),
+                    shape = newChatShape,
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = colors.secondaryContainer,
+                        contentColor = colors.onSecondaryContainer,
+                    ),
+                ) {
+                    Icon(HugeIcons.MessageAdd01, "Новый чат", Modifier.size(22.dp))
+                }
+            }
         }
     }
 }
@@ -285,7 +271,7 @@ internal fun ChatDrawerAssistantCard(
         Row(
             Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(MaterialTheme.shapes.large)
                 .clickable(role = Role.Button) { expanded = !expanded }
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {

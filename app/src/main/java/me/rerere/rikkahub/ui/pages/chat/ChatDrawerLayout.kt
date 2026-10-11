@@ -32,8 +32,8 @@ internal fun ChatDrawerFrame(content: @Composable ColumnScope.() -> Unit) {
 
 @Composable
 internal fun ChatDrawerTopArea(content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.padding(top = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp), content = content)
+    Column(Modifier.padding(horizontal = 16.dp).padding(top = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
 }
 
 @Composable
