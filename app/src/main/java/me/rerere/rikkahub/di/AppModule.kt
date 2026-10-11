@@ -30,6 +30,7 @@ import me.rerere.rikkahub.utils.SoundEffectPlayer
 import me.rerere.rikkahub.utils.UpdateChecker
 import me.rerere.rikkahub.web.WebServerManager
 import me.rerere.tts.provider.TTSManager
+import okhttp3.OkHttpClient
 import org.koin.dsl.module
 
 val appModule = module {
@@ -84,7 +85,7 @@ val appModule = module {
 
     single {
         UpdateChecker(
-            client = get(),
+            clientProvider = { get<OkHttpClient>() },
             appScope = get(),
         )
     }

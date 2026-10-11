@@ -2,103 +2,216 @@ package me.rerere.rikkahub.utils
 
 import android.app.DownloadManager
 import android.content.Context
+import android.content.Intent
+import android.content.SharedPreferences
 import android.os.Environment
-import android.widget.Toast
 import androidx.core.net.toUri
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import me.rerere.common.http.await
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.BuildConfig
+import okhttp3.CacheControl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.IOException
 
-private const val API_URL = "https://api.github.com/repos/mishaqp/Rikka-Root/releases/latest"
+private const val REPOSITORY_API_URL = "https://api.github.com/repos/mishaqp/Rikka-Root"
+private const val NIGHTLY_API_URL = "$REPOSITORY_API_URL/releases/tags/nightly"
+private const val UPDATE_PREFERENCES = "nightly_updater"
+private const val UPDATE_CACHE_KEY = "cache"
 
 class UpdateChecker(
-    private val client: OkHttpClient,
-    appScope: AppScope,
+    clientProvider: () -> OkHttpClient,
+    private val appScope: AppScope,
 ) {
-    val updateState: StateFlow<UiState<UpdateInfo>> = checkUpdate().stateIn(
-        scope = appScope,
-        started = SharingStarted.Lazily,
-        initialValue = UiState.Loading,
-    )
+    constructor(client: OkHttpClient, appScope: AppScope) : this({ client }, appScope)
 
-    private fun checkUpdate(): Flow<UiState<UpdateInfo>> = flow {
-        emit(UiState.Loading)
-        val noUpdate = UpdateInfo(BuildConfig.VERSION_NAME, "", "", emptyList())
-        // Debug packages use a different application ID and signing key.
-        if (BuildConfig.DEBUG) {
-            emit(UiState.Success(noUpdate))
-            return@flow
-        }
-        emit(
-            UiState.Success(
-                data = try {
-                    val response = client.newCall(
-                        Request.Builder()
-                            .url(API_URL)
-                            .get()
-                            .addHeader(
-                                "User-Agent",
-                                "Rikka-Root ${BuildConfig.VERSION_NAME} #${BuildConfig.VERSION_CODE}"
-                            )
-                            .addHeader("Accept", "application/vnd.github+json")
-                            .addHeader("X-GitHub-Api-Version", "2022-11-28")
-                            .build()
-                    ).await()
-                    response.use {
-                        when {
-                            it.code == 404 -> noUpdate
-                            it.isSuccessful -> decodeForkReleaseUpdate(it.body.string()) ?: noUpdate
-                            else -> error("Failed to fetch update info (HTTP ${it.code})")
-                        }
-                    }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    throw Exception("Failed to fetch update info", e)
+    // Resolving the shared client also initializes network/search services and reads their cache.
+    // The first access is in fetch(), after check() has switched to Dispatchers.IO.
+    private val client: OkHttpClient by lazy(clientProvider)
+    private val checkMutex = Mutex()
+    private val cacheJson = Json { ignoreUnknownKeys = true }
+    private var cacheLoaded = false
+    private var preferences: SharedPreferences? = null
+    @Volatile private var applicationContext: Context? = null
+    private val mutableNightlyState = MutableStateFlow(NightlyUpdateState())
+    private val mutableUpdateState = MutableStateFlow<UiState<UpdateInfo>>(UiState.Idle)
+
+    val nightlyState: StateFlow<NightlyUpdateState> = mutableNightlyState.asStateFlow()
+
+    /** Retained for the existing chat card and view model; errors have no toast or notification. */
+    val updateState: StateFlow<UiState<UpdateInfo>> = mutableUpdateState.asStateFlow()
+
+    fun start(context: Context): Job {
+        applicationContext = context.applicationContext
+        return checkNow(force = false)
+    }
+
+    fun checkNow(force: Boolean = true): Job = appScope.launch(Dispatchers.IO) { check(force) }
+
+    suspend fun check(force: Boolean = false): NightlyUpdateState = withContext(Dispatchers.IO) {
+        checkMutex.withLock {
+            loadCache()
+            val previous = mutableNightlyState.value
+            val now = System.currentTimeMillis()
+            if (!shouldCheckNightly(previous.checkedAt, now, force)) return@withLock previous
+
+            val checking = previous.copy(isChecking = true, error = null, checkedAt = now)
+            publish(checking)
+            // Save the attempt before networking, including when the process dies while offline.
+            saveCache(checking.copy(isChecking = false))
+            val result = try {
+                val release = decodeNightlyReleaseUpdate(fetch(NIGHTLY_API_URL, force))
+                    ?: throw UpdateCheckException("Nightly-сборка с подходящим APK пока недоступна.")
+                val currentCommit = BuildConfig.GIT_COMMIT
+                if (!isGitCommitHash(currentCommit)) {
+                    throw UpdateCheckException("Не удалось определить коммит установленной сборки.")
                 }
-            )
-        )
-    }.catch {
-        emit(UiState.Error(it))
-    }.flowOn(Dispatchers.IO)
+                val update = if (sameGitCommit(currentCommit, release.commitHash)) {
+                    release
+                } else {
+                    val comparison = compareCommits(currentCommit, release.commitHash, force)
+                    if (comparison.relation == NightlyCommitRelation.DIVERGED) {
+                        throw UpdateCheckException("История nightly и установленной сборки разошлась. Не удалось определить наличие обновления.")
+                    }
+                    release.copy(
+                        isNewer = comparison.relation == NightlyCommitRelation.AHEAD,
+                        commitTitles = comparison.commitTitles,
+                        changelog = comparison.commitTitles.joinToString("\n") { "- $it" },
+                    )
+                }
+                NightlyUpdateState(update = update, checkedAt = now)
+            } catch (cancel: CancellationException) {
+                publish(previous.copy(isChecking = false, checkedAt = now))
+                saveCache(mutableNightlyState.value)
+                throw cancel
+            } catch (error: Exception) {
+                checking.copy(
+                    isChecking = false,
+                    error = when (error) {
+                        is UpdateCheckException -> error.message
+                        is IOException -> "Не удалось связаться с GitHub. Проверьте подключение к интернету."
+                        else -> "Не удалось проверить обновления. Попробуйте ещё раз."
+                    },
+                )
+            }
+            publish(result)
+            saveCache(result)
+            result
+        }
+    }
+
+    private suspend fun compareCommits(current: String, latest: String, force: Boolean): NightlyComparison {
+        val url = "$REPOSITORY_API_URL/compare/$current...$latest?per_page=30"
+        val first = decodeNightlyComparison(fetch(url, force, comparing = true))
+        if (first.relation != NightlyCommitRelation.AHEAD || first.totalCommits <= 30) return first
+
+        // Compare pages are chronological. Fetch only the tail to show the latest 30 changes.
+        val lastPage = (first.totalCommits.toLong() + 29) / 30
+        val last = decodeNightlyComparison(fetch("$url&page=$lastPage", force, comparing = true))
+        val preceding = if (last.commitTitles.size < 30) {
+            if (lastPage == 2L) first else {
+                decodeNightlyComparison(fetch("$url&page=${lastPage - 1}", force, comparing = true))
+            }
+        } else null
+        return first.copy(commitTitles = (preceding?.commitTitles.orEmpty() + last.commitTitles).takeLast(30))
+    }
+
+    private suspend fun fetch(url: String, force: Boolean, comparing: Boolean = false): String {
+        val request = Request.Builder()
+            .url(url)
+            .get()
+            .header("User-Agent", "Rikka-Root ${BuildConfig.VERSION_NAME} #${BuildConfig.VERSION_CODE}")
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .apply { if (force) cacheControl(CacheControl.FORCE_NETWORK) }
+            .build()
+        return client.newCall(request).await().use { response ->
+            when {
+                response.isSuccessful -> response.body.string()
+                response.code == 403 || response.code == 429 ->
+                    throw UpdateCheckException("GitHub временно ограничил проверки. Попробуйте позже.")
+                comparing && (response.code == 404 || response.code == 422) ->
+                    throw UpdateCheckException("GitHub не смог сравнить коммиты установленной и nightly-сборки.")
+                response.code == 404 -> throw UpdateCheckException("Nightly-сборка пока не опубликована.")
+                else -> throw UpdateCheckException("Не удалось получить данные GitHub (HTTP ${response.code}).")
+            }
+        }
+    }
+
+    private fun loadCache() {
+        if (cacheLoaded) return
+        val context = applicationContext ?: return
+        preferences = runCatching {
+            context.getSharedPreferences(UPDATE_PREFERENCES, Context.MODE_PRIVATE)
+        }.getOrNull()
+        cacheLoaded = true
+        val cache = runCatching {
+            preferences?.getString(UPDATE_CACHE_KEY, null)?.let {
+                cacheJson.decodeFromString<NightlyUpdateCache>(it)
+            }
+        }.getOrNull() ?: return
+        if (cache.matchesInstalledCommit(BuildConfig.GIT_COMMIT)) {
+            publish(cache.state.copy(isChecking = false))
+        }
+    }
+
+    private fun saveCache(state: NightlyUpdateState) {
+        runCatching {
+            preferences?.edit()?.putString(
+                UPDATE_CACHE_KEY,
+                cacheJson.encodeToString(NightlyUpdateCache(BuildConfig.GIT_COMMIT, state.copy(isChecking = false))),
+            )?.commit()
+        }
+    }
+
+    private fun publish(state: NightlyUpdateState) {
+        mutableNightlyState.value = state
+        mutableUpdateState.value = when {
+            state.update != null -> UiState.Success(state.update)
+            state.isChecking -> UiState.Loading
+            state.error != null -> UiState.Error(IllegalStateException(state.error))
+            else -> UiState.Success(UpdateInfo(BuildConfig.VERSION_NAME, "", "", emptyList()))
+        }
+    }
 
     fun downloadUpdate(context: Context, download: UpdateDownload) {
         runCatching {
             val request = DownloadManager.Request(download.url.toUri()).apply {
-                // 设置下载时通知栏的标题和描述
                 setTitle(download.name)
-                setDescription("正在下载更新包...")
-                // 下载完成后通知栏可见
+                setDescription("Загрузка обновления Rikka-Root…")
                 setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                // 允许在移动网络和WiFi下下载
                 setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI or DownloadManager.Request.NETWORK_MOBILE)
-                // 设置文件保存路径
                 setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, download.name)
-                // 允许下载的文件类型
                 setMimeType("application/vnd.android.package-archive")
             }
-            // 获取系统的DownloadManager
             val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             dm.enqueue(request)
-            // 你可以保存返回的downloadId到本地，以便后续查询下载进度或状态
         }.onFailure {
-            Toast.makeText(context, "Failed to update", Toast.LENGTH_SHORT).show()
-            context.openUrl(download.url) // 跳转到下载页面
+            runCatching {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, download.url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }.onFailure {
+                publish(mutableNightlyState.value.copy(error = "Не удалось начать загрузку APK. Попробуйте открыть nightly-релиз в браузере."))
+            }
         }
     }
 }
+
+private class UpdateCheckException(message: String) : Exception(message)
 
 @Serializable
 data class UpdateDownload(
@@ -112,7 +225,10 @@ data class UpdateInfo(
     val version: String,
     val publishedAt: String,
     val changelog: String,
-    val downloads: List<UpdateDownload>
+    val downloads: List<UpdateDownload>,
+    val commitHash: String = "",
+    val isNewer: Boolean = false,
+    val commitTitles: List<String> = emptyList(),
 )
 
 /**

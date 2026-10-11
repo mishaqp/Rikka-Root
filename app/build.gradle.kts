@@ -2,6 +2,7 @@ import com.android.build.api.dsl.Packaging
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import java.io.FileInputStream
+import java.time.Instant
 import java.util.Properties
 
 plugins {
@@ -16,6 +17,17 @@ plugins {
 val releaseAbis = providers.gradleProperty("rikkarootReleaseAbis").orNull
     ?.split(',')?.also { require(it.isNotEmpty() && it.all { abi -> abi in setOf("arm64-v8a", "x86_64") }) }
     ?: listOf("arm64-v8a", "x86_64")
+
+val fullCommitPattern = Regex("[a-fA-F0-9]{40}")
+val buildGitCommit = providers.environmentVariable("GITHUB_SHA").orNull
+    ?.takeIf { fullCommitPattern.matches(it) }
+    ?: providers.exec {
+        workingDir(rootProject.projectDir)
+        commandLine("git", "rev-parse", "HEAD")
+        isIgnoreExitValue = true
+    }.standardOutput.asText.get().trim().takeIf { fullCommitPattern.matches(it) }
+    ?: "unknown"
+val buildDateUtc = Instant.now().toString()
 
 android {
     namespace = "me.rerere.rikkahub"
@@ -32,6 +44,10 @@ android {
         // Reserve two digits for fork revisions of each upstream version.
         versionCode = 191 * 100 + 2
         versionName = "2.5.6-root.2"
+        buildConfigField("String", "GIT_COMMIT", "\"$buildGitCommit\"")
+        buildConfigField("String", "GIT_COMMIT_SHORT", "\"${buildGitCommit.take(7)}\"")
+        buildConfigField("String", "BUILD_DATE", "\"$buildDateUtc\"")
+        buildConfigField("String", "BUILD_ABIS", "\"${releaseAbis.joinToString(",")}\"")
         resValue("string", "shortcut_target_package", "me.mishaqp.rikkaroot")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
