@@ -117,58 +117,22 @@ fun AssistantLocalToolPage(id: String) {
     val category = LocalToolUiRegistry.categories.firstOrNull { it.id == categoryId }
     val selected = LocalToolUiRegistry.entries.firstOrNull { it.option::class.simpleName == selectedKey }
     val searching = query.isNotBlank()
-    val matches = remember(query, context) { LocalToolUiRegistry.entries.filter {
-        (it.title(context) + " " + it.description(context)).contains(query.trim(), ignoreCase = true)
-    } }
-    val visible = if (searching) matches else category?.options?.map(LocalToolUiRegistry::entry).orEmpty()
-    val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     BackHandler(enabled = category != null || searching) { if (searching) query = "" else categoryId = null }
-    Scaffold(topBar = {
-        LargeFlexibleTopAppBar(title = { Text(if (searching) "Поиск инструментов" else category?.title ?: "Инструменты") },
-            navigationIcon = {
-                if (category != null || searching) IconButton(onClick = { if (searching) query = "" else categoryId = null }) {
-                    Icon(HugeIcons.ArrowLeft01, "Назад к инструментам")
-                } else BackButton()
-            }, scrollBehavior = scroll, colors = CustomColors.topBarColors)
-    }, modifier = Modifier.nestedScroll(scroll.nestedScrollConnection), containerColor = CustomColors.topBarColors.containerColor) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding).imePadding(),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            item {
-                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Включено ${assistant.localTools.toSet().size} из ${LocalToolUiRegistry.entries.size}", style = MaterialTheme.typography.titleLarge)
-                        Text(estimate?.let {
-                            val format = NumberFormat.getNumberInstance(Locale.forLanguageTag("ru")).apply { minimumFractionDigits = 1; maximumFractionDigits = 1 }
-                            "≈${format.format(it / 1000.0)} тыс. токенов в каждом запросе"
-                        } ?: if (metadataError) "Не удалось оценить размер инструментов" else "Оцениваю размер инструментов…")
-                        Text("Описания, схемы и выбранные навыки · примерно 4 символа на токен", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-            }
-            item { OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                label = { Text("Поиск по названию и описанию") }, leadingIcon = { Icon(HugeIcons.Search01, null) },
-                trailingIcon = if (query.isNotEmpty()) ({ IconButton(onClick = { query = "" }) { Icon(HugeIcons.Cancel01, "Очистить поиск") } }) else null) }
-            if (category == null && !searching) {
-                item { FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    LocalToolPreset.entries.forEach { candidate -> AssistChip(onClick = { preset = candidate }, label = { Text(candidate.title) },
-                        enabled = !controls.busy || candidate == LocalToolPreset.None) }
-                } }
-                if (controls.busy) item { Text("Применяю изменения и проверяю разрешения…", style = MaterialTheme.typography.bodySmall) }
-                items(LocalToolUiRegistry.categories, key = { it.id }) { group -> ToolCategoryRow(group, assistant.localTools.toSet()) { categoryId = group.id } }
-            } else {
-                if (!searching && category != null) item { ListItem(headlineContent = { Text("Включить всю категорию") },
-                    supportingContent = { Text("Каждое разрешение Android запрашивается отдельно", style = MaterialTheme.typography.bodySmall) },
-                    trailingContent = { Switch(checked = category.options.all { it in assistant.localTools }, enabled = !controls.busy, onCheckedChange = {
-                        controls.applyOptions(if (it) assistant.localTools.toSet() + category.options else assistant.localTools.toSet() - category.options.toSet())
-                    }) }) }
-                if (visible.isEmpty()) item { Text("Инструменты не найдены") }
-                items(visible, key = { it.option::class.simpleName.orEmpty() }) { entry ->
-                    LocalToolCompactRow(entry, entry.option in assistant.localTools, controls, definitions[entry.option].orEmpty(), accessRevision,
-                        if (searching) LocalToolUiRegistry.category(entry.option).title else null) { selectedKey = entry.option::class.simpleName; sheetGeneration++ }
-                }
-            }
-        }
-    }
+    AssistantLocalToolPageContent(
+        assistant = assistant,
+        estimate = estimate,
+        metadataError = metadataError,
+        query = query,
+        category = category,
+        controls = controls,
+        definitions = definitions,
+        accessRevision = accessRevision,
+        onQueryChange = { query = it },
+        onCategorySelected = { categoryId = it },
+        onPresetSelected = { preset = it },
+        onToolSelected = { selectedKey = it.option::class.simpleName; sheetGeneration++ },
+        onBackToTools = { if (searching) query = "" else categoryId = null },
+    )
     preset?.let { candidate ->
         val desired = LocalToolUiRegistry.preset(candidate)
         val enabled = assistant.localTools.toSet()
@@ -229,6 +193,78 @@ fun AssistantLocalToolPage(id: String) {
                         if (selectedKey == entry.option::class.simpleName && sheetGeneration == generation) update(assistant, requested)
                     },
                 )
+            }
+        }
+    }
+}
+
+/** The production tools overview, with metadata and actions supplied by its host. */
+@Composable
+internal fun AssistantLocalToolPageContent(
+    assistant: Assistant,
+    estimate: Long?,
+    metadataError: Boolean,
+    query: String,
+    category: LocalToolUiCategory?,
+    controls: LocalToolControls,
+    definitions: Map<LocalToolOption, List<Tool>>,
+    accessRevision: Int,
+    onQueryChange: (String) -> Unit,
+    onCategorySelected: (String) -> Unit,
+    onPresetSelected: (LocalToolPreset) -> Unit,
+    onToolSelected: (LocalToolUiEntry) -> Unit,
+    onBackToTools: () -> Unit,
+) {
+    val context = LocalContext.current
+    val searching = query.isNotBlank()
+    val matches = remember(query, context) { LocalToolUiRegistry.entries.filter {
+        (it.title(context) + " " + it.description(context)).contains(query.trim(), ignoreCase = true)
+    } }
+    val visible = if (searching) matches else category?.options?.map(LocalToolUiRegistry::entry).orEmpty()
+    val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    Scaffold(topBar = {
+        LargeFlexibleTopAppBar(title = { Text(if (searching) "Поиск инструментов" else category?.title ?: "Инструменты") },
+            navigationIcon = {
+                if (category != null || searching) IconButton(onClick = { onBackToTools() }) {
+                    Icon(HugeIcons.ArrowLeft01, "Назад к инструментам")
+                } else BackButton()
+            }, scrollBehavior = scroll, colors = CustomColors.topBarColors)
+    }, modifier = Modifier.nestedScroll(scroll.nestedScrollConnection), containerColor = CustomColors.topBarColors.containerColor) { padding ->
+        LazyColumn(Modifier.fillMaxSize().padding(padding).imePadding(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            item {
+                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Включено ${assistant.localTools.toSet().size} из ${LocalToolUiRegistry.entries.size}", style = MaterialTheme.typography.titleLarge)
+                        Text(estimate?.let {
+                            val format = NumberFormat.getNumberInstance(Locale.forLanguageTag("ru")).apply { minimumFractionDigits = 1; maximumFractionDigits = 1 }
+                            "≈${format.format(it / 1000.0)} тыс. токенов в каждом запросе"
+                        } ?: if (metadataError) "Не удалось оценить размер инструментов" else "Оцениваю размер инструментов…")
+                        Text("Описания, схемы и выбранные навыки · примерно 4 символа на токен", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+            item { OutlinedTextField(value = query, onValueChange = onQueryChange, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                label = { Text("Поиск по названию и описанию") }, leadingIcon = { Icon(HugeIcons.Search01, null) },
+                trailingIcon = if (query.isNotEmpty()) ({ IconButton(onClick = { onQueryChange("") }) { Icon(HugeIcons.Cancel01, "Очистить поиск") } }) else null) }
+            if (category == null && !searching) {
+                item { FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    LocalToolPreset.entries.forEach { candidate -> AssistChip(onClick = { onPresetSelected(candidate) }, label = { Text(candidate.title) },
+                        enabled = !controls.busy || candidate == LocalToolPreset.None) }
+                } }
+                if (controls.busy) item { Text("Применяю изменения и проверяю разрешения…", style = MaterialTheme.typography.bodySmall) }
+                items(LocalToolUiRegistry.categories, key = { it.id }) { group -> ToolCategoryRow(group, assistant.localTools.toSet()) { onCategorySelected(group.id) } }
+            } else {
+                if (!searching && category != null) item { ListItem(headlineContent = { Text("Включить всю категорию") },
+                    supportingContent = { Text("Каждое разрешение Android запрашивается отдельно", style = MaterialTheme.typography.bodySmall) },
+                    trailingContent = { Switch(checked = category.options.all { it in assistant.localTools }, enabled = !controls.busy, onCheckedChange = {
+                        controls.applyOptions(if (it) assistant.localTools.toSet() + category.options else assistant.localTools.toSet() - category.options.toSet())
+                    }) }) }
+                if (visible.isEmpty()) item { Text("Инструменты не найдены") }
+                items(visible, key = { it.option::class.simpleName.orEmpty() }) { entry ->
+                    LocalToolCompactRow(entry, entry.option in assistant.localTools, controls, definitions[entry.option].orEmpty(), accessRevision,
+                        if (searching) LocalToolUiRegistry.category(entry.option).title else null) { onToolSelected(entry) }
+                }
             }
         }
     }

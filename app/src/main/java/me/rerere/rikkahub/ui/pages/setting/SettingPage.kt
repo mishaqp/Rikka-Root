@@ -37,10 +37,12 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.GlobalSearch
 import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.UpdateChecker
+import me.rerere.rikkahub.utils.NightlyUpdateState
 import me.rerere.rikkahub.utils.openUrl
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
@@ -52,11 +54,9 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
     val statuses = rememberSettingsDashboardStatuses(settings)
     val updateChecker = koinInject<UpdateChecker>()
     val update by updateChecker.nightlyState.collectAsStateWithLifecycle()
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val navigator = LocalNavController.current
     val context = LocalContext.current
     var query by rememberSaveable { mutableStateOf("") }
-    val searchResults = remember(query) { SettingsSearchIndex.search(query) }
     val open: (SettingsTarget) -> Unit = { target ->
         when (target) {
             is SettingsTarget.Route -> navigator.navigate(target.screen)
@@ -71,6 +71,30 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
             }
         }
     }
+    SettingPageContent(
+        settings = settings,
+        statuses = statuses,
+        update = update,
+        query = query,
+        onQueryChange = { query = it },
+        open = open,
+        openScreen = { navigator.navigate(it) },
+    )
+}
+
+/** The production dashboard, with observed state supplied by its host. */
+@Composable
+internal fun SettingPageContent(
+    settings: Settings,
+    statuses: Map<SettingsDashboardStatusKey, SettingsDashboardStatus>,
+    update: NightlyUpdateState,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    open: (SettingsTarget) -> Unit,
+    openScreen: (Screen) -> Unit,
+) {
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val searchResults = remember(query) { SettingsSearchIndex.search(query) }
     Scaffold(
         topBar = {
             LargeFlexibleTopAppBar(title = { Text("Настройки") }, navigationIcon = { BackButton() },
@@ -85,25 +109,25 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             item("statePanel") {
-                SettingsStatePanel(settings, statuses[SettingsDashboardStatusKey.Root], update) { navigator.navigate(it) }
+                SettingsStatePanel(settings, statuses[SettingsDashboardStatusKey.Root], update, openScreen)
             }
             item("quickTiles") {
                 SettingsQuickTiles(SettingsDashboardPanelPresentation.quickTileValues(
                     settings, statuses[SettingsDashboardStatusKey.Root],
                 )) { tile ->
                     val assistantId = settings.assistantId.takeIf { id -> settings.assistants.any { it.id == id } }
-                    navigator.navigate(tile.route(assistantId?.toString()))
+                    openScreen(tile.route(assistantId?.toString()))
                 }
             }
             item("search") {
                 OutlinedTextField(
-                    value = query, onValueChange = { query = it }, singleLine = true,
+                    value = query, onValueChange = onQueryChange, singleLine = true,
                     modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp),
                     label = { Text("Поиск по настройкам") },
                     placeholder = { Text("Например: root, голос, батарея") },
                     leadingIcon = { Icon(HugeIcons.GlobalSearch, null) },
                     trailingIcon = if (query.isNotEmpty()) ({
-                        IconButton(onClick = { query = "" }) { Icon(HugeIcons.Cancel01, "Очистить поиск") }
+                        IconButton(onClick = { onQueryChange("") }) { Icon(HugeIcons.Cancel01, "Очистить поиск") }
                     }) else null,
                 )
             }

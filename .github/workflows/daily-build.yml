@@ -76,7 +76,16 @@ jobs:
         run: python -m unittest discover -s .github/scripts -p 'test_*.py'
 
       - name: Unit tests
-        run: ./gradlew test --no-configuration-cache
+        run: ./gradlew test --no-configuration-cache -Proborazzi.test.record=true
+
+      - name: Publish UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots
+          path: app/build/outputs/roborazzi/**/*.png
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Lint and inherited-error gate
         shell: bash

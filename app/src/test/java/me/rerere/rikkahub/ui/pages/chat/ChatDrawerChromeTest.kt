@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.pages.chat
 
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
@@ -13,6 +14,21 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ChatDrawerChromeTest {
+    @Test fun `footer selection follows the active destination instead of the last tap`() {
+        assertNull(chatDrawerBottomSelection(null, "assistant", moreExpanded = false))
+        assertNull(chatDrawerBottomSelection(Screen.Chat("chat"), "assistant", moreExpanded = false))
+        assertEquals("assistants", chatDrawerBottomSelection(Screen.Assistant, "assistant", moreExpanded = false))
+        assertEquals("favorites", chatDrawerBottomSelection(Screen.Favorite, "assistant", moreExpanded = false))
+        assertEquals("stats", chatDrawerBottomSelection(Screen.Stats, "assistant", moreExpanded = false))
+    }
+
+    @Test fun `more is selected for its active destination or while its sheet is expanded`() {
+        assertEquals("more", chatDrawerBottomSelection(Screen.SettingRoot, "assistant", moreExpanded = false))
+        assertEquals("more", chatDrawerBottomSelection(Screen.AssistantLocalTool("assistant"), "assistant", moreExpanded = false))
+        assertEquals("more", chatDrawerBottomSelection(Screen.Favorite, "assistant", moreExpanded = true))
+        assertNull(chatDrawerBottomSelection(Screen.MessageSearch, "assistant", moreExpanded = false))
+    }
+
     @Test fun `unchecked root never displays a chip or starts a check`() {
         assertNull(chatDrawerRootStatus(RootStatus.UNCHECKED))
         assertNull(chatDrawerRootStatus(RootStatus.CHECKING))

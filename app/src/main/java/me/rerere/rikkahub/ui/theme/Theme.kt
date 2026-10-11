@@ -5,6 +5,7 @@ import androidx.compose.foundation.LocalOverscrollFactory
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -30,6 +31,7 @@ private val ExtendDarkColors = darkExtendColors()
 val LocalExtendColors = compositionLocalOf { ExtendLightColors }
 
 val LocalDarkMode = compositionLocalOf { false }
+val LocalAmoledDarkMode = compositionLocalOf { false }
 
 private val AMOLED_DARK_BACKGROUND = Color(0xFF000000)
 
@@ -65,18 +67,6 @@ fun RikkahubTheme(
             theme.getColorScheme(dark = darkTheme)
         }
     }
-    val colorSchemeConverted = remember(darkTheme, amoledDarkMode, colorScheme) {
-        if (darkTheme && amoledDarkMode) {
-            colorScheme.copy(
-                background = AMOLED_DARK_BACKGROUND,
-                surface = AMOLED_DARK_BACKGROUND,
-            )
-        } else {
-            colorScheme
-        }
-    }
-    val extendColors = if (darkTheme) ExtendDarkColors else ExtendLightColors
-
     // 更新状态栏图标颜色
     val view = LocalView.current
     val activity = view.context.getActivity()
@@ -99,8 +89,28 @@ fun RikkahubTheme(
         }
     }
 
+    RikkahubThemeContent(colorScheme, darkTheme, amoledDarkMode, content)
+}
+
+/** Shared production theme rendering; its host resolves preferences and platform colors. */
+@Composable
+internal fun RikkahubThemeContent(
+    colorScheme: ColorScheme,
+    darkTheme: Boolean,
+    amoledDarkMode: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    val colorSchemeConverted = remember(darkTheme, amoledDarkMode, colorScheme) {
+        if (darkTheme && amoledDarkMode) {
+            colorScheme.copy(background = AMOLED_DARK_BACKGROUND, surface = AMOLED_DARK_BACKGROUND)
+        } else {
+            colorScheme
+        }
+    }
+    val extendColors = if (darkTheme) ExtendDarkColors else ExtendLightColors
     CompositionLocalProvider(
         LocalDarkMode provides darkTheme,
+        LocalAmoledDarkMode provides (darkTheme && amoledDarkMode),
         LocalExtendColors provides extendColors,
         LocalOverscrollFactory provides null
     ) {

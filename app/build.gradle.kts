@@ -1,4 +1,5 @@
 import com.android.build.api.dsl.Packaging
+import org.gradle.api.tasks.testing.Test
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import java.io.FileInputStream
@@ -153,6 +154,20 @@ android {
         compilerOptions.optIn.add("kotlinx.coroutines.ExperimentalCoroutinesApi")
         compilerOptions.optIn.add("androidx.navigation3.runtime.ExperimentalNavigation3Api")
     }
+}
+
+// Roborazzi runs in Robolectric; no emulator or instrumentation task is needed.
+val screenshotModeProperties = listOf("record", "compare", "verify").associate { mode ->
+    val property = "roborazzi.test.$mode"
+    property to providers.gradleProperty(property).getOrElse("false")
+}
+val recordScreenshots = screenshotModeProperties.getValue("roborazzi.test.record").toBoolean()
+val screenshotOutputDirectory = layout.buildDirectory.dir("outputs/roborazzi").get().asFile.absolutePath
+
+tasks.withType<Test>().configureEach {
+    outputs.upToDateWhen { !recordScreenshots }
+    systemProperties(screenshotModeProperties)
+    systemProperty("ui.screenshots.dir", file("$screenshotOutputDirectory/$name").absolutePath)
 }
 
 composeCompiler {
@@ -356,7 +371,12 @@ dependencies {
 
     // tests
     testImplementation(libs.junit)
-    testImplementation("org.robolectric:robolectric:4.16.1")
+    testImplementation(libs.robolectric)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.ui.test.junit4)
+    testImplementation(libs.androidx.ui.test.manifest)
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

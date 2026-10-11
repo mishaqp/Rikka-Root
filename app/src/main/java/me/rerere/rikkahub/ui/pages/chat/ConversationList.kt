@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -41,11 +40,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.paging.LoadState
@@ -68,7 +69,7 @@ import me.rerere.rikkahub.data.datastore.ConversationSortOrder
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.ui.pages.setting.SettingsIconCircle
 import me.rerere.rikkahub.ui.pages.setting.SettingsSectionTone
-import me.rerere.rikkahub.ui.theme.extendColors
+import me.rerere.rikkahub.ui.theme.LocalAmoledDarkMode
 import me.rerere.rikkahub.utils.mirrorForRtl
 
 /** UI projection only: no changes to persisted conversations or backups. */
@@ -115,7 +116,7 @@ fun ColumnScope.ConversationList(
     LazyColumn(
         state = listState,
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
         item(key = "drawer_header") { headerContent() }
         if (isEmpty) {
@@ -175,15 +176,15 @@ fun ColumnScope.ConversationList(
 }
 
 @Composable
-private fun DateHeaderItem(label: String, modifier: Modifier = Modifier, pinned: Boolean = false) {
+internal fun DateHeaderItem(label: String, modifier: Modifier = Modifier, pinned: Boolean = false) {
     Row(
-        modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+        modifier.fillMaxWidth().padding(start = 12.dp, top = 16.dp, end = 12.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        if (pinned) Icon(HugeIcons.Pin, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
-        Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.primary)
+        if (pinned) Icon(HugeIcons.Pin, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(label, style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -214,12 +215,14 @@ private fun SwipeableConversationItem(
         enableDismissFromStartToEnd = false,
         modifier = modifier,
         backgroundContent = {
-            Box(
-                Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
-                    .background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 20.dp),
-                contentAlignment = Alignment.CenterEnd,
-            ) {
-                Icon(HugeIcons.Delete01, "Удалить чат", tint = MaterialTheme.colorScheme.onErrorContainer)
+            if (dismissState.dismissDirection != SwipeToDismissBoxValue.Settled) {
+                Box(
+                    Modifier.fillMaxSize().clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 20.dp),
+                    contentAlignment = Alignment.CenterEnd,
+                ) {
+                    Icon(HugeIcons.Delete01, "Удалить чат", tint = MaterialTheme.colorScheme.onErrorContainer)
+                }
             }
         },
     ) {
@@ -229,7 +232,7 @@ private fun SwipeableConversationItem(
 }
 
 @Composable
-private fun ConversationItem(
+internal fun ConversationItem(
     conversation: Conversation,
     metadata: ChatDrawerRowMetadata,
     selected: Boolean,
@@ -248,20 +251,27 @@ private fun ConversationItem(
     val title = conversation.title.ifBlank { "Новый чат" }
     val time = chatDrawerRowTime(conversation.updateAt)
     val toolLabel = if (metadata.hasWorkflows) "Работали сценарии" else "Работали инструменты"
-    val background = if (selected) MaterialTheme.colorScheme.secondaryContainer
-        else MaterialTheme.colorScheme.surface
+    val selectedBackground = if (LocalAmoledDarkMode.current) MaterialTheme.colorScheme.surfaceContainerHigh
+        else MaterialTheme.colorScheme.secondaryContainer
+    val foreground = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
+        else MaterialTheme.colorScheme.onSurface
+    val supportingForeground = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
+        else MaterialTheme.colorScheme.onSurfaceVariant
     Box(
-        Modifier.fillMaxWidth().heightIn(min = 68.dp).clip(RoundedCornerShape(16.dp))
-            .background(background)
+        Modifier.testTag("chat_drawer_conversation_${conversation.id}")
+            .fillMaxWidth().heightIn(min = 56.dp).clip(CircleShape)
+            .then(if (selected) Modifier.background(selectedBackground) else Modifier)
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = LocalIndication.current,
+                role = Role.Tab,
                 onClickLabel = "Открыть чат",
                 onLongClickLabel = "Действия с чатом",
                 onClick = { onClick(conversation) },
                 onLongClick = { focusManager.clearFocus(force = true); showMenu = true },
             )
             .semantics(mergeDescendants = true) {
+                this.selected = selected
                 contentDescription = listOfNotNull(title, metadata.preview, time,
                     "Закреплён".takeIf { conversation.isPinned },
                     toolLabel.takeIf { metadata.hasTools }, "Ответ формируется".takeIf { loading })
@@ -275,31 +285,28 @@ private fun ConversationItem(
                     CustomAccessibilityAction("Удалить") { onDelete(conversation); true },
                 )
             },
+        contentAlignment = Alignment.CenterStart,
     ) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SettingsIconCircle(HugeIcons.Message01, SettingsSectionTone.Secondary, 32.dp, 18.dp)
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(title, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium)
-                    if (conversation.isPinned) Icon(HugeIcons.Pin, null, Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
-                    AnimatedVisibility(loading) {
-                        Box(Modifier.size(5.dp).background(MaterialTheme.extendColors.green6, CircleShape))
-                    }
+        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(title, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.titleSmall, color = foreground)
+                if (conversation.isPinned) Icon(HugeIcons.Pin, null, Modifier.size(12.dp), tint = supportingForeground)
+                AnimatedVisibility(loading) {
+                    Box(Modifier.size(5.dp).background(
+                        if (selected) foreground else MaterialTheme.colorScheme.primary,
+                        CircleShape,
+                    ))
                 }
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text(metadata.preview, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (metadata.hasTools) {
-                        Box(Modifier.clip(RoundedCornerShape(5.dp)).background(MaterialTheme.colorScheme.tertiaryContainer)
-                            .padding(3.dp)) {
-                            Icon(if (metadata.hasWorkflows) HugeIcons.Refresh01 else HugeIcons.Tools, null,
-                                Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onTertiaryContainer)
-                        }
-                    }
-                    Text(time, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(time, style = MaterialTheme.typography.labelSmall, color = supportingForeground)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(metadata.preview, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodySmall, color = supportingForeground)
+                if (metadata.hasTools) {
+                    Icon(if (metadata.hasWorkflows) HugeIcons.Refresh01 else HugeIcons.Tools, null,
+                        Modifier.size(12.dp), tint = supportingForeground)
                 }
             }
         }

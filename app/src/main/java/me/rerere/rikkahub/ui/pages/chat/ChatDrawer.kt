@@ -5,16 +5,14 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -26,7 +24,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.SnackbarDuration
@@ -40,7 +37,6 @@ import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -51,7 +47,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -196,125 +191,118 @@ fun ChatDrawerContent(
     val presentationSort by drawerVm.presentationSort.collectAsStateWithLifecycle()
     var conversationToRename by remember { mutableStateOf<Conversation?>(null) }
     val deleteFolderGeneratingMessage = stringResource(R.string.chat_page_delete_folder_generating)
-    val drawerWidth = minOf(LocalConfiguration.current.screenWidthDp.dp * 0.85f, 360.dp)
-
-    ModalDrawerSheet(modifier = Modifier.width(drawerWidth)) {
-        Column(Modifier.fillMaxSize()) {
-            ConversationList(
-                current = current,
-                conversations = conversations,
-                conversationJobs = conversationJobs.keys,
-                listState = conversationListState,
-                pendingRemovalIds = pendingRemovalIds,
-                folderSelected = !showAllFolders,
-                rowMetadata = currentRowMetadata,
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                headerContent = {
-                    Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        ChatDrawerHeader(
-                            settings = settings,
-                            current = current,
-                            onEditNickname = { nicknameEditState.open(settings.displaySetting.userNickname) },
-                            onUpdateAvatar = { avatar ->
-                                vm.updateSettings(settings.copy(displaySetting = settings.displaySetting.copy(userAvatar = avatar)))
-                            },
-                            onNavigate = { navController.navigate(it) },
-                            showUpdateStatus = updateChecksEnabled && !isPlayStore,
-                        )
-                        ChatDrawerNewChatButton(onClick = { navigateToChatPage(navController) })
-                        BackupReminderCard(settings, onClick = { navController.navigate(Screen.Backup) })
-                        ChatDrawerSearchBar(onNavigate = { navController.navigate(it) })
-                        ChatDrawerAssistantCard(
-                            settings = settings,
-                            onUpdateSettings = { updated ->
-                                val updateJob = vm.updateSettings(updated)
-                                scope.launch {
-                                    updateJob.join()
-                                    val id = if (context.readBooleanPreference("create_new_conversation_on_start", true)) {
-                                        Uuid.random()
-                                    } else {
-                                        repo.getConversationsOfAssistant(updated.assistantId).first().firstOrNull()?.id ?: Uuid.random()
-                                    }
-                                    navigateToChatPage(navController, id)
+    ChatDrawerFrame {
+        ConversationList(
+            current = current,
+            conversations = conversations,
+            conversationJobs = conversationJobs.keys,
+            listState = conversationListState,
+            pendingRemovalIds = pendingRemovalIds,
+            folderSelected = !showAllFolders,
+            rowMetadata = currentRowMetadata,
+            modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 12.dp),
+            headerContent = {
+                ChatDrawerTopArea {
+                    ChatDrawerHeader(
+                        settings = settings,
+                        current = current,
+                        onEditNickname = { nicknameEditState.open(settings.displaySetting.userNickname) },
+                        onUpdateAvatar = { avatar ->
+                            vm.updateSettings(settings.copy(displaySetting = settings.displaySetting.copy(userAvatar = avatar)))
+                        },
+                        onNavigate = { navController.navigate(it) },
+                        showUpdateStatus = updateChecksEnabled && !isPlayStore,
+                    )
+                    ChatDrawerNewChatButton(onClick = { navigateToChatPage(navController) })
+                    BackupReminderCard(settings, onClick = { navController.navigate(Screen.Backup) })
+                    ChatDrawerSearchBar(onNavigate = { navController.navigate(it) })
+                    ChatDrawerAssistantCard(
+                        settings = settings,
+                        onUpdateSettings = { updated ->
+                            val updateJob = vm.updateSettings(updated)
+                            scope.launch {
+                                updateJob.join()
+                                val id = if (context.readBooleanPreference("create_new_conversation_on_start", true)) {
+                                    Uuid.random()
+                                } else {
+                                    repo.getConversationsOfAssistant(updated.assistantId).first().firstOrNull()?.id ?: Uuid.random()
                                 }
-                            },
-                            onNavigate = { navController.navigate(it) },
-                        )
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Text("Папки", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            ConversationSortButton(
-                                presentationSort = presentationSort,
-                                onPresentationSortChange = {
-                                    drawerVm.setPresentationSort(it)
-                                    scope.launch { conversationListState.scrollToItem(0) }
-                                },
-                                sortOrder = settings.displaySetting.conversationSortOrder,
-                                onSortOrderChange = { sortOrder ->
-                                    vm.updateSettings(settings.copy(displaySetting = settings.displaySetting.copy(conversationSortOrder = sortOrder)))
-                                    scope.launch { conversationListState.scrollToItem(0) }
-                                },
-                            )
-                        }
-                        FolderBar(
-                            folders = folders, selectedFolderId = selectedFolderId,
-                            showAll = showAllFolders,
-                            onSelectAll = { drawerVm.selectAllFolders() },
-                            onSelect = { drawerVm.selectFolder(it) },
-                            onCreate = { showCreateFolderDialog = true },
-                            onRename = { folderToRename = it },
-                            onDelete = { folderToDelete = it },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                },
-                onNewChat = { navigateToChatPage(navController) },
-                onClick = { navigateToChatPage(navController, it.id) },
-                onRename = { conversationToRename = it },
-                onRegenerateTitle = { conversation ->
-                    if (settings.hasFastModelTarget()) {
-                        vm.generateTitle(conversation, true)
-                    } else {
-                        scope.launch {
-                            if (snackbarHostState.showSnackbar(
-                                    message = "Выберите быструю модель в настройках", actionLabel = "Настройки",
-                                    withDismissAction = true, duration = SnackbarDuration.Short,
-                                ) == SnackbarResult.ActionPerformed) {
-                                navController.navigate(Screen.SettingModels)
+                                navigateToChatPage(navController, id)
                             }
-                        }
-                    }
-                },
-                onDelete = { conversation ->
+                        },
+                        onNavigate = { navController.navigate(it) },
+                    )
+                    ChatDrawerFolderControls(
+                        sort = { ConversationSortButton(
+                            presentationSort = presentationSort,
+                            onPresentationSortChange = {
+                                drawerVm.setPresentationSort(it)
+                                scope.launch { conversationListState.scrollToItem(0) }
+                            },
+                            sortOrder = settings.displaySetting.conversationSortOrder,
+                            onSortOrderChange = { sortOrder ->
+                                vm.updateSettings(settings.copy(displaySetting = settings.displaySetting.copy(conversationSortOrder = sortOrder)))
+                                scope.launch { conversationListState.scrollToItem(0) }
+                            },
+                        ) },
+                        folders = { FolderBar(
+                        folders = folders, selectedFolderId = selectedFolderId,
+                        showAll = showAllFolders,
+                        onSelectAll = { drawerVm.selectAllFolders() },
+                        onSelect = { drawerVm.selectFolder(it) },
+                        onCreate = { showCreateFolderDialog = true },
+                        onRename = { folderToRename = it },
+                        onDelete = { folderToDelete = it },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) },
+                    )
+                }
+            },
+            onNewChat = { navigateToChatPage(navController) },
+            onClick = { navigateToChatPage(navController, it.id) },
+            onRename = { conversationToRename = it },
+            onRegenerateTitle = { conversation ->
+                if (settings.hasFastModelTarget()) {
+                    vm.generateTitle(conversation, true)
+                } else {
                     scope.launch {
-                        try {
-                            deletionCoordinator.delete(
-                                id = conversation.id,
-                                offerUndo = {
-                                    snackbarHostState.showSnackbar("Чат удалён", actionLabel = "Отменить",
-                                        withDismissAction = true, duration = SnackbarDuration.Short) == SnackbarResult.ActionPerformed
-                                },
-                                commit = {
-                                    withContext(Dispatchers.IO) { repo.deleteConversation(conversation) }
-                                    conversations.refresh()
-                                    if (scope.isActive && conversation.id == latestCurrentId) navigateToChatPage(navController)
-                                },
-                            )
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (_: Exception) {
-                            if (scope.isActive) snackbarHostState.showSnackbar("Не удалось удалить чат. Попробуйте ещё раз.")
+                        if (snackbarHostState.showSnackbar(
+                                message = "Выберите быструю модель в настройках", actionLabel = "Настройки",
+                                withDismissAction = true, duration = SnackbarDuration.Short,
+                            ) == SnackbarResult.ActionPerformed) {
+                            navController.navigate(Screen.SettingModels)
                         }
                     }
-                },
-                onPin = { vm.updatePinnedStatus(it) },
-                onMoveToAssistant = { conversationToMove = it; showMoveToAssistantSheet = true },
-                onMoveToFolder = { conversationToMoveFolder = it; showMoveToFolderSheet = true },
-            )
-            SnackbarHost(snackbarHostState, Modifier.padding(horizontal = 8.dp))
-            ChatDrawerBottomBar(settings.assistantId.toString(), onNavigate = { navController.navigate(it) })
-        }
+                }
+            },
+            onDelete = { conversation ->
+                scope.launch {
+                    try {
+                        deletionCoordinator.delete(
+                            id = conversation.id,
+                            offerUndo = {
+                                snackbarHostState.showSnackbar("Чат удалён", actionLabel = "Отменить",
+                                    withDismissAction = true, duration = SnackbarDuration.Short) == SnackbarResult.ActionPerformed
+                            },
+                            commit = {
+                                withContext(Dispatchers.IO) { repo.deleteConversation(conversation) }
+                                conversations.refresh()
+                                if (scope.isActive && conversation.id == latestCurrentId) navigateToChatPage(navController)
+                            },
+                        )
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        if (scope.isActive) snackbarHostState.showSnackbar("Не удалось удалить чат. Попробуйте ещё раз.")
+                    }
+                }
+            },
+            onPin = { vm.updatePinnedStatus(it) },
+            onMoveToAssistant = { conversationToMove = it; showMoveToAssistantSheet = true },
+            onMoveToFolder = { conversationToMoveFolder = it; showMoveToFolderSheet = true },
+        )
+        SnackbarHost(snackbarHostState, Modifier.padding(horizontal = 8.dp))
+        ChatDrawerBottomBar(settings.assistantId.toString(), onNavigate = { navController.navigate(it) })
     }
 
     conversationToRename?.let { conversation ->
@@ -608,9 +596,8 @@ fun ChatDrawerContent(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun FolderBar(
+internal fun FolderBar(
     folders: List<Folder>,
     selectedFolderId: Uuid?,
     showAll: Boolean,
@@ -621,34 +608,34 @@ private fun FolderBar(
     onDelete: (Folder) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // Wrapping chips keep every folder reachable without sideways scrolling or clipping.
-    FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        FolderChip("Все", showAll, onSelectAll, null)
-        FolderChip("Без папки", !showAll && selectedFolderId == null, { onSelect(null) }, null)
-        folders.forEach { folder ->
-            key(folder.id) {
-                var menuExpanded by remember { mutableStateOf(false) }
-                Box {
-                    FolderChip(folder.name, !showAll && selectedFolderId == folder.id,
-                        { onSelect(folder.id) }, { menuExpanded = true }, HugeIcons.Folder01)
-                    DropdownMenu(menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                        DropdownMenuItem(text = { Text("Переименовать") },
-                            leadingIcon = { Icon(HugeIcons.PencilEdit01, null) },
-                            onClick = { menuExpanded = false; onRename(folder) })
-                        DropdownMenuItem(text = { Text("Удалить") },
-                            leadingIcon = { Icon(HugeIcons.Delete01, null) },
-                            onClick = { menuExpanded = false; onDelete(folder) })
-                    }
+    // Only the folder strip scrolls sideways; the sorting action stays visible.
+    LazyRow(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        item(key = "all") { FolderChip("Все", showAll, onSelectAll, null) }
+        if (folders.isNotEmpty()) item(key = "unfiled") {
+            FolderChip("Без папки", !showAll && selectedFolderId == null, { onSelect(null) }, null)
+        }
+        items(folders, key = { it.id }) { folder ->
+            var menuExpanded by remember { mutableStateOf(false) }
+            Box {
+                FolderChip(folder.name, !showAll && selectedFolderId == folder.id,
+                    { onSelect(folder.id) }, { menuExpanded = true }, HugeIcons.Folder01)
+                DropdownMenu(menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                    DropdownMenuItem(text = { Text("Переименовать") },
+                        leadingIcon = { Icon(HugeIcons.PencilEdit01, null) },
+                        onClick = { menuExpanded = false; onRename(folder) })
+                    DropdownMenuItem(text = { Text("Удалить") },
+                        leadingIcon = { Icon(HugeIcons.Delete01, null) },
+                        onClick = { menuExpanded = false; onDelete(folder) })
                 }
             }
         }
-        FolderChip("+ Папка", false, onCreate, null, HugeIcons.FolderAdd)
+        item(key = "create") { FolderChip("+ Папка", false, onCreate, null, HugeIcons.FolderAdd) }
     }
 }
 
 @Composable
-private fun ConversationSortButton(
+internal fun ConversationSortButton(
     presentationSort: DrawerConversationSort,
     onPresentationSortChange: (DrawerConversationSort) -> Unit,
     sortOrder: ConversationSortOrder,
@@ -687,19 +674,23 @@ private fun FolderChip(
     onLongClick: (() -> Unit)?,
     icon: ImageVector? = null,
 ) {
-    Surface(
-        shape = CircleShape,
-        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
-        contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.clip(CircleShape).combinedClickable(
-            role = Role.Button, onClick = onClick, onLongClick = onLongClick,
-            onLongClickLabel = if (onLongClick != null) "Действия с папкой: $label" else null,
-        ).semantics { contentDescription = label; this.selected = selected },
-    ) {
-        Row(Modifier.heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (icon != null) Icon(icon, null, Modifier.size(16.dp))
-            Text(label, style = MaterialTheme.typography.labelLarge)
+    Box(Modifier.heightIn(min = 48.dp), contentAlignment = Alignment.Center) {
+        Surface(
+            shape = CircleShape,
+            color = if (selected) MaterialTheme.colorScheme.secondaryContainer
+                else MaterialTheme.colorScheme.surface.copy(alpha = 0f),
+            contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.clip(CircleShape).combinedClickable(
+                role = Role.Button, onClick = onClick, onLongClick = onLongClick,
+                onLongClickLabel = if (onLongClick != null) "Действия с папкой: $label" else null,
+            ).semantics { contentDescription = label; this.selected = selected },
+        ) {
+            Row(Modifier.heightIn(min = 32.dp).padding(horizontal = 10.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (icon != null) Icon(icon, null, Modifier.size(14.dp))
+                Text(label, style = MaterialTheme.typography.labelMedium)
+            }
         }
     }
 }
