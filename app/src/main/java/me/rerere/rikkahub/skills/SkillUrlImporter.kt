@@ -266,7 +266,7 @@ class SkillUrlImporter(
             }
             appendLine("## Source")
             appendLine()
-            appendLine("Imported from Hermes skill at $sourceUrl. Tool names were not transcoded — Hermes references its own tool surface, which doesn't always map 1:1 to RikkaHub's. Edit any tool references manually if the skill misbehaves.")
+            appendLine("Imported from Hermes skill at $sourceUrl. Tool names were not transcoded — Hermes references its own tool surface, which doesn't always map 1:1 to Rikka-Root's. Edit any tool references manually if the skill misbehaves.")
         }
         return ToolNameTranscoder.transcode(body)
     }

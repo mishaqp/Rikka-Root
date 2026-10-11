@@ -745,7 +745,7 @@
   <string name="setting_asr_configure_step_sample_rate_desc">معدل أخذ العينات لتسجيل PCM بوحدة Hz، يُوصى بـ 16000 لـ ASR</string>
   <string name="setting_asr_configure_step_segment_desc">تفريغ تلقائي للصوت المخزن مؤقتًا كل N ثانية أثناء التسجيل. تعطّل القيمة 0 التقسيم التلقائي (طلب واحد عند الإيقاف)</string>
   <string name="setting_asr_configure_step_timestamp">تفعيل الطوابع الزمنية</string>
-  <string name="setting_asr_configure_step_timestamp_desc">إرجاع طوابع زمنية على مستوى الكلمة في أحداث delta. معطّل افتراضيًا لتوفير الـ Token (لا يستهلكها rikkahub حتى الآن)</string>
+  <string name="setting_asr_configure_step_timestamp_desc">إرجاع طوابع زمنية على مستوى الكلمة في أحداث delta. معطّل افتراضيًا لتوفير الـ Token (لا يستهلكها Rikka-Root حتى الآن)</string>
   <string name="setting_asr_configure_vad_desc">حساسية VAD للخادم، عادةً من 0.3 إلى 0.8</string>
   <string name="setting_asr_configure_vad_threshold">عتبة VAD</string>
   <string name="setting_asr_configure_volcengine_api_key_desc">مفتاح API لـ Volcengine (X-Api-Key)</string>
@@ -1014,7 +1014,7 @@
   <string name="setting_page_web_server">خادم الويب</string>
   <string name="setting_page_web_server_address_note">ملاحظات العنوان</string>
   <string name="setting_page_web_server_address_note_desc">عنوان LAN: يستخدم عنوان IP الخاص بشبكة WiFi للجهاز، ويمكن الوصول إليه من الأجهزة الأخرى على نفس الشبكة. غير متاح على بيانات الجوال.\nالعنوان المحلي: يستخدم localhost، ويمكن الوصول إليه على هذا الجهاز فقط.\nعنوان mDNS: يستخدم اسم مضيف .local، ويمكن الوصول إليه بالاسم من الأجهزة الأخرى على نفس الشبكة دون معرفة عنوان IP.</string>
-  <string name="setting_page_web_server_desc">يتيح لك الوصول إلى RikkaHub عبر الويب</string>
+  <string name="setting_page_web_server_desc">يتيح لك الوصول إلى Rikka-Root عبر الويب</string>
   <string name="setting_page_web_server_error">خطأ</string>
   <string name="setting_page_web_server_jwt_enable">تفعيل المصادقة</string>
   <string name="setting_page_web_server_jwt_enable_desc">يتطلب التحقق بكلمة المرور عند الوصول إلى واجهة الويب</string>

@@ -1,12 +1,12 @@
 ---
 name: openclaw-converter
-description: Convert OpenClaw skills from ClawHub (or raw markdown) into RikkaHub-compatible skills. Use whenever the user gives you an OpenClaw skill URL, a GitHub link to an OpenClaw skill, or raw OpenClaw skill markdown to convert.
+description: Convert OpenClaw skills from ClawHub (or raw markdown) into Rikka-Root-compatible skills. Use whenever the user gives you an OpenClaw skill URL, a GitHub link to an OpenClaw skill, or raw OpenClaw skill markdown to convert.
 auto_load: false
 ---
 
-# OpenClaw to RikkaHub Skill Converter
+# OpenClaw to Rikka-Root Skill Converter
 
-Convert OpenClaw skills from ClawHub (or raw markdown) into RikkaHub-compatible skills. Apply this whenever the user gives you an OpenClaw skill URL, a GitHub link to an OpenClaw skill, or raw OpenClaw skill markdown to convert.
+Convert OpenClaw skills from ClawHub (or raw markdown) into Rikka-Root-compatible skills. Apply this whenever the user gives you an OpenClaw skill URL, a GitHub link to an OpenClaw skill, or raw OpenClaw skill markdown to convert.
 
 ## How to Fetch the Source
 
@@ -18,7 +18,7 @@ Convert OpenClaw skills from ClawHub (or raw markdown) into RikkaHub-compatible 
 
 ### Paths
 
-| OpenClaw | RikkaHub |
+| OpenClaw | Rikka-Root |
 |---|---|
 | `~/.openclaw/workspace/` | `~/` |
 | `~/.openclaw/workspace/.learnings/` | `~/learnings/` |
@@ -27,7 +27,7 @@ Convert OpenClaw skills from ClawHub (or raw markdown) into RikkaHub-compatible 
 
 ### Tool references
 
-| OpenClaw tool / concept | RikkaHub equivalent | Notes |
+| OpenClaw tool / concept | Rikka-Root equivalent | Notes |
 |---|---|---|
 | `sessions_list` | Not available | Remove the section or note the limitation |
 | `sessions_history` | Not available | Remove the section or note the limitation |
@@ -41,10 +41,10 @@ Convert OpenClaw skills from ClawHub (or raw markdown) into RikkaHub-compatible 
 
 ### Promotion targets
 
-| OpenClaw target | RikkaHub target |
+| OpenClaw target | Rikka-Root target |
 |---|---|
 | `CLAUDE.md` | A project-level file (if the project exists) or `~/learnings/` |
-| `AGENTS.md` | A RikkaHub skill file or `memory_tool` |
+| `AGENTS.md` | A Rikka-Root skill file or `memory_tool` |
 | `SOUL.md` | `memory_tool` for behavioral patterns |
 | `TOOLS.md` | Update the relevant skill's content |
 | `MEMORY.md` | `memory_tool` |
@@ -52,11 +52,11 @@ Convert OpenClaw skills from ClawHub (or raw markdown) into RikkaHub-compatible 
 
 ### Sections to remove or replace
 
-- "OpenClaw Setup" / "OpenClaw Workspace Structure": replace with RikkaHub workspace paths.
+- "OpenClaw Setup" / "OpenClaw Workspace Structure": replace with Rikka-Root workspace paths.
 - "Inter-Session Communication": remove `sessions_*` tools; if the concept is valuable, suggest `telegram_send_message` as a cross-session notification workaround.
-- "Hook Integration" / "Enable Hook": replace with RikkaHub workflows (`workflow_create`) or scheduled jobs (`schedule_job`).
+- "Hook Integration" / "Enable Hook": replace with Rikka-Root workflows (`workflow_create`) or scheduled jobs (`schedule_job`).
 - "Claude Code / Codex Setup": remove entirely (other agent platforms).
-- Installation via `clawdhub` or `git clone`: replace with "install via `skill_install_from_url` or `skill_install_from_text`" and RikkaHub-compatible paths.
+- Installation via `clawdhub` or `git clone`: replace with "install via `skill_install_from_url` or `skill_install_from_text`" and Rikka-Root-compatible paths.
 
 ### Sections to keep as-is
 
@@ -64,7 +64,7 @@ Logging formats (LEARNINGS.md / ERRORS.md structure), detection triggers, priori
 
 ### Format header
 
-RikkaHub skills use a simple frontmatter block: `name`, `description`, and `auto_load`. Strip any OpenClaw YAML frontmatter and use the first `# Heading` as the title.
+Rikka-Root skills use a simple frontmatter block: `name`, `description`, and `auto_load`. Strip any OpenClaw YAML frontmatter and use the first `# Heading` as the title.
 
 ### Naming
 
@@ -89,7 +89,7 @@ User: "fetch this skill and convert it https://clawhub.ai/owner/skill-name"
 4. close the browser
 5. apply the conversion rules above to produce adapted markdown
 6. skill_install_from_text(content=adapted, name="skill-name",
-     source_label="Converted from <url> for RikkaHub")
+     source_label="Converted from <url> for Rikka-Root")
 7. initialise any required directories
 8. confirm to the user
 ```
@@ -97,7 +97,7 @@ User: "fetch this skill and convert it https://clawhub.ai/owner/skill-name"
 ## Known Edge Cases
 
 - Minimal skills (a few paragraphs): only paths and tool names need changing.
-- Skills with hook scripts: the `scripts/` directory and hook setup are OpenClaw-specific; replace with RikkaHub workflows/scheduled jobs or remove.
+- Skills with hook scripts: the `scripts/` directory and hook setup are OpenClaw-specific; replace with Rikka-Root workflows/scheduled jobs or remove.
 - Skills referencing `~/.openclaw/` paths: replace all with `~/` equivalents.
 - Skills with YAML frontmatter: strip the delimited block at the top.
 - Skills already installed: `skill_install_from_text` with the same name updates in place. Do not rename to force a new install; updating is preferred.

@@ -651,7 +651,7 @@
   <string name="setting_asr_configure_step_itn">Enable ITN</string>
   <string name="setting_asr_configure_step_itn_desc">Inverse Text Normalization: convert spoken numbers to digits (e.g. 三百 → 300)</string>
   <string name="setting_asr_configure_step_timestamp">Enable Timestamps</string>
-  <string name="setting_asr_configure_step_timestamp_desc">Return word-level timestamps in delta events. Disabled by default to save tokens (rikkahub does not consume them yet)</string>
+  <string name="setting_asr_configure_step_timestamp_desc">Return word-level timestamps in delta events. Disabled by default to save tokens (Rikka-Root does not consume them yet)</string>
   <string name="setting_asr_configure_step_hotwords">Hotwords</string>
   <string name="setting_asr_configure_step_hotwords_desc">Comma-separated list of hotwords to boost recognition accuracy for proper nouns / domain terms</string>
   <string name="setting_asr_page_add_provider">Add ASR Provider</string>
@@ -916,7 +916,7 @@
   <string name="setting_page_web_server">Web Server</string>
   <string name="setting_page_web_server_address_note">Address Notes</string>
   <string name="setting_page_web_server_address_note_desc">LAN Address: Uses device WiFi IP, accessible to other devices on the same network. Unavailable on mobile data.\nLocal Address: Uses localhost, accessible on this device only.\nmDNS Address: Uses .local hostname, accessible by name from other devices on the same network without knowing the IP.</string>
-  <string name="setting_page_web_server_desc">Allow you access RikkaHub via Web</string>
+  <string name="setting_page_web_server_desc">Allow you access Rikka-Root via Web</string>
   <string name="setting_page_web_server_error">Error</string>
   <string name="setting_page_web_server_jwt_enable">Enable authentication</string>
   <string name="setting_page_web_server_jwt_enable_desc">Require password verification when accessing the web interface</string>

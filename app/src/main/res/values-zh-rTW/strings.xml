@@ -842,7 +842,7 @@
   <string name="setting_page_web_server">Web伺服器</string>
   <string name="setting_page_web_server_address_note">位址備註</string>
   <string name="setting_page_web_server_address_note_desc">LAN 位址：使用裝置 WiFi IP，可供同一網路上的其他裝置存取。行動數據無法使用。\n本機位址：使用 localhost，僅供本裝置存取。\nmDNS 位址：使用 .local 主機名稱，可供同一網路上的其他裝置透過名稱存取，無需知道 IP。</string>
-  <string name="setting_page_web_server_desc">允許您透過網頁存取 RikkaHub</string>
+  <string name="setting_page_web_server_desc">允許您透過網頁存取 Rikka-Root</string>
   <string name="setting_page_web_server_error">錯誤</string>
   <string name="setting_page_web_server_jwt_enable">啟用身分驗證</string>
   <string name="setting_page_web_server_jwt_enable_desc">存取網頁介面時需要密碼驗證</string>
@@ -1237,7 +1237,7 @@
   <string name="setting_asr_configure_step_itn">啟用 ITN</string>
   <string name="setting_asr_configure_step_itn_desc">逆文字正規化：將口語數字轉換為數字（例如「三百」→「300」）</string>
   <string name="setting_asr_configure_step_timestamp">啟用時間戳</string>
-  <string name="setting_asr_configure_step_timestamp_desc">回傳詞級時間戳。rikkahub 目前尚未使用，預設關閉以節省 token</string>
+  <string name="setting_asr_configure_step_timestamp_desc">回傳詞級時間戳。Rikka-Root 目前尚未使用，預設關閉以節省 token</string>
   <string name="setting_asr_configure_step_hotwords">熱詞</string>
   <string name="setting_asr_configure_step_hotwords_desc">以逗號分隔的熱詞清單，用於提升專有名詞／領域術語的辨識準確率</string>
   <string name="log_page_record_requests">記錄請求</string>
