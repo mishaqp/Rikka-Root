@@ -55,7 +55,13 @@ private val hardwareToolSettings = listOf(
 )
 
 @Composable
-internal fun HardwareLocalToolSettings(assistant: Assistant, onUpdate: (Assistant) -> Unit) {
+internal fun HardwareLocalToolSettings(
+    assistant: Assistant,
+    onUpdate: (Assistant) -> Unit,
+    visibleOptions: Set<LocalToolOption>? = null,
+    onEnabledChange: ((LocalToolOption, Boolean) -> Unit)? = null,
+    controlsEnabled: Boolean = true,
+) {
     val context = LocalContext.current
     val resources = LocalResources.current
     val toaster = LocalToaster.current
@@ -133,6 +139,7 @@ internal fun HardwareLocalToolSettings(assistant: Assistant, onUpdate: (Assistan
 
     CardGroup {
         hardwareToolSettings.forEachIndexed { index, setting ->
+            if (visibleOptions != null && setting.option !in visibleOptions) return@forEachIndexed
             val enabled = setting.option in assistant.localTools
             item(
                 headlineContent = { Text(stringResource(setting.title)) },
@@ -181,9 +188,10 @@ internal fun HardwareLocalToolSettings(assistant: Assistant, onUpdate: (Assistan
                 trailingContent = {
                     Switch(
                         checked = enabled,
-                        enabled = !rootBusy && pendingIndex == null && (supported[index] || enabled),
+                        enabled = controlsEnabled && !rootBusy && pendingIndex == null && (supported[index] || enabled),
                         onCheckedChange = { checked ->
-                            if (!checked) setEnabled(setting.option, false)
+                            if (onEnabledChange != null) onEnabledChange(setting.option, checked)
+                            else if (!checked) setEnabled(setting.option, false)
                             else if (!needsAccess(setting.option)) { deniedIndex = null; setEnabled(setting.option, true) }
                             else { pendingIndex = index; enableAfterGrant = true; showRationale = true }
                         },

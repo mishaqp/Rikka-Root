@@ -20,14 +20,21 @@ import me.rerere.rikkahub.ui.components.ai.rememberScheduleExecutionSettings
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 
 @Composable
-internal fun AgentLocalToolSettings(assistant: Assistant, onUpdate: (Assistant) -> Unit) {
+internal fun AgentLocalToolSettings(
+    assistant: Assistant,
+    onUpdate: (Assistant) -> Unit,
+    visibleOptions: Set<LocalToolOption>? = null,
+    onEnabledChange: ((LocalToolOption, Boolean) -> Unit)? = null,
+    controlsEnabled: Boolean = true,
+) {
     val enabled = LocalToolOption.CostGuards in assistant.localTools
-    CardGroup {
+    if (visibleOptions == null || LocalToolOption.CostGuards in visibleOptions) CardGroup {
         item(
             headlineContent = { Text(stringResource(R.string.agent_tools_cost_title)) },
             supportingContent = { Text(stringResource(R.string.agent_tools_cost_desc)) },
-            trailingContent = { Switch(checked = enabled, onCheckedChange = { checked ->
-                onUpdate(assistant.copy(localTools = if (checked)
+            trailingContent = { Switch(checked = enabled, enabled = controlsEnabled, onCheckedChange = { checked ->
+                if (onEnabledChange != null) onEnabledChange(LocalToolOption.CostGuards, checked)
+                else onUpdate(assistant.copy(localTools = if (checked)
                     (assistant.localTools + LocalToolOption.CostGuards).distinct()
                     else assistant.localTools - LocalToolOption.CostGuards))
             }) },
@@ -44,13 +51,23 @@ internal fun AgentLocalToolSettings(assistant: Assistant, onUpdate: (Assistant) 
             }
         })
     }
-    AgentFeatureCard(assistant, onUpdate, LocalToolOption.Reliability,
-        R.string.agent_tools_reliability_title, R.string.agent_tools_reliability_desc)
-    AgentFeatureCard(assistant, onUpdate, LocalToolOption.SubAgents,
-        R.string.agent_tools_subagent_title, R.string.agent_tools_subagent_desc)
-    AgentFeatureCard(assistant, onUpdate, LocalToolOption.CronJobs,
-        R.string.agent_tools_cron_title, R.string.agent_tools_cron_desc)
-    if (LocalToolOption.SubAgents in assistant.localTools) CardGroup {
+    if (visibleOptions == null || LocalToolOption.Reliability in visibleOptions) {
+        AgentFeatureCard(assistant, onUpdate, LocalToolOption.Reliability,
+        R.string.agent_tools_reliability_title, R.string.agent_tools_reliability_desc,
+        onEnabledChange, controlsEnabled)
+    }
+    if (visibleOptions == null || LocalToolOption.SubAgents in visibleOptions) {
+        AgentFeatureCard(assistant, onUpdate, LocalToolOption.SubAgents,
+        R.string.agent_tools_subagent_title, R.string.agent_tools_subagent_desc,
+        onEnabledChange, controlsEnabled)
+    }
+    if (visibleOptions == null || LocalToolOption.CronJobs in visibleOptions) {
+        AgentFeatureCard(assistant, onUpdate, LocalToolOption.CronJobs,
+        R.string.agent_tools_cron_title, R.string.agent_tools_cron_desc,
+        onEnabledChange, controlsEnabled)
+    }
+    if ((visibleOptions == null || LocalToolOption.SubAgents in visibleOptions) &&
+        LocalToolOption.SubAgents in assistant.localTools) CardGroup {
         item(headlineContent = {
             OutlinedTextField(value = assistant.subAgentConcurrencyLimit.toString(),
                 onValueChange = { input -> input.toIntOrNull()?.takeIf { it in 1..8 }?.let {
@@ -63,7 +80,9 @@ internal fun AgentLocalToolSettings(assistant: Assistant, onUpdate: (Assistant) 
 
 @Composable
 private fun AgentFeatureCard(assistant: Assistant, onUpdate: (Assistant) -> Unit,
-                             option: LocalToolOption, title: Int, description: Int) {
+                             option: LocalToolOption, title: Int, description: Int,
+                             onEnabledChange: ((LocalToolOption, Boolean) -> Unit)?,
+                             controlsEnabled: Boolean) {
     val scheduleSettings = if (option == LocalToolOption.CronJobs) rememberScheduleExecutionSettings() else null
     CardGroup {
         item(headlineContent = { Text(stringResource(title)) },
@@ -76,10 +95,14 @@ private fun AgentFeatureCard(assistant: Assistant, onUpdate: (Assistant) -> Unit
                 }
             },
             trailingContent = { Switch(checked = option in assistant.localTools,
+                enabled = controlsEnabled,
                 onCheckedChange = { checked ->
-                    onUpdate(assistant.copy(localTools = if (checked)
-                        (assistant.localTools + option).distinct() else assistant.localTools - option))
-                    if (checked) scheduleSettings?.requestExactAlarms?.invoke()
+                    if (onEnabledChange != null) onEnabledChange(option, checked)
+                    else {
+                        onUpdate(assistant.copy(localTools = if (checked)
+                            (assistant.localTools + option).distinct() else assistant.localTools - option))
+                        if (checked) scheduleSettings?.requestExactAlarms?.invoke()
+                    }
                 }) })
     }
 }

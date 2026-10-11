@@ -47,7 +47,13 @@ private val personalToolSettings = listOf(
 )
 
 @Composable
-internal fun PersonalLocalToolSettings(assistant: Assistant, onUpdate: (Assistant) -> Unit) {
+internal fun PersonalLocalToolSettings(
+    assistant: Assistant,
+    onUpdate: (Assistant) -> Unit,
+    visibleOptions: Set<LocalToolOption>? = null,
+    onEnabledChange: ((LocalToolOption, Boolean) -> Unit)? = null,
+    controlsEnabled: Boolean = true,
+) {
     val context = LocalContext.current
     val resources = LocalResources.current
     val toaster = LocalToaster.current
@@ -92,6 +98,7 @@ internal fun PersonalLocalToolSettings(assistant: Assistant, onUpdate: (Assistan
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { finishRequest() }
     CardGroup {
         personalToolSettings.forEachIndexed { index, setting ->
+            if (visibleOptions != null && setting.option !in visibleOptions) return@forEachIndexed
             val enabled = setting.option in assistant.localTools
             item(
                 headlineContent = { Text(stringResource(setting.title)) },
@@ -123,8 +130,9 @@ internal fun PersonalLocalToolSettings(assistant: Assistant, onUpdate: (Assistan
                     }
                 },
                 trailingContent = {
-                    Switch(checked = enabled, enabled = !rootBusy && pendingIndex == null && (supported[index] || enabled), onCheckedChange = { checked ->
-                        if (!checked) setEnabled(setting.option, false)
+                    Switch(checked = enabled, enabled = controlsEnabled && !rootBusy && pendingIndex == null && (supported[index] || enabled), onCheckedChange = { checked ->
+                        if (onEnabledChange != null) onEnabledChange(setting.option, checked)
+                        else if (!checked) setEnabled(setting.option, false)
                         else if (missingLocalToolPermissions(context, setting.option).isEmpty()) { deniedIndex = null; setEnabled(setting.option, true) }
                         else { pendingIndex = index; showRationale = true }
                     })

@@ -56,7 +56,13 @@ private val shellToolSettings = listOf(
 
 /** Agent AssistantLocalToolPage shell/network rows adapted to the fork's approval and permission UI. */
 @Composable
-internal fun ShellLocalToolSettings(assistant: Assistant, onUpdate: (Assistant) -> Unit) {
+internal fun ShellLocalToolSettings(
+    assistant: Assistant,
+    onUpdate: (Assistant) -> Unit,
+    visibleOptions: Set<LocalToolOption>? = null,
+    onEnabledChange: ((LocalToolOption, Boolean) -> Unit)? = null,
+    controlsEnabled: Boolean = true,
+) {
     val context = LocalContext.current
     val resources = LocalResources.current
     val toaster = LocalToaster.current
@@ -106,6 +112,7 @@ internal fun ShellLocalToolSettings(assistant: Assistant, onUpdate: (Assistant) 
 
     CardGroup(title = { Text(stringResource(R.string.shell_tools_title)) }) {
         shellToolSettings.forEachIndexed { index, setting ->
+            if (visibleOptions != null && setting.option !in visibleOptions) return@forEachIndexed
             val enabled = setting.option in assistant.localTools
             item(
                 headlineContent = { Text(stringResource(setting.title)) },
@@ -129,9 +136,10 @@ internal fun ShellLocalToolSettings(assistant: Assistant, onUpdate: (Assistant) 
                     }
                 },
                 trailingContent = {
-                    Switch(checked = enabled, enabled = pendingIndex == null,
+                    Switch(checked = enabled, enabled = controlsEnabled && pendingIndex == null,
                         onCheckedChange = { checked ->
-                            if (!checked) setEnabled(setting.option, false)
+                            if (onEnabledChange != null) onEnabledChange(setting.option, checked)
+                            else if (!checked) setEnabled(setting.option, false)
                             else if (setting.option == LocalToolOption.Termux &&
                                 TermuxIntegration.state(context) == TermuxIntegration.State.NOT_INSTALLED) {
                                 deniedIndex = index

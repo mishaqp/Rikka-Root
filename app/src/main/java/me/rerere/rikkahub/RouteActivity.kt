@@ -427,6 +427,10 @@ class RouteActivity : ComponentActivity() {
                                 SettingToolApprovalsPage()
                             }
 
+                            entry<Screen.SettingToolApprovalsFocused> { key ->
+                                SettingToolApprovalsPage(focusTool = key.toolName)
+                            }
+
                             entry<Screen.Setting> {
                                 SettingPage()
                             }
@@ -704,6 +708,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingToolApprovals : Screen
+
+    @Serializable
+    data class SettingToolApprovalsFocused(val toolName: String) : Screen
 
     @Serializable
     data object Backup : Screen

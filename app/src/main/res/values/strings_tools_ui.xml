@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tool_ui_download_title" translatable="false">Загрузка файлов</string>
+    <string name="tool_ui_files_title" translatable="false">Файлы</string>
+    <string name="tool_ui_storage_title" translatable="false">Хранилище SAF</string>
+    <string name="tool_ui_keystore_title" translatable="false">Ключи и шифрование</string>
+    <string name="tool_ui_tts_title" translatable="false">Озвучивание</string>
+</resources>

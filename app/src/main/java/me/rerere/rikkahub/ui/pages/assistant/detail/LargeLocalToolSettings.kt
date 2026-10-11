@@ -52,7 +52,13 @@ private val largeToolSettings = listOf(
 
 /** Original feature switches remain opt-in. Bluetooth is optional for unrelated triggers. */
 @Composable
-internal fun LargeLocalToolSettings(assistant: Assistant, onUpdate: (Assistant) -> Unit) {
+internal fun LargeLocalToolSettings(
+    assistant: Assistant,
+    onUpdate: (Assistant) -> Unit,
+    visibleOptions: Set<LocalToolOption>? = null,
+    onEnabledChange: ((LocalToolOption, Boolean) -> Unit)? = null,
+    controlsEnabled: Boolean = true,
+) {
     val context = LocalContext.current
     val resources = LocalResources.current
     val nav = LocalNavController.current
@@ -101,6 +107,7 @@ internal fun LargeLocalToolSettings(assistant: Assistant, onUpdate: (Assistant) 
 
     CardGroup(title = { Text(stringResource(R.string.large_tools_group_title)) }) {
         largeToolSettings.forEach { setting ->
+            if (visibleOptions != null && setting.option !in visibleOptions) return@forEach
             val enabled = setting.option in assistant.localTools
             item(
                 headlineContent = { Text(stringResource(setting.title)) },
@@ -129,7 +136,10 @@ internal fun LargeLocalToolSettings(assistant: Assistant, onUpdate: (Assistant) 
                     }
                 },
                 trailingContent = {
-                    Switch(checked = enabled, onCheckedChange = { toggleLocalTool(setting.option, it) })
+                    Switch(checked = enabled, enabled = controlsEnabled, onCheckedChange = { checked ->
+                        if (onEnabledChange != null) onEnabledChange(setting.option, checked)
+                        else toggleLocalTool(setting.option, checked)
+                    })
                 },
             )
         }

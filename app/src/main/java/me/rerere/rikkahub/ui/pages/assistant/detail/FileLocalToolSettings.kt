@@ -39,7 +39,13 @@ private val fileToolSettings=listOf(
 )
 
 @Composable
-internal fun FileLocalToolSettings(assistant: Assistant,onUpdate:(Assistant)->Unit) {
+internal fun FileLocalToolSettings(
+    assistant: Assistant,
+    onUpdate: (Assistant) -> Unit,
+    visibleOptions: Set<LocalToolOption>? = null,
+    onEnabledChange: ((LocalToolOption, Boolean) -> Unit)? = null,
+    controlsEnabled: Boolean = true,
+) {
     val context=LocalContext.current; val toaster=LocalToaster.current; val scope=rememberCoroutineScope(); val root=koinInject<RootShellManager>()
     val resources=LocalResources.current
     val current by rememberUpdatedState(assistant); val update by rememberUpdatedState(onUpdate)
@@ -60,7 +66,9 @@ internal fun FileLocalToolSettings(assistant: Assistant,onUpdate:(Assistant)->Un
     }
     val launcher=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { finishRequest() }
     CardGroup {
-        fileToolSettings.forEach { setting -> item(
+        fileToolSettings.forEach { setting ->
+            if (visibleOptions != null && setting.option !in visibleOptions) return@forEach
+            item(
             headlineContent={ Text(stringResource(setting.title)) },
             supportingContent={ Column {
                 Text(stringResource(setting.description))
@@ -83,8 +91,9 @@ internal fun FileLocalToolSettings(assistant: Assistant,onUpdate:(Assistant)->Un
                     }) { Text(stringResource(R.string.assistant_page_local_tools_grant_root)) }
                 }
             } },
-            trailingContent={ Switch(checked=setting.option in assistant.localTools,enabled=!rootBusy&&!pending,onCheckedChange={ checked ->
-                if(checked&&setting.option==LocalToolOption.Download&&missingLocalToolPermissions(context,setting.option).isNotEmpty()) { pending=true; showRationale=true }
+            trailingContent={ Switch(checked=setting.option in assistant.localTools,enabled=controlsEnabled&&!rootBusy&&!pending,onCheckedChange={ checked ->
+                if (onEnabledChange != null) onEnabledChange(setting.option, checked)
+                else if(checked&&setting.option==LocalToolOption.Download&&missingLocalToolPermissions(context,setting.option).isNotEmpty()) { pending=true; showRationale=true }
                 else setEnabled(setting.option,checked)
             }) },
         ) }

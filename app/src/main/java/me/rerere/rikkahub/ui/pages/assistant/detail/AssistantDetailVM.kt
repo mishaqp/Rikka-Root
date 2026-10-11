@@ -178,6 +178,17 @@ class AssistantDetailVM(
         }
     }
 
+    /** Tool UI updates may follow a permission dialog: merge into the latest stored assistant. */
+    fun updateToolSettings(before: Assistant, requested: Assistant) {
+        viewModelScope.launch {
+            settingsStore.update { settings ->
+                settings.copy(assistants = settings.assistants.map { current ->
+                    if (current.id == assistantId) mergeToolUiChanges(current, before, requested) else current
+                })
+            }
+        }
+    }
+
     fun addMemory(memory: AssistantMemory) {
         viewModelScope.launch {
             val memoryAssistantId = if (assistant.value.useGlobalMemory) {

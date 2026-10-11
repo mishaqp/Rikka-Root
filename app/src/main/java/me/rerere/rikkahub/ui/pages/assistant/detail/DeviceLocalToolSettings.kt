@@ -52,7 +52,13 @@ private val deviceToolSettings = listOf(
 )
 
 @Composable
-internal fun DeviceLocalToolSettings(assistant: Assistant, onUpdate: (Assistant) -> Unit) {
+internal fun DeviceLocalToolSettings(
+    assistant: Assistant,
+    onUpdate: (Assistant) -> Unit,
+    visibleOptions: Set<LocalToolOption>? = null,
+    onEnabledChange: ((LocalToolOption, Boolean) -> Unit)? = null,
+    controlsEnabled: Boolean = true,
+) {
     val context = LocalContext.current
     val resources = LocalResources.current
     val toaster = LocalToaster.current
@@ -103,6 +109,7 @@ internal fun DeviceLocalToolSettings(assistant: Assistant, onUpdate: (Assistant)
 
     CardGroup {
         deviceToolSettings.forEachIndexed { index, setting ->
+            if (visibleOptions != null && setting.option !in visibleOptions) return@forEachIndexed
             item(
                 headlineContent = { Text(stringResource(setting.title)) },
                 supportingContent = {
@@ -145,9 +152,11 @@ internal fun DeviceLocalToolSettings(assistant: Assistant, onUpdate: (Assistant)
                 trailingContent = {
                     Switch(
                         checked = setting.option in assistant.localTools,
-                        enabled = !rootBusy && pendingIndex == null,
+                        enabled = controlsEnabled && !rootBusy && pendingIndex == null,
                         onCheckedChange = { enabled ->
-                            if (!enabled) {
+                            if (onEnabledChange != null) {
+                                onEnabledChange(setting.option, enabled)
+                            } else if (!enabled) {
                                 setEnabled(setting.option, false)
                             } else if (missingLocalToolPermissions(context, setting.option).isEmpty()) {
                                 deniedIndex = null

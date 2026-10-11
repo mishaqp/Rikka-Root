@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string translatable="false" name="assistant_page_local_tools_root_title">Root shell</string>
-    <string translatable="false" name="assistant_page_local_tools_root_desc">Run Android commands as root through su. Disabled by default. Commands require approval unless automatic execution is enabled below. Your device root manager also controls access; disabling this tool does not revoke its grant.</string>
-    <string translatable="false" name="assistant_page_local_tools_root_status_title">Last root verification</string>
-    <string translatable="false" name="assistant_page_local_tools_root_verify">Verify root</string>
-    <string translatable="false" name="assistant_page_local_tools_root_unchecked">Not verified. Tap Verify root to check access; your root manager may ask for permission.</string>
-    <string translatable="false" name="assistant_page_local_tools_root_checking">Verifying root… Review any permission prompt in your device root manager.</string>
-    <string translatable="false" name="assistant_page_local_tools_root_ready">UID 0 verified. Root grants can change; verify again to refresh.</string>
-    <string translatable="false" name="assistant_page_local_tools_root_unavailable">su could not be launched. Check your device root manager. This app cannot root your device.</string>
-    <string translatable="false" name="assistant_page_local_tools_root_denied">Root was denied or verification failed. Review access in your device root manager, then verify again.</string>
-    <string translatable="false" name="assistant_page_local_tools_root_not_root">su did not grant UID 0. ADB or shell access alone is insufficient.</string>
-    <string translatable="false" name="assistant_page_local_tools_root_timeout">Verification timed out. Review access in your device root manager, then verify again.</string>
+    <string translatable="false" name="assistant_page_local_tools_root_title">Root-оболочка</string>
+    <string translatable="false" name="assistant_page_local_tools_root_desc">Выполнение команд Android с правами root через su. По умолчанию выключено. Команды проходят через общую систему разрешений инструментов; обязательные подтверждения и запретный список сохраняются. Доступ также контролирует root-менеджер устройства. Выключение инструмента не отзывает выданный им доступ.</string>
+    <string translatable="false" name="assistant_page_local_tools_root_status_title">Последняя проверка root</string>
+    <string translatable="false" name="assistant_page_local_tools_root_verify">Проверить root</string>
+    <string translatable="false" name="assistant_page_local_tools_root_unchecked">Доступ не проверен. Нажмите «Проверить root»; root-менеджер устройства может запросить разрешение.</string>
+    <string translatable="false" name="assistant_page_local_tools_root_checking">Проверяю root… Подтвердите запрос разрешения в root-менеджере устройства, если он появится.</string>
+    <string translatable="false" name="assistant_page_local_tools_root_ready">Права UID 0 подтверждены. Root-доступ может измениться; для обновления статуса повторите проверку.</string>
+    <string translatable="false" name="assistant_page_local_tools_root_unavailable">Не удалось запустить su. Проверьте root-менеджер устройства. Приложение не может получить root на устройстве самостоятельно.</string>
+    <string translatable="false" name="assistant_page_local_tools_root_denied">Root-доступ отклонён или проверка завершилась ошибкой. Проверьте разрешение в root-менеджере устройства и повторите проверку.</string>
+    <string translatable="false" name="assistant_page_local_tools_root_not_root">su не предоставил права UID 0. Одного доступа через ADB или оболочку недостаточно.</string>
+    <string translatable="false" name="assistant_page_local_tools_root_timeout">Время проверки истекло. Проверьте разрешение в root-менеджере устройства и повторите проверку.</string>
     <string translatable="false" name="root_automatic_title">Выполнять root-команды без подтверждения</string>
     <string translatable="false" name="root_automatic_description">Разрешает этому ассистенту запускать root-команды без запроса подтверждения, включая команды, содержимое которых невозможно проверить. Команды могут изменять устройство и данные.</string>
     <string translatable="false" name="root_automatic_active">Root-команды выполняются без подтверждения</string>
