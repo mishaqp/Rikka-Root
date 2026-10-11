@@ -76,6 +76,7 @@ fun ColumnScope.ChatMessageActionButtons(
     onOpenActionSheet: () -> Unit,
     onTranslate: ((UIMessage, Locale) -> Unit)? = null,
     onClearTranslation: (UIMessage) -> Unit = {},
+    readOnly: Boolean = false,
 ) {
     val context = LocalContext.current
     val settings = LocalSettings.current
@@ -103,6 +104,7 @@ fun ColumnScope.ChatMessageActionButtons(
         ChatMessageActionButton(
             icon = HugeIcons.Refresh03,
             contentDescription = stringResource(R.string.regenerate),
+            enabled = !readOnly,
             onClick = {
                 if (message.role == MessageRole.USER) {
                     showRegenerateConfirm = true
@@ -153,7 +155,7 @@ fun ColumnScope.ChatMessageActionButtons(
             }
 
             // Translation button
-            if (onTranslate != null) {
+            if (!readOnly && onTranslate != null) {
                 ChatMessageActionButton(
                     icon = HugeIcons.Translate,
                     contentDescription = stringResource(R.string.translate),
@@ -171,6 +173,7 @@ fun ColumnScope.ChatMessageActionButtons(
         ChatMessageBranchSelector(
             node = node,
             onUpdate = onUpdate,
+            enabled = !readOnly,
         )
 
         if (settings.displaySetting.showDateTimeInMessage) {
@@ -266,7 +269,8 @@ fun ChatMessageActionsSheet(
     isFavorite: Boolean = false,
     onToggleFavorite: (() -> Unit)? = null,
     onWebViewPreview: () -> Unit,
-    onDismissRequest: () -> Unit
+    onDismissRequest: () -> Unit,
+    readOnly: Boolean = false,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
@@ -280,10 +284,10 @@ fun ChatMessageActionsSheet(
             if (hasTextContent) {
                 add(MessageSheetAction(HugeIcons.WebDesign01, stringResource(R.string.render_with_webview), onClick = onWebViewPreview))
             }
-            add(MessageSheetAction(HugeIcons.Edit01, stringResource(R.string.edit), onClick = onEdit))
+            if (!readOnly) add(MessageSheetAction(HugeIcons.Edit01, stringResource(R.string.edit), onClick = onEdit))
             add(MessageSheetAction(HugeIcons.Share04, stringResource(R.string.share), onClick = onShare))
-            add(MessageSheetAction(HugeIcons.GitFork, stringResource(R.string.create_fork), onClick = onFork))
-            if (onToggleFavorite != null) {
+            if (!readOnly) add(MessageSheetAction(HugeIcons.GitFork, stringResource(R.string.create_fork), onClick = onFork))
+            if (!readOnly && onToggleFavorite != null) {
                 add(
                     MessageSheetAction(
                         icon = HugeIcons.FavouriteCircle,
@@ -295,7 +299,7 @@ fun ChatMessageActionsSheet(
                     )
                 )
             }
-            add(MessageSheetAction(HugeIcons.Delete01, stringResource(R.string.delete), destructive = true, onClick = onDelete))
+            if (!readOnly) add(MessageSheetAction(HugeIcons.Delete01, stringResource(R.string.delete), destructive = true, onClick = onDelete))
         }
 
         Column(

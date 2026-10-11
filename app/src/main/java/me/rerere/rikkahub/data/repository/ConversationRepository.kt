@@ -12,6 +12,7 @@ import androidx.sqlite.db.SimpleSQLiteQuery
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.rerere.ai.ui.UIMessage
@@ -27,6 +28,9 @@ import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.rikkahub.data.model.HistoryLoadState
+import me.rerere.rikkahub.data.model.HistoryNotWritableException
+import me.rerere.rikkahub.data.model.requireCompleteHistory
 import me.rerere.rikkahub.data.ssh.SshToolSecretSanitizer
 import me.rerere.rikkahub.data.ssh.sanitizeSshToolMessages
 import me.rerere.rikkahub.data.ai.mcp.control.McpToolSecretSanitizer
@@ -44,6 +48,22 @@ class ConversationRepository(
     private val sshToolSecrets: SshToolSecretSanitizer? = null,
     private val mcpSecretSanitizer: McpToolSecretSanitizer? = null,
 ) {
+    private val historyLoads = java.util.concurrent.ConcurrentHashMap<String, HistoryLoadState>()
+
+    /** Also reject reconstructed snapshots of an ID whose latest load failed. */
+    fun requireWritableHistory(conversation: Conversation) {
+        conversation.requireCompleteHistory()
+        if (historyLoads[conversation.id.toString()] == HistoryLoadState.INCOMPLETE) {
+            throw HistoryNotWritableException(HistoryLoadState.INCOMPLETE)
+        }
+    }
+
+    private fun requireWritableId(conversationId: Uuid) {
+        if (historyLoads[conversationId.toString()] == HistoryLoadState.INCOMPLETE) {
+            throw HistoryNotWritableException(HistoryLoadState.INCOMPLETE)
+        }
+    }
+
     private var drawerJsonFunctionsAvailable: Boolean? = null
 
     companion object {
@@ -60,7 +80,7 @@ class ConversationRepository(
             limit = limit
         ).map { entity ->
             val nodes = loadMessageNodes(entity.id)
-            conversationEntityToConversation(entity, nodes)
+            conversationEntityToConversation(entity, nodes.nodes, nodes.state)
         }
     }
 
@@ -125,12 +145,15 @@ class ConversationRepository(
 
     /** Rename metadata only; never write a lightweight drawer item over the full conversation. */
     suspend fun updateConversationTitle(conversationId: Uuid, title: String) {
+        requireWritableId(conversationId)
         conversationDAO.updateTitle(conversationId.toString(), title)
     }
 
     /** The loaded drawer row may be stale after a manual or background AI rename. */
-    suspend fun backfillConversationTitle(conversationId: Uuid, expectedTitle: String, title: String): Boolean =
-        conversationDAO.updateTitleIfUnchanged(conversationId.toString(), expectedTitle, title) == 1
+    suspend fun backfillConversationTitle(conversationId: Uuid, expectedTitle: String, title: String): Boolean {
+        requireWritableId(conversationId)
+        return conversationDAO.updateTitleIfUnchanged(conversationId.toString(), expectedTitle, title) == 1
+    }
 
     fun getUnfiledConversationsOfAssistantPaging(
         assistantId: Uuid,
@@ -346,7 +369,7 @@ class ConversationRepository(
         val entity = conversationDAO.getConversationById(uuid.toString())
         return if (entity != null) {
             val nodes = loadMessageNodes(entity.id)
-            conversationEntityToConversation(entity, nodes)
+            conversationEntityToConversation(entity, nodes.nodes, nodes.state)
         } else null
     }
 
@@ -365,6 +388,7 @@ class ConversationRepository(
     }
 
     suspend fun insertConversation(conversation: Conversation) {
+        requireWritableHistory(conversation)
         val safeConversation = sanitizeSshConversation(conversation, sshToolSecrets, mcpSecretSanitizer)
         database.withTransaction {
             conversationDAO.insert(
@@ -376,6 +400,7 @@ class ConversationRepository(
     }
 
     suspend fun updateConversation(conversation: Conversation) {
+        requireWritableHistory(conversation)
         val safeConversation = sanitizeSshConversation(conversation, sshToolSecrets, mcpSecretSanitizer)
         database.withTransaction {
             conversationDAO.update(
@@ -390,11 +415,12 @@ class ConversationRepository(
 
     suspend fun deleteConversation(conversation: Conversation) {
         // 获取完整的 Conversation（包含 messageNodes）以正确清理文件
-        val fullConversation = if (conversation.messageNodes.isEmpty()) {
+        val fullConversation = if (conversation.historyLoadState == HistoryLoadState.NOT_LOADED) {
             getConversationById(conversation.id) ?: conversation
         } else {
             conversation
         }
+        requireWritableHistory(fullConversation)
         messageFtsManager.deleteConversation(conversation.id.toString())
         database.withTransaction {
             // message_node 会通过 CASCADE 自动删除
@@ -412,22 +438,22 @@ class ConversationRepository(
     ) = messageFtsManager.search(keyword, sort, assistantId?.toString())
 
     suspend fun rebuildAllIndexes(onProgress: (current: Int, total: Int) -> Unit = { _, _ -> }) {
+        // Validate every snapshot before clearing the old complete search index.
+        val conversations = conversationDAO.getAllIds().mapNotNull { id ->
+            getConversationById(Uuid.parse(id))
+        }
+        conversations.forEach(::requireWritableHistory)
         messageFtsManager.deleteAll()
-        val allIds = conversationDAO.getAllIds()
-        val total = allIds.size
-        allIds.forEachIndexed { index, id ->
-            val entity = conversationDAO.getConversationById(id) ?: return@forEachIndexed
-            val nodes = loadMessageNodes(entity.id)
-            val conversation = conversationEntityToConversation(entity, nodes)
+        conversations.forEachIndexed { index, conversation ->
             messageFtsManager.indexConversation(sanitizeSshConversation(conversation, sshToolSecrets, mcpSecretSanitizer))
-            onProgress(index + 1, total)
+            onProgress(index + 1, conversations.size)
         }
     }
 
     suspend fun deleteConversationOfAssistant(assistantId: Uuid) {
-        getConversationsOfAssistant(assistantId).first().forEach { conversation ->
-            deleteConversation(conversation)
-        }
+        val conversations = getConversationsOfAssistant(assistantId).first().mapNotNull { getConversationById(it.id) }
+        conversations.forEach(::requireWritableHistory)
+        conversations.forEach { deleteConversation(it) }
     }
 
     fun conversationToConversationEntity(conversation: Conversation): ConversationEntity {
@@ -452,11 +478,13 @@ class ConversationRepository(
 
     fun conversationEntityToConversation(
         conversationEntity: ConversationEntity,
-        messageNodes: List<MessageNode>
+        messageNodes: List<MessageNode>,
+        historyLoadState: HistoryLoadState = HistoryLoadState.NOT_LOADED,
     ): Conversation {
         return Conversation(
             id = Uuid.parse(conversationEntity.id),
             title = conversationEntity.title,
+            historyLoadState = historyLoadState,
             messageNodes = messageNodes.filter { it.messages.isNotEmpty() },
             createAt = Instant.ofEpochMilli(conversationEntity.createAt),
             updateAt = Instant.ofEpochMilli(conversationEntity.updateAt),
@@ -483,6 +511,7 @@ class ConversationRepository(
     }
 
     suspend fun updatePinStatus(conversationId: Uuid, isPinned: Boolean) {
+        requireWritableId(conversationId)
         conversationDAO.updatePinStatus(
             id = conversationId.toString(),
             isPinned = isPinned,
@@ -490,6 +519,7 @@ class ConversationRepository(
     }
 
     suspend fun updateConversationAssistant(conversationId: Uuid, assistantId: Uuid) {
+        requireWritableId(conversationId)
         conversationDAO.updateAssistantId(conversationId.toString(), assistantId.toString())
     }
 
@@ -497,6 +527,7 @@ class ConversationRepository(
      * 只更新会话持有的配置（含注入绑定和工作目录），不重写消息节点。
      */
     suspend fun updateConversationConfig(conversation: Conversation) {
+        requireWritableHistory(conversation)
         conversationDAO.updateConfig(
             id = conversation.id.toString(),
             config = conversation.config?.let { JsonInstant.encodeToString(it) } ?: "",
@@ -510,6 +541,7 @@ class ConversationRepository(
      * 单列更新会话的文件夹归属，folderId 为 null 表示移出文件夹（未归类）。
      */
     suspend fun updateConversationFolderId(conversationId: Uuid, folderId: Uuid?) {
+        requireWritableId(conversationId)
         conversationDAO.updateFolderId(
             id = conversationId.toString(),
             folderId = folderId?.toString() ?: ""
@@ -525,11 +557,14 @@ class ConversationRepository(
             createAt = Instant.ofEpochMilli(entity.createAt),
             updateAt = Instant.ofEpochMilli(entity.updateAt),
             messageNodes = emptyList(),
+            historyLoadState = HistoryLoadState.NOT_LOADED,
             folderId = entity.folderId.ifEmpty { null }?.let { Uuid.parse(it) },
         )
     }
 
-    private suspend fun loadMessageNodes(conversationId: String): List<MessageNode> {
+    private data class LoadedHistory(val nodes: List<MessageNode>, val state: HistoryLoadState)
+
+    private suspend fun loadMessageNodes(conversationId: String): LoadedHistory {
         val favoriteNodeIds = favoriteDAO
             .getFavoriteNodeIdsOfConversation(conversationId)
             .mapNotNull { runCatching { Uuid.parse(it) }.getOrNull() }
@@ -538,18 +573,21 @@ class ConversationRepository(
         return database.withTransaction {
             val nodes = mutableListOf<MessageNode>()
             var offset = 0
+            var loadState = HistoryLoadState.COMPLETE
             val pageSize = 64
             while (true) {
                 val page = try {
                     messageNodeDAO.getNodesOfConversationPaged(conversationId, pageSize, offset)
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: SQLiteBlobTooBigException) {
-                    e.printStackTrace()
-                    offset += pageSize
-                    continue
+                    android.util.Log.w("ConversationRepository", "History page could not be loaded at offset $offset", e)
+                    loadState = HistoryLoadState.INCOMPLETE
+                    break
                 } catch (e: IllegalStateException) {
-                    e.printStackTrace()
-                    offset += pageSize
-                    continue
+                    android.util.Log.w("ConversationRepository", "History page could not be loaded at offset $offset", e)
+                    loadState = HistoryLoadState.INCOMPLETE
+                    break
                 }
                 if (page.isEmpty()) break
                 page.forEach { entity ->
@@ -566,7 +604,7 @@ class ConversationRepository(
                 }
                 offset += page.size
             }
-            nodes
+            LoadedHistory(nodes, loadState).also { historyLoads[conversationId] = it.state }
         }
     }
 

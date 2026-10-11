@@ -358,7 +358,7 @@ fun Route.conversationRoutes(
             val request = call.receive<RegenerateRequest>()
             val messageId = request.messageId.toUuid("message id")
 
-            val conversation = chatService.getConversationFlow(uuid).first()
+            val conversation = chatService.requireWritableConversation(uuid)
             val node = conversation.getMessageNodeByMessageId(messageId)
             val message = node?.messages?.find { it.id == messageId }
                 ?: throw NotFoundException("Message not found")
@@ -378,6 +378,7 @@ fun Route.conversationRoutes(
         post("/{id}/tool-approval") {
             val uuid = call.parameters["id"].toUuid("conversation id")
             val request = call.receive<ToolApprovalRequest>()
+            chatService.requireWritableConversation(uuid)
             chatService.handleToolApproval(uuid, request.toolCallId, request.approved, request.reason, request.answer)
             call.respond(HttpStatusCode.Accepted, mapOf("status" to "accepted"))
         }

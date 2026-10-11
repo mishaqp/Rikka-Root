@@ -62,7 +62,7 @@ import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
 /** A single fixed dialogue; only external boundaries are replaced, never the UI renderer. */
-internal class ChatBeforeFixture(image: File) {
+internal class ChatBeforeFixture(image: File, private val actualVM: ChatVM? = null) {
     private val instant = Instant.parse("2026-01-02T12:00:00Z")
     private val timestamp = LocalDateTime.parse("2026-01-02T12:00:00")
     private fun id(index: Int) = Uuid.parse("40000000-0000-0000-0000-${index.toString().padStart(12, '0')}")
@@ -160,13 +160,14 @@ internal class ChatBeforeFixture(image: File) {
     )
     val conversationFlow = MutableStateFlow(conversation)
     val errors = MutableStateFlow<List<ChatError>>(emptyList())
-    val vm = mockk<ChatVM>(relaxed = true)
+    val vm = actualVM ?: mockk<ChatVM>(relaxed = true)
     private val asr = mockk<CustomAsrState>(relaxed = true)
     private val tts = mockk<CustomTtsState>(relaxed = true)
     private lateinit var application: KoinApplication
 
     fun install() {
         stopKoin()
+        if (actualVM == null) {
         val voice = mockk<VoiceSessionController>(relaxed = true)
         every { voice.state } returns MutableStateFlow(VoiceSessionState())
         every { vm.voiceSession } returns voice
@@ -182,6 +183,7 @@ internal class ChatBeforeFixture(image: File) {
         every { vm.messageQueue } returns MutableStateFlow(MessageQueueState())
         every { vm.conversationJobs } returns MutableStateFlow(emptyMap())
         every { vm.generationDoneFlow } returns MutableSharedFlow()
+        }
         val drawer = mockk<ChatDrawerVM>(relaxed = true)
         every { drawer.conversations } returns flowOf(PagingData.empty<ConversationListItem>())
         every { drawer.folders } returns MutableStateFlow(emptyList())
@@ -214,7 +216,7 @@ internal class ChatBeforeFixture(image: File) {
         SharedTransitionLayout {
             CompositionLocalProvider(LocalSharedTransitionScope provides this, LocalASRState provides asr,
                 LocalTTSState provides tts, LocalToaster provides toaster) {
-                ChatPage(conversation.id, null, emptyList())
+                ChatPage(actualVM?.conversation?.value?.id ?: conversation.id, null, emptyList())
             }
         }
     }

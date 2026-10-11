@@ -46,6 +46,7 @@ fun ChatMessageContextCheckpoint(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
+    readOnly: Boolean = false,
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
 
@@ -107,10 +108,10 @@ fun ChatMessageContextCheckpoint(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End,
                     ) {
-                        TextButton(onClick = onEdit) {
+                        TextButton(onClick = onEdit, enabled = !readOnly) {
                             Text(stringResource(R.string.edit))
                         }
-                        TextButton(onClick = onDelete) {
+                        TextButton(onClick = onDelete, enabled = !readOnly) {
                             Text(
                                 text = stringResource(R.string.delete),
                                 color = MaterialTheme.colorScheme.error,

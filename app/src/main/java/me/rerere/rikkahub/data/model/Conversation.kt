@@ -15,6 +15,18 @@ import me.rerere.rikkahub.data.datastore.Settings
 import java.time.Instant
 import kotlin.uuid.Uuid
 
+enum class HistoryLoadState { COMPLETE, NOT_LOADED, INCOMPLETE }
+
+class HistoryNotWritableException(state: HistoryLoadState) : IllegalStateException(
+    if (state == HistoryLoadState.INCOMPLETE)
+        "Часть истории не загрузилась, чат открыт только для чтения"
+    else "История чата ещё не загружена"
+)
+
+fun Conversation.requireCompleteHistory() {
+    if (historyLoadState != HistoryLoadState.COMPLETE) throw HistoryNotWritableException(historyLoadState)
+}
+
 @Serializable
 data class Conversation(
     val id: Uuid = Uuid.random(),
@@ -36,6 +48,8 @@ data class Conversation(
     val workspaceCwd: String? = null,
     // 所属文件夹（助手内分组），null 表示未归入任何文件夹
     val folderId: Uuid? = null,
+    @Transient
+    val historyLoadState: HistoryLoadState = HistoryLoadState.COMPLETE,
     @Transient
     val newConversation: Boolean = false
 ) {

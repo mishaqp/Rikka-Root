@@ -51,6 +51,7 @@ import kotlinx.coroutines.launch
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.HistoryLoadState
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.utils.navigateToChatPage
@@ -102,6 +103,7 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
         }
     ) { contentPadding ->
         val snackMessageDeleted = stringResource(R.string.history_page_conversation_deleted)
+        val historyReadOnly = stringResource(R.string.chat_page_history_read_only)
         val snackMessageUndo = stringResource(R.string.history_page_undo)
         LazyColumn(
             contentPadding = contentPadding + PaddingValues(16.dp),
@@ -117,7 +119,11 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
                         scope.launch {
                             // 先获取完整的对话数据（包含 messageNodes），用于撤销恢复
                             val fullConversation = vm.getFullConversation(conversation.id) ?: conversation
-                            vm.deleteConversation(conversation)
+                            if (fullConversation.historyLoadState != HistoryLoadState.COMPLETE) {
+                                snackbarHostState.showSnackbar(historyReadOnly)
+                                return@launch
+                            }
+                            if (!vm.deleteConversation(fullConversation)) return@launch
                             val result = snackbarHostState.showSnackbar(
                                 message = snackMessageDeleted,
                                 actionLabel = snackMessageUndo,

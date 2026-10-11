@@ -97,6 +97,7 @@ fun ChatMessage(
     node: MessageNode,
     modifier: Modifier = Modifier,
     loading: Boolean = false,
+    readOnly: Boolean = false,
     model: Model? = null,
     assistant: Assistant? = null,
     lastMessage: Boolean = false,
@@ -117,6 +118,7 @@ fun ChatMessage(
     if (message.isContextCheckpoint) {
         ChatMessageContextCheckpoint(
             message = message,
+            readOnly = readOnly,
             onEdit = onEdit,
             onDelete = onDelete,
             modifier = modifier,
@@ -170,9 +172,9 @@ fun ChatMessage(
                 annotations = message.annotations,
                 loading = loading,
                 model = model,
-                onToolApproval = onToolApproval,
-                onToolAnswer = onToolAnswer,
-                onUserMessageClick = if (message.role == MessageRole.USER) onEdit else null,
+                onToolApproval = if (readOnly) null else onToolApproval,
+                onToolAnswer = if (readOnly) null else onToolAnswer,
+                onUserMessageClick = if (!readOnly && message.role == MessageRole.USER) onEdit else null,
             )
 
             message.translation?.let { translation ->
@@ -202,6 +204,7 @@ fun ChatMessage(
             ) {
                 ChatMessageActionButtons(
                     message = message,
+                    readOnly = readOnly,
                     onRegenerate = onRegenerate,
                     node = node,
                     onUpdate = onUpdate,
@@ -227,6 +230,7 @@ fun ChatMessage(
     if (showActionsSheet) {
         ChatMessageActionsSheet(
             message = message,
+            readOnly = readOnly,
             onEdit = onEdit,
             onDelete = onDelete,
             onShare = onShare,

@@ -1561,4 +1561,11 @@
   <string name="chat_page_sort_conversations">Sort chats</string>
   <string name="chat_page_sort_by_update_time">By last updated</string>
   <string name="chat_page_sort_by_create_time">By date created</string>
+    <string name="chat_page_history_read_only">Часть истории не загрузилась, чат открыт только для чтения</string>
+    <string name="chat_page_history_export">Экспорт</string>
+    <string name="chat_page_history_backup_title">Полная резервная копия</string>
+    <string name="chat_page_history_backup_description">Резервная копия включает всю базу данных, файлы и настройки приложения, в том числе незагруженные сообщения.</string>
+    <string name="chat_page_history_backup_save">Сохранить резервную копию</string>
+    <string name="chat_page_history_partial_export">Этот экспорт содержит только загруженные сообщения. Для сохранения всей истории используйте полную резервную копию.</string>
+    <string name="chat_page_history_backup_error">Не удалось сохранить резервную копию</string>
 </resources>

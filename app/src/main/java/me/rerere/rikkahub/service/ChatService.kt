@@ -88,6 +88,8 @@ import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.HistoryLoadState
+import me.rerere.rikkahub.data.model.HistoryNotWritableException
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.MessageNode
@@ -180,6 +182,7 @@ internal fun createForkConversation(
     config = source.config,
     workspaceCwd = source.workspaceCwd,
     folderId = source.folderId,
+    historyLoadState = source.historyLoadState,
 )
 
 /** 在 [afterNodeId] 节点之后插入压缩检查点；该节点已不存在时返回 null。 */
@@ -308,6 +311,7 @@ class ChatService(
         scope = appScope,
         createInitialConversation = { id ->
             Conversation.ofId(id, assistantId = settingsStore.settingsFlow.value.getCurrentAssistant().id)
+                .copy(historyLoadState = HistoryLoadState.NOT_LOADED)
         },
         onGenerationFinished = ::onSessionGenerationFinished,
     )
@@ -424,7 +428,9 @@ class ChatService(
     private suspend fun loadConversation(conversationId: Uuid): Conversation? {
         val conversation = conversationRepo.getConversationById(conversationId) ?: return null
         val bound = conversation.bindConfig(loadedSettings())
-        if (bound !== conversation) conversationRepo.updateConversationConfig(bound)
+        if (bound !== conversation && bound.historyLoadState == HistoryLoadState.COMPLETE) {
+            conversationRepo.updateConversationConfig(bound)
+        }
         return bound
     }
 
@@ -432,26 +438,52 @@ class ChatService(
     // 不读 settingsFlowRaw：它落后于还没写完盘的修改，刚在新会话里切的模型会被漏掉。
     private suspend fun loadedSettings(): Settings = settingsStore.settingsFlow.first { !it.init }
 
+    /** Shared gate for UI, automation and Web callers, before any mutation effects. */
+    suspend fun requireWritableConversation(conversationId: Uuid): Conversation {
+        val session = sessionManager.getOrCreate(conversationId)
+        ensureInitialized(session)
+        return requireWritableSession(session)
+    }
+
+    private fun requireWritableSession(session: ConversationSession, snapshot: Conversation? = null): Conversation {
+        try {
+            conversationRepo.requireWritableHistory(session.state.value)
+            snapshot?.let(conversationRepo::requireWritableHistory)
+            return session.state.value
+        } catch (error: HistoryNotWritableException) {
+            addError(error, session.id)
+            throw error
+        }
+    }
+
     // ---- 发送消息 ----
 
     fun getMessageQueueFlow(conversationId: Uuid): StateFlow<MessageQueueState> =
         sessionManager.getMessageQueueFlow(conversationId)
 
     fun removeQueuedMessage(conversationId: Uuid, messageId: Uuid) {
-        sessionManager.get(conversationId)?.messageQueue?.remove(messageId)?.let(::cleanupQueuedAttachments)
+        sessionManager.get(conversationId)?.let { session ->
+            requireWritableSession(session)
+            session.messageQueue.remove(messageId)?.let(::cleanupQueuedAttachments)
+        }
         dispatchNextQueuedMessage(conversationId)
     }
 
     fun beginEditQueuedMessage(conversationId: Uuid, messageId: Uuid): QueuedMessage? =
-        sessionManager.get(conversationId)?.messageQueue?.beginEdit(messageId)
+        sessionManager.get(conversationId)?.let { session ->
+            requireWritableSession(session)
+            session.messageQueue.beginEdit(messageId)
+        }
 
     fun finishEditQueuedMessage(
         conversationId: Uuid,
         messageId: Uuid,
         parts: List<UIMessagePart>? = null
     ) {
-        sessionManager.get(conversationId)?.messageQueue?.finishEdit(messageId, parts)
-            ?.let(::cleanupQueuedAttachments)
+        sessionManager.get(conversationId)?.let { session ->
+            requireWritableSession(session)
+            session.messageQueue.finishEdit(messageId, parts)?.let(::cleanupQueuedAttachments)
+        }
         dispatchNextQueuedMessage(conversationId)
     }
 
@@ -484,25 +516,41 @@ class ChatService(
     }
 
     fun resumeMessageQueue(conversationId: Uuid) {
-        sessionManager.get(conversationId)?.messageQueue?.resume()
+        sessionManager.get(conversationId)?.let { session ->
+            requireWritableSession(session)
+            session.messageQueue.resume()
+        }
         dispatchNextQueuedMessage(conversationId)
     }
 
     fun sendMessage(conversationId: Uuid, content: List<UIMessagePart>, answer: Boolean = true) {
         if (content.isEmptyInputMessage()) return
         val session = sessionManager.getOrCreate(conversationId)
-        synchronized(session) {
+        fun enqueue() = synchronized(session) {
+            requireWritableSession(session)
             if (session.messageQueue.state.value.messages.isEmpty()) session.messageQueue.resume()
             session.messageQueue.enqueue(content, answer)
             dispatchNextQueuedMessage(conversationId)
         }
+        if (session.isInitialized) {
+            enqueue()
+        } else {
+            appScope.launch {
+                try { ensureInitialized(session); enqueue() }
+                catch (error: Exception) {
+                    if (error is CancellationException) throw error
+                    if (error !is HistoryNotWritableException) addError(error, conversationId)
+                }
+            }
+        }
     }
 
-    /** Enqueue immediately; the result belongs to this item even after edits or later turns. */
+    /** Await initialization before inserting a voice item, and visibly settle refused replies. */
     fun enqueueVoiceMessage(conversationId: Uuid, text: String): Deferred<String?> {
         val session = sessionManager.getOrCreate(conversationId)
         val reply = CompletableDeferred<String?>()
-        synchronized(session) {
+        fun enqueue() = synchronized(session) {
+            requireWritableSession(session)
             check(text.isNotBlank()) { context.getString(R.string.chat_page_voice_empty) }
             check(!session.messageQueue.state.value.paused || session.messageQueue.state.value.messages.isEmpty()) {
                 context.getString(R.string.chat_page_voice_resume_queue)
@@ -514,12 +562,23 @@ class ChatService(
             session.messageQueue.enqueue(listOf(UIMessagePart.Text(text)), reply = reply)
             dispatchNextQueuedMessage(conversationId)
         }
+        appScope.launch {
+            try { ensureInitialized(session); enqueue() }
+            catch (error: Exception) {
+                reply.completeExceptionally(error)
+                if (error is CancellationException) throw error
+                if (error !is HistoryNotWritableException) addError(error, conversationId)
+            }
+        }
         return reply
     }
 
     private fun dispatchNextQueuedMessage(conversationId: Uuid): Job? {
         val session = sessionManager.get(conversationId) ?: return null
         synchronized(session) {
+            if (session.state.value.historyLoadState != HistoryLoadState.COMPLETE) return null
+            try { requireWritableSession(session) }
+            catch (_: HistoryNotWritableException) { return null }
             // A pending tool approval is still part of the current turn.
             if (session.getJob() != null || session.state.value.currentMessages.any { message ->
                     message.parts.any { it is UIMessagePart.Tool && it.isPending }
@@ -539,6 +598,8 @@ class ChatService(
             keepAliveInBackground = answer,
         ) {
             try {
+                ensureInitialized(session)
+                requireWritableSession(session)
                 finishInterruptedPendingTools(conversationId)
 
                 val currentConversation = session.state.value
@@ -619,6 +680,7 @@ class ChatService(
         regenerateAssistantMsg: Boolean = true
     ) = synchronized(sessionManager.getOrCreate(conversationId)) {
         val session = sessionManager.getOrCreate(conversationId)
+        requireWritableSession(session)
         val previousJob = session.getJob()
 
         val job = launchGenerationJob(
@@ -627,7 +689,8 @@ class ChatService(
         ) {
             try {
                 previousJob?.join()
-                val conversation = session.state.value
+                ensureInitialized(session)
+                val conversation = requireWritableSession(session)
 
                 if (message.role == MessageRole.USER) {
                     // 如果是用户消息，则截止到当前消息
@@ -674,6 +737,7 @@ class ChatService(
     ) = synchronized(sessionManager.getOrCreate(conversationId)) {
         val session = sessionManager.getOrCreate(conversationId)
 
+        requireWritableSession(session)
         val hasOtherPendingTools = session.state.value.messageNodes.any { node ->
             node.currentMessage.parts.any { part ->
                 part is UIMessagePart.Tool && part.isPending && part.toolCallId != toolCallId
@@ -685,6 +749,7 @@ class ChatService(
             grant = {
                 if (approved && toolName != null && scope != ApprovalScope.Once) {
                     ensureInitialized(session)
+                    requireWritableSession(session)
                     val tool = session.state.value.currentMessages.flatMap { it.getTools() }
                         .firstOrNull { it.toolCallId == toolCallId && it.isPending }
                     if (tool?.toolName == toolName && when (scope) {
@@ -714,7 +779,7 @@ class ChatService(
         ) {
             try {
                 ensureInitialized(session)
-                val conversation = session.state.value
+                val conversation = requireWritableSession(session)
                 // Ignore double taps and stale approvals for completed or inactive tools.
                 if (conversation.currentMessages.none { message ->
                         message.getTools().any { it.toolCallId == toolCallId && it.isPending }
@@ -768,6 +833,7 @@ class ChatService(
     }
 
     private suspend fun grantAlwaysScope(conversationId: Uuid, toolName: String) {
+        requireWritableConversation(conversationId)
         if (isWorkspaceToolName(toolName)) {
             val conversation = getConversationFlow(conversationId).value
             // ConversationConfig may bind a different workspace from the assistant's current setting.
@@ -786,7 +852,7 @@ class ChatService(
         messageRange: ClosedRange<Int>? = null
     ) {
         val settings = settingsStore.settingsFlow.first()
-        val initialConversation = getConversationFlow(conversationId).value
+        val initialConversation = requireWritableConversation(conversationId)
         // 模型、思考级别、搜索、工具等以会话上固定的配置为准
         val assistant = settings.getAssistantOf(initialConversation)
         val generationBudget = try {
@@ -1020,6 +1086,8 @@ class ChatService(
         conversation: Conversation,
         force: Boolean = false
     ) = withContext(Dispatchers.IO) {
+        requireWritableConversation(conversationId)
+        conversationRepo.requireWritableHistory(conversation)
         val shouldGenerate = when {
             force -> true
             conversation.title.isBlank() -> true
@@ -1073,6 +1141,8 @@ class ChatService(
         conversationId: Uuid,
         conversation: Conversation,
     ) = withContext(Dispatchers.IO) {
+        requireWritableConversation(conversationId)
+        conversationRepo.requireWritableHistory(conversation)
         runCatching {
             val settings = settingsStore.settingsFlow.first()
             if (!settings.enableSuggestion) return@runCatching
@@ -1145,6 +1215,8 @@ class ChatService(
         requestEndNodeId: Uuid? = null,
     ): Result<Unit> = runCatching {
         val session = sessionManager.getOrCreate(conversationId)
+        requireWritableConversation(conversationId)
+        conversationRepo.requireWritableHistory(conversation)
         // Manual compression must wait; the automatic path owns an acknowledged generation boundary.
         check(!session.isGenerating || permitGenerating()) { context.getString(R.string.chat_page_compress_blocked_generating) }
 
@@ -1254,6 +1326,7 @@ class ChatService(
     suspend fun updateChatAssistant(conversationId: Uuid, update: (Assistant) -> Assistant) {
         sessionManager.withSession(conversationId) { session ->
             ensureInitialized(session)
+            requireWritableSession(session)
             val settings = settingsStore.settingsFlow.first()
             val conversation = session.state.value
             val stored = settings.getStoredAssistantOf(conversation)
@@ -1282,7 +1355,7 @@ class ChatService(
     ) {
         sessionManager.withSession(conversationId) { session ->
             ensureInitialized(session)
-            val conversation = session.state.value
+            val conversation = requireWritableSession(session)
             if (conversation.config != null) {
                 session.updateMetadata(
                     update = {
@@ -1335,12 +1408,13 @@ class ChatService(
     private fun updateConversation(conversationId: Uuid, conversation: Conversation) {
         if (conversation.id != conversationId) return
         val session = sessionManager.getOrCreate(conversationId)
+        requireWritableSession(session, conversation)
         checkFilesDelete(conversation, session.state.value)
         session.updateConversation(conversation)
     }
 
     fun updateConversationState(conversationId: Uuid, update: (Conversation) -> Conversation) {
-        val current = getConversationFlow(conversationId).value
+        val current = requireWritableSession(sessionManager.getOrCreate(conversationId))
         updateConversation(conversationId, update(current))
     }
 
@@ -1354,6 +1428,7 @@ class ChatService(
                 loadConversation(conversationId)
                     ?: throw NotFoundException("Conversation not found")
             }
+            requireWritableSession(session)
             session.updateMetadata(update, persist)
         }
     }
@@ -1386,6 +1461,7 @@ class ChatService(
                 return@withContext
             }
             val persisted = conversationRepo.getConversationById(conversationId) ?: return@withContext
+            if (persisted.historyLoadState != HistoryLoadState.COMPLETE) return@withContext
             backfillLoadedLegacyConversationTitle(persisted, observedTitle, sessionManager.get(conversationId),
                 onCommitted = { committedTitle ->
                     sessionManager.get(conversationId)?.reconcileLegacyBackfilledTitle(observedTitle, committedTitle)
@@ -1413,6 +1489,7 @@ class ChatService(
      * 先改内存可确保这段窗口内的整对象保存也带上新 folderId。
      */
     suspend fun moveConversationToFolder(conversationId: Uuid, folderId: Uuid?) {
+        requireWritableConversation(conversationId)
         if (sessionManager.get(conversationId) != null) {
             updateConversationState(conversationId) { it.copy(folderId = folderId) }
         }
@@ -1435,9 +1512,9 @@ class ChatService(
      * 后续整对象保存会写回一个已被删除的 folder_id，导致会话在列表中悬空。
      */
     suspend fun deleteFolder(folderId: Uuid) {
-        sessionManager.snapshot()
-            .filter { it.state.value.folderId == folderId }
-            .forEach { updateConversationState(it.id) { c -> c.copy(folderId = null) } }
+        val sessions = sessionManager.snapshot().filter { it.state.value.folderId == folderId }
+        sessions.forEach { requireWritableSession(it) }
+        sessions.forEach { updateConversationState(it.id) { c -> c.copy(folderId = null) } }
         folderRepository.deleteFolder(folderId)
     }
 
@@ -1458,6 +1535,10 @@ class ChatService(
     }
 
     suspend fun saveConversation(conversationId: Uuid, conversation: Conversation) {
+        require(conversation.id == conversationId)
+        val session = sessionManager.getOrCreate(conversationId)
+        ensureInitialized(session)
+        requireWritableSession(session, conversation)
         val exists = conversationRepo.existsConversationById(conversation.id)
         if (!exists && conversation.title.isBlank() && conversation.messageNodes.isEmpty()) {
             return // 新会话且为空时不保存
@@ -1489,6 +1570,7 @@ class ChatService(
     ) {
         appScope.launch(Dispatchers.IO) {
             try {
+                requireWritableConversation(conversationId)
                 val settings = settingsStore.settingsFlow.first()
 
                 val messageText = message.parts.filterIsInstance<UIMessagePart.Text>()
@@ -1514,7 +1596,9 @@ class ChatService(
                 saveConversation(conversationId, getConversationFlow(conversationId).value)
             } catch (e: Exception) {
                 // Clear translation field on error
-                clearTranslationField(conversationId, message.id)
+                if (getConversationFlow(conversationId).value.historyLoadState == HistoryLoadState.COMPLETE) {
+                    clearTranslationField(conversationId, message.id)
+                }
                 addError(e, conversationId, title = context.getString(R.string.error_title_translate_message))
             }
         }
@@ -1553,7 +1637,7 @@ class ChatService(
     ) {
         if (parts.isEmptyInputMessage()) return
 
-        val currentConversation = getConversationFlow(conversationId).value
+        val currentConversation = requireWritableConversation(conversationId)
         val settings = settingsStore.settingsFlow.first()
         val assistant = settings.getAssistantById(currentConversation.assistantId)
             ?: settings.getCurrentAssistant()
@@ -1598,7 +1682,7 @@ class ChatService(
         conversationId: Uuid,
         messageId: Uuid
     ): Conversation {
-        val currentConversation = getConversationFlow(conversationId).value
+        val currentConversation = requireWritableConversation(conversationId)
         val targetNodeIndex = currentConversation.messageNodes.indexOfFirst { node ->
             node.messages.any { it.id == messageId }
         }
@@ -1636,7 +1720,7 @@ class ChatService(
         nodeId: Uuid,
         selectIndex: Int
     ) {
-        val currentConversation = getConversationFlow(conversationId).value
+        val currentConversation = requireWritableConversation(conversationId)
         val targetNode = currentConversation.messageNodes.firstOrNull { it.id == nodeId }
             ?: throw NotFoundException("Message node not found")
 
@@ -1665,7 +1749,7 @@ class ChatService(
         messageId: Uuid,
         failIfMissing: Boolean = true,
     ) {
-        val currentConversation = getConversationFlow(conversationId).value
+        val currentConversation = requireWritableConversation(conversationId)
         val updatedConversation = buildConversationAfterMessageDelete(currentConversation, messageId)
 
         if (updatedConversation == null) {
@@ -1733,7 +1817,7 @@ class ChatService(
     }
 
     fun clearTranslationField(conversationId: Uuid, messageId: Uuid) {
-        val currentConversation = getConversationFlow(conversationId).value
+        val currentConversation = requireWritableSession(sessionManager.getOrCreate(conversationId))
         val updatedNodes = currentConversation.messageNodes.map { node ->
             if (node.messages.any { it.id == messageId }) {
                 val updatedMessages = node.messages.map { msg ->

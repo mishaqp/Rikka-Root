@@ -66,6 +66,7 @@ import me.rerere.rikkahub.data.datastore.getSelectedASRProvider
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.HistoryLoadState
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.ui.components.ai.ChatAttachmentPickerActions
@@ -143,7 +144,8 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val inputState = vm.inputState
 
     // 初始化输入状态（处理传入的 files 和 text 参数）
-    LaunchedEffect(files, text) {
+    LaunchedEffect(files, text, conversation.historyLoadState) {
+        if (conversation.historyLoadState != HistoryLoadState.COMPLETE) return@LaunchedEffect
         if (files.isNotEmpty()) {
             val localFiles = filesManager.createChatFilesByContents(files)
             val contentTypes = files.mapNotNull { file ->
@@ -335,7 +337,9 @@ private fun ChatPageContent(
             bottomBar = {
                 val messageQueue by vm.messageQueue.collectAsStateWithLifecycle()
                 val voiceState by vm.voiceSession.state.collectAsStateWithLifecycle()
-                ChatInput(
+                if (conversation.historyLoadState == HistoryLoadState.INCOMPLETE) {
+                    HistoryRecoveryExport()
+                } else if (conversation.historyLoadState == HistoryLoadState.COMPLETE) ChatInput(
                     onStartVoiceMode = onStartVoiceMode,
                     voiceState = voiceState,
                     onStopVoiceMode = vm.voiceSession::stop,
@@ -613,6 +617,7 @@ private fun TopBar(
                     }
                 },
                 color = Color.Transparent,
+                enabled = conversation.historyLoadState == HistoryLoadState.COMPLETE,
             ) {
                 Column {
                     val provider = chatModel?.findProvider(providers = settings.providers, checkOverwrite = false)

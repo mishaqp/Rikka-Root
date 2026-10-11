@@ -12,6 +12,7 @@ import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -105,6 +106,15 @@ class ChatVM(
         chatService.removeConversationReference(_conversationId)
     }
 
+    private fun reportMutationFailure(error: Exception) {
+        if (error is CancellationException) throw error
+        if (chatService.errors.value.none { it.error === error }) chatService.addError(error, _conversationId)
+    }
+
+    private fun launchMutation(block: suspend () -> Unit): Job = viewModelScope.launch {
+        try { block() } catch (error: Exception) { reportMutationFailure(error) }
+    }
+
     // 用户设置
     val settings: StateFlow<Settings> =
         settingsStore.settingsFlow.stateIn(viewModelScope, SharingStarted.Eagerly, Settings.dummy())
@@ -171,21 +181,21 @@ class ChatVM(
 
     // 聊天页对助手的修改：新会话直接改助手，会话开始后只改当前会话
     fun updateAssistant(assistant: Assistant) {
-        viewModelScope.launch {
+        launchMutation {
             chatService.updateChatAssistant(_conversationId) { assistant }
         }
     }
 
     // 设置聊天模型
     fun setChatModel(model: Model) {
-        viewModelScope.launch {
+        launchMutation {
             chatService.updateChatAssistant(_conversationId) { it.copy(chatModelId = model.id) }
         }
     }
 
     // 切换搜索方式
     fun updateSearch(enableWebSearch: Boolean, builtInSearch: Boolean) {
-        viewModelScope.launch {
+        launchMutation {
             chatService.updateChatSearch(_conversationId, enableWebSearch, builtInSearch)
         }
     }
@@ -215,13 +225,14 @@ class ChatVM(
     fun handleMessageSend(content: List<UIMessagePart>,answer: Boolean = true) {
         if (content.isEmptyInputMessage()) return
 
-        chatService.sendMessage(_conversationId, content, answer)
+        try { chatService.sendMessage(_conversationId, content, answer) }
+        catch (error: Exception) { reportMutationFailure(error) }
     }
 
     fun handleMessageEdit(parts: List<UIMessagePart>, messageId: Uuid) {
         if (parts.isEmptyInputMessage()) return
 
-        viewModelScope.launch {
+        launchMutation {
             chatService.editMessage(_conversationId, messageId, parts)
         }
     }
@@ -245,7 +256,7 @@ class ChatVM(
     }
 
     fun deleteMessage(message: UIMessage) {
-        viewModelScope.launch {
+        launchMutation {
             chatService.deleteMessage(_conversationId, message)
         }
     }
@@ -262,7 +273,8 @@ class ChatVM(
         message: UIMessage,
         regenerateAssistantMsg: Boolean = true
     ) {
-        chatService.regenerateAtMessage(_conversationId, message, regenerateAssistantMsg)
+        try { chatService.regenerateAtMessage(_conversationId, message, regenerateAssistantMsg) }
+        catch (error: Exception) { reportMutationFailure(error) }
     }
 
     fun handleToolApproval(
@@ -271,13 +283,19 @@ class ChatVM(
         reason: String = "",
         scope: ChatService.ApprovalScope = ChatService.ApprovalScope.Once,
         toolName: String? = null,
-    ): kotlinx.coroutines.Job = chatService.handleToolApproval(_conversationId, toolCallId, approved, reason, scope = scope, toolName = toolName)
+    ): kotlinx.coroutines.Job = try {
+        chatService.handleToolApproval(_conversationId, toolCallId, approved, reason, scope = scope, toolName = toolName)
+    } catch (error: Exception) {
+        reportMutationFailure(error)
+        viewModelScope.launch { }
+    }
 
     fun handleToolAnswer(
         toolCallId: String,
         answer: String,
     ) {
-        chatService.handleToolApproval(_conversationId, toolCallId, approved = true, answer = answer)
+        try { chatService.handleToolApproval(_conversationId, toolCallId, approved = true, answer = answer) }
+        catch (error: Exception) { reportMutationFailure(error) }
     }
 
     fun stopGeneration() {
@@ -287,31 +305,31 @@ class ChatVM(
     }
 
     fun saveConversationAsync() {
-        viewModelScope.launch {
+        launchMutation {
             chatService.saveConversation(_conversationId, conversation.value)
         }
     }
 
     fun updateTitle(title: String) {
-        viewModelScope.launch {
+        launchMutation {
             val updatedConversation = conversation.value.copy(title = title)
             chatService.saveConversation(_conversationId, updatedConversation)
         }
     }
 
     fun deleteConversation(conversation: Conversation): Job =
-        viewModelScope.launch {
+        launchMutation {
             conversationRepo.deleteConversation(conversation)
         }
 
     fun updatePinnedStatus(conversation: Conversation) {
-        viewModelScope.launch {
+        launchMutation {
             chatService.toggleConversationPinned(conversation.id)
         }
     }
 
     fun moveConversationToAssistant(conversation: Conversation, targetAssistantId: Uuid) {
-        viewModelScope.launch {
+        launchMutation {
             chatService.moveConversationToAssistant(conversation.id, targetAssistantId)
             if (conversation.id == _conversationId) {
                 settingsStore.updateAssistant(targetAssistantId)
@@ -324,36 +342,37 @@ class ChatVM(
     }
 
     fun generateTitle(conversation: Conversation, force: Boolean = false) {
-        viewModelScope.launch {
-            val conversationFull = conversationRepo.getConversationById(conversation.id) ?: return@launch
+        launchMutation {
+            val conversationFull = conversationRepo.getConversationById(conversation.id) ?: return@launchMutation
             chatService.generateTitle(conversationFull.id, conversationFull, force)
         }
     }
 
     fun renameConversation(conversation: Conversation, title: String) {
-        viewModelScope.launch {
+        launchMutation {
             chatService.renameConversation(conversation.id, title)
         }
     }
 
     fun generateSuggestion(conversation: Conversation) {
-        viewModelScope.launch {
+        launchMutation {
             chatService.generateSuggestion(_conversationId, conversation)
         }
     }
 
     fun clearTranslationField(messageId: Uuid) {
-        chatService.clearTranslationField(_conversationId, messageId)
+        try { chatService.clearTranslationField(_conversationId, messageId) }
+        catch (error: Exception) { reportMutationFailure(error) }
     }
 
     fun updateConversation(newConversation: Conversation) {
-        chatService.updateConversationState(_conversationId) {
-            newConversation
-        }
+        try { chatService.updateConversationState(_conversationId) { newConversation } }
+        catch (error: Exception) { reportMutationFailure(error) }
     }
 
     fun toggleMessageFavorite(node: MessageNode) {
-        viewModelScope.launch {
+        launchMutation {
+            chatService.requireWritableConversation(_conversationId)
             val currentlyFavorited = favoriteRepository.isNodeFavorited(_conversationId, node.id)
             if (currentlyFavorited) {
                 favoriteRepository.removeNodeFavorite(_conversationId, node.id)

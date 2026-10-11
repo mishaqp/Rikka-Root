@@ -80,6 +80,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.HistoryLoadState
 import me.rerere.rikkahub.data.ssh.sanitizeSshToolMessages
 import me.rerere.rikkahub.ui.components.message.MessagePartBlock
 import me.rerere.rikkahub.ui.components.message.ThinkingStep
@@ -134,6 +135,9 @@ fun ChatExportSheet(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(text = stringResource(id = R.string.chat_page_export_format))
+                if (conversation.historyLoadState == HistoryLoadState.INCOMPLETE) {
+                    Text(stringResource(R.string.chat_page_history_partial_export), color = MaterialTheme.colorScheme.error)
+                }
 
                 OutlinedCard(
                     modifier = Modifier.fillMaxWidth()

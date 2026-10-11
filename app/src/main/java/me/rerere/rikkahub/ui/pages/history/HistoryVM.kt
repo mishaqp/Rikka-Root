@@ -3,6 +3,7 @@ package me.rerere.rikkahub.ui.pages.history
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.catch
@@ -34,22 +35,33 @@ class HistoryVM(
         Log.e(TAG, "Error: ${it.message}")
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    fun deleteConversation(conversation: Conversation) {
-        viewModelScope.launch {
-            conversationRepo.deleteConversation(conversation)
-        }
+    suspend fun deleteConversation(conversation: Conversation): Boolean = try {
+        conversationRepo.deleteConversation(conversation)
+        true
+    } catch (error: Exception) {
+        if (error is CancellationException) throw error
+        chatService.addError(error, conversation.id)
+        false
     }
 
     fun deleteAllConversations() {
         val assistant = assistant.value ?: return
         viewModelScope.launch {
-            conversationRepo.deleteConversationOfAssistant(assistant.id)
+            try { conversationRepo.deleteConversationOfAssistant(assistant.id) }
+            catch (error: Exception) {
+                if (error is CancellationException) throw error
+                chatService.addError(error)
+            }
         }
     }
 
     fun togglePinStatus(conversationId: Uuid) {
         viewModelScope.launch {
-            chatService.toggleConversationPinned(conversationId)
+            try { chatService.toggleConversationPinned(conversationId) }
+            catch (error: Exception) {
+                if (error is CancellationException) throw error
+                chatService.addError(error, conversationId)
+            }
         }
     }
 
@@ -58,7 +70,11 @@ class HistoryVM(
 
     fun restoreConversation(conversation: Conversation) {
         viewModelScope.launch {
-            conversationRepo.insertConversation(conversation)
+            try { conversationRepo.insertConversation(conversation) }
+            catch (error: Exception) {
+                if (error is CancellationException) throw error
+                chatService.addError(error, conversation.id)
+            }
         }
     }
 

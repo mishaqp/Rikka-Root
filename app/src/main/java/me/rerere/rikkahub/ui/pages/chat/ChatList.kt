@@ -92,6 +92,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.HistoryLoadState
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.withConversation
 import me.rerere.rikkahub.service.ChatError
@@ -339,6 +340,7 @@ private fun ChatListNormal(
                     ) {
                         ChatMessage(
                             node = node,
+                            readOnly = conversation.historyLoadState != HistoryLoadState.COMPLETE,
                             model = node.currentMessage.modelId?.let(modelById::get)
                                 ?: node.currentMessage.snapshotModel(),
                             assistant = assistant,
@@ -378,7 +380,7 @@ private fun ChatListNormal(
                 }
             }
 
-            if (!loading && assistant?.allowConversationSystemPrompt == true && onConversationSystemPromptChange != null) {
+            if (conversation.historyLoadState == HistoryLoadState.COMPLETE && !loading && assistant?.allowConversationSystemPrompt == true && onConversationSystemPromptChange != null) {
                 item(key = "ConversationSystemPrompt") {
                     ConversationSystemPromptButton(
                         customSystemPrompt = conversation.customSystemPrompt,

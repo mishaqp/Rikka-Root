@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.service
 
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.HistoryLoadState
 
 /** Never create a runtime session or migrate legacy config solely for drawer title upkeep. */
 internal suspend fun backfillLoadedLegacyConversationTitle(
@@ -10,7 +11,7 @@ internal suspend fun backfillLoadedLegacyConversationTitle(
     onCommitted: suspend (String) -> Unit = {},
     persist: suspend (String) -> Boolean,
 ): Boolean {
-    if (persisted.title != expectedTitle || !isLegacyConversationTitle(expectedTitle)) return false
+    if (persisted.historyLoadState != HistoryLoadState.COMPLETE || persisted.title != expectedTitle || !isLegacyConversationTitle(expectedTitle)) return false
     if (session != null) {
         if (!session.isInitialized) return false
         return session.backfillLegacyTitle(expectedTitle, persist)

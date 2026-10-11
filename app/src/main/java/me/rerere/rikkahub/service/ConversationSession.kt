@@ -15,6 +15,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import me.rerere.ai.ui.finishReasoning
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.HistoryLoadState
+import me.rerere.rikkahub.data.model.requireCompleteHistory
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.uuid.Uuid
@@ -53,6 +55,10 @@ class ConversationSession(
     @Synchronized
     fun updateConversation(conversation: Conversation) {
         require(conversation.id == id)
+        if (initialized) {
+            state.value.requireCompleteHistory()
+            conversation.requireCompleteHistory()
+        }
         _state.value = conversation
         initialized = true
     }
@@ -64,6 +70,7 @@ class ConversationSession(
     ) {
         metadataMutex.withLock {
             val updated = synchronized(this) {
+                state.value.requireCompleteHistory()
                 update(state.value).also(::updateConversation)
             }
             persist(updated)
@@ -76,7 +83,7 @@ class ConversationSession(
         persist: suspend (String) -> Boolean,
     ): Boolean = metadataMutex.withLock {
         val current = synchronized(this) { state.value }
-        if (current.title != expectedTitle || !isLegacyConversationTitle(current.title) ||
+        if (current.historyLoadState != HistoryLoadState.COMPLETE || current.title != expectedTitle || !isLegacyConversationTitle(current.title) ||
             current.newConversation || getJob() != null) return@withLock false
         // This path deliberately has no settings/model/provider dependency.
         val title = localConversationTitle(current)
@@ -98,7 +105,7 @@ class ConversationSession(
             metadataMutex.withLock {
                 synchronized(this) {
                     val current = state.value
-                    if (initialized && current.title == expectedTitle && isLegacyConversationTitle(current.title) &&
+                    if (initialized && current.historyLoadState == HistoryLoadState.COMPLETE && current.title == expectedTitle && isLegacyConversationTitle(current.title) &&
                         !current.newConversation && getJob() == null) {
                         updateConversation(current.copy(title = committedTitle))
                     }
@@ -111,6 +118,7 @@ class ConversationSession(
     suspend fun finishGeneration(save: suspend (Conversation) -> Unit): Conversation =
         withContext(NonCancellable) {
             val current = state.value
+            current.requireCompleteHistory()
             val conversation = current.copy(
                 messageNodes = current.messageNodes.map { node ->
                     node.copy(messages = node.messages.map { it.finishReasoning() })
