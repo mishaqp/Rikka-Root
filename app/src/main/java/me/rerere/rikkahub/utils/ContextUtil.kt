@@ -124,7 +124,7 @@ fun Context.openUrl(url: String) {
         intent.launchUrl(this, url.toUri())
     }.onFailure {
         it.printStackTrace()
-        Toast.makeText(this, "Failed to open URL: $url", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Не удалось открыть ссылку. Установите браузер или выберите приложение для ссылок.", Toast.LENGTH_LONG).show()
     }
 }
 

@@ -19,7 +19,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -49,8 +48,9 @@ fun SettingRootPage() {
     val nav = LocalNavController.current
     val settings = LocalSettings.current
     val assistant = settings.getCurrentAssistant()
-    val context = LocalContext.current
     val toaster = LocalToaster.current
+    val headlessReadyText = stringResource(R.string.agent_tools_root_headless_opened)
+    val headlessFailedText = stringResource(R.string.agent_tools_root_headless_failed)
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     Scaffold(
@@ -125,7 +125,7 @@ fun SettingRootPage() {
                                     root.verifyRoot(force = true, prepareHeadless = true)
                                     val ready = root.isHeadlessReady()
                                     toaster.show(
-                                        context.getString(if (ready) R.string.agent_tools_root_headless_opened else R.string.agent_tools_root_headless_failed),
+                                        if (ready) headlessReadyText else headlessFailedText,
                                         type = if (ready) ToastType.Success else ToastType.Warning,
                                     )
                                 }
