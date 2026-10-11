@@ -31,7 +31,7 @@ object SettingsSearchIndex {
             "notifications sound",
         ),
         SettingsSearchEntry(
-            "general_preferences", "Общие настройки", "Поведение приложения, прокрутка и ввод",
+            "general_preferences", "Общие настройки", "Поведение приложения, прокрутка и ввод, автоназвания чатов",
             HugeIcons.Settings03, SettingsSection.General, SettingsTarget.Route(Screen.SettingPreferencesGeneral),
             "general preferences взаимодействие",
         ),

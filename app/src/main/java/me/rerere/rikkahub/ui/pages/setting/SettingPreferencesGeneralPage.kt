@@ -93,6 +93,18 @@ fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_auto_chat_titles_title)) },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_auto_chat_titles_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = displaySetting.enableAutoChatTitles,
+                                onCheckedChange = {
+                                    updateDisplaySetting(displaySetting.copy(enableAutoChatTitles = it))
+                                }
+                            )
+                        },
+                    )
+                    item(
                         headlineContent = { Text(stringResource(R.string.setting_display_page_send_on_enter_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_display_page_send_on_enter_desc)) },
                         trailingContent = {

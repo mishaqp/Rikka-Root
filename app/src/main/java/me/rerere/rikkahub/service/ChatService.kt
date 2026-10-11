@@ -1029,33 +1029,31 @@ class ChatService(
 
         runCatching {
             val settings = settingsStore.settingsFlow.first()
-            val model = settings.findModelById(settings.fastModelId)
-                ?: throw IllegalStateException(context.getString(R.string.error_fast_model_not_found))
-            val provider = model.findProvider(settings.providers)
-                ?: throw IllegalStateException(context.getString(R.string.error_fast_model_provider_not_found))
-
-            val providerHandler = providerManager.getProviderByType(provider)
-            val result = generateBackgroundWithBudget(
-                provider = providerHandler,
-                budget = currentCoroutineContext()[TokenBudgetContext]?.ledger
-                    ?: tokenBudgetStore.getLedger(settings.getAssistantOf(conversation), conversationId, conversation.currentMessages),
-                providerSetting = provider,
-                messages = listOf(
-                    UIMessage.user(
-                        prompt = settings.titlePrompt.applyPlaceholders(
-                            "locale" to Locale.getDefault().displayName,
-                            "content" to conversation.currentMessages
-                                .takeLast(4).joinToString("\n\n") { it.summaryAsText(maxLength = 500) })
+            val title = generateConversationTitle(settings, conversation, force) { target ->
+                val providerHandler = providerManager.getProviderByType(target.provider)
+                val result = generateBackgroundWithBudget(
+                    provider = providerHandler,
+                    budget = currentCoroutineContext()[TokenBudgetContext]?.ledger
+                        ?: tokenBudgetStore.getLedger(settings.getAssistantOf(conversation), conversationId, conversation.currentMessages),
+                    providerSetting = target.provider,
+                    messages = listOf(
+                        UIMessage.user(
+                            prompt = settings.titlePrompt.applyPlaceholders(
+                                "locale" to Locale.getDefault().displayName,
+                                "content" to conversation.currentMessages
+                                    .takeLast(4).joinToString("\n\n") { it.summaryAsText(maxLength = 500) })
+                        ),
                     ),
-                ),
-                params = backgroundTextGenerationParams(model, conversationId, settings.fastModelReasoningLevel),
-            )
+                    params = backgroundTextGenerationParams(target.model, conversationId, settings.fastModelReasoningLevel),
+                )
+                result.message.toText().trim()
+            } ?: return@runCatching
 
             // 生成完，conversation可能不是最新了，因此需要重新获取
             conversationRepo.getConversationById(conversation.id)?.let {
                 saveConversation(
                     conversationId,
-                    it.copy(title = result.message.toText().trim())
+                    it.copy(title = title)
                 )
             }
         }.onFailure {
@@ -1078,9 +1076,9 @@ class ChatService(
         runCatching {
             val settings = settingsStore.settingsFlow.first()
             if (!settings.enableSuggestion) return@runCatching
-            val model = settings.findModelById(settings.fastModelId)
-                ?: return@runCatching
-            val provider = model.findProvider(settings.providers) ?: return@runCatching
+            val target = settings.findFastModelTarget() ?: return@runCatching
+            val model = target.model
+            val provider = target.provider
 
             sessionManager.get(conversationId)?.let { session ->
                 updateConversation(
@@ -1438,7 +1436,8 @@ class ChatService(
 
         // 会话落库即视为开始，此时把助手的配置固定到会话上
         val settings = loadedSettings()
-        val updatedConversation = conversation.bindConfig(settings).fillModelSnapshots(settings)
+        val updatedConversation = applyLocalConversationTitle(settings, conversation)
+            .bindConfig(settings).fillModelSnapshots(settings)
         updateConversation(conversationId, updatedConversation)
 
         if (!exists) {
