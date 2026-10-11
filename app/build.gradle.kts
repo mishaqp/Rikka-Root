@@ -168,6 +168,8 @@ tasks.withType<Test>().configureEach {
     outputs.upToDateWhen { !recordScreenshots }
     systemProperties(screenshotModeProperties)
     systemProperty("ui.screenshots.dir", file("$screenshotOutputDirectory/$name").absolutePath)
+    // Opt-in baseline regeneration; Daily Build must verify the committed chat images.
+    systemProperty("chat.audit.record", providers.gradleProperty("chat.audit.record").getOrElse("false"))
 }
 
 composeCompiler {
@@ -374,6 +376,8 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.roborazzi)
     testImplementation(libs.roborazzi.compose)
+    // ChatPage baselines replace only service/VM boundaries; production composables stay intact.
+    testImplementation("io.mockk:mockk:1.14.7")
     testImplementation(platform(libs.androidx.compose.bom))
     testImplementation(libs.androidx.ui.test.junit4)
     testImplementation(libs.androidx.ui.test.manifest)
