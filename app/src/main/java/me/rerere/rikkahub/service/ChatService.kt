@@ -40,7 +40,6 @@ import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.rikkahub.costguards.TokenBudgetContext
 import me.rerere.rikkahub.costguards.TokenBudgetLedger
 import me.rerere.rikkahub.costguards.TokenBudgetStore
-import me.rerere.rikkahub.costguards.boundedCustomBodies
 import me.rerere.rikkahub.subagent.SubAgentRegistry
 import me.rerere.rikkahub.subagent.SubAgentOwner
 import me.rerere.ai.ui.ToolApprovalState
@@ -59,6 +58,7 @@ import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationLoop
 import me.rerere.rikkahub.data.ai.AutoContextCompression
 import me.rerere.rikkahub.data.ai.TranslationHandler
+import me.rerere.rikkahub.data.ai.generateTextWithBudget
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.tools.ChatToolFactory
 import me.rerere.rikkahub.data.ai.tools.ToolApprovalAllowList
@@ -121,27 +121,7 @@ internal suspend fun generateBackgroundWithBudget(
     messages: List<UIMessage>,
     params: TextGenerationParams,
     budget: TokenBudgetLedger,
-): TextGenerationResult {
-    val reservation = budget.reserve(AutoContextCompression.estimateTokens(messages), params.maxTokens)
-    var failure: Throwable? = null
-    try {
-        currentCoroutineContext().ensureActive()
-        budget.ensureCanContinue()
-        reservation.markSubmitted()
-        val bounded = params.copy(maxTokens = reservation.maxTokens,
-            customBody = if (budget.enabled && budget.hardCap != null)
-                boundedCustomBodies(params.customBody, reservation.maxTokens) else params.customBody)
-        return provider.generateText(providerSetting, messages, bounded).also {
-            reservation.observe(it.usage)
-            reservation.markCompleted()
-        }
-    } catch (error: Throwable) {
-        failure = error
-        throw error
-    } finally {
-        reservation.closePreserving(failure)
-    }
-}
+): TextGenerationResult = generateTextWithBudget(provider, providerSetting, messages, params, budget)
 
 internal fun backgroundTextGenerationParams(
     model: Model,
@@ -1579,18 +1559,25 @@ class ChatService(
 
                 if (messageText.isBlank()) return@launch
 
+                val conversation = getConversationFlow(conversationId).value
+                val translationBudget = tokenBudgetStore.getLedger(
+                    settings.getAssistantOf(conversation), conversationId, conversation.currentMessages,
+                )
+
                 // Set loading state for translation
                 val loadingText = context.getString(R.string.translating)
                 updateTranslationField(conversationId, message.id, loadingText)
 
-                translationHandler.translateText(
-                    settings = settings,
-                    sourceText = messageText,
-                    targetLanguage = targetLanguage
-                ) { translatedText ->
-                    // Update translation field in real-time
-                    updateTranslationField(conversationId, message.id, translatedText)
-                }.collect { /* Final translation already handled in onStreamUpdate */ }
+                withContext(TokenBudgetContext(translationBudget)) {
+                    translationHandler.translateText(
+                        settings = settings,
+                        sourceText = messageText,
+                        targetLanguage = targetLanguage
+                    ) { translatedText ->
+                        // Update translation field in real-time
+                        updateTranslationField(conversationId, message.id, translatedText)
+                    }.collect { /* Final translation already handled in onStreamUpdate */ }
+                }
 
                 // Save the conversation after translation is complete
                 saveConversation(conversationId, getConversationFlow(conversationId).value)
@@ -1599,6 +1586,7 @@ class ChatService(
                 if (getConversationFlow(conversationId).value.historyLoadState == HistoryLoadState.COMPLETE) {
                     clearTranslationField(conversationId, message.id)
                 }
+                if (e is CancellationException) throw e
                 addError(e, conversationId, title = context.getString(R.string.error_title_translate_message))
             }
         }

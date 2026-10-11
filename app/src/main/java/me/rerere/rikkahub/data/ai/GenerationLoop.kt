@@ -515,7 +515,7 @@ class GenerationLoop(
         tokenBudget: TokenBudgetLedger? = null,
         beforeModelRequest: suspend () -> Unit = {},
     ) {
-        val internalMessages = buildList {
+        val rawMessages = buildList {
             val system = buildString {
                 val effectiveSystemPrompt =
                     if (assistant.allowConversationSystemPrompt && !conversationSystemPrompt.isNullOrBlank()) {
@@ -543,15 +543,16 @@ class GenerationLoop(
             }
             addAll(AutoContextCompression.activeMessages(messages,
                 if (assistant.autoCompressContext) 0 else assistant.contextMessageLimit))
-        }.transforms(
-            transformers = transformers,
-            context = context,
-            model = model,
-            assistant = assistant,
-            settings = settings,
-            processingStatus = processingStatus,
-            workspaceCwd = workspaceCwd,
+        }
+        suspend fun transformInput() = rawMessages.transforms(
+            transformers = transformers, context = context, model = model, assistant = assistant,
+            settings = settings, processingStatus = processingStatus, workspaceCwd = workspaceCwd,
         )
+        // OCR runs before the main reservation and must inherit this exact explicit ledger.
+        // Keep the context limited to transforms: onUpdateMessages emits into the outer Flow.
+        val internalMessages = if (tokenBudget != null) withContext(TokenBudgetContext(tokenBudget)) {
+            transformInput()
+        } else transformInput()
 
         var messages: List<UIMessage> = messages
         val params = TextGenerationParams(

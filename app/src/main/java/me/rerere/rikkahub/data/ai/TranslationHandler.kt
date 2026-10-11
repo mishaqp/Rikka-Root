@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.ai
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
@@ -14,6 +15,7 @@ import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.StreamChunkHandler
 import me.rerere.ai.ui.UIMessage
+import me.rerere.rikkahub.costguards.TokenBudgetContext
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -35,6 +37,7 @@ class TranslationHandler(
             ?: error("Translation provider not found")
 
         val providerHandler = providerManager.getProviderByType(provider)
+        val budget = currentCoroutineContext()[TokenBudgetContext]?.ledger
 
         if (!ModelRegistry.QWEN_MT.match(model.modelId)) {
             // Use regular translation with prompt
@@ -46,14 +49,16 @@ class TranslationHandler(
             var messages = listOf(UIMessage.user(prompt))
             val streamChunkHandler = StreamChunkHandler(model)
 
-            providerHandler.streamText(
+            collectTextWithBudget(
+                provider = providerHandler,
                 providerSetting = provider,
                 messages = messages,
+                budget = budget,
                 params = TextGenerationParams(
                     model = model,
                     reasoningLevel = ReasoningLevel.fromBudgetTokens(settings.translateThinkingBudget),
                 ),
-            ).collect { chunk ->
+            ) { chunk ->
                 messages = streamChunkHandler.handle(messages, chunk)
                 val translatedText = messages.lastOrNull()?.toText() ?: ""
 
@@ -65,9 +70,11 @@ class TranslationHandler(
         } else {
             // Use Qwen MT model with special translation options
             val messages = listOf(UIMessage.user(sourceText))
-            val result = providerHandler.generateText(
+            val result = generateTextWithBudget(
+                provider = providerHandler,
                 providerSetting = provider,
                 messages = messages,
+                budget = budget,
                 params = TextGenerationParams(
                     model = model,
                     temperature = 0.3f,

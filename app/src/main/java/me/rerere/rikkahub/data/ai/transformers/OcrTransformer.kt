@@ -2,7 +2,10 @@ package me.rerere.rikkahub.data.ai.transformers
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
@@ -15,6 +18,11 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.cache.LruCache
 import me.rerere.common.cache.SingleFileCacheStore
+import me.rerere.rikkahub.costguards.TokenBudgetContext
+import me.rerere.rikkahub.costguards.TokenBudgetExceededException
+import me.rerere.rikkahub.costguards.TokenBudgetOwnerUnavailableException
+import me.rerere.rikkahub.costguards.TokenBudgetPersistenceException
+import me.rerere.rikkahub.data.ai.generateTextWithBudget
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
@@ -90,8 +98,11 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
         val model = settings.findModelById(settings.ocrModelId) ?: return "[Image]"
         val providerSetting = model.findProvider(settings.providers) ?: return "[Image]"
         val provider = get<ProviderManager>().getProviderByType(providerSetting)
-        val result = provider.generateText(
+        val budget = currentCoroutineContext()[TokenBudgetContext]?.ledger
+        val result = generateTextWithBudget(
+            provider = provider,
             providerSetting = providerSetting,
+            budget = budget,
             messages = listOf(
                 UIMessage.system(settings.ocrPrompt),
                 UIMessage(
@@ -105,6 +116,7 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
                 customBody = model.customBodies,
             ),
         )
+        budget?.ensureCanContinue()
         val content = result.message.toText().ifBlank { "[ERROR, OCR failed]" }
         Log.i(TAG, "performOcr: $content")
         val ocrResult = """
@@ -118,6 +130,11 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
         cache.put(part.url, ocrResult)
         return ocrResult
     }.getOrElse {
+        if (it is CancellationException || it is TokenBudgetExceededException ||
+            it is TokenBudgetPersistenceException || it is TokenBudgetOwnerUnavailableException ||
+            it.suppressed.any { cleanup -> cleanup is TokenBudgetPersistenceException ||
+                cleanup is TokenBudgetOwnerUnavailableException || cleanup is TokenBudgetExceededException }) throw it
+        currentCoroutineContext().ensureActive()
         "[ERROR, OCR failed: $it]"
     }
 }
