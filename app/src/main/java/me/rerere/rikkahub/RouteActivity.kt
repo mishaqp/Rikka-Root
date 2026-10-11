@@ -2,6 +2,7 @@ package me.rerere.rikkahub
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
@@ -38,6 +39,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
+import androidx.core.content.IntentCompat
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
@@ -241,9 +243,9 @@ class RouteActivity : ComponentActivity() {
                 openNewMediaCreation(backStack)
                 null
             }
-            Intent.ACTION_SEND -> Screen.ShareHandler(
-                text = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty(),
-                streamUri = intent.getStringExtra(Intent.EXTRA_STREAM),
+            Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE -> Screen.ShareHandler(
+                text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString().orEmpty(),
+                streamUris = shareStreamUris(intent),
             )
             Intent.ACTION_PROCESS_TEXT -> Screen.ShareHandler(
                 text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString().orEmpty(),
@@ -254,6 +256,26 @@ class RouteActivity : ComponentActivity() {
         if (destination != null && backStack.lastOrNull() != destination) {
             backStack.add(destination)
         }
+    }
+
+    private fun shareStreamUris(intent: Intent): List<String> {
+        if (intent.action == Intent.ACTION_SEND_MULTIPLE) {
+            return runCatching {
+                IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+            }.getOrNull().orEmpty()
+                .filterIsInstance<Uri>()
+                .map { it.toString() }
+                .filter { it.isNotBlank() }
+        }
+
+        val uri = runCatching {
+            IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+        }.getOrNull()
+        // The internal camera shortcut sends a String instead of a Parcelable Uri.
+        val streamUri = uri?.toString() ?: runCatching {
+            intent.getStringExtra(Intent.EXTRA_STREAM)
+        }.getOrNull()
+        return listOfNotNull(streamUri?.takeIf { it.isNotBlank() })
     }
 
     // 快捷方式没有指定会话，打开一个空会话
@@ -371,7 +393,7 @@ class RouteActivity : ComponentActivity() {
                             entry<Screen.ShareHandler> { key ->
                                 ShareHandlerPage(
                                     text = key.text,
-                                    image = key.streamUri
+                                    streamUris = key.streamUris
                                 )
                             }
 
@@ -677,7 +699,7 @@ sealed interface Screen : NavKey {
     ) : Screen
 
     @Serializable
-    data class ShareHandler(val text: String, val streamUri: String? = null) : Screen
+    data class ShareHandler(val text: String, val streamUris: List<String> = emptyList()) : Screen
 
     @Serializable
     data object History : Screen
