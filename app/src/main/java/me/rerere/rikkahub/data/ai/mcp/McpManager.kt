@@ -27,6 +27,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.saveUploadFromBytes
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.runtime.SettingsDashboardRuntimeStatusStore
 import me.rerere.rikkahub.data.ai.mcp.control.McpControlSecretStore
 import me.rerere.rikkahub.data.ai.mcp.control.guardedMcpHttpClient
 import me.rerere.rikkahub.utils.JsonInstant
@@ -106,6 +107,7 @@ class McpManager(
     )
 
     init {
+        SettingsDashboardRuntimeStatusStore.shared.publishMcpStatus(statusStore.status)
         appScope.launch {
             settingsStore.settingsFlow
                 .map { settings -> settings.mcpServers }

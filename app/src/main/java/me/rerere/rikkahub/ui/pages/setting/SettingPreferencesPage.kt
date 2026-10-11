@@ -38,7 +38,7 @@ fun SettingPreferencesPage() {
         topBar = {
             LargeFlexibleTopAppBar(
                 title = {
-                    Text(stringResource(R.string.setting_page_preferences))
+                    Text("Внешний вид и поведение")
                 },
                 navigationIcon = {
                     BackButton()

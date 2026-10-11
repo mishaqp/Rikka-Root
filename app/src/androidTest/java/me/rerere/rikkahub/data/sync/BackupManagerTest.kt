@@ -9,6 +9,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.AppDatabaseFactory
 import me.rerere.rikkahub.utils.JsonInstant
+import me.rerere.rikkahub.workflow.db.WorkflowDatabase
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -28,6 +29,7 @@ class BackupManagerTest {
     private lateinit var directory: File
     private lateinit var context: Context
     private lateinit var liveDatabase: AppDatabase
+    private lateinit var workflowDatabase: WorkflowDatabase
     private lateinit var manager: BackupManager
 
     @Before fun setUp() {
@@ -42,13 +44,21 @@ class BackupManagerTest {
                 else File(directory, "databases/$name").also { it.parentFile!!.mkdirs() }
         }
         liveDatabase = AppDatabaseFactory.create(context)
+        workflowDatabase = WorkflowDatabase.create(context)
         liveDatabase.openHelper.writableDatabase.execSQL("CREATE TABLE backup_probe (text TEXT)")
         liveDatabase.openHelper.writableDatabase.execSQL("INSERT INTO backup_probe VALUES ('live')")
-        manager = BackupManager(context, liveDatabase, GlobalContext.get().get<SettingsStore>(), JsonInstant)
+        manager = BackupManager(
+            context = context,
+            database = liveDatabase,
+            settingsStore = GlobalContext.get().get<SettingsStore>(),
+            json = JsonInstant,
+            workflowDatabase = workflowDatabase,
+        )
     }
 
     @After fun tearDown() {
         liveDatabase.close()
+        workflowDatabase.close()
         directory.deleteRecursively()
     }
 

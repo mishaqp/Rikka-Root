@@ -1,33 +1,75 @@
 package me.rerere.rikkahub.ui.pages.setting
 
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Book03
+import me.rerere.hugeicons.stroke.Folder01
+import me.rerere.hugeicons.stroke.Internet
+import me.rerere.hugeicons.stroke.Notification01
+import me.rerere.hugeicons.stroke.PaintBoard
+import me.rerere.hugeicons.stroke.Puzzle
+import me.rerere.hugeicons.stroke.Refresh03
+import me.rerere.hugeicons.stroke.Settings03
+import me.rerere.hugeicons.stroke.Sun01
+import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.Screen
 
-data class SettingsSearchEntry(val title: String, val description: String, val route: Screen, val keywords: String = "")
+typealias SettingsSearchEntry = SettingsCatalogItem
 
 /** Only implemented Rikka-Root pages belong here; never index credentials or configuration values. */
 object SettingsSearchIndex {
-    // Keep this list aligned with SettingPage and SettingPreferencesPage when adding destinations.
-    val entries: List<SettingsSearchEntry> = listOf(
-        SettingsSearchEntry("Разрешения инструментов", "Автоодобрение, Всегда разрешать, отзыв разрешений", Screen.SettingToolApprovals, "root рут журнал полный доступ"),
-        SettingsSearchEntry("Ассистенты", "Модель, системные инструкции, контекст и автоматическое сжатие", Screen.Assistant, "assistant compaction compression"),
-        SettingsSearchEntry("Расширения", "Рабочие пространства, навыки, режимы и справочники", Screen.Extensions, "extensions skills lorebook"),
-        SettingsSearchEntry("Рабочие пространства", "Файлы, rootfs, терминал и фоновые процессы workspace", Screen.Workspaces, "background shell"),
-        SettingsSearchEntry("Модели по умолчанию", "Модели чата, быстрого ответа и сжатия", Screen.SettingModels, "models default"),
-        SettingsSearchEntry("Провайдеры", "Подключение сервисов и вход в ChatGPT", Screen.SettingProvider, "providers openai oauth gpt"),
-        SettingsSearchEntry("Веб-поиск", "Сервисы поиска в интернете", Screen.SettingSearch, "web search searx duckduckgo"),
-        SettingsSearchEntry("Голос", "Синтез и распознавание речи", Screen.SettingSpeech, "speech tts asr"),
-        SettingsSearchEntry("Изображения и видео", "Сервисы генерации медиа", Screen.SettingMedia, "media image video"),
-        SettingsSearchEntry("MCP", "Подключение серверов инструментов", Screen.SettingMcp, "tools инструменты"),
-        SettingsSearchEntry("Веб-сервер", "Веб-интерфейс и доступ через браузер", Screen.SettingWeb, "web server"),
-        SettingsSearchEntry("Резервные копии", "Экспорт и восстановление данных", Screen.Backup, "backup restore"),
-        SettingsSearchEntry("Файлы чата", "Вложения и занимаемое место", Screen.SettingFiles, "storage cache хранилище"),
-        SettingsSearchEntry("Тема", "Цвета, тёмный режим и оформление", Screen.SettingPreferencesTheme, "theme colors"),
-        SettingsSearchEntry("Уведомления", "Звук и уведомления об ответах", Screen.SettingPreferencesNotification, "notifications sound"),
-        SettingsSearchEntry("Общие настройки", "Предпочтения приложения", Screen.SettingPreferencesGeneral, "general preferences"),
-        SettingsSearchEntry("Интерфейс", "Отображение чата и элементов управления", Screen.SettingPreferencesUI, "ui display"),
-        SettingsSearchEntry("Сеть", "Прокси, таймауты и повтор запросов", Screen.SettingPreferencesNetwork, "network proxy retry"),
-        SettingsSearchEntry("Журнал запросов", "Просмотр запросов к модели", Screen.Log, "logs диагностика"),
-        SettingsSearchEntry("О приложении", "Версия и обновления Rikka-Root", Screen.SettingAbout, "about update"),
+    // Main rows are the catalog items themselves, so labels, icons and navigation stay aligned.
+    // Additional pages have a stable entry only when they can open without a user-specific ID.
+    val entries: List<SettingsSearchEntry> = SettingsCatalog.items + listOf(
+        SettingsSearchEntry(
+            "theme_palettes", "Темы и палитры", "Палитры цветов и оформление приложения",
+            HugeIcons.Sun01, SettingsSection.General, SettingsTarget.Route(Screen.SettingTheme),
+            "theme colors тема цвета палитра оформление",
+        ),
+        SettingsSearchEntry(
+            "notifications", "Уведомления", "Звук и уведомления об ответах",
+            HugeIcons.Notification01, SettingsSection.General, SettingsTarget.Route(Screen.SettingPreferencesNotification),
+            "notifications sound",
+        ),
+        SettingsSearchEntry(
+            "general_preferences", "Общие настройки", "Поведение приложения, прокрутка и ввод",
+            HugeIcons.Settings03, SettingsSection.General, SettingsTarget.Route(Screen.SettingPreferencesGeneral),
+            "general preferences взаимодействие",
+        ),
+        SettingsSearchEntry(
+            "interface_preferences", "Интерфейс", "Отображение чата, шрифтов и элементов управления",
+            HugeIcons.PaintBoard, SettingsSection.General, SettingsTarget.Route(Screen.SettingPreferencesUI),
+            "ui display блоки кода",
+        ),
+        SettingsSearchEntry(
+            "network_preferences", "Сеть", "Прокси, таймауты и повтор запросов",
+            HugeIcons.Internet, SettingsSection.General, SettingsTarget.Route(Screen.SettingPreferencesNetwork),
+            "network proxy retry user-agent",
+        ),
+        SettingsSearchEntry(
+            "quick_messages", "Быстрые сообщения", "Готовые сообщения для быстрого ввода",
+            HugeIcons.Zap, SettingsSection.General, SettingsTarget.Route(Screen.QuickMessages),
+            "quick messages шаблон",
+        ),
+        SettingsSearchEntry(
+            "prompts", "Промпты и справочники", "Режимы, инструкции и справочники для ассистентов",
+            HugeIcons.Book03, SettingsSection.General, SettingsTarget.Route(Screen.Prompts),
+            "prompts lorebook injections modebook системный промпт",
+        ),
+        SettingsSearchEntry(
+            "skills", "Навыки", "Установка и настройка навыков агента",
+            HugeIcons.Puzzle, SettingsSection.General, SettingsTarget.Route(Screen.Skills),
+            "skills agent расширения",
+        ),
+        SettingsSearchEntry(
+            "workspaces", "Рабочие пространства", "Файлы, rootfs, терминал и фоновые процессы workspace",
+            HugeIcons.Folder01, SettingsSection.General, SettingsTarget.Route(Screen.Workspaces),
+            "workspace background shell",
+        ),
+        SettingsSearchEntry(
+            "updates", "Обновления", "Проверка версии и доступных обновлений Rikka-Root",
+            HugeIcons.Refresh03, SettingsSection.About, SettingsTarget.Route(Screen.SettingUpdate),
+            "update обновление версия релиз apk nightly",
+        ),
     )
 
     fun search(query: String): List<SettingsSearchEntry> {

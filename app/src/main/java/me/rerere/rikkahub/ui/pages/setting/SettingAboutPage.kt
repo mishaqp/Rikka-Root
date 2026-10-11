@@ -2,7 +2,6 @@ package me.rerere.rikkahub.ui.pages.setting
 
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Code
-import me.rerere.hugeicons.stroke.Earth
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.Github
 import me.rerere.hugeicons.stroke.SmartPhone01
@@ -18,10 +17,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -37,8 +39,8 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.R
@@ -48,15 +50,20 @@ import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.SoundEffectPlayer
+import me.rerere.rikkahub.utils.UpdateChecker
 import me.rerere.rikkahub.utils.openUrl
 import me.rerere.rikkahub.utils.plus
+import me.rerere.rikkahub.utils.writeClipboardText
 import me.rerere.ui.easteregg.EmojiBurstHost
+import org.koin.compose.koinInject
 
 @Composable
 fun SettingAboutPage() {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val context = LocalContext.current
     val navController = LocalNavController.current
+    val updateChecker = koinInject<UpdateChecker>()
+    val updateState by updateChecker.nightlyState.collectAsStateWithLifecycle()
     val soundOptions = remember { listOf(R.raw.bingbingbing, R.raw.gangguan) }
     val soundEffectPlayer = remember(context) { SoundEffectPlayer(context) }
     DisposableEffect(soundEffectPlayer) {
@@ -81,7 +88,7 @@ fun SettingAboutPage() {
         topBar = {
             LargeFlexibleTopAppBar(
                 title = {
-                    Text(stringResource(R.string.about_page_title))
+                    Text("О Rikka-Root")
                 },
                 navigationIcon = {
                     BackButton()
@@ -113,7 +120,7 @@ fun SettingAboutPage() {
                     ) {
                         AsyncImage(
                             model = R.mipmap.ic_launcher,
-                            contentDescription = "Logo",
+                            contentDescription = "Логотип Rikka-Root",
                             modifier = Modifier
                                 .clip(CircleShape)
                                 .size(150.dp)
@@ -132,7 +139,7 @@ fun SettingAboutPage() {
                         )
 
                         Text(
-                            text = stringResource(R.string.app_name),
+                            text = "Rikka-Root",
                             style = MaterialTheme.typography.displaySmall,
                         )
                     }
@@ -151,15 +158,61 @@ fun SettingAboutPage() {
                             supportingContent = {
                                 Text("${BuildConfig.VERSION_NAME} / ${BuildConfig.VERSION_CODE}")
                             },
-                            headlineContent = { Text(stringResource(R.string.about_page_version)) },
+                            headlineContent = { Text("Версия") },
+                        )
+                        item(
+                            onClick = {
+                                if (BuildConfig.GIT_COMMIT.isNotBlank()) {
+                                    context.openUrl("https://github.com/mishaqp/Rikka-Root/commit/${BuildConfig.GIT_COMMIT}")
+                                }
+                            },
+                            headlineContent = { Text("Коммит сборки") },
+                            supportingContent = { Text(BuildConfig.GIT_COMMIT.ifBlank { "Не указан" }) },
+                        )
+                        item(
+                            headlineContent = { Text("Дата сборки") },
+                            supportingContent = { Text(BuildConfig.BUILD_DATE.ifBlank { "Не указана" }) },
+                        )
+                        item(
+                            headlineContent = { Text("Архитектуры APK") },
+                            supportingContent = { Text(BuildConfig.BUILD_ABIS.ifBlank { "Не указаны" }.replace(",", ", ")) },
                         )
                         item(
                             leadingContent = { Icon(HugeIcons.SmartPhone01, null) },
                             supportingContent = {
                                 Text("${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} / Android ${android.os.Build.VERSION.RELEASE} / SDK ${android.os.Build.VERSION.SDK_INT}")
                             },
-                            headlineContent = { Text(stringResource(R.string.about_page_system)) },
+                            headlineContent = { Text("Устройство") },
                         )
+                        item(
+                            onClick = { context.writeClipboardText(currentBuildInfo()) },
+                            headlineContent = { Text("Скопировать сведения о сборке") },
+                            supportingContent = { Text("Версия, коммит, дата и архитектуры") },
+                        )
+                    }
+                }
+
+                item {
+                    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Обновления nightly", style = MaterialTheme.typography.titleMedium)
+                            Text(when {
+                                updateState.isChecking -> "Проверяю обновления…"
+                                updateState.error != null -> "Не удалось проверить обновления"
+                                updateState.hasUpdate -> "Доступна новая сборка"
+                                updateState.checkedAt != null -> "Установлена актуальная сборка"
+                                else -> "Проверка обновлений ещё не выполнена"
+                            })
+                            updateState.error?.let { message ->
+                                Text(message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                            }
+                            Button(onClick = { updateChecker.checkNow(force = true) }, enabled = !updateState.isChecking) {
+                                Text("Проверить сейчас")
+                            }
+                            TextButton(onClick = { navController.navigate(Screen.SettingUpdate) }) {
+                                Text(if (updateState.hasUpdate) "Посмотреть обновление" else "Сведения о nightly")
+                            }
+                        }
                     }
                 }
 
@@ -168,26 +221,34 @@ fun SettingAboutPage() {
                         modifier = Modifier.padding(horizontal = 8.dp),
                     ) {
                         item(
-                            onClick = { context.openUrl("https://rikka-ai.com/") },
-                            leadingContent = { Icon(HugeIcons.Earth, null) },
-                            supportingContent = { Text("https://rikka-ai.com") },
-                            headlineContent = { Text(stringResource(R.string.about_page_website)) },
-                        )
-                        item(
                             onClick = { context.openUrl("https://github.com/mishaqp/Rikka-Root") },
                             leadingContent = { Icon(HugeIcons.Github, null) },
                             supportingContent = { Text("https://github.com/mishaqp/Rikka-Root") },
-                            headlineContent = { Text(stringResource(R.string.about_page_github)) },
+                            headlineContent = { Text("Исходный код Rikka-Root") },
+                        )
+                        item(
+                            onClick = { context.openUrl("https://github.com/rikkahub/rikkahub") },
+                            leadingContent = { Icon(HugeIcons.Github, null) },
+                            supportingContent = { Text("https://github.com/rikkahub/rikkahub") },
+                            headlineContent = { Text("Основано на RikkaHub (AGPL-3.0)") },
                         )
                         item(
                             onClick = { context.openUrl("https://github.com/rikkahub/rikkahub/blob/master/LICENSE") },
                             leadingContent = { Icon(HugeIcons.File02, null) },
                             supportingContent = { Text("https://github.com/rikkahub/rikkahub/blob/master/LICENSE") },
-                            headlineContent = { Text(stringResource(R.string.about_page_license)) },
+                            headlineContent = { Text("Лицензия AGPL-3.0") },
                         )
                     }
                 }
             }
         }
     }
+}
+
+private fun currentBuildInfo(): String = buildString {
+    appendLine("Rikka-Root ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+    appendLine("Коммит: ${BuildConfig.GIT_COMMIT.ifBlank { "не указан" }}")
+    appendLine("Дата сборки: ${BuildConfig.BUILD_DATE.ifBlank { "не указана" }}")
+    appendLine("Архитектуры APK: ${BuildConfig.BUILD_ABIS.ifBlank { "не указаны" }}")
+    append("https://github.com/mishaqp/Rikka-Root")
 }

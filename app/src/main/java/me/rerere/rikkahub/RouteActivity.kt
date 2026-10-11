@@ -500,6 +500,18 @@ class RouteActivity : ComponentActivity() {
                                 SettingAboutPage()
                             }
 
+                            entry<Screen.SettingUpdate> {
+                                me.rerere.rikkahub.ui.pages.setting.SettingUpdatePage()
+                            }
+
+                            entry<Screen.SettingRoot> {
+                                me.rerere.rikkahub.ui.pages.setting.SettingRootPage()
+                            }
+
+                            entry<Screen.SettingSchedules> {
+                                me.rerere.rikkahub.ui.pages.setting.SettingSchedulesPage()
+                            }
+
                             entry<Screen.SettingSearch> {
                                 SettingSearchPage()
                             }
@@ -759,6 +771,15 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingAbout : Screen
+
+    @Serializable
+    data object SettingUpdate : Screen
+
+    @Serializable
+    data object SettingRoot : Screen
+
+    @Serializable
+    data object SettingSchedules : Screen
 
     @Serializable
     data object SettingSearch : Screen

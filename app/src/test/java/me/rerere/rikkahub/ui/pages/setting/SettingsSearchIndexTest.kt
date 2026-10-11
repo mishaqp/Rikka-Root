@@ -18,9 +18,52 @@ class SettingsSearchIndexTest {
     }
 
     @Test fun `absent Agent capabilities have no routes and index titles are unique`() {
-        for (name in listOf("ssh", "telegram", "локальные ии", "shizuku", "termux")) {
+        for (name in listOf("telegram", "локальные ии", "shizuku")) {
             assertTrue(name, SettingsSearchIndex.search(name).isEmpty())
         }
         assertEquals(SettingsSearchIndex.entries.size, SettingsSearchIndex.entries.map { it.title }.distinct().size)
+    }
+
+    @Test fun `all dashboard actions are indexed with their original icon section and target`() {
+        SettingsCatalog.items.forEach { item ->
+            val entry = SettingsSearchIndex.entries.single { it.id == item.id }
+            assertSame(item.icon, entry.icon)
+            assertEquals(item.section, entry.section)
+            assertEquals(item.target, entry.target)
+            assertTrue(item.id, SettingsSearchIndex.search(item.title).contains(entry))
+        }
+        assertTrue(SettingsSearchIndex.search("документация").any { it.target is SettingsTarget.Url })
+        assertTrue(SettingsSearchIndex.search("поделиться").any { it.target is SettingsTarget.Share })
+    }
+
+    @Test fun `root shell remote server battery and updates accept synonyms mixed case and whitespace`() {
+        for (query in listOf("ROOT", "  РуТ  ", "Su")) {
+            assertTrue(query, SettingsSearchIndex.search(query).any { it.route == Screen.SettingRoot })
+        }
+        assertTrue(SettingsSearchIndex.search("\tSsH\nСеРвЕр  ").any { it.route == Screen.SettingSsh })
+        assertTrue(SettingsSearchIndex.search("termux").any { it.route == Screen.SettingTermux })
+        for (query in listOf("батарея", "BATTERY", "DoZe")) {
+            assertTrue(query, SettingsSearchIndex.search(query).any { it.route == Screen.SettingSchedules })
+            assertTrue(query, SettingsSearchIndex.search(query).any { it.route == Screen.Workflows })
+        }
+        val updates = SettingsSearchIndex.search("  ОБНОВЛЕНИЕ  ").map { it.route }
+        assertTrue(updates.contains(Screen.SettingAbout))
+        assertTrue(updates.contains(Screen.SettingUpdate))
+    }
+
+    @Test fun `nested preferences and extension destinations remain searchable`() {
+        val routes = SettingsSearchIndex.entries.mapNotNull { it.route }.toSet()
+        assertTrue(routes.containsAll(listOf(
+            Screen.SettingTheme,
+            Screen.SettingPreferencesNotification,
+            Screen.SettingPreferencesGeneral,
+            Screen.SettingPreferencesUI,
+            Screen.SettingPreferencesNetwork,
+            Screen.QuickMessages,
+            Screen.Prompts,
+            Screen.Skills,
+            Screen.Workspaces,
+        )))
+        assertEquals(SettingsSearchIndex.entries.size, SettingsSearchIndex.entries.map { it.id }.distinct().size)
     }
 }

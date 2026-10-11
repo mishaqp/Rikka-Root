@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -33,14 +34,18 @@ import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.hooks.rememberAmoledDarkMode
+import me.rerere.rikkahub.ui.hooks.rememberColorMode
+import me.rerere.rikkahub.ui.theme.ColorMode
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import org.koin.androidx.compose.koinViewModel
+import me.rerere.ui.components.Select
 
 @Composable
 fun SettingPreferencesThemePage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     var amoledDarkMode by rememberAmoledDarkMode()
+    var colorMode by rememberColorMode()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val navController = LocalNavController.current
 
@@ -48,7 +53,7 @@ fun SettingPreferencesThemePage(vm: SettingVM = koinViewModel()) {
         topBar = {
             LargeFlexibleTopAppBar(
                 title = {
-                    Text(stringResource(R.string.setting_page_preferences_theme))
+                    Text("Цветовая схема")
                 },
                 navigationIcon = {
                     BackButton()
@@ -69,6 +74,27 @@ fun SettingPreferencesThemePage(vm: SettingVM = koinViewModel()) {
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
                 ) {
+                    item(
+                        headlineContent = { Text("Цветовая схема") },
+                        supportingContent = {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Светлая, тёмная или как в системе")
+                                Select(
+                                    options = ColorMode.entries,
+                                    selectedOption = colorMode,
+                                    onOptionSelected = { colorMode = it },
+                                    optionToString = {
+                                        when (it) {
+                                            ColorMode.SYSTEM -> "Как в системе"
+                                            ColorMode.LIGHT -> "Светлая"
+                                            ColorMode.DARK -> "Тёмная"
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                        },
+                    )
                     item(
                         headlineContent = { Text(stringResource(R.string.setting_page_dynamic_color)) },
                         supportingContent = { Text(stringResource(R.string.setting_page_dynamic_color_desc)) },
