@@ -1,15 +1,19 @@
 package me.rerere.rikkahub.data.repository
 
 import android.database.sqlite.SQLiteBlobTooBigException
+import android.database.sqlite.SQLiteException
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.PagingData
 import androidx.paging.PagingSource
 import androidx.paging.map
 import androidx.room.withTransaction
+import androidx.sqlite.db.SimpleSQLiteQuery
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.datastore.ConversationSortOrder
 import me.rerere.rikkahub.data.db.AppDatabase
@@ -40,6 +44,8 @@ class ConversationRepository(
     private val sshToolSecrets: SshToolSecretSanitizer? = null,
     private val mcpSecretSanitizer: McpToolSecretSanitizer? = null,
 ) {
+    private var drawerJsonFunctionsAvailable: Boolean? = null
+
     companion object {
         private const val PAGE_SIZE = 20
         private const val INITIAL_LOAD_SIZE = 40
@@ -80,6 +86,46 @@ class ConversationRepository(
         pagingData.map { entity ->
             conversationSummaryToConversation(entity)
         }
+    }
+
+    fun getDrawerConversationsPaging(
+        query: SimpleSQLiteQuery,
+    ): Flow<PagingData<DrawerConversationSummary>> = Pager(
+        config = PagingConfig(
+            pageSize = PAGE_SIZE,
+            initialLoadSize = INITIAL_LOAD_SIZE,
+            enablePlaceholders = false,
+        ),
+        pagingSourceFactory = { conversationDAO.getDrawerConversationsPaging(query) },
+    ).flow.map { pagingData ->
+        pagingData.map { entity ->
+            DrawerConversationSummary(
+                conversation = conversationSummaryToConversation(LightConversationEntity(
+                    id = entity.id, assistantId = entity.assistantId, title = entity.title,
+                    isPinned = entity.isPinned, createAt = entity.createAt, updateAt = entity.updateAt,
+                    folderId = entity.folderId,
+                )),
+                previewText = entity.previewText.replace(Regex("\\s+"), " ").trim(),
+                hasTools = entity.hasTools,
+                hasWorkflows = entity.hasWorkflows,
+            )
+        }
+    }
+
+    /** Older system SQLite builds may omit JSON1; the drawer still opens without previews. */
+    suspend fun drawerSupportsMessagePreviews(): Boolean = withContext(Dispatchers.IO) {
+        drawerJsonFunctionsAvailable ?: try {
+            database.openHelper.readableDatabase.query("SELECT json_valid('[]')").use { cursor ->
+                cursor.moveToFirst() && cursor.getInt(0) == 1
+            }
+        } catch (_: SQLiteException) {
+            false
+        }.also { drawerJsonFunctionsAvailable = it }
+    }
+
+    /** Rename metadata only; never write a lightweight drawer item over the full conversation. */
+    suspend fun updateConversationTitle(conversationId: Uuid, title: String) {
+        conversationDAO.updateTitle(conversationId.toString(), title)
     }
 
     fun getUnfiledConversationsOfAssistantPaging(

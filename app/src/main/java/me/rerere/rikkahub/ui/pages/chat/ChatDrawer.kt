@@ -1,76 +1,87 @@
 package me.rerere.rikkahub.ui.pages.chat
 
 import androidx.activity.ComponentActivity
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SheetValue
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.compose.collectAsLazyPagingItems
+import com.dokar.sonner.ToastType
+import kotlin.uuid.Uuid
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ChartColumn
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.FolderAdd
-import me.rerere.hugeicons.stroke.Image02
-import me.rerere.hugeicons.stroke.ImageToVideo
-import me.rerere.hugeicons.stroke.InLove
-import me.rerere.hugeicons.stroke.LanguageCircle
-import me.rerere.hugeicons.stroke.LookTop
 import me.rerere.hugeicons.stroke.PencilEdit01
-import me.rerere.hugeicons.stroke.Search01
-import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Sorting01
-import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.hugeicons.stroke.Tick01
-import me.rerere.hugeicons.stroke.TransactionHistory
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.ConversationSortOrder
@@ -79,26 +90,18 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.Folder
 import me.rerere.rikkahub.data.repository.ConversationRepository
-import me.rerere.rikkahub.ui.components.ai.AssistantPicker
+import me.rerere.rikkahub.service.hasFastModelTarget
 import me.rerere.rikkahub.ui.components.ui.BackupReminderCard
-import me.rerere.rikkahub.ui.components.ui.Greeting
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
-import me.rerere.rikkahub.ui.components.ui.UpdateCard
-import androidx.compose.ui.draw.clip
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.context.Navigator
-import com.dokar.sonner.ToastType
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.readBooleanPreference
 import me.rerere.rikkahub.ui.hooks.rememberIsPlayStoreVersion
 import me.rerere.rikkahub.ui.hooks.useEditState
-import me.rerere.rikkahub.ui.modifier.onClick
 import me.rerere.rikkahub.utils.navigateToChatPage
-import me.rerere.rikkahub.utils.toDp
-import me.rerere.ui.components.Tooltip
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
-import kotlin.uuid.Uuid
 
 @Composable
 fun ChatDrawerContent(
@@ -106,6 +109,7 @@ fun ChatDrawerContent(
     vm: ChatVM,
     settings: Settings,
     current: Conversation,
+    isOpen: Boolean = true,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -116,6 +120,8 @@ fun ChatDrawerContent(
     val activity = context as ComponentActivity
     val drawerVm: ChatDrawerVM = koinViewModel(viewModelStoreOwner = activity)
 
+    LaunchedEffect(drawerVm, isOpen) { if (isOpen) drawerVm.refreshDateGrouping() }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { drawerVm.refreshDateGrouping() }
     val conversations = drawerVm.conversations.collectAsLazyPagingItems()
     val folders by drawerVm.folders.collectAsStateWithLifecycle()
     val selectedFolderId by drawerVm.selectedFolderId.collectAsStateWithLifecycle()
@@ -163,9 +169,6 @@ fun ChatDrawerContent(
     var folderToRename by remember { mutableStateOf<Folder?>(null) }
     var folderToDelete by remember { mutableStateOf<Folder?>(null) }
 
-    // Menu popup 状态
-    var showMenuPopup by remember { mutableStateOf(false) }
-
     val updateCheckDisabledUntil = settings.displaySetting.updateCheckDisabledUntilEpochMillis
     var updateChecksEnabled by remember(updateCheckDisabledUntil) {
         mutableStateOf(updateCheckDisabledUntil <= System.currentTimeMillis())
@@ -182,269 +185,155 @@ fun ChatDrawerContent(
         }
     }
 
-    ModalDrawerSheet(
-        modifier = Modifier.width(300.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (updateChecksEnabled && !isPlayStore) {
-                UpdateCard(vm)
-            }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val deletionCoordinator = remember { ChatDrawerDeleteCoordinator() }
+    val pendingRemovalIds by deletionCoordinator.pendingIds.collectAsStateWithLifecycle()
+    val latestCurrentId by rememberUpdatedState(current.id)
+    val currentRowMetadata = remember(current.id, current.messageNodes) {
+        mapOf(current.id to ChatDrawerRowMetadata.fromConversation(current))
+    }
+    val showAllFolders by drawerVm.showAllFolders.collectAsStateWithLifecycle()
+    val presentationSort by drawerVm.presentationSort.collectAsStateWithLifecycle()
+    var conversationToRename by remember { mutableStateOf<Conversation?>(null) }
+    val deleteFolderGeneratingMessage = stringResource(R.string.chat_page_delete_folder_generating)
+    val drawerWidth = minOf(LocalConfiguration.current.screenWidthDp.dp * 0.85f, 360.dp)
 
-            BackupReminderCard(
-                settings = settings,
-                onClick = { navController.navigate(Screen.Backup) },
-            )
-
-            // 用户头像和昵称自定义区域
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                UIAvatar(
-                    name = settings.displaySetting.userNickname.ifBlank { stringResource(R.string.user_default_name) },
-                    value = settings.displaySetting.userAvatar,
-                    onUpdate = { newAvatar ->
-                        vm.updateSettings(
-                            settings.copy(
-                                displaySetting = settings.displaySetting.copy(
-                                    userAvatar = newAvatar
-                                )
-                            )
-                        )
-                    },
-                    modifier = Modifier.size(50.dp),
-                )
-
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Text(
-                            text = settings.displaySetting.userNickname.ifBlank { stringResource(R.string.user_default_name) },
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.clickable {
-                                nicknameEditState.open(settings.displaySetting.userNickname)
-                            }
-                        )
-
-                        Icon(
-                            imageVector = HugeIcons.PencilEdit01,
-                            contentDescription = "Edit",
-                            modifier = Modifier
-                                .onClick {
-                                    nicknameEditState.open(settings.displaySetting.userNickname)
-                                }
-                                .size(LocalTextStyle.current.fontSize.toDp())
-                        )
-                    }
-                    Greeting(
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                }
-            }
-
-            DrawerActions(navController = navController)
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                FolderBar(
-                    folders = folders,
-                    selectedFolderId = selectedFolderId,
-                    onSelect = { drawerVm.selectFolder(it) },
-                    onCreate = { showCreateFolderDialog = true },
-                    onRename = { folderToRename = it },
-                    onDelete = { folderToDelete = it },
-                    modifier = Modifier.weight(1f),
-                )
-
-                ConversationSortButton(
-                    sortOrder = settings.displaySetting.conversationSortOrder,
-                    onSortOrderChange = { sortOrder ->
-                        vm.updateSettings(
-                            settings.copy(
-                                displaySetting = settings.displaySetting.copy(
-                                    conversationSortOrder = sortOrder
-                                )
-                            )
-                        )
-                        // 换排序后回到顶部，否则会停留在原来滚动到的位置
-                        scope.launch { conversationListState.scrollToItem(0) }
-                    },
-                )
-            }
-
+    ModalDrawerSheet(modifier = Modifier.width(drawerWidth)) {
+        Column(Modifier.fillMaxSize()) {
             ConversationList(
                 current = current,
                 conversations = conversations,
                 conversationJobs = conversationJobs.keys,
                 listState = conversationListState,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                onClick = {
-                    navigateToChatPage(navController, it.id)
+                pendingRemovalIds = pendingRemovalIds,
+                folderSelected = !showAllFolders,
+                rowMetadata = currentRowMetadata,
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                headerContent = {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        ChatDrawerHeader(
+                            settings = settings,
+                            current = current,
+                            onEditNickname = { nicknameEditState.open(settings.displaySetting.userNickname) },
+                            onUpdateAvatar = { avatar ->
+                                vm.updateSettings(settings.copy(displaySetting = settings.displaySetting.copy(userAvatar = avatar)))
+                            },
+                            onNavigate = { navController.navigate(it) },
+                            showUpdateStatus = updateChecksEnabled && !isPlayStore,
+                        )
+                        ChatDrawerNewChatButton(onClick = { navigateToChatPage(navController) })
+                        BackupReminderCard(settings, onClick = { navController.navigate(Screen.Backup) })
+                        ChatDrawerSearchBar(onNavigate = { navController.navigate(it) })
+                        ChatDrawerAssistantCard(
+                            settings = settings,
+                            onUpdateSettings = { updated ->
+                                val updateJob = vm.updateSettings(updated)
+                                scope.launch {
+                                    updateJob.join()
+                                    val id = if (context.readBooleanPreference("create_new_conversation_on_start", true)) {
+                                        Uuid.random()
+                                    } else {
+                                        repo.getConversationsOfAssistant(updated.assistantId).first().firstOrNull()?.id ?: Uuid.random()
+                                    }
+                                    navigateToChatPage(navController, id)
+                                }
+                            },
+                            onNavigate = { navController.navigate(it) },
+                        )
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Папки", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            ConversationSortButton(
+                                presentationSort = presentationSort,
+                                onPresentationSortChange = {
+                                    drawerVm.setPresentationSort(it)
+                                    scope.launch { conversationListState.scrollToItem(0) }
+                                },
+                                sortOrder = settings.displaySetting.conversationSortOrder,
+                                onSortOrderChange = { sortOrder ->
+                                    vm.updateSettings(settings.copy(displaySetting = settings.displaySetting.copy(conversationSortOrder = sortOrder)))
+                                    scope.launch { conversationListState.scrollToItem(0) }
+                                },
+                            )
+                        }
+                        FolderBar(
+                            folders = folders, selectedFolderId = selectedFolderId,
+                            showAll = showAllFolders,
+                            onSelectAll = { drawerVm.selectAllFolders() },
+                            onSelect = { drawerVm.selectFolder(it) },
+                            onCreate = { showCreateFolderDialog = true },
+                            onRename = { folderToRename = it },
+                            onDelete = { folderToDelete = it },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                 },
-                onRegenerateTitle = {
-                    vm.generateTitle(it, true)
-                },
-                onDelete = {
-                    scope.launch {
-                        vm.deleteConversation(it).join()
-                        conversations.refresh()
-                        if (it.id == current.id) {
-                            navigateToChatPage(navController)
+                onNewChat = { navigateToChatPage(navController) },
+                onClick = { navigateToChatPage(navController, it.id) },
+                onRename = { conversationToRename = it },
+                onRegenerateTitle = { conversation ->
+                    if (settings.hasFastModelTarget()) {
+                        vm.generateTitle(conversation, true)
+                    } else {
+                        scope.launch {
+                            if (snackbarHostState.showSnackbar(
+                                    message = "Выберите быструю модель в настройках", actionLabel = "Настройки",
+                                    withDismissAction = true, duration = SnackbarDuration.Short,
+                                ) == SnackbarResult.ActionPerformed) {
+                                navController.navigate(Screen.SettingModels)
+                            }
                         }
                     }
                 },
-                onPin = {
-                    vm.updatePinnedStatus(it)
-                },
-                onMoveToAssistant = {
-                    conversationToMove = it
-                    showMoveToAssistantSheet = true
-                },
-                onMoveToFolder = {
-                    conversationToMoveFolder = it
-                    showMoveToFolderSheet = true
-                }
-            )
-
-            // 助手选择器
-            AssistantPicker(
-                settings = settings,
-                onUpdateSettings = {
-                    val updateJob = vm.updateSettings(it)
+                onDelete = { conversation ->
                     scope.launch {
-                        updateJob.join()
-                        val id = if (context.readBooleanPreference("create_new_conversation_on_start", true)) {
-                            Uuid.random()
-                        } else {
-                            repo.getConversationsOfAssistant(it.assistantId)
-                                .first()
-                                .firstOrNull()
-                                ?.id ?: Uuid.random()
+                        try {
+                            deletionCoordinator.delete(
+                                id = conversation.id,
+                                offerUndo = {
+                                    snackbarHostState.showSnackbar("Чат удалён", actionLabel = "Отменить",
+                                        withDismissAction = true, duration = SnackbarDuration.Short) == SnackbarResult.ActionPerformed
+                                },
+                                commit = {
+                                    withContext(Dispatchers.IO) { repo.deleteConversation(conversation) }
+                                    conversations.refresh()
+                                    if (scope.isActive && conversation.id == latestCurrentId) navigateToChatPage(navController)
+                                },
+                            )
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            if (scope.isActive) snackbarHostState.showSnackbar("Не удалось удалить чат. Попробуйте ещё раз.")
                         }
-                        navigateToChatPage(navigator = navController, chatId = id)
                     }
                 },
-                modifier = Modifier.fillMaxWidth(),
-                onClickSetting = {
-                    val currentAssistantId = settings.assistantId
-                    navController.navigate(Screen.AssistantDetail(id = currentAssistantId.toString()))
-                }
+                onPin = { vm.updatePinnedStatus(it) },
+                onMoveToAssistant = { conversationToMove = it; showMoveToAssistantSheet = true },
+                onMoveToFolder = { conversationToMoveFolder = it; showMoveToFolderSheet = true },
             )
-
-            Row(
-                horizontalArrangement = Arrangement.SpaceAround,
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp)
-            ) {
-                DrawerAction(
-                    icon = {
-                        Icon(
-                            imageVector = HugeIcons.LookTop,
-                            contentDescription = stringResource(R.string.assistant_page_title)
-                        )
-                    },
-                    label = {
-                        Text(stringResource(R.string.assistant_page_title))
-                    },
-                    onClick = {
-                        navController.navigate(Screen.Assistant)
-                    },
-                )
-
-                Box {
-                    DrawerAction(
-                        icon = {
-                            Icon(HugeIcons.Sparkles, "Menu")
-                        },
-                        label = {
-                            Text(stringResource(R.string.menu))
-                        },
-                        onClick = {
-                            showMenuPopup = true
-                        },
-                    )
-                    DropdownMenu(
-                        expanded = showMenuPopup,
-                        onDismissRequest = { showMenuPopup = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.chat_page_menu_ai_translator)) },
-                            leadingIcon = { Icon(HugeIcons.LanguageCircle, null) },
-                            onClick = {
-                                showMenuPopup = false
-                                navController.navigate(Screen.Translator)
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.chat_page_menu_image_generation)) },
-                            leadingIcon = { Icon(HugeIcons.Image02, null) },
-                            onClick = {
-                                showMenuPopup = false
-                                navController.navigate(Screen.ImageGen)
-                            }
-                        )
-                    }
-                }
-
-                DrawerAction(
-                    icon = {
-                        Icon(HugeIcons.InLove, stringResource(R.string.favorite_page_title))
-                    },
-                    label = {
-                        Text(stringResource(R.string.favorite_page_title))
-                    },
-                    onClick = {
-                        navController.navigate(Screen.Favorite)
-                    },
-                )
-
-                DrawerAction(
-                    icon = {
-                        Icon(HugeIcons.ChartColumn, "统计数据")
-                    },
-                    label = {
-                        Text("统计数据")
-                    },
-                    onClick = {
-                        navController.navigate(Screen.Stats)
-                    },
-                )
-
-                Spacer(Modifier.weight(1f))
-
-                DrawerAction(
-                    icon = {
-                        Icon(HugeIcons.Settings03, null)
-                    },
-                    label = { Text(stringResource(R.string.settings)) },
-                    onClick = {
-                        navController.navigate(Screen.Setting)
-                    },
-                )
-            }
+            SnackbarHost(snackbarHostState, Modifier.padding(horizontal = 8.dp))
+            ChatDrawerBottomBar(settings.assistantId.toString(), onNavigate = { navController.navigate(it) })
         }
+    }
+
+    conversationToRename?.let { conversation ->
+        var title by remember(conversation.id) { mutableStateOf(conversation.title) }
+        AlertDialog(
+            onDismissRequest = { conversationToRename = null },
+            title = { Text("Переименовать чат") },
+            text = {
+                OutlinedTextField(title, onValueChange = { title = it }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth(), label = { Text("Название чата") })
+            },
+            confirmButton = {
+                TextButton(enabled = title.isNotBlank(), onClick = {
+                    vm.renameConversation(conversation, title)
+                    conversationToRename = null
+                }) { Text("Сохранить") }
+            },
+            dismissButton = { TextButton(onClick = { conversationToRename = null }) { Text("Отмена") } },
+        )
     }
 
     // 昵称编辑对话框
@@ -659,7 +548,7 @@ fun ChatDrawerContent(
                             folderToDelete = null
                             conversations.refresh()
                         } else {
-                            toaster.show(context.getString(R.string.chat_page_delete_folder_generating), type = ToastType.Warning)
+                            toaster.show(deleteFolderGeneratingMessage, type = ToastType.Warning)
                         }
                     }
                 ) { Text(stringResource(R.string.chat_page_delete)) }
@@ -719,216 +608,72 @@ fun ChatDrawerContent(
     }
 }
 
-@Composable
-private fun DrawerActions(navController: Navigator) {
-    Column {
-        // 搜索入口
-        DrawerEntry(
-            icon = HugeIcons.Search01,
-            text = stringResource(R.string.chat_page_search_chats),
-            onClick = { navController.navigate(Screen.MessageSearch) },
-        )
-
-        // 历史记录入口
-        DrawerEntry(
-            icon = HugeIcons.TransactionHistory,
-            text = stringResource(R.string.chat_page_history),
-            onClick = { navController.navigate(Screen.History) },
-        )
-
-        // 媒体创作入口
-        DrawerEntry(
-            icon = HugeIcons.ImageToVideo,
-            text = stringResource(R.string.media_creation_title),
-            onClick = { navController.navigate(Screen.MediaCreationSessions) },
-        )
-    }
-}
-
-@Composable
-private fun DrawerEntry(
-    icon: ImageVector,
-    text: String,
-    onClick: () -> Unit,
-) {
-    Surface(
-        onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 4.dp),
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = text,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-        }
-    }
-}
-
-@Composable
-private fun DrawerAction(
-    modifier: Modifier = Modifier,
-    icon: @Composable () -> Unit,
-    label: @Composable () -> Unit,
-    onClick: () -> Unit,
-) {
-    Surface(
-        onClick = onClick,
-        modifier = modifier,
-        color = MaterialTheme.colorScheme.primaryContainer,
-        shape = CircleShape,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-    ) {
-        Tooltip(
-            tooltip = {
-                label()
-            }
-        ) {
-            Box(
-                modifier = Modifier
-                    .padding(10.dp)
-                    .size(20.dp),
-            ) {
-                icon()
-            }
-        }
-    }
-}
-
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FolderBar(
     folders: List<Folder>,
     selectedFolderId: Uuid?,
+    showAll: Boolean,
+    onSelectAll: () -> Unit,
     onSelect: (Uuid?) -> Unit,
     onCreate: () -> Unit,
     onRename: (Folder) -> Unit,
     onDelete: (Folder) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    LazyRow(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        item {
-            FolderChip(
-                label = stringResource(R.string.chat_page_folder_default),
-                selected = selectedFolderId == null,
-                onClick = { onSelect(null) },
-                onLongClick = {},
-            )
-        }
-        items(folders) { folder ->
-            var menuExpanded by remember { mutableStateOf(false) }
-            Box {
-                FolderChip(
-                    label = folder.name,
-                    icon = HugeIcons.Folder01,
-                    selected = selectedFolderId == folder.id,
-                    onClick = { onSelect(folder.id) },
-                    onLongClick = { menuExpanded = true },
-                )
-                DropdownMenu(
-                    expanded = menuExpanded,
-                    onDismissRequest = { menuExpanded = false },
-                ) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.chat_page_rename)) },
-                        leadingIcon = { Icon(HugeIcons.PencilEdit01, null) },
-                        onClick = {
-                            onRename(folder)
-                            menuExpanded = false
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.chat_page_delete)) },
-                        leadingIcon = { Icon(HugeIcons.Delete01, null) },
-                        onClick = {
-                            onDelete(folder)
-                            menuExpanded = false
-                        }
-                    )
+    // Wrapping chips keep every folder reachable without sideways scrolling or clipping.
+    FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        FolderChip("Все", showAll, onSelectAll, null)
+        FolderChip("Без папки", !showAll && selectedFolderId == null, { onSelect(null) }, null)
+        folders.forEach { folder ->
+            key(folder.id) {
+                var menuExpanded by remember { mutableStateOf(false) }
+                Box {
+                    FolderChip(folder.name, !showAll && selectedFolderId == folder.id,
+                        { onSelect(folder.id) }, { menuExpanded = true }, HugeIcons.Folder01)
+                    DropdownMenu(menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                        DropdownMenuItem(text = { Text("Переименовать") },
+                            leadingIcon = { Icon(HugeIcons.PencilEdit01, null) },
+                            onClick = { menuExpanded = false; onRename(folder) })
+                        DropdownMenuItem(text = { Text("Удалить") },
+                            leadingIcon = { Icon(HugeIcons.Delete01, null) },
+                            onClick = { menuExpanded = false; onDelete(folder) })
+                    }
                 }
             }
         }
-        item {
-            FolderChip(
-                label = stringResource(R.string.chat_page_folder_add),
-                icon = HugeIcons.FolderAdd,
-                selected = false,
-                onClick = onCreate,
-                onLongClick = {},
-            )
-        }
+        FolderChip("+ Папка", false, onCreate, null, HugeIcons.FolderAdd)
     }
 }
 
 @Composable
 private fun ConversationSortButton(
+    presentationSort: DrawerConversationSort,
+    onPresentationSortChange: (DrawerConversationSort) -> Unit,
     sortOrder: ConversationSortOrder,
     onSortOrderChange: (ConversationSortOrder) -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     Box {
-        Surface(
-            onClick = { menuExpanded = true },
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-        ) {
-            Tooltip(
-                tooltip = { Text(stringResource(R.string.chat_page_sort_conversations)) }
-            ) {
-                Icon(
-                    imageVector = HugeIcons.Sorting01,
-                    contentDescription = stringResource(R.string.chat_page_sort_conversations),
-                    modifier = Modifier
-                        .padding(8.dp)
-                        .size(16.dp),
-                )
-            }
+        IconButton(onClick = { menuExpanded = true }) {
+            Icon(HugeIcons.Sorting01, "Сортировка чатов: ${presentationSort.label}")
         }
-        DropdownMenu(
-            expanded = menuExpanded,
-            onDismissRequest = { menuExpanded = false },
-        ) {
+        DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+            Text("Сортировка: ${presentationSort.label}", Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            DrawerConversationSort.entries.forEach { option ->
+                DropdownMenuItem(text = { Text(option.label) },
+                    trailingIcon = { if (option == presentationSort) Icon(HugeIcons.Tick01, null) },
+                    onClick = { menuExpanded = false; onPresentationSortChange(option) })
+            }
+            HorizontalDivider()
+            Text("Дата для сортировки", Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             ConversationSortOrder.entries.forEach { option ->
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            stringResource(
-                                when (option) {
-                                    ConversationSortOrder.UPDATE_TIME -> R.string.chat_page_sort_by_update_time
-                                    ConversationSortOrder.CREATE_TIME -> R.string.chat_page_sort_by_create_time
-                                }
-                            )
-                        )
-                    },
-                    trailingIcon = {
-                        if (option == sortOrder) {
-                            Icon(HugeIcons.Tick01, null, modifier = Modifier.size(18.dp))
-                        }
-                    },
-                    onClick = {
-                        menuExpanded = false
-                        if (option != sortOrder) onSortOrderChange(option)
-                    }
-                )
+                DropdownMenuItem(text = { Text(if (option == ConversationSortOrder.UPDATE_TIME) "Обновление чата" else "Создание чата") },
+                    trailingIcon = { if (option == sortOrder) Icon(HugeIcons.Tick01, null) },
+                    onClick = { menuExpanded = false; if (option != sortOrder) onSortOrderChange(option) })
             }
         }
     }
@@ -939,37 +684,22 @@ private fun FolderChip(
     label: String,
     selected: Boolean,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    onLongClick: (() -> Unit)?,
     icon: ImageVector? = null,
 ) {
     Surface(
         shape = CircleShape,
-        color = if (selected) {
-            MaterialTheme.colorScheme.secondaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerLow
-        },
-        modifier = Modifier
-            .clip(CircleShape)
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongClick,
-            )
+        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.clip(CircleShape).combinedClickable(
+            role = Role.Button, onClick = onClick, onLongClick = onLongClick,
+            onLongClickLabel = if (onLongClick != null) "Действия с папкой: $label" else null,
+        ).semantics { contentDescription = label; this.selected = selected },
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            if (icon != null) {
-                Icon(icon, null, modifier = Modifier.size(14.dp))
-            }
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+        Row(Modifier.heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (icon != null) Icon(icon, null, Modifier.size(16.dp))
+            Text(label, style = MaterialTheme.typography.labelLarge)
         }
     }
 }
@@ -1001,7 +731,7 @@ private fun AssistantItem(
             UIAvatar(
                 name = assistant.name,
                 value = assistant.avatar,
-                onUpdate = {},
+                onClick = onClick,
                 modifier = Modifier.size(40.dp),
             )
             Column(

@@ -8,6 +8,7 @@ import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import androidx.paging.insertSeparators
 import androidx.paging.map
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -18,18 +19,20 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.ConversationSortOrder
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.Folder
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FolderRepository
+import me.rerere.rikkahub.data.repository.drawerConversationQuery
 import me.rerere.rikkahub.service.ChatService
-import me.rerere.rikkahub.utils.toLocalString
+import java.time.Duration
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlin.uuid.Uuid
@@ -51,9 +54,39 @@ class ChatDrawerVM(
         .map { it.displaySetting.conversationSortOrder }
         .distinctUntilChanged()
 
-    // 当前选中的文件夹筛选，null 表示「未归类」视图
+    // Presentation-only All filter; null folder still preserves the Unfiled view.
     private val _selectedFolderId = MutableStateFlow<Uuid?>(null)
     val selectedFolderId: StateFlow<Uuid?> = _selectedFolderId.asStateFlow()
+    private val _showAllFolders = MutableStateFlow(true)
+    val showAllFolders: StateFlow<Boolean> = _showAllFolders.asStateFlow()
+    private val _presentationSort = MutableStateFlow(
+        DrawerConversationSort.entries.firstOrNull {
+            it.name == savedStateHandle.get<String>("drawerPresentationSort")
+        } ?: DrawerConversationSort.NEWEST
+    )
+    val presentationSort: StateFlow<DrawerConversationSort> = _presentationSort.asStateFlow()
+    private val dateRefresh = MutableStateFlow(0)
+
+    private data class DrawerDateContext(val today: LocalDate, val zone: ZoneId)
+    private val dateContext = dateRefresh.flatMapLatest {
+        flow {
+            while (true) {
+                val zone = ZoneId.systemDefault()
+                val today = LocalDate.now(zone)
+                emit(DrawerDateContext(today, zone))
+                val tomorrow = today.plusDays(1).atStartOfDay(zone).toInstant()
+                delay(Duration.between(Instant.now(), tomorrow).toMillis().coerceAtLeast(1L))
+            }
+        }
+    }.distinctUntilChanged()
+
+    private data class DrawerQueryOptions(
+        val assistantId: Uuid,
+        val folderId: Uuid?,
+        val allFolders: Boolean,
+        val dateBasis: ConversationSortOrder,
+        val sort: DrawerConversationSort,
+    )
 
     // 当前助手的文件夹列表（Room Flow，增删改自动刷新）
     val folders: StateFlow<List<Folder>> = assistantIdFlow
@@ -61,42 +94,35 @@ class ChatDrawerVM(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val conversations: Flow<PagingData<ConversationListItem>> =
-        combine(assistantIdFlow, _selectedFolderId, sortOrderFlow) { assistantId, folderId, sortOrder ->
-            Triple(assistantId, folderId, sortOrder)
+        combine(assistantIdFlow, _selectedFolderId, _showAllFolders, sortOrderFlow, _presentationSort) {
+                assistantId, folderId, allFolders, dateBasis, sort ->
+            DrawerQueryOptions(assistantId, folderId, allFolders, dateBasis, sort)
         }
-            .flatMapLatest { (assistantId, folderId, sortOrder) ->
-                val paging = if (folderId == null) {
-                    conversationRepo.getUnfiledConversationsOfAssistantPaging(assistantId, sortOrder)
-                } else {
-                    conversationRepo.getConversationsOfFolderPaging(folderId, sortOrder)
-                }
+            .combine(dateContext) { options, dates -> options to dates }
+            .flatMapLatest { (options, dates) ->
+                val paging = conversationRepo.getDrawerConversationsPaging(drawerConversationQuery(
+                    assistantId = options.assistantId.toString(),
+                    folderId = options.folderId?.toString(),
+                    includeAllFolders = options.allFolders,
+                    sortByCreateTime = options.dateBasis == ConversationSortOrder.CREATE_TIME,
+                    oldestFirst = options.sort == DrawerConversationSort.OLDEST,
+                    alphabetical = options.sort == DrawerConversationSort.TITLE,
+                    todayMillis = dates.today.atStartOfDay(dates.zone).toInstant().toEpochMilli(),
+                    yesterdayMillis = dates.today.minusDays(1).atStartOfDay(dates.zone).toInstant().toEpochMilli(),
+                    weekStartMillis = drawerWeekStart(dates.today).atStartOfDay(dates.zone).toInstant().toEpochMilli(),
+                    includePreviews = conversationRepo.drawerSupportsMessagePreviews(),
+                ))
                 paging.map { pagingData ->
                     pagingData
-                        .map { ConversationListItem.Item(it) }
+                        .map { summary -> ConversationListItem.Item(
+                            conversation = summary.conversation,
+                            previewText = summary.previewText,
+                            hasTools = summary.hasTools,
+                            hasWorkflows = summary.hasWorkflows,
+                        ) }
                         .insertSeparators<ConversationListItem.Item, ConversationListItem> { before, after ->
-                            when {
-                                after == null -> null
-                                after.conversation.isPinned -> {
-                                    if (before == null) ConversationListItem.PinnedHeader else null
-                                }
-
-                                else -> {
-                                    // 日期分组跟随排序依据：按创建时间排序时以创建日期分组
-                                    val afterDate = after.conversation.sortDate(sortOrder)
-                                    val sameGroup = before != null &&
-                                        !before.conversation.isPinned &&
-                                        before.conversation.sortDate(sortOrder) == afterDate
-                                    if (sameGroup) {
-                                        null
-                                    } else {
-                                        ConversationListItem.DateHeader(
-                                            date = afterDate,
-                                            label = getDateLabel(afterDate),
-                                            sortOrder = sortOrder,
-                                        )
-                                    }
-                                }
-                            }
+                            drawerConversationHeader(before?.conversation, after?.conversation,
+                                options.dateBasis, dates.today, dates.zone)
                         }
                 }
             }
@@ -111,6 +137,7 @@ class ChatDrawerVM(
         viewModelScope.launch {
             assistantIdFlow.collect {
                 _selectedFolderId.value = null
+                _showAllFolders.value = true
             }
         }
     }
@@ -121,7 +148,23 @@ class ChatDrawerVM(
     }
 
     fun selectFolder(folderId: Uuid?) {
+        _showAllFolders.value = false
         _selectedFolderId.value = folderId
+    }
+
+    fun selectAllFolders() {
+        _showAllFolders.value = true
+        _selectedFolderId.value = null
+    }
+
+    fun setPresentationSort(sort: DrawerConversationSort) {
+        _presentationSort.value = sort
+        savedStateHandle["drawerPresentationSort"] = sort.name
+    }
+
+    /** Refresh on reopening too: time-zone changes must not keep Activity-lived headers stale. */
+    fun refreshDateGrouping() {
+        dateRefresh.value += 1
     }
 
     fun createFolder(name: String) {
@@ -165,21 +208,4 @@ class ChatDrawerVM(
         }
     }
 
-    private fun Conversation.sortDate(sortOrder: ConversationSortOrder): LocalDate {
-        val instant = when (sortOrder) {
-            ConversationSortOrder.UPDATE_TIME -> updateAt
-            ConversationSortOrder.CREATE_TIME -> createAt
-        }
-        return instant.atZone(ZoneId.systemDefault()).toLocalDate()
-    }
-
-    private fun getDateLabel(date: LocalDate): String {
-        val today = LocalDate.now()
-        val yesterday = today.minusDays(1)
-        return when (date) {
-            today -> context.getString(R.string.chat_page_today)
-            yesterday -> context.getString(R.string.chat_page_yesterday)
-            else -> date.toLocalString(date.year != today.year)
-        }
-    }
 }

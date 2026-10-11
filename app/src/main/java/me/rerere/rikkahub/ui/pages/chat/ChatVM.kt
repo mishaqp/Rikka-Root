@@ -326,7 +326,13 @@ class ChatVM(
     fun generateTitle(conversation: Conversation, force: Boolean = false) {
         viewModelScope.launch {
             val conversationFull = conversationRepo.getConversationById(conversation.id) ?: return@launch
-            chatService.generateTitle(_conversationId, conversationFull, force)
+            chatService.generateTitle(conversationFull.id, conversationFull, force)
+        }
+    }
+
+    fun renameConversation(conversation: Conversation, title: String) {
+        viewModelScope.launch {
+            chatService.renameConversation(conversation.id, title)
         }
     }
 

@@ -1366,6 +1366,16 @@ class ChatService(
         )
     }
 
+    suspend fun renameConversation(conversationId: Uuid, title: String) {
+        val trimmedTitle = title.trim()
+        if (trimmedTitle.isEmpty()) return
+        updateConversationMetadata(
+            conversationId = conversationId,
+            update = { it.copy(title = trimmedTitle) },
+            persist = { conversationRepo.updateConversationTitle(conversationId, it.title) },
+        )
+    }
+
     suspend fun moveConversationToAssistant(conversationId: Uuid, assistantId: Uuid) {
         updateConversationMetadata(
             conversationId = conversationId,

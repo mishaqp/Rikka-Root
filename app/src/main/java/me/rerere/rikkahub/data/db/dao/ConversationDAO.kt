@@ -5,13 +5,20 @@ import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.Query
+import androidx.room.RawQuery
 import androidx.room.Update
+import androidx.sqlite.db.SupportSQLiteQuery
 import kotlinx.coroutines.flow.Flow
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
+import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
+import me.rerere.rikkahub.data.repository.DrawerConversationEntity
 import me.rerere.rikkahub.data.repository.LightConversationEntity
 
 @Dao
 interface ConversationDAO {
+    @RawQuery(observedEntities = [ConversationEntity::class, MessageNodeEntity::class])
+    fun getDrawerConversationsPaging(query: SupportSQLiteQuery): PagingSource<Int, DrawerConversationEntity>
+
     @Query("SELECT * FROM conversationentity ORDER BY is_pinned DESC, update_at DESC")
     fun getAll(): Flow<List<ConversationEntity>>
 
@@ -86,6 +93,9 @@ interface ConversationDAO {
 
     @Query("UPDATE conversationentity SET is_pinned = :isPinned WHERE id = :id")
     suspend fun updatePinStatus(id: String, isPinned: Boolean)
+
+    @Query("UPDATE conversationentity SET title = :title WHERE id = :id")
+    suspend fun updateTitle(id: String, title: String)
 
     @Query("UPDATE conversationentity SET assistant_id = :assistantId, folder_id = '' WHERE id = :id")
     suspend fun updateAssistantId(id: String, assistantId: String)
