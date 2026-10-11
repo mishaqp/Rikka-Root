@@ -3,7 +3,6 @@ package me.rerere.rikkahub.ui.pages.setting
 import androidx.compose.ui.graphics.vector.ImageVector
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.AiMagic
-import me.rerere.hugeicons.stroke.Bash
 import me.rerere.hugeicons.stroke.Book01
 import me.rerere.hugeicons.stroke.Bookshelf01
 import me.rerere.hugeicons.stroke.Brain02
@@ -13,6 +12,7 @@ import me.rerere.hugeicons.stroke.ComputerTerminal01
 import me.rerere.hugeicons.stroke.Database02
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.GitFork
+import me.rerere.hugeicons.stroke.Globe02
 import me.rerere.hugeicons.stroke.GlobalSearch
 import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.Internet
@@ -24,7 +24,9 @@ import me.rerere.hugeicons.stroke.ServerStack01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Share04
 import me.rerere.hugeicons.stroke.ShieldCheck
+import me.rerere.hugeicons.stroke.ShieldKey
 import me.rerere.hugeicons.stroke.Sun01
+import me.rerere.hugeicons.stroke.Tools
 import me.rerere.rikkahub.Screen
 
 /** Material color roles are resolved by the UI, so metadata also works in dark mode. */
@@ -55,6 +57,26 @@ data class SettingsCatalogItem(
 ) {
     /** Route convenience; external actions retain their own target. */
     val route: Screen? get() = (target as? SettingsTarget.Route)?.screen
+}
+
+sealed interface SettingsQuickTileTarget {
+    data class Route(val screen: Screen) : SettingsQuickTileTarget
+    data object CurrentAssistantTools : SettingsQuickTileTarget
+}
+
+data class SettingsQuickTileMetadata(
+    val id: String,
+    val title: String,
+    val icon: ImageVector,
+    val target: SettingsQuickTileTarget,
+    val catalogItemId: String? = null,
+) {
+    /** Pass an existing assistant ID; a missing assistant opens the assistant list. */
+    fun route(currentAssistantId: String?): Screen = when (val target = target) {
+        is SettingsQuickTileTarget.Route -> target.screen
+        SettingsQuickTileTarget.CurrentAssistantTools -> currentAssistantId?.let { Screen.AssistantLocalTool(it) }
+            ?: Screen.Assistant
+    }
 }
 
 /** Display metadata only; never include credentials or user configuration values. */
@@ -114,7 +136,7 @@ object SettingsCatalog {
         ),
         SettingsCatalogItem(
             "root", "Root", "Root-доступ и инструменты устройства",
-            HugeIcons.Bash, SettingsSection.Tools, SettingsTarget.Route(Screen.SettingRoot),
+            HugeIcons.ShieldKey, SettingsSection.Tools, SettingsTarget.Route(Screen.SettingRoot),
             "root рут su суперпользователь shell терминал",
         ),
         SettingsCatalogItem(
@@ -149,7 +171,7 @@ object SettingsCatalog {
         ),
         SettingsCatalogItem(
             "web", "Веб-сервер", "Веб-интерфейс и доступ через браузер",
-            HugeIcons.ServerStack01, SettingsSection.Tools, SettingsTarget.Route(Screen.SettingWeb),
+            HugeIcons.Globe02, SettingsSection.Tools, SettingsTarget.Route(Screen.SettingWeb),
             "web server сервер порт локальная сеть",
         ),
         SettingsCatalogItem(
@@ -184,4 +206,25 @@ object SettingsCatalog {
             "share поделиться отправить releases релизы",
         ),
     )
+
+    val quickTiles: List<SettingsQuickTileMetadata> = listOf(
+        quickTile("providers", "Провайдеры", "providers"),
+        quickTile("model", "Модель", "default_model_prompt"),
+        SettingsQuickTileMetadata(
+            "tools", "Инструменты", HugeIcons.Tools,
+            SettingsQuickTileTarget.CurrentAssistantTools,
+        ),
+        quickTile("root", "Root", "root"),
+    )
+
+    private fun quickTile(id: String, title: String, catalogItemId: String): SettingsQuickTileMetadata {
+        val item = items.single { it.id == catalogItemId }
+        return SettingsQuickTileMetadata(
+            id = id,
+            title = title,
+            icon = item.icon,
+            target = SettingsQuickTileTarget.Route(requireNotNull(item.route)),
+            catalogItemId = item.id,
+        )
+    }
 }

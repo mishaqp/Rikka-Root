@@ -88,14 +88,11 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                 SettingsStatePanel(settings, statuses[SettingsDashboardStatusKey.Root], update) { navigator.navigate(it) }
             }
             item("quickTiles") {
-                SettingsQuickTiles { destination ->
-                    navigator.navigate(when (destination) {
-                        "providers" -> Screen.SettingProvider
-                        "model" -> Screen.SettingModels
-                        "tools" -> if (settings.assistants.any { it.id == settings.assistantId })
-                            Screen.AssistantLocalTool(settings.assistantId.toString()) else Screen.Assistant
-                        else -> Screen.SettingRoot
-                    })
+                SettingsQuickTiles(SettingsDashboardPanelPresentation.quickTileValues(
+                    settings, statuses[SettingsDashboardStatusKey.Root],
+                )) { tile ->
+                    val assistantId = settings.assistantId.takeIf { id -> settings.assistants.any { it.id == id } }
+                    navigator.navigate(tile.route(assistantId?.toString()))
                 }
             }
             item("search") {

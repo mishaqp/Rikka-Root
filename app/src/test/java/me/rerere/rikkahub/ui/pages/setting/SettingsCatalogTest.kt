@@ -55,6 +55,44 @@ class SettingsCatalogTest {
         assertTrue(SettingsCatalog.items.single { it.id == "approvals" }.icon.name.contains("Shield"))
     }
 
+    @Test fun `every main settings destination has a distinct icon`() {
+        assertEquals(24, SettingsCatalog.items.map { it.icon.name }.distinct().size)
+        assertEquals(24, SettingsCatalog.items.map { it.icon }.distinct().size)
+        val root = SettingsCatalog.items.single { it.id == "root" }
+        val termux = SettingsCatalog.items.single { it.id == "termux" }
+        val ssh = SettingsCatalog.items.single { it.id == "ssh" }
+        val web = SettingsCatalog.items.single { it.id == "web" }
+        assertTrue(root.icon.name.contains("Shield") || root.icon.name.contains("Key"))
+        assertNotEquals(root.icon, termux.icon)
+        assertNotEquals(ssh.icon, web.icon)
+        assertTrue(web.icon.name.contains("Globe"))
+    }
+
+    @Test fun `shared quick tiles use catalog icons and destinations`() {
+        assertEquals(listOf("providers", "model", "tools", "root"), SettingsCatalog.quickTiles.map { it.id })
+        assertEquals(
+            listOf("providers", "default_model_prompt", "root"),
+            SettingsCatalog.quickTiles.mapNotNull { it.catalogItemId },
+        )
+        SettingsCatalog.quickTiles.filter { it.catalogItemId != null }.forEach { tile ->
+            val item = SettingsCatalog.items.single { it.id == tile.catalogItemId }
+            assertSame(tile.id, item.icon, tile.icon)
+            assertEquals(tile.id, item.route, tile.route(null))
+            assertEquals(tile.id, item.route, tile.route("current-assistant"))
+        }
+    }
+
+    @Test fun `assistant tools tile follows the current assistant without adding a main destination`() {
+        val tools = SettingsCatalog.quickTiles.single { it.id == "tools" }
+        assertNull(tools.catalogItemId)
+        assertEquals(SettingsQuickTileTarget.CurrentAssistantTools, tools.target)
+        assertEquals(Screen.AssistantLocalTool("current-assistant"), tools.route("current-assistant"))
+        assertEquals(Screen.Assistant, tools.route(null))
+        assertFalse(SettingsCatalog.items.any { it.id == "tools" })
+        assertFalse(SettingsCatalog.items.any { it.icon == tools.icon })
+        assertFalse(SettingsCatalog.items.any { it.icon.name == tools.icon.name })
+    }
+
     @Test fun `documentation keeps its destination and share points to fork releases`() {
         assertEquals("Документация RikkaHub (оригинал)", SettingsCatalog.items.single { it.id == "docs" }.title)
         assertEquals(

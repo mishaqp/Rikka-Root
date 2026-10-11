@@ -26,7 +26,6 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.update
-import me.rerere.rikkahub.data.ai.mcp.McpStatus
 import me.rerere.rikkahub.data.ai.tools.local.TermuxIntegration
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.db.AppDatabase
@@ -37,13 +36,10 @@ import me.rerere.rikkahub.data.repository.SshHostRepository
 import me.rerere.rikkahub.data.runtime.SettingsDashboardRuntimeStatusStore
 import me.rerere.rikkahub.root.RootShellManager
 import me.rerere.rikkahub.root.RootStatus
-import me.rerere.rikkahub.utils.fileSizeToString
 import me.rerere.rikkahub.workflow.repository.WorkflowRepository
 import org.koin.core.Koin
 import org.koin.java.KoinJavaComponent.getKoin
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.util.TimeZone
 
 /** UI-only observations: never verify root, launch Termux, read cookies, or request permissions. */
 @Composable
@@ -100,7 +96,7 @@ private class SettingsDashboardStatusSources(
         SettingsDashboardStatusKey.Termux to ioFlow {
             emitAll(refreshes.map {
                 when (TermuxIntegration.state(context)) {
-                    TermuxIntegration.State.NOT_INSTALLED -> ready("Не установлен")
+                    TermuxIntegration.State.NOT_INSTALLED -> ready("Не установлен", SettingsDashboardStatusTone.Warning)
                     TermuxIntegration.State.NO_PERMISSION -> ready("Нет разрешения", SettingsDashboardStatusTone.Warning)
                     TermuxIntegration.State.READY -> ready("Готов", SettingsDashboardStatusTone.Success)
                 }
@@ -110,7 +106,7 @@ private class SettingsDashboardStatusSources(
             val database = koin.get<AppDatabase>()
             val repository = koin.get<SshHostRepository>()
             emitAll(databaseChanges(database, "ssh_hosts").map {
-                ready("${repository.getAll().size} хостов")
+                SettingsDashboardStatusPresentation.ssh(repository.getAll().size)
             })
         },
         SettingsDashboardStatusKey.Mcp to ioFlow {
@@ -119,28 +115,12 @@ private class SettingsDashboardStatusSources(
                     .distinctUntilChanged(),
                 SettingsDashboardRuntimeStatusStore.shared.observeMcpStatus(),
             ) { enabledIds, statuses ->
-                if (statuses == null) return@combine SettingsDashboardStatus.Ready()
-                val enabledStatuses = enabledIds.mapNotNull(statuses::get)
-                val connected = enabledStatuses.count { it == McpStatus.Connected }
-                val hasError = enabledStatuses.any { it is McpStatus.Error }
-                val needsAuthorization = enabledStatuses.any { it == McpStatus.NeedsAuthorization }
-                val suffix = when {
-                    hasError -> " · ошибка"
-                    needsAuthorization -> " · нужен вход"
-                    else -> ""
-                }
-                val tone = when {
-                    hasError -> SettingsDashboardStatusTone.Error
-                    needsAuthorization -> SettingsDashboardStatusTone.Warning
-                    connected > 0 -> SettingsDashboardStatusTone.Success
-                    else -> SettingsDashboardStatusTone.Neutral
-                }
-                ready("$connected подключено$suffix", tone)
+                SettingsDashboardStatusPresentation.mcp(statuses?.let { enabledIds.mapNotNull(it::get) })
             })
         },
         SettingsDashboardStatusKey.Workflows to ioFlow {
             emitAll(koin.get<WorkflowRepository>().observeAll().map { workflows ->
-                ready("${workflows.count { it.definition.enabled }} активных")
+                SettingsDashboardStatusPresentation.workflows(workflows.count { it.definition.enabled })
             })
         },
         SettingsDashboardStatusKey.Cron to ioFlow {
@@ -148,7 +128,7 @@ private class SettingsDashboardStatusSources(
             val repository = koin.get<ScheduledJobRepository>()
             emitAll(databaseChanges(database, "scheduled_jobs").map {
                 // The scheduler persists nextRunAtMs; do not invent or rearm schedules for a badge.
-                ready("${repository.active().count { it.nextRunAtMs != null }} в расписании")
+                SettingsDashboardStatusPresentation.cron(repository.active().count { it.nextRunAtMs != null })
             })
         },
         // A visited domain or cookie presence does not reliably establish a signed-in session.
@@ -175,14 +155,13 @@ private class SettingsDashboardStatusSources(
             val manager = koin.get<FilesManager>()
             emitAll(databaseChanges(database, "managed_files").map {
                 val (count, size) = manager.countChatFiles()
-                ready("Файлов: $count · ${size.fileSizeToString()}")
+                SettingsDashboardStatusPresentation.storage(count, size)
             })
         },
         SettingsDashboardStatusKey.Backup to ioFlow {
             emitAll(settings.map { it.backupReminderConfig.lastBackupTime }.distinctUntilChanged().map { timestamp ->
                 // Existing metadata records a prepared local archive, or a completed cloud upload.
-                if (timestamp > 0L) ready(SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(Date(timestamp)))
-                else ready("Нет данных")
+                SettingsDashboardStatusPresentation.backup(timestamp, TimeZone.getDefault())
             })
         },
     )
