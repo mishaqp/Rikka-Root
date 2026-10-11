@@ -102,8 +102,11 @@ class FilesManager(
     fun getFile(entity: ManagedFileEntity): File =
         File(context.filesDir, entity.relativePath)
 
-    fun createChatFilesByContents(uris: List<Uri>): List<Uri> {
-        val newUris = mutableListOf<Uri>()
+    fun createChatFilesByContents(uris: List<Uri>): List<Uri> =
+        importChatFiles(uris).map { it.localUri }
+
+    fun importChatFiles(uris: List<Uri>): List<ImportedChatFile> {
+        val importedFiles = mutableListOf<ImportedChatFile>()
         val dir = context.filesDir.resolve(FileFolders.UPLOAD)
         if (!dir.exists()) {
             dir.mkdirs()
@@ -131,7 +134,14 @@ class FilesManager(
                     displayName = sourceName,
                     mimeType = guessedMime
                 )
-                newUris.add(file.toUri())
+                importedFiles.add(
+                    ImportedChatFile(
+                        sourceUri = uri,
+                        localUri = file.toUri(),
+                        displayName = sourceName,
+                        mimeType = guessedMime,
+                    )
+                )
             }.onFailure {
                 it.printStackTrace()
                 Log.e(TAG, "createChatFilesByContents: Failed to save file from $uri", it)
@@ -141,7 +151,7 @@ class FilesManager(
                 )
             }
         }
-        return newUris
+        return importedFiles
     }
 
     fun createChatFilesByByteArrays(
@@ -508,6 +518,13 @@ class FilesManager(
     private fun guessMimeType(file: File, fileName: String): String =
         FileUtils.guessMimeType(file, fileName)
 }
+
+data class ImportedChatFile(
+    val sourceUri: Uri,
+    val localUri: Uri,
+    val displayName: String,
+    val mimeType: String,
+)
 
 data class SyncResult(
     val inserted: Int,

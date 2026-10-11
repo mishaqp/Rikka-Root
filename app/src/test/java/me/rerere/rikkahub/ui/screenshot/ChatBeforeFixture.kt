@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.screenshot
 
+import android.net.Uri
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -62,7 +63,11 @@ import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
 /** A single fixed dialogue; only external boundaries are replaced, never the UI renderer. */
-internal class ChatBeforeFixture(image: File, private val actualVM: ChatVM? = null) {
+internal class ChatBeforeFixture(
+    image: File,
+    private val actualVM: ChatVM? = null,
+    private val filesManager: FilesManager? = null,
+) {
     private val instant = Instant.parse("2026-01-02T12:00:00Z")
     private val timestamp = LocalDateTime.parse("2026-01-02T12:00:00")
     private fun id(index: Int) = Uuid.parse("40000000-0000-0000-0000-${index.toString().padStart(12, '0')}")
@@ -199,7 +204,7 @@ internal class ChatBeforeFixture(image: File, private val actualVM: ChatVM? = nu
         every { tts.isSpeaking } returns MutableStateFlow(false)
         application = startKoin { modules(module {
             single { vm }; single { drawer }
-            single { mockk<FilesManager>(relaxed = true) }
+            single { filesManager ?: mockk<FilesManager>(relaxed = true) }
             single { mockk<WorkspaceRepository>(relaxed = true) }
             single { mockk<ConversationRepository>(relaxed = true) }
             single { mockk<SkillManager>(relaxed = true) }
@@ -211,12 +216,12 @@ internal class ChatBeforeFixture(image: File, private val actualVM: ChatVM? = nu
     fun close() { stopKoin() }
 
     @Composable
-    fun Content() {
+    fun Content(text: String? = null, files: List<Uri> = emptyList()) {
         val toaster = rememberToasterState()
         SharedTransitionLayout {
             CompositionLocalProvider(LocalSharedTransitionScope provides this, LocalASRState provides asr,
                 LocalTTSState provides tts, LocalToaster provides toaster) {
-                ChatPage(actualVM?.conversation?.value?.id ?: conversation.id, null, emptyList())
+                ChatPage(actualVM?.conversation?.value?.id ?: conversation.id, text, files)
             }
         }
     }

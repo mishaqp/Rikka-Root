@@ -147,20 +147,17 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     LaunchedEffect(files, text, conversation.historyLoadState) {
         if (conversation.historyLoadState != HistoryLoadState.COMPLETE) return@LaunchedEffect
         if (files.isNotEmpty()) {
-            val localFiles = filesManager.createChatFilesByContents(files)
-            val contentTypes = files.mapNotNull { file ->
-                filesManager.getFileMimeType(file)
-            }
-            val parts = buildList {
-                localFiles.forEachIndexed { index, file ->
-                    val type = contentTypes.getOrNull(index)
-                    if (type?.startsWith("image/") == true) {
-                        add(UIMessagePart.Image(url = file.toString()))
-                    } else if (type?.startsWith("video/") == true) {
-                        add(UIMessagePart.Video(url = file.toString()))
-                    } else if (type?.startsWith("audio/") == true) {
-                        add(UIMessagePart.Audio(url = file.toString()))
-                    }
+            val parts = filesManager.importChatFiles(files).map { file ->
+                val url = file.localUri.toString()
+                when {
+                    file.mimeType.startsWith("image/") -> UIMessagePart.Image(url = url)
+                    file.mimeType.startsWith("video/") -> UIMessagePart.Video(url = url)
+                    file.mimeType.startsWith("audio/") -> UIMessagePart.Audio(url = url)
+                    else -> UIMessagePart.Document(
+                        url = url,
+                        fileName = file.displayName,
+                        mime = file.mimeType,
+                    )
                 }
             }
             inputState.messageContent = parts
