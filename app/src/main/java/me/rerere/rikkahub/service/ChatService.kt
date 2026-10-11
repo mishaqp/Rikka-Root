@@ -1778,7 +1778,11 @@ class ChatService(
                 return@mapIndexedNotNull null
             }
 
-            val nextSelectIndex = node.selectIndex.coerceAtMost(nextMessages.lastIndex)
+            val nextSelectIndex = if (node.currentMessage.id == messageId) {
+                node.selectIndex.coerceAtMost(nextMessages.lastIndex)
+            } else {
+                node.selectIndex - node.messages.take(node.selectIndex).count { it.id == messageId }
+            }
             node.copy(
                 messages = nextMessages,
                 selectIndex = nextSelectIndex,

@@ -176,14 +176,13 @@ class ChatBranchCharacterizationTest {
         assertEquals(true, deleted.messageNodes[1].isFavorite)
     }
 
-    @Test fun deletingBeforeSelectedAlternativeCurrentlyKeepsItsNumericIndexAndChangesBranch() {
+    @Test fun deletingBeforeSelectedAlternativePreservesItsIdentity() {
         val third = UIMessage.assistant("Third answer")
         val source = conversation.copy(messageNodes = listOf(userNode, answerNode.copy(messages = listOf(answer, alternative, third))))
         val deleted = deleteFromTree(source, answer.id)!!
         assertEquals(listOf(alternative, third), deleted.messageNodes[1].messages)
-        assertEquals(1, deleted.messageNodes[1].selectIndex)
-        // Characterization of the existing selected-index defect, not the desired future policy.
-        assertEquals(third, deleted.currentMessages[1])
+        assertEquals(0, deleted.messageNodes[1].selectIndex)
+        assertEquals(alternative, deleted.currentMessages[1])
         assertEquals(alternative, source.currentMessages[1])
     }
 
