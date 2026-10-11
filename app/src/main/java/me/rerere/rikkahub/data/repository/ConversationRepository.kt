@@ -128,6 +128,10 @@ class ConversationRepository(
         conversationDAO.updateTitle(conversationId.toString(), title)
     }
 
+    /** The loaded drawer row may be stale after a manual or background AI rename. */
+    suspend fun backfillConversationTitle(conversationId: Uuid, expectedTitle: String, title: String): Boolean =
+        conversationDAO.updateTitleIfUnchanged(conversationId.toString(), expectedTitle, title) == 1
+
     fun getUnfiledConversationsOfAssistantPaging(
         assistantId: Uuid,
         sortOrder: ConversationSortOrder = ConversationSortOrder.UPDATE_TIME,

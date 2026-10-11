@@ -1376,6 +1376,25 @@ class ChatService(
         )
     }
 
+    /** Backfill only loaded legacy rows; live new chats keep their normal AI title path. */
+    suspend fun backfillLegacyConversationTitle(conversationId: Uuid, observedTitle: String): Unit =
+        withContext(Dispatchers.IO) {
+            if (!isLegacyConversationTitle(observedTitle)) return@withContext
+            if (sessionManager.get(conversationId)?.let {
+                    !it.isInitialized || it.getJob() != null || it.state.value.newConversation
+                } == true) {
+                return@withContext
+            }
+            val persisted = conversationRepo.getConversationById(conversationId) ?: return@withContext
+            backfillLoadedLegacyConversationTitle(persisted, observedTitle, sessionManager.get(conversationId),
+                onCommitted = { committedTitle ->
+                    sessionManager.get(conversationId)?.reconcileLegacyBackfilledTitle(observedTitle, committedTitle)
+                },
+            ) { title ->
+                conversationRepo.backfillConversationTitle(conversationId, observedTitle, title)
+            }
+        }
+
     suspend fun moveConversationToAssistant(conversationId: Uuid, assistantId: Uuid) {
         updateConversationMetadata(
             conversationId = conversationId,

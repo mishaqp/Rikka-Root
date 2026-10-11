@@ -21,6 +21,9 @@ internal fun Settings.findFastModelTarget(): FastModelTarget? {
 /** The drawer uses the same availability check as background title generation. */
 fun Settings.hasFastModelTarget(): Boolean = findFastModelTarget() != null
 
+/** Only the legacy blank/default drawer names may be replaced without an explicit rename. */
+fun isLegacyConversationTitle(title: String): Boolean = title.isBlank() || title.trim() == "Новый чат"
+
 /** Assign the local title with the first saved user message, even if its reply later fails. */
 internal fun applyLocalConversationTitle(settings: Settings, conversation: Conversation): Conversation {
     if (conversation.title.isNotBlank()) return conversation

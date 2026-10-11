@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.pages.chat
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -8,6 +9,8 @@ import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import androidx.paging.insertSeparators
 import androidx.paging.map
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,6 +26,8 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import me.rerere.rikkahub.data.datastore.ConversationSortOrder
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.model.Conversation
@@ -31,10 +36,12 @@ import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FolderRepository
 import me.rerere.rikkahub.data.repository.drawerConversationQuery
 import me.rerere.rikkahub.service.ChatService
+import me.rerere.rikkahub.service.isLegacyConversationTitle
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.uuid.Uuid
 
 class ChatDrawerVM(
@@ -66,6 +73,9 @@ class ChatDrawerVM(
     )
     val presentationSort: StateFlow<DrawerConversationSort> = _presentationSort.asStateFlow()
     private val dateRefresh = MutableStateFlow(0)
+    private val loadedLegacyTitles = ConcurrentHashMap<Uuid, String>()
+    private val pendingLegacyTitleBackfills = ConcurrentHashMap.newKeySet<Uuid>()
+    private val legacyTitleBackfillMutex = Mutex()
 
     private data class DrawerDateContext(val today: LocalDate, val zone: ZoneId)
     private val dateContext = dateRefresh.flatMapLatest {
@@ -114,12 +124,15 @@ class ChatDrawerVM(
                 ))
                 paging.map { pagingData ->
                     pagingData
-                        .map { summary -> ConversationListItem.Item(
-                            conversation = summary.conversation,
-                            previewText = summary.previewText,
-                            hasTools = summary.hasTools,
-                            hasWorkflows = summary.hasWorkflows,
-                        ) }
+                        .map { summary ->
+                            backfillLoadedLegacyTitle(summary.conversation)
+                            ConversationListItem.Item(
+                                conversation = summary.conversation,
+                                previewText = summary.previewText,
+                                hasTools = summary.hasTools,
+                                hasWorkflows = summary.hasWorkflows,
+                            )
+                        }
                         .insertSeparators<ConversationListItem.Item, ConversationListItem> { before, after ->
                             drawerConversationHeader(before?.conversation, after?.conversation,
                                 options.dateBasis, dates.today, dates.zone)
@@ -136,6 +149,7 @@ class ChatDrawerVM(
         // 避免继续显示上一个助手文件夹内的会话（文件夹是助手内分组）
         viewModelScope.launch {
             assistantIdFlow.collect {
+                loadedLegacyTitles.clear()
                 _selectedFolderId.value = null
                 _showAllFolders.value = true
             }
@@ -145,6 +159,35 @@ class ChatDrawerVM(
     fun saveScrollPosition(index: Int, offset: Int) {
         savedStateHandle["scrollIndex"] = index
         savedStateHandle["scrollOffset"] = offset
+    }
+
+    private fun backfillLoadedLegacyTitle(conversation: Conversation) {
+        if (!isLegacyConversationTitle(conversation.title)) {
+            loadedLegacyTitles.remove(conversation.id)
+            return
+        }
+        loadedLegacyTitles[conversation.id] = conversation.title
+        queueLegacyTitleBackfill(conversation.id, conversation.title)
+    }
+
+    private fun queueLegacyTitleBackfill(conversationId: Uuid, observedTitle: String) {
+        if (!pendingLegacyTitleBackfills.add(conversationId)) return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                // Serialize history reads; first drawer rendering never waits for upkeep.
+                legacyTitleBackfillMutex.withLock {
+                    chatService.backfillLegacyConversationTitle(conversationId, observedTitle)
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                // Error messages from history decoding can contain private message fragments.
+                Log.w("ChatDrawerVM", "Не удалось обновить старое название: ${error.javaClass.simpleName}")
+            } finally {
+                // Skipped live sessions and failed reads remain eligible on later list loads.
+                pendingLegacyTitleBackfills.remove(conversationId)
+            }
+        }
     }
 
     fun selectFolder(folderId: Uuid?) {
@@ -165,6 +208,8 @@ class ChatDrawerVM(
     /** Refresh on reopening too: time-zone changes must not keep Activity-lived headers stale. */
     fun refreshDateGrouping() {
         dateRefresh.value += 1
+        // cachedIn may reuse already mapped rows when the drawer reopens.
+        loadedLegacyTitles.forEach { (id, title) -> queueLegacyTitleBackfill(id, title) }
     }
 
     fun createFolder(name: String) {

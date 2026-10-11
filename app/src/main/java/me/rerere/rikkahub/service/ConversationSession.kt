@@ -35,6 +35,7 @@ class ConversationSession(
     private val metadataMutex = Mutex()
     @Volatile
     private var initialized = false
+    internal val isInitialized: Boolean get() = initialized
     val messageQueue = MessageQueue()
 
     // 页面切换和 SSE 重连只加载一次；活跃 session 的内存状态始终优先。
@@ -66,6 +67,43 @@ class ConversationSession(
                 update(state.value).also(::updateConversation)
             }
             persist(updated)
+        }
+    }
+
+    /** Local legacy upkeep shares the rename lock and never replaces a message snapshot. */
+    internal suspend fun backfillLegacyTitle(
+        expectedTitle: String,
+        persist: suspend (String) -> Boolean,
+    ): Boolean = metadataMutex.withLock {
+        val current = synchronized(this) { state.value }
+        if (current.title != expectedTitle || !isLegacyConversationTitle(current.title) ||
+            current.newConversation || getJob() != null) return@withLock false
+        // This path deliberately has no settings/model/provider dependency.
+        val title = localConversationTitle(current)
+        if (title == expectedTitle || !persist(title)) return@withLock false
+        synchronized(this) {
+            val latest = state.value
+            // AI/full saves can publish a newer title without taking the metadata lock.
+            if (latest.title == expectedTitle && !latest.newConversation && getJob() == null) {
+                updateConversation(latest.copy(title = title))
+            }
+        }
+        true
+    }
+
+    /** A session created during the DAO CAS may already be loading the old title. */
+    internal suspend fun reconcileLegacyBackfilledTitle(expectedTitle: String, committedTitle: String) {
+        // Wait for an already-running normal load; never initialize a session for upkeep.
+        initializationMutex.withLock {
+            metadataMutex.withLock {
+                synchronized(this) {
+                    val current = state.value
+                    if (initialized && current.title == expectedTitle && isLegacyConversationTitle(current.title) &&
+                        !current.newConversation && getJob() == null) {
+                        updateConversation(current.copy(title = committedTitle))
+                    }
+                }
+            }
         }
     }
 

@@ -97,6 +97,9 @@ interface ConversationDAO {
     @Query("UPDATE conversationentity SET title = :title WHERE id = :id")
     suspend fun updateTitle(id: String, title: String)
 
+    @Query("UPDATE conversationentity SET title = :title WHERE id = :id AND title = :expectedTitle")
+    suspend fun updateTitleIfUnchanged(id: String, expectedTitle: String, title: String): Int
+
     @Query("UPDATE conversationentity SET assistant_id = :assistantId, folder_id = '' WHERE id = :id")
     suspend fun updateAssistantId(id: String, assistantId: String)
 
