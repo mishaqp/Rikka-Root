@@ -856,7 +856,7 @@ class ChatService(
             chatToolFactory.restoreWebContentGuard(conversationId.toString(), initialConversation.messageNodes.flatMap { it.messages })
 
             // reset suggestions
-            updateConversation(conversationId, initialConversation.copy(chatSuggestions = emptyList()))
+            updateConversationState(conversationId) { it.copy(chatSuggestions = emptyList()) }
 
             // memory tool
             if (!model.abilities.contains(ModelAbility.TOOL)) {
@@ -987,9 +987,9 @@ class ChatService(
                         }
                     }
                     is GenerationChunk.Messages -> {
-                        val updatedConversation = getConversationFlow(conversationId).value
-                            .let { AutoContextCompression.mergeGenerated(it, chunk.messages, regenerationNodeId) }
-                        updateConversation(conversationId, updatedConversation)
+                        updateConversationState(conversationId) {
+                            AutoContextCompression.mergeGenerated(it, chunk.messages, regenerationNodeId)
+                        }
 
                         // 通知等边缘副作用由 ChatNotificationManager 消费；
                         // tryEmit 不挂起，事件丢失只影响单次通知更新，不能反压生成链
@@ -1074,6 +1074,7 @@ class ChatService(
             else -> false
         }
         if (!shouldGenerate) return@withContext
+        val expectedTitle = conversation.title
 
         runCatching {
             val settings = settingsStore.settingsFlow.first()
@@ -1097,11 +1098,14 @@ class ChatService(
                 result.message.toText().trim()
             } ?: return@runCatching
 
-            // 生成完，conversation可能不是最新了，因此需要重新获取
-            conversationRepo.getConversationById(conversation.id)?.let {
-                saveConversation(
-                    conversationId,
-                    it.copy(title = title)
+            sessionManager.withSession(conversationId) { session ->
+                session.updateMetadataIf(
+                    predicate = {
+                        requireWritableSession(session)
+                        it.title == expectedTitle
+                    },
+                    update = { it.copy(title = title) },
+                    persist = { conversationRepo.updateGeneratedConversationTitle(conversationId, expectedTitle, title) },
                 )
             }
         }.onFailure {
@@ -1131,10 +1135,10 @@ class ChatService(
             val provider = target.provider
 
             sessionManager.get(conversationId)?.let { session ->
-                updateConversation(
-                    conversationId,
-                    session.state.value.copy(chatSuggestions = emptyList())
-                )
+                synchronized(session) {
+                    requireWritableSession(session)
+                    if (session.isInitialized) session.updateState { it.copy(chatSuggestions = emptyList()) }
+                }
             }
 
             val providerHandler = providerManager.getProviderByType(provider)
@@ -1157,17 +1161,16 @@ class ChatService(
                 result.message.toText().split("\n").map { it.trim() }
                     .filter { it.isNotBlank() }
 
-            val latestConversation = conversationRepo.getConversationById(conversationId)
-                ?: sessionManager.get(conversationId)?.state?.value
-                ?: conversation
-            saveConversation(
-                conversationId,
-                latestConversation.copy(
-                    chatSuggestions = suggestions.take(
-                        10
-                    )
+            sessionManager.withSession(conversationId) { session ->
+                session.updateMetadataIf(
+                    predicate = {
+                        requireWritableSession(session)
+                        true
+                    },
+                    update = { it.copy(chatSuggestions = suggestions.take(10)) },
+                    persist = { conversationRepo.updateConversationSuggestions(conversationId, suggestions.take(10)) },
                 )
-            )
+            }
         }.onFailure {
             it.printStackTrace()
         }
@@ -1290,7 +1293,9 @@ class ChatService(
                     "Compression summary exceeded the configured trigger"
                 }
             }
-            updated.copy(chatSuggestions = emptyList()).also { updateConversation(conversationId, it) }
+            updated.copy(chatSuggestions = emptyList()).also {
+                updateConversationState(conversationId) { _ -> it }
+            }
         }
 
         saveConversation(conversationId, newConversation)
@@ -1388,14 +1393,32 @@ class ChatService(
     private fun updateConversation(conversationId: Uuid, conversation: Conversation) {
         if (conversation.id != conversationId) return
         val session = sessionManager.getOrCreate(conversationId)
-        requireWritableSession(session, conversation)
-        checkFilesDelete(conversation, session.state.value)
-        session.updateConversation(conversation)
+        synchronized(session) {
+            requireWritableSession(session, conversation)
+            session.updateState { current ->
+                // Message snapshots may predate a metadata commit; only field transforms own those fields.
+                val updated = if (session.isInitialized) current.copy(
+                    messageNodes = conversation.messageNodes,
+                    updateAt = conversation.updateAt,
+                ) else conversation
+                requireWritableSession(session, updated)
+                checkFilesDelete(updated, current)
+                updated
+            }
+        }
     }
 
     fun updateConversationState(conversationId: Uuid, update: (Conversation) -> Conversation) {
-        val current = requireWritableSession(sessionManager.getOrCreate(conversationId))
-        updateConversation(conversationId, update(current))
+        val session = sessionManager.getOrCreate(conversationId)
+        synchronized(session) {
+            requireWritableSession(session)
+            session.updateState { current ->
+                update(current).also {
+                    requireWritableSession(session, it)
+                    checkFilesDelete(it, current)
+                }
+            }
+        }
     }
 
     private suspend fun updateConversationMetadata(
@@ -1421,7 +1444,36 @@ class ChatService(
         )
     }
 
-    suspend fun renameConversation(conversationId: Uuid, title: String) {
+    suspend fun renameConversation(conversationId: Uuid, title: String, normalize: Boolean = true) {
+        if (!normalize) {
+            // The native dialog historically accepts verbatim/blank titles and may name a new chat.
+            val saved = sessionManager.withSession(conversationId) { session ->
+                ensureInitialized(session)
+                requireWritableSession(session)
+                session.withPersistenceLock {
+                    requireWritableSession(session)
+                    val exists = conversationRepo.existsConversationById(conversationId)
+                    if (!exists && title.isBlank() && session.state.value.messageNodes.isEmpty()) {
+                        return@withPersistenceLock false
+                    }
+                    val settings = loadedSettings()
+                    val updated = session.updateState { current ->
+                        requireWritableSession(session)
+                        val renamed = applyLocalConversationTitle(settings, current.copy(title = title))
+                        (if (exists) renamed else renamed.bindConfig(settings).fillModelSnapshots(settings))
+                            .also { requireWritableSession(session, it) }
+                    }
+                    if (exists) {
+                        conversationRepo.updateConversationTitle(conversationId, updated.title)
+                    } else {
+                        conversationRepo.insertConversation(updated)
+                    }
+                    true
+                }
+            }
+            if (saved) dispatchNextQueuedMessage(conversationId)
+            return
+        }
         val trimmedTitle = title.trim()
         if (trimmedTitle.isEmpty()) return
         updateConversationMetadata(
@@ -1516,25 +1568,41 @@ class ChatService(
 
     suspend fun saveConversation(conversationId: Uuid, conversation: Conversation) {
         require(conversation.id == conversationId)
-        val session = sessionManager.getOrCreate(conversationId)
-        ensureInitialized(session)
-        requireWritableSession(session, conversation)
-        val exists = conversationRepo.existsConversationById(conversation.id)
-        if (!exists && conversation.title.isBlank() && conversation.messageNodes.isEmpty()) {
-            return // 新会话且为空时不保存
-        }
+        val saved = sessionManager.withSession(conversationId) { session ->
+            // Safety loading must validate stored history without taking ownership of caller metadata.
+            val hadMetadataOwnership = session.isInitialized
+            ensureInitialized(session)
+            requireWritableSession(session, conversation)
+            session.withPersistenceLock {
+                requireWritableSession(session, conversation)
+                val exists = conversationRepo.existsConversationById(conversation.id)
+                if (!exists && conversation.title.isBlank() && conversation.messageNodes.isEmpty()) {
+                    return@withPersistenceLock false // 新会话且为空时不保存
+                }
 
-        // 会话落库即视为开始，此时把助手的配置固定到会话上
-        val settings = loadedSettings()
-        val updatedConversation = applyLocalConversationTitle(settings, conversation)
-            .bindConfig(settings).fillModelSnapshots(settings)
-        updateConversation(conversationId, updatedConversation)
-
-        if (!exists) {
-            conversationRepo.insertConversation(updatedConversation)
-        } else {
-            conversationRepo.updateConversation(updatedConversation)
+                // Capture metadata after taking the persistence lock, even for an older final/checkpoint snapshot.
+                val settings = loadedSettings()
+                val updatedConversation = session.updateState { current ->
+                    val latestMetadata = if (exists && hadMetadataOwnership) current.copy(
+                        messageNodes = conversation.messageNodes,
+                        updateAt = conversation.updateAt,
+                    ) else conversation
+                    applyLocalConversationTitle(settings, latestMetadata)
+                        .bindConfig(settings).fillModelSnapshots(settings)
+                        .also {
+                            requireWritableSession(session, it)
+                            checkFilesDelete(it, current)
+                        }
+                }
+                if (!exists) {
+                    conversationRepo.insertConversation(updatedConversation)
+                } else {
+                    conversationRepo.updateConversation(updatedConversation)
+                }
+                true
+            }
         }
+        if (!saved) return
 
         // 删除消息或切换分支也可能解除工具审批阻塞，保存成功后重新检查队列。
         // 调度器仍会检查当前生成任务、待审批工具、暂停状态及编辑占位。

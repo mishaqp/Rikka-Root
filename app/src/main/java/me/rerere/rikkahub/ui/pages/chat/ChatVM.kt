@@ -312,8 +312,7 @@ class ChatVM(
 
     fun updateTitle(title: String) {
         launchMutation {
-            val updatedConversation = conversation.value.copy(title = title)
-            chatService.saveConversation(_conversationId, updatedConversation)
+            chatService.renameConversation(_conversationId, title, normalize = false)
         }
     }
 

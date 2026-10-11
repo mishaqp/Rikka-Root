@@ -63,6 +63,49 @@ class ConversationSession(
         initialized = true
     }
 
+    /** Read and transform the latest state within the same publication boundary. */
+    @Synchronized
+    internal fun updateState(update: (Conversation) -> Conversation): Conversation {
+        val current = state.value
+        current.requireCompleteHistory()
+        val updated = update(current)
+        updated.requireCompleteHistory()
+        return updated.also(::updateConversation)
+    }
+
+    /** Full saves and column-only metadata writes must commit in the same order. */
+    internal suspend fun <T> withPersistenceLock(block: suspend () -> T): T =
+        metadataMutex.withLock { block() }
+
+    /** Publish only accepted metadata, including into a session initialized during persistence. */
+    internal suspend fun updateMetadataIf(
+        predicate: (Conversation) -> Boolean = { true },
+        update: (Conversation) -> Conversation,
+        persist: suspend () -> Boolean,
+    ): Boolean = initializationMutex.withLock {
+        withPersistenceLock {
+            val canUpdate = synchronized(this) {
+                if (!initialized) true else {
+                    val current = state.value
+                    current.requireCompleteHistory()
+                    if (!predicate(current)) false else {
+                        update(current).requireCompleteHistory()
+                        true
+                    }
+                }
+            }
+            if (!canUpdate) return@withPersistenceLock false
+            if (!persist()) return@withPersistenceLock false
+            synchronized(this) {
+                if (initialized) {
+                    state.value.requireCompleteHistory()
+                    if (predicate(state.value)) updateState(update)
+                }
+            }
+            true
+        }
+    }
+
     // 元数据先应用到最新内存状态；落库只更新对应列，不能用旧消息快照覆盖流式输出。
     internal suspend fun updateMetadata(
         update: (Conversation) -> Conversation,
@@ -90,7 +133,7 @@ class ConversationSession(
         if (title == expectedTitle || !persist(title)) return@withLock false
         synchronized(this) {
             val latest = state.value
-            // AI/full saves can publish a newer title without taking the metadata lock.
+            // Explicit state edits can publish a newer title while persistence is suspended.
             if (latest.title == expectedTitle && !latest.newConversation && getJob() == null) {
                 updateConversation(latest.copy(title = title))
             }
@@ -117,15 +160,14 @@ class ConversationSession(
     // 失败和取消也必须保存已收到的内容，且保存完成前不能释放生成任务。
     suspend fun finishGeneration(save: suspend (Conversation) -> Unit): Conversation =
         withContext(NonCancellable) {
-            val current = state.value
-            current.requireCompleteHistory()
-            val conversation = current.copy(
-                messageNodes = current.messageNodes.map { node ->
-                    node.copy(messages = node.messages.map { it.finishReasoning() })
-                },
-                updateAt = Instant.now(),
-            )
-            updateConversation(conversation)
+            val conversation = updateState { current ->
+                current.copy(
+                    messageNodes = current.messageNodes.map { node ->
+                        node.copy(messages = node.messages.map { it.finishReasoning() })
+                    },
+                    updateAt = Instant.now(),
+                )
+            }
             save(conversation)
             conversation
         }

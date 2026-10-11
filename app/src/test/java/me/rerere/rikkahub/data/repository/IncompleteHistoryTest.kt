@@ -170,10 +170,27 @@ class IncompleteHistoryTest {
         runCatching { fixture.repository.updateConversation(unmarked) }
         assertEquals(before, fixture.rows())
     }
+    @Test fun suppliedCompleteSnapshotBeforeInitializationCannotBypassFailedStoredPage() = runBlocking {
+        val before = fixture.rows()
+        val row = fixture.database.conversationDao().getConversationById(fixture.id.toString())!!
+        val supplied = me.rerere.rikkahub.data.model.Conversation.ofId(fixture.id,
+            assistantId = fixture.settings.assistantId).copy(title = "Caller supplied complete-looking metadata")
+
+        val result = runCatching { fixture.service.saveConversation(fixture.id, supplied) }
+
+        assertTrue("Actual stored history must be validated before accepting a supplied snapshot", result.isFailure)
+        assertEquals(listOf(0, 64), fixture.offsets)
+        assertEquals("No original rows may be overwritten or deleted", before, fixture.rows())
+        assertEquals(row, fixture.database.conversationDao().getConversationById(fixture.id.toString()))
+        assertTrue(fixture.attachment.isFile)
+        verify(exactly = 0) { fixture.files.deleteChatFiles(any()) }
+    }
     @Test fun titleBackfillCannotBypassReadOnlyHistory() = runBlocking {
         fixture.repository.getConversationById(fixture.id)
         val before = fixture.database.conversationDao().getConversationById(fixture.id.toString())!!
         runCatching { fixture.repository.backfillConversationTitle(fixture.id, before.title, "Новое название") }
+        runCatching { fixture.repository.updateGeneratedConversationTitle(fixture.id, before.title, "Новое название") }
+        runCatching { fixture.repository.updateConversationSuggestions(fixture.id, listOf("New suggestion")) }
         assertEquals("Metadata CAS must respect the failed history load", before,
             fixture.database.conversationDao().getConversationById(fixture.id.toString()))
     }

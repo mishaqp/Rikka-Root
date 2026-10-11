@@ -193,7 +193,7 @@ fun Route.conversationRoutes(
             val conversation = conversationRepo.getConversationById(uuid)
                 ?: throw NotFoundException("Conversation not found")
 
-            chatService.saveConversation(uuid, conversation.copy(title = title))
+            chatService.renameConversation(conversation.id, title)
             call.respond(HttpStatusCode.OK, mapOf("status" to "updated"))
         }
 

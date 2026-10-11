@@ -146,13 +146,32 @@ class ConversationRepository(
     /** Rename metadata only; never write a lightweight drawer item over the full conversation. */
     suspend fun updateConversationTitle(conversationId: Uuid, title: String) {
         requireWritableId(conversationId)
-        conversationDAO.updateTitle(conversationId.toString(), title)
+        database.withTransaction {
+            conversationDAO.updateTitle(conversationId.toString(), title)
+            messageFtsManager.updateConversationTitle(conversationId.toString(), title)
+        }
     }
 
     /** The loaded drawer row may be stale after a manual or background AI rename. */
     suspend fun backfillConversationTitle(conversationId: Uuid, expectedTitle: String, title: String): Boolean {
         requireWritableId(conversationId)
         return conversationDAO.updateTitleIfUnchanged(conversationId.toString(), expectedTitle, title) == 1
+    }
+
+    /** Background results own only the title, including its duplicated search metadata. */
+    suspend fun updateGeneratedConversationTitle(conversationId: Uuid, expectedTitle: String, title: String): Boolean {
+        requireWritableId(conversationId)
+        return database.withTransaction {
+            val changed = conversationDAO.updateTitleIfUnchanged(conversationId.toString(), expectedTitle, title) == 1
+            if (changed) messageFtsManager.updateConversationTitle(conversationId.toString(), title)
+            changed
+        }
+    }
+
+    /** A late result must neither rewrite nodes nor recreate a deleted row. */
+    suspend fun updateConversationSuggestions(conversationId: Uuid, suggestions: List<String>): Boolean {
+        requireWritableId(conversationId)
+        return conversationDAO.updateSuggestions(conversationId.toString(), JsonInstant.encodeToString(suggestions)) == 1
     }
 
     fun getUnfiledConversationsOfAssistantPaging(
