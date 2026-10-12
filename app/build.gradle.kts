@@ -174,6 +174,9 @@ val recordScreenshots = screenshotModeProperties.getValue("roborazzi.test.record
 val screenshotOutputDirectory = layout.buildDirectory.dir("outputs/roborazzi").get().asFile.absolutePath
 
 tasks.withType<Test>().configureEach {
+    // Native chat captures plus MockK metadata exceed the default 512 MiB test heap.
+    maxHeapSize = "2g"
+    testLogging.exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
     outputs.upToDateWhen { !recordScreenshots }
     systemProperties(screenshotModeProperties)
     systemProperty("ui.screenshots.dir", file("$screenshotOutputDirectory/$name").absolutePath)

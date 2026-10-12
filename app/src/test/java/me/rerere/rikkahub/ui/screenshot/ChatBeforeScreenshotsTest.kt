@@ -53,6 +53,7 @@ import androidx.test.espresso.Espresso.pressBack
 import coil3.ImageLoader
 import coil3.EventListener
 import coil3.SingletonImageLoader
+import coil3.compose.AsyncImagePainter
 import coil3.annotation.DelicateCoilApi
 import coil3.decode.BitmapFactoryDecoder
 import coil3.svg.SvgDecoder
@@ -147,9 +148,22 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
     private lateinit var fixture: ChatBeforeFixture
     private lateinit var imageLoader: ImageLoader
     private val activeImageRequests = AtomicInteger()
+    private val pendingImagePainters = java.util.concurrent.ConcurrentHashMap<AsyncImagePainter, ImageRequest>()
     private val imagesIdle = object : IdlingResource {
-        override val isIdleNow get() = activeImageRequests.get() == 0
-        override fun getDiagnosticMessageIfBusy() = "Waiting for ${activeImageRequests.get()} real Coil requests"
+        override val isIdleNow: Boolean
+            get() {
+                if (activeImageRequests.get() != 0) return false
+                pendingImagePainters.entries.removeIf { (painter, request) ->
+                    when (val state = painter.state.value) {
+                        is AsyncImagePainter.State.Success -> state.result.request === request
+                        is AsyncImagePainter.State.Error -> state.result.request === request
+                        else -> false
+                    }
+                }
+                return activeImageRequests.get() == 0 && pendingImagePainters.isEmpty()
+            }
+        override fun getDiagnosticMessageIfBusy() =
+            "Waiting for ${activeImageRequests.get()} real Coil requests and ${pendingImagePainters.size} painter results"
     }
     private var previousSystemFontScale: Float? = null
     private val snapshots get() = ChatStage1ScreenshotPaths(theme.fileName, fontScale)
@@ -176,15 +190,39 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         imageLoader = ImageLoader.Builder(context).eventListenerFactory {
             object : EventListener() {
                 private val started = AtomicBoolean()
+                private var painter: AsyncImagePainter? = null
                 override fun onStart(request: ImageRequest) {
-                    if (started.compareAndSet(false, true)) activeImageRequests.incrementAndGet()
+                    if (started.compareAndSet(false, true)) {
+                        activeImageRequests.incrementAndGet()
+                        // Coil's EventListener completes before AsyncImagePainter publishes
+                        // execute()'s result. Observe that real painter's public StateFlow too.
+                        // The pinned Coil target captures it in one directly typed field.
+                        val target = request.target
+                        val painterField = target?.javaClass?.declaredFields?.singleOrNull {
+                            AsyncImagePainter::class.java.isAssignableFrom(it.type)
+                        }
+                        check(target?.javaClass?.name?.startsWith("coil3.compose.AsyncImagePainter") != true ||
+                            painterField != null) { "Coil Compose target no longer exposes the expected painter field" }
+                        painter = painterField?.let { field ->
+                            field.isAccessible = true
+                            field.get(target) as AsyncImagePainter
+                        }
+                        painter?.let { pendingImagePainters[it] = request }
+                    }
                 }
                 private fun completed() {
                     if (started.compareAndSet(true, false)) activeImageRequests.decrementAndGet()
                 }
                 override fun onSuccess(request: ImageRequest, result: SuccessResult) = completed()
                 override fun onError(request: ImageRequest, result: ErrorResult) = completed()
-                override fun onCancel(request: ImageRequest) = completed()
+                override fun onCancel(request: ImageRequest) {
+                    painter?.let { cancelledPainter ->
+                        pendingImagePainters.computeIfPresent(cancelledPainter) { _, current ->
+                            if (current === request) null else current
+                        }
+                    }
+                    completed()
+                }
             }
         }.components {
             // Match the activity's real asset decoder: model/provider glyphs are SVG.
