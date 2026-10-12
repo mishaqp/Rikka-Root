@@ -8,6 +8,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.time.Duration.Companion.seconds
@@ -26,7 +27,12 @@ class OAuthLoopbackCallbackServerTest {
             }
 
             val callbackAndClose = async(Dispatchers.IO) {
-                session.awaitCallback(2.seconds).also { session.close() }
+                // A cold CI runner may delay the HTTP task while other modules compile.
+                // Only a received callback should close the listener under that request.
+                session.awaitCallback(10.seconds).also { callback ->
+                    assertNotNull("The callback must arrive before the consumer closes its session", callback)
+                    session.close()
+                }
             }
             withContext(Dispatchers.IO) {
                 execute("${session.redirectUri}?code=auth-code&state=expected-state").use { response ->

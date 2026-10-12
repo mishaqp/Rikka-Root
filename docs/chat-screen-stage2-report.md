@@ -57,6 +57,12 @@ Review выявил потерю сохранённого шрифта в таб
 
 Текущие screenshots снимают production `ChatPage` и native renderers через Robolectric SDK 35 Native Graphics, ru-RU, 411×891dp. К прежним 33 states добавлены 23: defaults/metadata/bubble opacity, collapse/expanded/off, stream/append/waiting, inline/fenced/HTML/table, sources pill/sheet и translation expanded/collapsed/pending. В отдельных runtime-тестах проверяются узкий экран, fontScale, реальные элементы управления, viewport bounds, branch callbacks и read-only/loading условия. Независимая визуальная проверка четырёх тем при fontScale 1.3, long text, metadata flags, code/table/sources и промежуточных streaming кадров не выявила видимых блокеров. Исторические каталоги защищены от записи; обычный CI выбирает Verify даже при глобальном `roborazzi.test.record=true`.
 
+## Исправление первого запуска CI
+
+[Daily Build 38212057569](https://github.com/mishaqp/Rikka-Root/actions/runs/38212057569) остановился в существующем `:oauth:testDebugUnitTest` до тестов приложения. `OAuthLoopbackCallbackServerTest` получил `ConnectException`; отсутствие опубликованных screenshots было следствием ранней остановки.
+
+Управляемый тестовый gate воспроизвёл гонку без sleep: независимый потребитель завершал двухсекундное ожидание с `null` и закрывал listener ещё до правильного HTTP callback. В тесте ожидание увеличено до ограниченных 10 секунд, а `assertNotNull` запрещает закрытие по таймауту. Конкурентное закрытие, неверный state → HTTP 400, правильный state → HTTP 200/body и проверка полей callback сохранены. **Оба OAuth-теста прошли, 0 failures/errors/skipped**, независимый review без blockers. Производственный `oauth/src/main` не менялся. Исправление отправляется отдельным CI-коммитом; итоговый run и APK подтверждаются в финальном сообщении.
+
 ## Ограничения и отложенные работы
 
 Этап 3, новый tool timeline, blur/Glass, обои и мини-карта не выполнялись. Backend, база/история, `ConversationConfig` и Android permissions ради этого оформления не менялись. Известная ёмкость контекста уже берётся из `ModelRegistry.MODEL_CONTEXT_LENGTH` исправлениями этапа 1; неизвестная отображается compact count с реальными prompt tokens, без выдуманного лимита.
