@@ -1563,4 +1563,11 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="chat_page_sort_conversations">排序方式</string>
   <string name="chat_page_sort_by_update_time">按更新时间</string>
   <string name="chat_page_sort_by_create_time">按创建时间</string>
+  <string name="chat_page_history_read_only">部分历史记录未能加载，此聊天已设为只读</string>
+  <string name="chat_page_history_export">导出</string>
+  <string name="chat_page_history_backup_title">完整备份</string>
+  <string name="chat_page_history_backup_description">备份包含整个数据库、文件和应用设置，包括未加载的消息。</string>
+  <string name="chat_page_history_backup_save">保存备份</string>
+  <string name="chat_page_history_partial_export">此导出仅包含已加载的消息。请使用完整备份保存全部历史记录。</string>
+  <string name="chat_page_history_backup_error">无法保存备份</string>
 </resources>

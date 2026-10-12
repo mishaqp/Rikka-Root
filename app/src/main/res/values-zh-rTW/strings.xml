@@ -1561,4 +1561,11 @@
   <string name="chat_page_sort_conversations">排序方式</string>
   <string name="chat_page_sort_by_update_time">依更新時間</string>
   <string name="chat_page_sort_by_create_time">依建立時間</string>
+  <string name="chat_page_history_read_only">部分歷史記錄未能載入，此聊天已設為唯讀</string>
+  <string name="chat_page_history_export">匯出</string>
+  <string name="chat_page_history_backup_title">完整備份</string>
+  <string name="chat_page_history_backup_description">備份包含整個資料庫、檔案和應用程式設定，包括未載入的訊息。</string>
+  <string name="chat_page_history_backup_save">儲存備份</string>
+  <string name="chat_page_history_partial_export">此匯出僅包含已載入的訊息。請使用完整備份儲存全部歷史記錄。</string>
+  <string name="chat_page_history_backup_error">無法儲存備份</string>
 </resources>

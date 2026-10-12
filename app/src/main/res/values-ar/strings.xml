@@ -1561,4 +1561,11 @@
   <string name="chat_page_sort_conversations">ترتيب المحادثات</string>
   <string name="chat_page_sort_by_update_time">حسب آخر تحديث</string>
   <string name="chat_page_sort_by_create_time">حسب تاريخ الإنشاء</string>
+  <string name="chat_page_history_read_only">تعذّر تحميل جزء من السجل. هذه المحادثة للقراءة فقط</string>
+  <string name="chat_page_history_export">تصدير</string>
+  <string name="chat_page_history_backup_title">نسخة احتياطية كاملة</string>
+  <string name="chat_page_history_backup_description">تشمل النسخة الاحتياطية قاعدة البيانات كاملة وملفات التطبيق وإعداداته، بما في ذلك الرسائل التي لم يتم تحميلها.</string>
+  <string name="chat_page_history_backup_save">حفظ النسخة الاحتياطية</string>
+  <string name="chat_page_history_partial_export">يتضمن هذا التصدير الرسائل التي تم تحميلها فقط. لحفظ السجل بالكامل، استخدم نسخة احتياطية كاملة.</string>
+  <string name="chat_page_history_backup_error">تعذّر حفظ النسخة الاحتياطية</string>
 </resources>

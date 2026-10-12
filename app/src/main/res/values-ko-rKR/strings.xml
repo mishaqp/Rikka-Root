@@ -1563,4 +1563,11 @@ mDNS 주소: .local 호스트네임을 사용하며, IP를 몰라도 같은 네�
   <string name="chat_page_sort_conversations">채팅 정렬</string>
   <string name="chat_page_sort_by_update_time">최근 업데이트순</string>
   <string name="chat_page_sort_by_create_time">생성 날짜순</string>
+  <string name="chat_page_history_read_only">기록 일부를 불러오지 못했습니다. 이 채팅은 읽기 전용입니다</string>
+  <string name="chat_page_history_export">내보내기</string>
+  <string name="chat_page_history_backup_title">전체 백업</string>
+  <string name="chat_page_history_backup_description">백업에는 불러오지 못한 메시지를 포함한 전체 데이터베이스, 파일 및 앱 설정이 포함됩니다.</string>
+  <string name="chat_page_history_backup_save">백업 저장</string>
+  <string name="chat_page_history_partial_export">이 내보내기에는 불러온 메시지만 포함됩니다. 전체 기록을 저장하려면 전체 백업을 사용하세요.</string>
+  <string name="chat_page_history_backup_error">백업을 저장하지 못했습니다</string>
 </resources>

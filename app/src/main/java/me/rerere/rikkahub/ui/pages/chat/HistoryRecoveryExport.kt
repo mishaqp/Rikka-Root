@@ -15,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -37,6 +38,8 @@ internal fun HistoryRecoveryExport() {
     val context = LocalContext.current
     val toaster = LocalToaster.current
     val scope = rememberCoroutineScope()
+    val successMessage by rememberUpdatedState(stringResource(R.string.backup_page_backup_success))
+    val fallbackErrorMessage by rememberUpdatedState(stringResource(R.string.chat_page_history_backup_error))
     var showExport by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
@@ -50,10 +53,10 @@ internal fun HistoryRecoveryExport() {
                             .use { output -> archive.inputStream().use { it.copyTo(output) } }
                     } finally { archive.delete() }
                 }
-                toaster.show(context.getString(R.string.backup_page_backup_success), type = ToastType.Success)
+                toaster.show(successMessage, type = ToastType.Success)
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
-                toaster.show(error.message ?: context.getString(R.string.chat_page_history_backup_error), type = ToastType.Error)
+                toaster.show(error.message ?: fallbackErrorMessage, type = ToastType.Error)
             } finally { exporting = false }
         }
     }

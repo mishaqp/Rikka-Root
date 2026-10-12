@@ -1563,4 +1563,11 @@ mDNSアドレス: .localホスト名を使用し、IPを知らなくても同じ
   <string name="chat_page_sort_conversations">チャットを並べ替え</string>
   <string name="chat_page_sort_by_update_time">最終更新順</string>
   <string name="chat_page_sort_by_create_time">作成日時順</string>
+  <string name="chat_page_history_read_only">履歴の一部を読み込めませんでした。このチャットは読み取り専用です</string>
+  <string name="chat_page_history_export">エクスポート</string>
+  <string name="chat_page_history_backup_title">完全なバックアップ</string>
+  <string name="chat_page_history_backup_description">バックアップには、読み込めなかったメッセージを含むデータベース全体、ファイル、アプリの設定が含まれます。</string>
+  <string name="chat_page_history_backup_save">バックアップを保存</string>
+  <string name="chat_page_history_partial_export">このエクスポートには読み込まれたメッセージのみが含まれます。履歴全体を保存するには、完全なバックアップを使用してください。</string>
+  <string name="chat_page_history_backup_error">バックアップを保存できませんでした</string>
 </resources>
