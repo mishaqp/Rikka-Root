@@ -169,6 +169,15 @@ class MessageDisplayPresentationTest {
         }
     }
 
+    @Test fun tokenLineWaitsUntilTheAssistantReplyStopsStreaming() {
+        val usage = TokenUsage(promptTokens = 100, completionTokens = 42, totalTokens = 142)
+        val assistant = message(MessageRole.ASSISTANT).copy(usage = usage)
+        assertFalse(presentMessageDisplay(assistant, DisplaySetting(), loading = true, lastMessage = true).showTokenUsage)
+        assertTrue(presentMessageDisplay(assistant, DisplaySetting(), loading = false, lastMessage = true).showTokenUsage)
+        val user = message(MessageRole.USER).copy(usage = usage)
+        assertTrue(presentMessageDisplay(user, DisplaySetting(), loading = true, lastMessage = true).showTokenUsage)
+    }
+
     @Test fun rendererOptionsReflectSavedFontsMarkdownAndFutureToolPreferences() {
         val settings = DisplaySetting(fontSizeRatio = 1.4f, chatFontFamily = ChatFontFamily.CUSTOM,
             chatCustomFontPath = "fonts/reader.ttf", enableLatexRendering = false, codeBlockAutoWrap = true,

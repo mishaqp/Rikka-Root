@@ -6,4 +6,11 @@
     <string translatable="false" name="setting_display_user_message_collapse_lines_title">Видимые строки</string>
     <string translatable="false" name="setting_display_user_message_actions_title">Действия сообщения</string>
     <string translatable="false" name="setting_display_user_message_actions_description">Показывать кнопки под сообщением пользователя.</string>
+    <string translatable="false" name="setting_display_message_actions_title">Действия и подсказки</string>
+    <string translatable="false" name="setting_display_confirm_assistant_regeneration_title">Подтверждать перегенерацию ответа</string>
+    <string translatable="false" name="setting_display_confirm_assistant_regeneration_description">Спрашивать перед повторной генерацией ответа ассистента. Для своих сообщений подтверждение есть всегда.</string>
+    <string translatable="false" name="setting_display_insert_suggestion_only_title">Подсказка только вставляется в поле</string>
+    <string translatable="false" name="setting_display_insert_suggestion_only_description">Нажатие на подсказку под ответом вставляет её в поле ввода. Если выключено — подсказка сразу отправляется.</string>
+    <string translatable="false" name="setting_display_show_produced_files_title">Строка файлов</string>
+    <string translatable="false" name="setting_display_show_produced_files_description">Показывать под ответом созданные и изменённые файлы.</string>
 </resources>

@@ -20,6 +20,9 @@ class MessageDisplaySerializationTest {
             assertTrue(display.showToolSummary)
             assertFalse(display.hideToolResultImages)
             assertTrue(display.autoCollapseToolSteps)
+            assertFalse(display.confirmAssistantRegeneration)
+            assertTrue(display.insertSuggestionOnly)
+            assertTrue(display.showProducedFiles)
         }
     }
 
@@ -45,6 +48,7 @@ class MessageDisplaySerializationTest {
             showTokenUsage = false, showThinkingContent = false, autoCloseThinking = false,
             collapseLongUserMessages = false, userMessageCollapseLines = 15, showUserMessageActions = false,
             showToolSummary = false, hideToolResultImages = true, autoCollapseToolSteps = false,
+            confirmAssistantRegeneration = true, insertSuggestionOnly = false, showProducedFiles = false,
         )
         assertEquals(display, JsonInstant.decodeFromString<DisplaySetting>(JsonInstant.encodeToString(display)))
         assertEquals(display, restore(JsonInstant.encodeToString(Settings(displaySetting = display))).displaySetting)

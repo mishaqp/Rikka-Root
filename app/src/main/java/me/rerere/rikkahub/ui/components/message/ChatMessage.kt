@@ -209,15 +209,18 @@ fun ChatMessage(
                         showActionsSheet = true
                     },
                     onTranslate = onTranslate,
-                    onClearTranslation = onClearTranslation
+                    onClearTranslation = onClearTranslation,
+                    onEdit = onEdit,
                 )
             }
         }
 
-        EditedFilesList(
-            parts = message.parts,
-            assistant = assistant,
-        )
+        if (settings.showProducedFiles) {
+            EditedFilesList(
+                parts = message.parts,
+                assistant = assistant,
+            )
+        }
 
         if (display.showTokenUsage) {
             ProvideTextStyle(textStyle) {

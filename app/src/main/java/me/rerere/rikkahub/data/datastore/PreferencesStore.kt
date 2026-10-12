@@ -725,6 +725,10 @@ data class DisplaySetting(
     val showToolSummary: Boolean = true,
     val hideToolResultImages: Boolean = false,
     val autoCollapseToolSteps: Boolean = true,
+    // Moru message actions block; defaults keep the previous behavior for old backups.
+    val confirmAssistantRegeneration: Boolean = false,
+    val insertSuggestionOnly: Boolean = true,
+    val showProducedFiles: Boolean = true,
     val updateCheckDisabledUntilEpochMillis: Long = 0L,
     val showMessageJumper: Boolean = true,
     val messageJumperOnLeft: Boolean = false,

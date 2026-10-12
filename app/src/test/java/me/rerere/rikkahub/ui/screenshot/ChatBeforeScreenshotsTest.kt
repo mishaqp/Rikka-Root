@@ -1206,6 +1206,37 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         capture("timeline_tool_previews")
     }
 
+    @Test fun productionChatStage4ActionsTokensAndSuggestions() {
+        val settings = MutableStateFlow(ScreenshotFixtures.settings)
+        val job = MutableStateFlow<Job?>(null)
+        val user = stage2Message(97, MessageRole.USER, "Сравни два варианта.")
+        val answer = stage2Message(98, MessageRole.ASSISTANT, "Второй вариант ответа.").let { node ->
+            val selected = node.currentMessage
+            node.copy(messages = listOf(selected.copy(id = Uuid.random()), selected, selected.copy(id = Uuid.random())),
+                selectIndex = 1)
+        }
+        mountStage2(settings, job, listOf(user, answer))
+        compose.runOnIdle {
+            fixture.conversationFlow.value = fixture.conversationFlow.value.copy(
+                chatSuggestions = listOf("Покажи таблицу", "А если взять третий вариант?", "Кратко"))
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("2/3").assertIsDisplayed()
+        compose.onNodeWithTag("chat_suggestions").assertIsDisplayed()
+        compose.onNodeWithTag("chat_message_tokens").assertIsDisplayed()
+        val context = RuntimeEnvironment.getApplication()
+        compose.onAllNodesWithContentDescription(context.getString(R.string.edit)).assertCountEquals(1)
+        capture("actions_tokens_suggestions")
+
+        compose.onNodeWithText("Покажи таблицу").performClick()
+        compose.waitForIdle()
+        verify(exactly = 0) { fixture.vm.handleMessageSend(any(), any()) }
+        showStage2(settings, DisplaySetting(insertSuggestionOnly = false), listOf(user, answer))
+        compose.onNodeWithText("Кратко").performClick()
+        compose.waitForIdle()
+        verify(exactly = 1) { fixture.vm.handleMessageSend(listOf(UIMessagePart.Text("Кратко")), any()) }
+    }
+
     private fun stage3PendingApprovalMessage() = stage3Message(84,
             stage3Tool("stage3_once", "workspace_write_file", """{"path":"/workspace/a.txt","text":"a"}""",
                 output = null, approval = ToolApprovalState.Pending),

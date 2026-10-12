@@ -47,12 +47,13 @@ import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Edit01
 import me.rerere.hugeicons.stroke.FavouriteCircle
 import me.rerere.hugeicons.stroke.GitFork
-import me.rerere.hugeicons.stroke.MoreVertical
-import me.rerere.hugeicons.stroke.Refresh03
+import me.rerere.hugeicons.stroke.MoreHorizontal
+import me.rerere.hugeicons.stroke.PencilEdit01
+import me.rerere.hugeicons.stroke.RefreshCw
 import me.rerere.hugeicons.stroke.Share04
 import me.rerere.hugeicons.stroke.StopCircle
 import me.rerere.hugeicons.stroke.TextSelection
-import me.rerere.hugeicons.stroke.Translate
+import me.rerere.hugeicons.stroke.Languages
 import me.rerere.hugeicons.stroke.VolumeHigh
 import me.rerere.hugeicons.stroke.WebDesign01
 import me.rerere.rikkahub.R
@@ -76,11 +77,15 @@ fun ColumnScope.ChatMessageActionButtons(
     onOpenActionSheet: () -> Unit,
     onTranslate: ((UIMessage, Locale) -> Unit)? = null,
     onClearTranslation: (UIMessage) -> Unit = {},
+    onEdit: (() -> Unit)? = null,
     readOnly: Boolean = false,
 ) {
     val context = LocalContext.current
     val settings = LocalSettings.current
-    val presentation = presentChatMessageActions(message, readOnly, canTranslate = onTranslate != null)
+    val presentation = presentChatMessageActions(
+        message, readOnly, canTranslate = onTranslate != null, canEdit = onEdit != null,
+        confirmAssistantRegeneration = settings.displaySetting.confirmAssistantRegeneration,
+    )
     var isPendingDelete by remember { mutableStateOf(false) }
     var showTranslateDialog by remember { mutableStateOf(false) }
     var showRegenerateConfirm by remember { mutableStateOf(false) }
@@ -95,7 +100,7 @@ fun ColumnScope.ChatMessageActionButtons(
     FlowRow(
         modifier = Modifier.testTag(if (message.role == MessageRole.USER)
             "chat_message_user_actions" else "chat_message_assistant_actions"),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(ActionSlotGap),
         itemVerticalAlignment = Alignment.CenterVertically,
     ) {
         ChatMessageActionButton(
@@ -105,7 +110,7 @@ fun ColumnScope.ChatMessageActionButtons(
         )
 
         ChatMessageActionButton(
-            icon = HugeIcons.Refresh03,
+            icon = HugeIcons.RefreshCw,
             contentDescription = stringResource(R.string.regenerate),
             enabled = presentation.mutationsEnabled,
             onClick = {
@@ -141,10 +146,10 @@ fun ColumnScope.ChatMessageActionButtons(
                         }
                     },
                     shapes = IconButtonDefaults.toggleableShapes(),
-                    modifier = Modifier.size(IconButtonDefaults.extraSmallContainerSize()),
+                    modifier = Modifier.size(ActionSlotSize),
                     enabled = presentation.canSpeak(isAvailable),
                     colors = IconButtonDefaults.iconToggleButtonColors(
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = ActionIconAlpha),
                         checkedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
                         checkedContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                     ),
@@ -160,15 +165,23 @@ fun ColumnScope.ChatMessageActionButtons(
             // Translation button
             if (presentation.showTranslation) {
                 ChatMessageActionButton(
-                    icon = HugeIcons.Translate,
+                    icon = HugeIcons.Languages,
                     contentDescription = stringResource(R.string.translate),
                     onClick = { showTranslateDialog = true },
                 )
             }
         }
 
+        if (presentation.showEdit && onEdit != null) {
+            ChatMessageActionButton(
+                icon = HugeIcons.PencilEdit01,
+                contentDescription = stringResource(R.string.edit),
+                onClick = onEdit,
+            )
+        }
+
         ChatMessageActionButton(
-            icon = HugeIcons.MoreVertical,
+            icon = HugeIcons.MoreHorizontal,
             contentDescription = stringResource(R.string.more_options),
             onClick = onOpenActionSheet,
         )
@@ -223,7 +236,11 @@ fun ColumnScope.ChatMessageActionButtons(
     )
 }
 
-private val ActionIconSize = 18.dp
+// Moru: 16dp glyphs in 28dp slots, 6dp apart.
+private val ActionIconSize = 16.dp
+internal val ActionSlotSize = 28.dp
+private val ActionSlotGap = 6.dp
+private const val ActionIconAlpha = 0.9f
 
 // 消息下方的小号图标按钮，按下时圆形收成方角
 @Composable
@@ -239,10 +256,10 @@ internal fun ChatMessageActionButton(
         IconButton(
             onClick = onClick,
             shapes = IconButtonDefaults.shapes(),
-            modifier = modifier.size(IconButtonDefaults.extraSmallContainerSize()),
+            modifier = modifier.size(ActionSlotSize),
             enabled = enabled,
             colors = IconButtonDefaults.iconButtonColors(
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = ActionIconAlpha),
             ),
         ) {
             Icon(

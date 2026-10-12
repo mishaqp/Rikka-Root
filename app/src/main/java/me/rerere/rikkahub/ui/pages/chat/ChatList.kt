@@ -88,6 +88,7 @@ import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
@@ -97,6 +98,7 @@ import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.withConversation
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.ui.components.message.ChatMessage
+import me.rerere.rikkahub.ui.components.message.ChatSuggestionBubbles
 import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
 import me.rerere.rikkahub.ui.components.message.ChatWaitingDots
 import me.rerere.rikkahub.ui.hooks.ImeLazyListAutoScroller
@@ -131,6 +133,7 @@ fun ChatList(
     onDelete: (UIMessage) -> Unit = {},
     onUpdateMessage: (MessageNode) -> Unit = {},
     onClickSuggestion: (String) -> Unit = {},
+    onSendSuggestion: ((String) -> Unit)? = null,
     onTranslate: ((UIMessage, java.util.Locale) -> Unit)? = null,
     onClearTranslation: (UIMessage) -> Unit = {},
     onJumpToMessage: (Int) -> Unit = {},
@@ -175,6 +178,7 @@ fun ChatList(
                 onDelete = onDelete,
                 onUpdateMessage = onUpdateMessage,
                 onClickSuggestion = onClickSuggestion,
+                onSendSuggestion = onSendSuggestion,
                 onTranslate = onTranslate,
                 onClearTranslation = onClearTranslation,
                 animatedVisibilityScope = this@AnimatedContent,
@@ -207,6 +211,7 @@ private fun ChatListNormal(
     onDelete: (UIMessage) -> Unit,
     onUpdateMessage: (MessageNode) -> Unit,
     onClickSuggestion: (String) -> Unit,
+    onSendSuggestion: ((String) -> Unit)?,
     onTranslate: ((UIMessage, java.util.Locale) -> Unit)?,
     onClearTranslation: (UIMessage) -> Unit,
     animatedVisibilityScope: AnimatedVisibilityScope,
@@ -389,6 +394,23 @@ private fun ChatListNormal(
                                 activeRunningToolCallId else null,
                         )
                     }
+                    // Moru: continuation bubbles directly under the finished last answer.
+                    if (item.lastMessage && !item.loading &&
+                        node.currentMessage.role == MessageRole.ASSISTANT &&
+                        conversation.chatSuggestions.isNotEmpty() && !LocalScrollCaptureInProgress.current
+                    ) {
+                        ChatSuggestionBubbles(
+                            suggestions = conversation.chatSuggestions,
+                            onClick = { suggestion ->
+                                if (settings.displaySetting.insertSuggestionOnly || onSendSuggestion == null) {
+                                    onClickSuggestion(suggestion)
+                                } else {
+                                    onSendSuggestion(suggestion)
+                                }
+                            },
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
                 }
             }
 
@@ -540,14 +562,6 @@ private fun ChatListNormal(
                 onInteraction = scrollNavigation::onInteraction,
             )
 
-            // Suggestion
-            if (conversation.chatSuggestions.isNotEmpty() && !captureProgress) {
-                ChatSuggestionsRow(
-                    conversation = conversation,
-                    onClickSuggestion = onClickSuggestion,
-                    modifier = Modifier.align(Alignment.BottomCenter)
-                )
-            }
         }
     }
 }
@@ -732,38 +746,6 @@ private fun ChatListPreview(
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ChatSuggestionsRow(
-    modifier: Modifier = Modifier,
-    conversation: Conversation,
-    onClickSuggestion: (String) -> Unit
-) {
-    LazyRow(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        items(conversation.chatSuggestions) { suggestion ->
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .clickable {
-                        onClickSuggestion(suggestion)
-                    }
-                    .background(MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp))
-                    .padding(vertical = 4.dp, horizontal = 8.dp),
-            ) {
-                Text(
-                    text = suggestion,
-                    style = MaterialTheme.typography.bodySmall
-                )
             }
         }
     }

@@ -7,12 +7,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.MutableStateFlow
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
@@ -21,8 +24,10 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
+import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.ui.hooks.CustomTtsState
+import me.rerere.rikkahub.ui.screenshot.ScreenshotFixtures
 import me.rerere.rikkahub.ui.screenshot.ScreenshotTheme
 import me.rerere.tts.model.PlaybackState
 import org.junit.Assert.assertEquals
@@ -282,6 +287,62 @@ class ChatActionAvailabilityTest {
         compose.onNodeWithText("Unknown error").assertExists()
         compose.onNodeWithText(label(R.string.chat_page_clear_all_errors)).performClick()
         assertEquals(1, cleared)
+    }
+
+    @Test fun userPencilEditsDirectlyAndIsHiddenForAssistantsAndReadOnly() {
+        val role = mutableStateOf(MessageRole.USER)
+        val readOnly = mutableStateOf(false)
+        var edits = 0
+        compose.setContent {
+            TestTheme {
+                Column {
+                    val message = UIMessage(role = role.value, parts = listOf(UIMessagePart.Text("Message")))
+                    ChatMessageActionButtons(message, MessageNode.of(message), {}, {}, {},
+                        onEdit = { edits++ }, readOnly = readOnly.value)
+                }
+            }
+        }
+        compose.onNodeWithContentDescription(label(R.string.edit)).performClick()
+        assertEquals(1, edits)
+        compose.runOnIdle { readOnly.value = true }
+        compose.onNodeWithContentDescription(label(R.string.edit)).assertDoesNotExist()
+        compose.runOnIdle { readOnly.value = false; role.value = MessageRole.ASSISTANT }
+        compose.onNodeWithContentDescription(label(R.string.edit)).assertDoesNotExist()
+    }
+
+    @Test fun assistantRegenerationAsksOnlyWhenTheSettingIsOn() {
+        val confirm = mutableStateOf(true)
+        var regenerations = 0
+        compose.setContent {
+            TestTheme {
+                val settings = ScreenshotFixtures.settings.copy(displaySetting =
+                    ScreenshotFixtures.settings.displaySetting.copy(confirmAssistantRegeneration = confirm.value))
+                CompositionLocalProvider(LocalSettings provides settings) {
+                    Column {
+                        val message = UIMessage.assistant("Answer")
+                        ChatMessageActionButtons(message, MessageNode.of(message), {}, { regenerations++ }, {})
+                    }
+                }
+            }
+        }
+        compose.onNodeWithContentDescription(label(R.string.regenerate)).performClick()
+        assertEquals(0, regenerations)
+        compose.onNodeWithText(label(R.string.confirm)).performClick()
+        assertEquals(1, regenerations)
+        compose.runOnIdle { confirm.value = false }
+        compose.onNodeWithContentDescription(label(R.string.regenerate)).performClick()
+        assertEquals(2, regenerations)
+    }
+
+    @Test fun actionsAndBranchSwitcherUseMoru28dpSlots() {
+        val message = UIMessage.assistant("Answer")
+        val node = MessageNode(messages = listOf(message, UIMessage.assistant("Second")), selectIndex = 0)
+        compose.setContent { TestTheme { Column { ChatMessageActionButtons(message, node, {}, {}, {}) } } }
+        listOf(R.string.copy, R.string.regenerate, R.string.tts, R.string.more_options).forEach { resource ->
+            compose.onNodeWithContentDescription(label(resource)).assertWidthIsEqualTo(28.dp).assertHeightIsEqualTo(28.dp)
+        }
+        compose.onNodeWithContentDescription("Next").assertWidthIsEqualTo(28.dp)
+        compose.onNodeWithText("1/2").assertExists()
     }
 
     @Composable private fun TestTheme(content: @Composable () -> Unit) {

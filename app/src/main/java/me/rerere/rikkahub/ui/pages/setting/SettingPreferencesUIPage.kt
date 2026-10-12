@@ -378,6 +378,14 @@ fun SettingPreferencesUIPage(vm: SettingVM = koinViewModel()) {
             }
 
             item {
+                MessageActionsDisplaySettings(
+                    displaySetting = displaySetting,
+                    onUpdate = ::updateDisplaySetting,
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
+            }
+
+            item {
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
                     title = { Text(stringResource(R.string.setting_page_code_display_settings)) },
@@ -522,6 +530,53 @@ internal fun MessageBehaviorDisplaySettings(
                     checked = displaySetting.showUserMessageActions,
                     onCheckedChange = { value -> onUpdate { it.copy(showUserMessageActions = value) } },
                     modifier = Modifier.testTag("setting_user_message_actions"),
+                )
+            },
+        )
+    }
+}
+
+/** Moru's action, suggestion and file-row switches on the same message display page. */
+@Composable
+internal fun MessageActionsDisplaySettings(
+    displaySetting: DisplaySetting,
+    onUpdate: ((DisplaySetting) -> DisplaySetting) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    CardGroup(
+        modifier = modifier,
+        title = { Text(stringResource(R.string.setting_display_message_actions_title)) },
+    ) {
+        item(
+            headlineContent = { Text(stringResource(R.string.setting_display_confirm_assistant_regeneration_title)) },
+            supportingContent = { Text(stringResource(R.string.setting_display_confirm_assistant_regeneration_description)) },
+            trailingContent = {
+                Switch(
+                    checked = displaySetting.confirmAssistantRegeneration,
+                    onCheckedChange = { value -> onUpdate { it.copy(confirmAssistantRegeneration = value) } },
+                    modifier = Modifier.testTag("setting_confirm_assistant_regeneration"),
+                )
+            },
+        )
+        item(
+            headlineContent = { Text(stringResource(R.string.setting_display_insert_suggestion_only_title)) },
+            supportingContent = { Text(stringResource(R.string.setting_display_insert_suggestion_only_description)) },
+            trailingContent = {
+                Switch(
+                    checked = displaySetting.insertSuggestionOnly,
+                    onCheckedChange = { value -> onUpdate { it.copy(insertSuggestionOnly = value) } },
+                    modifier = Modifier.testTag("setting_insert_suggestion_only"),
+                )
+            },
+        )
+        item(
+            headlineContent = { Text(stringResource(R.string.setting_display_show_produced_files_title)) },
+            supportingContent = { Text(stringResource(R.string.setting_display_show_produced_files_description)) },
+            trailingContent = {
+                Switch(
+                    checked = displaySetting.showProducedFiles,
+                    onCheckedChange = { value -> onUpdate { it.copy(showProducedFiles = value) } },
+                    modifier = Modifier.testTag("setting_show_produced_files"),
                 )
             },
         )

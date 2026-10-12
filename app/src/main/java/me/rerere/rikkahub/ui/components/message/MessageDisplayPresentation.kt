@@ -103,7 +103,8 @@ fun presentMessageDisplay(
         tools = ToolDisplayOptions(settings.showToolSummary, settings.hideToolResultImages, settings.autoCollapseToolSteps,
             settings.showThinkingContent, settings.autoCloseThinking),
         showActions = showActions,
-        showTokenUsage = regular && settings.showTokenUsage,
+        // Moru hides the token line while the reply is still streaming.
+        showTokenUsage = regular && settings.showTokenUsage && !(assistant && loading),
         showBranchSelector = capability.showActions && user && !showActions && hasBranches,
         streamText = regular && assistant && loading,
         showWaitingDots = regular && assistant && loading && !hasContent,

@@ -25,11 +25,11 @@ import kotlinx.datetime.toJavaLocalDateTime
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.ui.UIMessage
 import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Clock02
+import me.rerere.hugeicons.stroke.Timer01
 import me.rerere.hugeicons.stroke.Database02
-import me.rerere.hugeicons.stroke.Download04
+import me.rerere.hugeicons.stroke.ArrowDown02
 import me.rerere.hugeicons.stroke.Hash
-import me.rerere.hugeicons.stroke.Upload02
+import me.rerere.hugeicons.stroke.ArrowUp02
 import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.context.LocalSettings
@@ -124,13 +124,13 @@ fun ChatMessageNerdLine(
                             Icon(
                                 imageVector = when (statistic) {
                                     is TokenUsageStatistic.Count -> when (statistic.kind) {
-                                        TokenCountKind.Prompt -> HugeIcons.Upload02
+                                        TokenCountKind.Prompt -> HugeIcons.ArrowUp02
                                         TokenCountKind.Cached -> HugeIcons.Database02
-                                        TokenCountKind.Completion -> HugeIcons.Download04
+                                        TokenCountKind.Completion -> HugeIcons.ArrowDown02
                                         TokenCountKind.Total -> HugeIcons.Hash
                                     }
                                     is TokenUsageStatistic.Speed -> HugeIcons.Zap
-                                    is TokenUsageStatistic.Duration -> HugeIcons.Clock02
+                                    is TokenUsageStatistic.Duration -> HugeIcons.Timer01
                                 },
                                 contentDescription = null,
                                 modifier = Modifier.size(12.dp),

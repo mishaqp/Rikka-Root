@@ -136,3 +136,10 @@ reasons, short summaries instead of JSON), one-line titles with the call's
 essence, per-category tool icons and two 32dp scroll buttons. The new
 `timeline_tool_previews` scene shows root, Termux, SSH, file and browser steps
 (14 methods × eight theme/font cases = 112 tests, 788 PNGs).
+
+Stage 4 re-records the same live set with Moru message actions (16dp glyphs
+in 28dp slots, pencil on user messages, ‹ 2/3 › switcher), the token line
+with arrow/timer icons hidden while a reply streams, and continuation
+bubbles under the last answer. The new `actions_tokens_suggestions` scene
+also checks that a tap inserts the suggestion by default and sends it when
+"insert only" is off (15 methods = 120 tests, 796 PNGs).

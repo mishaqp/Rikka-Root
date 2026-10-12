@@ -482,6 +482,18 @@ private fun ChatPageContent(
                     inputState.editingMessage = null
                     inputState.setMessageText(suggestion)
                 },
+                // Moru's default tap: send the suggestion as the next message (opt-in via settings).
+                onSendSuggestion = { suggestion ->
+                    if (currentChatModel == null) {
+                        toaster.show(modelRequiredMessage, type = ToastType.Error)
+                    } else {
+                        vm.handleMessageSend(listOf(UIMessagePart.Text(suggestion)))
+                        scope.launch {
+                            delay(100.milliseconds)
+                            chatListState.requestScrollToItem(conversation.currentMessages.size + 5)
+                        }
+                    }
+                },
                 onTranslate = { message, locale ->
                     vm.translateMessage(message, locale)
                 },

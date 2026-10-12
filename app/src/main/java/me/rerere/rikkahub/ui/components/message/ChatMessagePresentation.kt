@@ -41,6 +41,8 @@ enum class ChatMessageSheetAction { SelectAndCopy, WebPreview, Edit, Share, Fork
 data class ChatMessageActionsPresentation(
     val mutationsEnabled: Boolean,
     val confirmRegeneration: Boolean,
+    /** Moru's pencil slot on user messages; the sheet keeps its own Edit entry. */
+    val showEdit: Boolean,
     val showTts: Boolean,
     val showTranslation: Boolean,
     val sheetActions: List<ChatMessageSheetAction>,
@@ -53,9 +55,13 @@ fun presentChatMessageActions(
     readOnly: Boolean = false,
     canTranslate: Boolean = false,
     canToggleFavorite: Boolean = false,
+    canEdit: Boolean = false,
+    confirmAssistantRegeneration: Boolean = false,
 ): ChatMessageActionsPresentation = ChatMessageActionsPresentation(
     mutationsEnabled = !readOnly,
-    confirmRegeneration = message.role == MessageRole.USER,
+    confirmRegeneration = message.role == MessageRole.USER ||
+        (confirmAssistantRegeneration && message.role == MessageRole.ASSISTANT),
+    showEdit = message.role == MessageRole.USER && !readOnly && canEdit,
     showTts = message.role == MessageRole.ASSISTANT,
     showTranslation = message.role == MessageRole.ASSISTANT && !readOnly && canTranslate,
     sheetActions = buildList {
