@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEachIndexed
@@ -92,6 +93,8 @@ fun ColumnScope.ChatMessageActionButtons(
     }
 
     FlowRow(
+        modifier = Modifier.testTag(if (message.role == MessageRole.USER)
+            "chat_message_user_actions" else "chat_message_assistant_actions"),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         itemVerticalAlignment = Alignment.CenterVertically,
     ) {

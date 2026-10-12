@@ -3,7 +3,7 @@
 `chat-before` contains the 208 preserved audit reference PNGs (26 viewports × four
 themes × font scales 1.0/1.3). These files describe the historical interface. The
 current source cannot render that old header and composer, so the live suite now
-verifies `chat-after-stage2` and publishes reference/current directories in `ui-screenshots`.
+verifies `chat-after-stage2-fixes` and publishes reference/current directories in `ui-screenshots`.
 The audit-era `ChatBeforeScreenshotsTest` class name is retained for existing
 targeted Gradle commands; its tests capture the current production `ChatPage`.
 
@@ -22,15 +22,19 @@ The 26 historical viewport comparisons retain their original density fixture.
 same 33 captures per theme/font case. Both archives contain 264 PNGs and are
 protected alongside `chat-before`, including every child directory.
 
-`chat-after-stage2` is the live baseline. It retains all 33 existing captures and
-adds 23 production `ChatPage` states for each theme/font combination (56 × 8 =
-448 PNGs): default user message; user avatar with timestamp; assistant bubbles at
+`chat-after-stage2` is a preserved 448-PNG archive. `chat-after-stage2-fixes` is
+the live baseline after the 16dp list and inline-code chrome corrections. It retains
+all 56 stage-2 captures and adds 11 geometry captures per theme/font combination
+(67 × 8 = 536 PNGs). The original 23 added stage-2 states include default user message;
+user avatar with timestamp; assistant bubbles at
 full and 0.35 opacity; independently hidden, icon-only, name-only, timestamp-only,
 and token-only assistant metadata; thirteen-line user text collapsed to nine
 lines, expanded, and with collapse disabled; streaming text, its next fragment
 during fade, and three waiting dots; inline and fenced code; a table; HTML code
 with its real controls; sources summary and the actual sources sheet; expanded,
-collapsed, and pending translation.
+collapsed, and pending translation. The geometry states cover short/long user text
+with avatar off/on, attachments with avatar off/on, a full-width tool card,
+wrapped AST and HTML inline code, and visible navigation overlays on both sides.
 
 New states replace mutable ViewModel/settings boundaries and mount the actual
 `ChatPage` and message renderers. They also update Android's resource font scale
@@ -50,17 +54,17 @@ input state's editing message unset.
 
 Normal tests always verify the committed AFTER baselines, including Daily Build
 with `-Proborazzi.test.record=true`. Global Roborazzi record does not authorize
-recording any chat baseline set. Explicit stage-2 recording is:
+recording any chat baseline set. Explicit stage-2-fixes recording is:
 
 ```sh
-./gradlew :app:testDebugUnitTest --tests 'me.rerere.rikkahub.ui.screenshot.ChatBeforeScreenshotsTest' -Pchat.stage2.record=true --no-configuration-cache
+./gradlew :app:testDebugUnitTest --tests 'me.rerere.rikkahub.ui.screenshot.ChatBeforeScreenshotsTest' -Pchat.stage2fixes.record=true --no-configuration-cache
 ```
 
-`-Pchat.stage2.record.dir=/tmp/chat-stage2-review` redirects intentional review
+`-Pchat.stage2fixes.record.dir=/tmp/chat-stage2-review` redirects intentional review
 captures. The legacy `chat.stage1.record` / `chat.audit.record` switches and their
-`.dir` properties remain accepted, and target stage-2 AFTER images. A stage-2
-directory takes precedence over stage-1, then audit directory aliases. Recording
-or publishing artifacts inside any of the three historical directories is
+`.dir` properties remain accepted, and target stage-2-fixes AFTER images. A stage-2-fixes
+directory takes precedence over stage-2, stage-1, then audit directory aliases. Recording
+or publishing artifacts inside any of the four historical directories is
 rejected. Review actual/diff images before accepting new baselines.
 
 Artifacts contain historical BEFORE references and verified current AFTER images

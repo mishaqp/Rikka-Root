@@ -77,6 +77,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalScrollCaptureInProgress
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -320,10 +321,6 @@ private fun ChatListNormal(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(chatScrollNavigationGutter(
-                        settings.displaySetting.showMessageJumper,
-                        settings.displaySetting.messageJumperOnLeft,
-                    ))
                     .hazeSource(state = hazeState)
                     .padding(top = innerPadding.calculateTopPadding()),
             ) {
@@ -347,6 +344,7 @@ private fun ChatListNormal(
                     ) {
                         ChatMessage(
                             node = node,
+                            modifier = Modifier.testTag("chat_message_row"),
                             readOnly = item.readOnly,
                             model = node.currentMessage.modelId?.let(modelById::get)
                                 ?: node.currentMessage.snapshotModel(),

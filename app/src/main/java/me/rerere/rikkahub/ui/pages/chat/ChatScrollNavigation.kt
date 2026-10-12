@@ -1,6 +1,5 @@
 package me.rerere.rikkahub.ui.pages.chat
 
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -10,7 +9,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
@@ -76,10 +74,3 @@ internal fun rememberChatScrollNavigationVisibility(state: LazyListState): ChatS
     }
     return visibility
 }
-
-/** The existing 16dp list inset plus this 36dp gutter leaves 8dp beside the navigation circles. */
-internal fun chatScrollNavigationGutter(showMessageJumper: Boolean, messageJumperOnLeft: Boolean): PaddingValues =
-    PaddingValues(
-        start = if (showMessageJumper && messageJumperOnLeft) 36.dp else 0.dp,
-        end = if (showMessageJumper && !messageJumperOnLeft) 36.dp else 0.dp,
-    )

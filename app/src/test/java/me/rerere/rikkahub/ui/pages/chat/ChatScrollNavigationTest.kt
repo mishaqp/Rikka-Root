@@ -79,17 +79,4 @@ class ChatScrollNavigationTest {
         assertFalse(visible)
     }
 
-    @Test
-    fun `gutter follows the enabled setting and configured side`() {
-        listOf(false, true).forEach { onLeft ->
-            val disabled = chatScrollNavigationGutter(false, onLeft)
-            assertEquals(0.dp, disabled.calculateLeftPadding(LayoutDirection.Ltr))
-            assertEquals(0.dp, disabled.calculateRightPadding(LayoutDirection.Ltr))
-            val enabled = chatScrollNavigationGutter(true, onLeft)
-            assertEquals(if (onLeft) 36.dp else 0.dp, enabled.calculateLeftPadding(LayoutDirection.Ltr))
-            assertEquals(if (onLeft) 0.dp else 36.dp, enabled.calculateRightPadding(LayoutDirection.Ltr))
-            assertEquals(0.dp, enabled.calculateTopPadding())
-            assertEquals(0.dp, enabled.calculateBottomPadding())
-        }
-    }
 }

@@ -134,8 +134,8 @@ class MarkdownRichRuntimeTest(private val width: Int, private val fontScale: Flo
         compose.onNodeWithTag("streaming_text").performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(incomingLayouts) }
         assertEquals("The incoming snapshot must contain the updated rendered text", "ab", incomingLayouts.single().layoutInput.text.text)
         val after = compose.onNodeWithTag("streaming_text").captureToImage().toPixelMap()
-        for (y in oldBounds.top.toInt().coerceAtLeast(0) until oldBounds.bottom.toInt().coerceAtMost(before.height)) {
-            for (x in oldBounds.left.toInt().coerceAtLeast(0) until oldBounds.right.toInt().coerceAtMost(before.width)) {
+        for (y in (oldBounds.top + 3f).toInt().coerceAtLeast(0) until (oldBounds.bottom - 3f).toInt().coerceAtMost(before.height)) {
+            for (x in (oldBounds.left + 3f).toInt().coerceAtLeast(0) until (oldBounds.right - 3f).toInt().coerceAtMost(before.width)) {
                 assertEquals("Existing glyph and its chip must stay visible at $x,$y", before[x, y], after[x, y])
             }
         }
@@ -151,9 +151,9 @@ class MarkdownRichRuntimeTest(private val width: Int, private val fontScale: Flo
             }
         }
         assertTrue("Incoming glyphs must fade into view while the existing glyph remains stable", incomingGlyphChanged)
-        // The chip has a 6dp painted inset. Sample its flat fill outside the glyph mask,
+        // The chip has a 3dp painted inset. Sample its flat fill outside the glyph mask,
         // rather than glyph-box top pixels which may contain antialiased ascenders.
-        val fillX = (newBounds.right + 3f).toInt().coerceIn(0, after.width - 1)
+        val fillX = (newBounds.right + 1f).toInt().coerceIn(0, after.width - 1)
         val fillY = newBounds.center.y.toInt().coerceIn(0, after.height - 1)
         assertTrue("The fill sample must be outside the incoming glyph mask", fillX >= newBounds.right)
         assertEquals("The incoming code chip fill must not fade with its glyph", complete[fillX, fillY], after[fillX, fillY])
@@ -257,6 +257,34 @@ class MarkdownRichRuntimeTest(private val width: Int, private val fontScale: Flo
         compose.runOnIdle { content.value = "<p>Начало <code>$token</code> конец</p>" }
         compose.waitForIdle()
         assertNativeText()
+    }
+
+    @Test fun inlineCodeChromeUsesThreePixelSideInsetInAstAndHtml() {
+        val content = mutableStateOf("prefix `code` suffix")
+        compose.setContent {
+            ScreenshotTheme(fontScale = fontScale) {
+                Surface(Modifier.width(width.dp)) {
+                    Column { key(content.value) { MarkdownBlock(content.value, displayOptions = defaultOptions) } }
+                }
+            }
+        }
+        fun assertChrome() {
+            val node = compose.onNodeWithText("prefix code suffix")
+            val layouts = mutableListOf<TextLayoutResult>()
+            node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            val layout = layouts.single()
+            val code = layout.layoutInput.text.getStringAnnotations(INLINE_CODE_ANNOTATION, 0, layout.layoutInput.text.length).single()
+            val lastGlyph = layout.getBoundingBox(code.end - 1)
+            val pixels = node.captureToImage().toPixelMap()
+            val y = lastGlyph.center.y.toInt().coerceIn(0, pixels.height - 1)
+            val inside = (lastGlyph.right + 2f).toInt().coerceIn(0, pixels.width - 1)
+            val outside = (lastGlyph.right + 5f).toInt().coerceIn(0, pixels.width - 1)
+            assertTrue("Code chrome should stop within 3dp of its last glyph", pixels[inside, y] != pixels[outside, y])
+        }
+        assertChrome()
+        compose.runOnIdle { content.value = "<p>prefix <code>code</code> suffix</p>" }
+        compose.waitForIdle()
+        assertChrome()
     }
 
     companion object {

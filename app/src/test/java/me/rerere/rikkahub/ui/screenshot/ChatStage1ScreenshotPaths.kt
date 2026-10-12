@@ -10,25 +10,28 @@ internal class ChatStage1ScreenshotPaths(theme: String, fontScale: Float) {
         beforeDirectory,
         File("src/test/screenshots/chat-after-stage1").canonicalFile,
         File("src/test/screenshots/chat-after-stage1-fixes").canonicalFile,
+        File("src/test/screenshots/chat-after-stage2").canonicalFile,
     )
     private val outputDirectory = File(System.getProperty("ui.screenshots.dir", "build/outputs/roborazzi"))
-    val record = System.getProperty("chat.stage2.record").toBoolean() ||
+    val record = System.getProperty("chat.stage2fixes.record").toBoolean() ||
+        System.getProperty("chat.stage2.record").toBoolean() ||
         System.getProperty("chat.stage1.record").toBoolean() ||
         System.getProperty("chat.audit.record").toBoolean()
     private val baselineDirectory: File = if (record) {
-        val directory = System.getProperty("chat.stage2.record.dir").orEmpty().takeIf(String::isNotBlank)
+        val directory = System.getProperty("chat.stage2fixes.record.dir").orEmpty().takeIf(String::isNotBlank)
+            ?: System.getProperty("chat.stage2.record.dir").orEmpty().takeIf(String::isNotBlank)
             ?: System.getProperty("chat.stage1.record.dir").orEmpty().takeIf(String::isNotBlank)
             ?: System.getProperty("chat.audit.record.dir").orEmpty().takeIf(String::isNotBlank)
-            ?: "src/test/screenshots/chat-after-stage2"
+            ?: "src/test/screenshots/chat-after-stage2-fixes"
         File(directory).canonicalFile.also(::requireLiveDirectory)
     } else {
         // Deliberately independent of roborazzi.test.record: Daily Build must verify.
-        File("src/test/screenshots/chat-after-stage2")
+        File("src/test/screenshots/chat-after-stage2-fixes")
     }
 
     fun baseline(name: String) = File(baselineDirectory, "$case/$name.png")
 
-    fun artifact(name: String): File = File(outputDirectory, "chat-after-stage2/$case/$name.png").also {
+    fun artifact(name: String): File = File(outputDirectory, "chat-after-stage2-fixes/$case/$name.png").also {
         requireLiveDirectory(requireNotNull(it.parentFile))
         requireNotNull(it.parentFile).mkdirs()
     }

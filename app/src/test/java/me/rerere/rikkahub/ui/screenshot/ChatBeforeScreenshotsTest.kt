@@ -28,6 +28,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
@@ -427,6 +428,108 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         capture("user_long_collapse_disabled")
 
         captureStage2Streaming(settings, job)
+    }
+
+    @Test fun productionChatContentKeepsBoth16dpEdgesWithNavigationEnabled() {
+        val settings = MutableStateFlow(ScreenshotFixtures.settings)
+        val job = MutableStateFlow<Job?>(null)
+        val shortUser = stage2Message(70, MessageRole.USER, "Коротко.")
+        val longUser = stage2Message(71, MessageRole.USER, "Длинный текст пользователя. ".repeat(24))
+        val tool = fixture.conversation.messageNodes[5]
+        mountStage2(settings, job, listOf(shortUser, longUser, tool))
+        for (onLeft in listOf(false, true)) {
+            for (avatar in listOf(false, true)) {
+                showStage2(settings, DisplaySetting(showMessageJumper = true,
+                    messageJumperOnLeft = onLeft, showUserAvatar = avatar), listOf(shortUser, longUser, tool))
+                val list = mainChatList().fetchSemanticsNode().boundsInRoot
+                assertEquals("The production list starts at the viewport edge", 0f, list.left, 1f)
+                assertEquals("The production list ends at the viewport edge", 411f, list.right, 1f)
+                compose.onAllNodesWithTag("chat_message_row").fetchSemanticsNodes().forEach { row ->
+                    assertEquals("Every message starts 16dp from the left", 16f, row.boundsInRoot.left, 1f)
+                    assertEquals("Every message ends 16dp from the right", 395f, row.boundsInRoot.right, 1f)
+                }
+            }
+        }
+    }
+
+    @Test fun productionChatStage2FixesVisualCases() {
+        val settings = MutableStateFlow(ScreenshotFixtures.settings)
+        val job = MutableStateFlow<Job?>(null)
+        val shortUser = stage2Message(72, MessageRole.USER, "Коротко.")
+        val longUser = stage2Message(73, MessageRole.USER, "Длинный текст пользователя. ".repeat(24))
+        mountStage2(settings, job, listOf(shortUser))
+        for ((avatar, node, name) in listOf(
+            Triple(false, shortUser, "geometry_user_short"),
+            Triple(false, longUser, "geometry_user_long"),
+            Triple(true, shortUser, "geometry_user_avatar_short"),
+            Triple(true, longUser, "geometry_user_avatar_long"),
+        )) {
+            showStage2(settings, DisplaySetting(showUserAvatar = avatar), listOf(node))
+            compose.onNodeWithTag("chat_message_user_bubble").assertIsDisplayed()
+            assertFlagVisibility("chat_message_user_header", avatar)
+            assertActualMessagePartsInside16dp(user = true)
+            capture(name)
+        }
+        val attachment = fixture.conversation.messageNodes[3]
+        for (avatar in listOf(false, true)) {
+            showStage2(settings, DisplaySetting(showUserAvatar = avatar), listOf(attachment))
+            assertFlagVisibility("chat_message_user_header", avatar)
+            assertActualMessagePartsInside16dp(user = true)
+            capture(if (avatar) "geometry_attachment_avatar" else "geometry_attachment")
+        }
+        showStage2(settings, DisplaySetting(), listOf(fixture.conversation.messageNodes[5]))
+        assertActualMessagePartsInside16dp(tool = true)
+        capture("geometry_tool_fullwidth")
+
+        // Space break opportunities keep native AST/HTML wraps stable across font resolution.
+        val wrap = "su_012345678901234567 ".repeat(6).trimEnd()
+        for ((markup, name) in listOf(
+            "Начало `${wrap}` конец" to "inline_ast_wrap",
+            "<p>Начало <code>$wrap</code> конец</p>" to "inline_html_wrap",
+        )) {
+            showStage2(settings, DisplaySetting(), listOf(stage2Message(74, MessageRole.ASSISTANT, markup)))
+            val layouts = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithText("Начало $wrap конец")
+                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            assertTrue("Inline su code must wrap in the native text layout", layouts.single().lineCount > 1)
+            capture(name)
+        }
+        for (onLeft in listOf(false, true)) {
+            val display = DisplaySetting(showMessageJumper = true, messageJumperOnLeft = onLeft)
+            showStage2(settings, display, listOf(shortUser, longUser, fixture.conversation.messageNodes[5]))
+            mainChatList().performScrollToIndex(1)
+            compose.waitForIdle()
+            compose.onNodeWithContentDescription("К началу чата").assertIsDisplayed()
+            compose.mainClock.autoAdvance = false
+            capture(if (onLeft) "overlay_left" else "overlay_right")
+            compose.mainClock.autoAdvance = true
+        }
+    }
+
+    private fun assertActualMessagePartsInside16dp(user: Boolean = false, tool: Boolean = false) {
+        val row = compose.onNodeWithTag("chat_message_row").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        assertEquals(16f, row.left, 1f)
+        assertEquals(395f, row.right, 1f)
+        listOf("chat_message_user_bubble", "chat_message_assistant_bubble",
+            "chat_message_user_header", "chat_message_assistant_header",
+            "chat_message_user_actions", "chat_message_assistant_actions",
+            "chat_message_tool_card").forEach { tag ->
+            compose.onAllNodesWithTag(tag).fetchSemanticsNodes().forEach { part ->
+                val bounds = part.boundsInRoot
+                assertTrue("$tag must begin inside the message inset: $bounds", bounds.left >= 15f)
+                assertTrue("$tag must end inside the message inset: $bounds", bounds.right <= 396f)
+                if (tag == "chat_message_user_bubble" || tag == "chat_message_user_header" ||
+                    tag == "chat_message_user_actions") {
+                    assertEquals("Right-aligned $tag ends at the message inset", 395f, bounds.right, 1f)
+                }
+            }
+        }
+        if (user) compose.onNodeWithTag("chat_message_user_actions").assertIsDisplayed()
+        if (tool) {
+            val card = compose.onNodeWithTag("chat_message_tool_card").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            assertEquals("Full-width tool card starts at the message inset", 16f, card.left, 1f)
+            assertEquals("Full-width tool card ends at the message inset", 395f, card.right, 1f)
+        }
     }
 
     @Test fun productionChatStage2UserBranchInteraction() {

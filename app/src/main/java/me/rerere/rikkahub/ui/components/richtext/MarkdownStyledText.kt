@@ -68,8 +68,7 @@ internal fun MarkdownStyledText(
         onTextLayout = { textLayout = it },
         modifier = modifier.drawWithContent {
             textLayout?.let { layout ->
-                val horizontalInset = 6.dp.toPx()
-                val verticalInset = 2.dp.toPx()
+                val horizontalInset = 3.dp.toPx()
                 val radius = CornerRadius(6.dp.toPx())
                 ranges.forEach { range ->
                     if (range.start < range.end && range.end <= layout.layoutInput.text.length) {
@@ -81,15 +80,33 @@ internal fun MarkdownStyledText(
                             if (start < end) {
                                 var left = Float.POSITIVE_INFINITY
                                 var right = Float.NEGATIVE_INFINITY
+                                var top = Float.POSITIVE_INFINITY
+                                var bottom = Float.NEGATIVE_INFINITY
                                 for (offset in start until end) {
                                     val bounds = layout.getBoundingBox(offset)
                                     left = minOf(left, bounds.left)
                                     right = maxOf(right, bounds.right)
+                                    top = minOf(top, bounds.top)
+                                    bottom = maxOf(bottom, bounds.bottom)
                                 }
-                                val topLeft = Offset(left - horizontalInset, layout.getLineTop(line) - verticalInset)
-                                val size = Size(right - left + horizontalInset * 2, layout.getLineBottom(line) - layout.getLineTop(line) + verticalInset * 2)
-                                drawRoundRect(fill, topLeft, size, radius)
-                                drawRoundRect(border, topLeft, size, radius, style = Stroke(1.dp.toPx()))
+                                var paintedLeft = left - horizontalInset
+                                var paintedRight = right + horizontalInset
+                                // Neighboring native glyphs take precedence when the gap is narrower than 3dp.
+                                listOf(start - 1, end).forEach { neighbor ->
+                                    if (neighbor in layout.getLineStart(line) until layout.getLineEnd(line, visibleEnd = true) &&
+                                        !layout.layoutInput.text.text[neighbor].isWhitespace() &&
+                                        neighbor !in range.start until range.end) {
+                                        val bounds = layout.getBoundingBox(neighbor)
+                                        if (bounds.right <= left) paintedLeft = maxOf(paintedLeft, bounds.right)
+                                        if (bounds.left >= right) paintedRight = minOf(paintedRight, bounds.left)
+                                    }
+                                }
+                                val topLeft = Offset(paintedLeft, top)
+                                val size = Size(paintedRight - paintedLeft, bottom - top)
+                                if (size.width > 0f && size.height > 0f) {
+                                    drawRoundRect(fill, topLeft, size, radius)
+                                    drawRoundRect(border, topLeft, size, radius, style = Stroke(1.dp.toPx()))
+                                }
                             }
                         }
                     }

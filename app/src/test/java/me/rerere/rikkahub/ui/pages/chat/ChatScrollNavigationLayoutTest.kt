@@ -29,7 +29,7 @@ import org.robolectric.ParameterizedRobolectricTestRunner.Parameters
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** Uses the production circles and gutter with narrow message constraints. */
+/** Uses the production navigation controls with narrow message constraints. */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [35], qualifiers = "ru-rRU-w411dp-h891dp-mdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -37,14 +37,14 @@ class ChatScrollNavigationLayoutTest(private val width: Int, private val fontSca
     @get:Rule val compose = createComposeRule()
 
     @Test
-    fun `36dp circles and their touch targets fit outside message content`() {
+    fun `36dp circles overlay 16dp message margins without resizing content`() {
         val enabled = mutableStateOf(true)
         compose.setContent {
             ScreenshotTheme(fontScale = fontScale) {
                 val state = rememberLazyListState()
                 val scope = rememberCoroutineScope()
                 Box(Modifier.requiredSize(width.dp, 240.dp)) {
-                    Box(Modifier.fillMaxSize().padding(chatScrollNavigationGutter(enabled.value, onLeft)).padding(16.dp)) {
+                    Box(Modifier.fillMaxSize().padding(16.dp)) {
                         LazyColumn(state = state, modifier = Modifier.fillMaxSize().testTag("scroll_message_content")) {
                             items(8) { Box(Modifier.height(80.dp)) }
                         }
@@ -55,17 +55,17 @@ class ChatScrollNavigationLayoutTest(private val width: Int, private val fontSca
         }
 
         val content = compose.onNodeWithTag("scroll_message_content").fetchSemanticsNode().boundsInRoot
-        assertEquals(if (onLeft) 52f else 16f, content.left, .5f)
-        assertEquals(width - if (onLeft) 16f else 52f, content.right, .5f)
+        assertEquals(16f, content.left, .5f)
+        assertEquals(width - 16f, content.right, .5f)
         listOf("К началу чата", "Предыдущее сообщение", "Следующее сообщение", "Прокрутить вниз").forEach { label ->
             val node = compose.onNodeWithContentDescription(label).assertIsDisplayed().assertHasClickAction().fetchSemanticsNode()
             assertEquals("$label has a 36dp circle", 36f, node.boundsInRoot.width, .5f)
             assertEquals("$label has a 36dp circle", 36f, node.boundsInRoot.height, .5f)
             assertTrue("$label retains a minimum touch target", node.touchBoundsInRoot.width >= 48f)
-            assertTrue("$label fits beside the message content", if (onLeft) {
-                node.touchBoundsInRoot.right <= content.left
+            assertTrue("$label floats over the message margin", if (onLeft) {
+                node.touchBoundsInRoot.left < content.left && node.touchBoundsInRoot.right > content.left
             } else {
-                node.touchBoundsInRoot.left >= content.right
+                node.touchBoundsInRoot.left < content.right && node.touchBoundsInRoot.right > content.right
             })
         }
 
