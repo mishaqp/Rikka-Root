@@ -42,6 +42,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastAll
 import androidx.compose.ui.util.fastForEach
+import androidx.compose.ui.util.fastForEachIndexed
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import kotlinx.serialization.json.jsonArray
@@ -102,6 +103,7 @@ fun ChatMessage(
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String, scope: me.rerere.rikkahub.service.ChatService.ApprovalScope, toolName: String) -> kotlinx.coroutines.Job)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     pendingTools: List<ChatPendingToolPresentation> = emptyList(),
+    activeToolCallId: String? = null,
 ) {
     val message = node.messages[node.selectIndex]
     val presentation = presentChatMessage(message, loading, lastMessage, readOnly)
@@ -165,6 +167,7 @@ fun ChatMessage(
                 onToolAnswer = if (presentation.canInteractWithTools) onToolAnswer else null,
                 onUserMessageClick = if (presentation.canEditFromBubble) onEdit else null,
                 pendingTools = pendingTools.filter { it.key.messageId == presentation.messageId },
+                activeToolCallId = activeToolCallId,
             )
 
             message.translation?.let { translation ->
@@ -283,6 +286,7 @@ private fun MessagePartsBlock(
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onUserMessageClick: (() -> Unit)? = null,
     pendingTools: List<ChatPendingToolPresentation> = emptyList(),
+    activeToolCallId: String? = null,
 ) {
     val context = LocalContext.current
     // 消息输出HapticFeedback
@@ -322,50 +326,24 @@ private fun MessagePartsBlock(
 
     // Render parts in original order (group thinking/tool as chain-of-thought)
     val groupedParts = remember(parts) { parts.groupMessageParts() }
-    groupedParts.fastForEach { block ->
+    groupedParts.fastForEachIndexed { blockOrdinal, block ->
         when (block) {
             is MessagePartBlock.ThinkingBlock -> {
                 if (block.steps.isNotEmpty()) {
-                    val isReasoningOnlyBlock = block.steps.fastAll { it is ThinkingStep.ReasoningStep }
-                    ChainOfThought(
-                        modifier = Modifier.animateContentSize().testTag("chat_message_tool_card"),
-                        steps = block.steps,
-                        collapsedAdaptiveWidth = isReasoningOnlyBlock,
-                        cardColors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = settings.displaySetting.bubbleOpacity),
-                        ),
-                    ) { step ->
-                        when (step) {
-                            is ThinkingStep.ReasoningStep -> {
-                                key(step.reasoning.createdAt) {
-                                    ChatMessageReasoningStep(
-                                        reasoning = step.reasoning,
-                                        model = model,
-                                        assistant = assistant,
-                                        collapsedAdaptiveWidth = isReasoningOnlyBlock,
-                                    )
-                                }
-                            }
-
-                            is ThinkingStep.ToolStep -> {
-                                val pending = pendingTools.firstOrNull { it.tool == step.tool }
-                                key(pending?.renderKey ?: step.tool.toolCallId.ifBlank { step.hashCode().toString() }) {
-                                    ChatMessageToolStep(
-                                        tool = step.tool,
-                                        loading = loading && !step.tool.isExecuted,
-                                        onToolApproval = onToolApproval,
-                                        onToolAnswer = onToolAnswer,
-                                    )
-                                }
-                            }
-
-                            is ThinkingStep.ServerToolStep -> {
-                                key(step.tool.toolCallId.ifBlank { step.hashCode().toString() }) {
-                                    ChatMessageServerToolStep(tool = step.tool)
-                                }
-                            }
-                        }
-                    }
+                    ChatToolTimeline(
+                        block = block,
+                        messageKey = messageKey,
+                        blockOrdinal = blockOrdinal,
+                        options = display.tools,
+                        fontSizeRatio = display.typography.fontSizeRatio,
+                        loading = loading,
+                        model = model,
+                        assistant = assistant,
+                        pendingTools = pendingTools,
+                        activeToolCallId = activeToolCallId,
+                        onToolApproval = onToolApproval,
+                        onToolAnswer = onToolAnswer,
+                    )
                 }
             }
 

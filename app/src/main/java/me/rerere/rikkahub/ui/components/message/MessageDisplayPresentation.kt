@@ -48,7 +48,7 @@ data class MessageTypographyOptions(
 
 data class UserTextDisplayOptions(val enabled: Boolean, val visibleLines: Int)
 
-/** Stored preferences for the later tool timeline; this stage retains its existing renderer. */
+/** Independent stored preferences for the tool timeline and reasoning display. */
 data class ToolDisplayOptions(
     val showSummary: Boolean,
     val hideResultImages: Boolean,

@@ -6,12 +6,16 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.os.Looper
+import android.view.View
+import android.view.ViewGroup
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.InternalComposeUiApi
+import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -23,7 +27,12 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -31,11 +40,15 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.AnnotatedString
 import androidx.test.espresso.Espresso.pressBack
 import coil3.ImageLoader
 import coil3.EventListener
@@ -61,6 +74,7 @@ import com.dropbox.differ.SimpleImageComparator
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.serialization.json.Json
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -69,6 +83,7 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.ui.ToolApprovalState
+import me.rerere.ai.ui.ServerToolStatus
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.rikkahub.data.datastore.DisplaySetting
@@ -83,7 +98,9 @@ import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.service.MessageQueueState
 import me.rerere.rikkahub.service.QueuedMessage
+import me.rerere.rikkahub.service.ChatService.ApprovalScope
 import me.rerere.rikkahub.ui.hooks.ChatInputState
+import me.rerere.rikkahub.ui.components.message.LocalChatTimelineClock
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Response
@@ -109,6 +126,8 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.time.Instant
+import kotlin.time.Clock
 import kotlin.uuid.Uuid
 import me.rerere.rikkahub.R
 import ru.noties.jlatexmath.JLatexMathAndroid
@@ -222,16 +241,33 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         fixture.viewports.forEach { (name, index) ->
             list.performScrollToIndex(index)
             compose.waitForIdle()
-            if (name in listOf("terminal", "automation")) {
-                val count = if (name == "terminal") 1 else 2
-                val label = RuntimeEnvironment.getApplication().getString(R.string.chain_of_thought_show_more_steps, count)
-                compose.onNodeWithText(label).performClick()
+            if (name == "terminal") {
+                val terminalCard = hasTestTag("chat_timeline_card") and
+                    hasAnyDescendant(hasTestTag("chat_timeline_tool_details:call_termux_run_command"))
+                compose.onNode(hasTestTag("chat_timeline_show_more") and hasAnyAncestor(terminalCard)).performClick()
                 compose.waitForIdle()
             }
-            if (name == "reasoning") {
-                val label = RuntimeEnvironment.getApplication().getString(R.string.deep_thinking_seconds, 2f)
-                compose.onNodeWithText(label).performClick()
+            if (name in listOf("automation", "reasoning")) {
+                val context = RuntimeEnvironment.getApplication()
+                val summary = if (name == "reasoning") {
+                    context.getString(R.string.chat_timeline_processed_seconds, "2.0")
+                } else {
+                    context.resources.getQuantityString(R.plurals.chat_timeline_processed_steps, 4, 4)
+                }
+                val expectedSummary = hasTestTag("chat_timeline_summary") and hasText(summary)
+                compose.onAllNodes(expectedSummary).assertCountEquals(1)
+                compose.onNode(expectedSummary).performClick()
                 compose.waitForIdle()
+            }
+            if (name == "generic") {
+                // This is the final message in the fixture. At the end of the
+                // list, earlier two-step cards can remain in the viewport.
+                val summary = RuntimeEnvironment.getApplication().resources
+                    .getQuantityString(R.plurals.chat_timeline_processed_steps, 2, 2)
+                compose.onAllNodes(hasTestTag("chat_timeline_summary") and hasText(summary))
+                    .onLast().performClick()
+                compose.onNodeWithTag("chat_timeline_tool_details:call_unregistered_fixture_tool")
+                    .assertIsDisplayed()
             }
             capture(name)
             if (name == "terminal") {
@@ -666,6 +702,464 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         compose.mainClock.autoAdvance = true
     }
 
+    @Test fun productionChatStage3TimelineStates() {
+        val settings = MutableStateFlow(ScreenshotFixtures.settings)
+        val job = MutableStateFlow<Job?>(null)
+        val ordered = stage3Message(80,
+            UIMessagePart.Text("Сначала проверю данные."),
+            stage3Tool("ordered_read", "workspace_read_file", """{"path":"/workspace/notes.txt"}""",
+                """{"text":"Данные для графика готовы"}"""),
+            UIMessagePart.Tool("ordered_chart", "chart_display",
+                """{"style":"bar","title":"Порядок блоков","x_axis":{"data":["A","B"]},"series":[{"name":"Проверка","values":[2,3]}]}""",
+                listOf(UIMessagePart.Text("""{"success":true}"""))),
+            UIMessagePart.Text("После графика — итог."),
+        )
+        mountStage2(settings, job, listOf(ordered))
+        compose.onNodeWithText("Сначала проверю данные.").assertIsDisplayed()
+        compose.onNodeWithText("После графика — итог.").assertIsDisplayed()
+        compose.onNodeWithTag("chat_timeline_card").assertIsDisplayed()
+        val firstBounds = compose.onNodeWithText("Сначала проверю данные.").fetchSemanticsNode().boundsInRoot
+        val timelineBounds = compose.onNodeWithTag("chat_timeline_card").fetchSemanticsNode().boundsInRoot
+        val chartBounds = compose.onNodeWithText("Порядок блоков").fetchSemanticsNode().boundsInRoot
+        val lastBounds = compose.onNodeWithText("После графика — итог.").fetchSemanticsNode().boundsInRoot
+        assertTrue("Production page must retain text → tool → chart → text order",
+            firstBounds.bottom <= timelineBounds.top && timelineBounds.bottom <= chartBounds.top &&
+                chartBounds.bottom <= lastBounds.top)
+        capture("timeline_text_tool_chart_text")
+
+        val collapsed = stage3Message(81,
+            stage3Tool("finished_one", "get_time_info", output = """{"time":"2026-01-02T12:00:00Z"}"""),
+            stage3Tool("finished_two", "workspace_read_file", output = """{"text":"Прочитано"}"""),
+            stage3Tool("finished_three", "list_files", output = """{"files":[]}"""),
+            stage3Tool("finished_four", "clipboard_tool", output = """{"text":"Готово"}"""),
+        )
+        showStage2(settings, DisplaySetting(), listOf(collapsed))
+        compose.onNodeWithTag("chat_timeline_summary").assertIsDisplayed()
+        capture("timeline_processed_count")
+        compose.onNodeWithTag("chat_timeline_summary").performClick()
+        listOf("finished_one", "finished_two", "finished_three", "finished_four").forEach { id ->
+            compose.onNodeWithTag("chat_timeline_tool_details:$id").assertIsDisplayed()
+        }
+        capture("timeline_summary_expanded")
+        showStage2(settings, DisplaySetting(showToolSummary = false), listOf(collapsed))
+        compose.onNodeWithTag("chat_timeline_summary").assertDoesNotExist()
+        compose.onNodeWithTag("chat_timeline_show_more").assertIsDisplayed()
+        compose.onNodeWithTag("chat_timeline_tool_details:finished_one").assertDoesNotExist()
+        compose.onNodeWithTag("chat_timeline_tool_details:finished_two").assertDoesNotExist()
+        compose.onNodeWithTag("chat_timeline_tool_details:finished_three").assertIsDisplayed()
+        compose.onNodeWithTag("chat_timeline_tool_details:finished_four").assertIsDisplayed()
+        capture("timeline_collapsed_steps")
+        compose.onNodeWithTag("chat_timeline_show_more").performClick()
+        listOf("finished_one", "finished_two", "finished_three", "finished_four").forEach { id ->
+            compose.onNodeWithTag("chat_timeline_tool_details:$id").assertIsDisplayed()
+        }
+        capture("timeline_expanded_steps")
+        showStage2(settings, DisplaySetting(showToolSummary = false, autoCollapseToolSteps = false), listOf(collapsed))
+        compose.onNodeWithTag("chat_timeline_show_more").assertDoesNotExist()
+        listOf("finished_one", "finished_two", "finished_three", "finished_four").forEach { id ->
+            compose.onNodeWithTag("chat_timeline_tool_details:$id").assertIsDisplayed()
+        }
+        capture("timeline_autocollapse_off")
+        showStage2(settings, DisplaySetting(showToolSummary = true, autoCollapseToolSteps = false), listOf(collapsed))
+        compose.onNodeWithTag("chat_timeline_summary").assertIsDisplayed()
+        compose.onNodeWithTag("chat_timeline_show_more").assertDoesNotExist()
+        listOf("finished_one", "finished_two", "finished_three", "finished_four").forEach { id ->
+            compose.onNodeWithTag("chat_timeline_tool_details:$id").assertIsDisplayed()
+        }
+        compose.onNodeWithTag("chat_timeline_summary").performClick()
+        listOf("finished_one", "finished_two", "finished_three", "finished_four").forEach { id ->
+            compose.onNodeWithTag("chat_timeline_tool_details:$id").assertDoesNotExist()
+        }
+        compose.onNodeWithTag("chat_timeline_summary").performClick()
+        listOf("finished_one", "finished_two", "finished_three", "finished_four").forEach { id ->
+            compose.onNodeWithTag("chat_timeline_tool_details:$id").assertIsDisplayed()
+        }
+        showStage2(settings, DisplaySetting(), listOf(collapsed))
+        compose.onNodeWithTag("chat_timeline_summary").assertIsDisplayed()
+
+        val mandatory = stage3Message(82,
+            stage3Tool("prefix_success", "get_time_info", output = """{"time":"2026-01-02T12:00:00Z"}"""),
+            stage3Tool("prefix_pending", "root_exec", """{"command":"id"}""", output = null,
+                approval = ToolApprovalState.Pending),
+            stage3Tool("prefix_ask", "ask_user",
+                """{"questions":[{"id":"q1","question":"Нужна проверка?","options":["Да","Нет"],"selection_type":"single"}]}""",
+                output = null, approval = ToolApprovalState.Pending),
+            UIMessagePart.ServerTool("prefix_failed", "web_search", status = ServerToolStatus.FAILED),
+            stage3Tool("prefix_denied", "browser_eval_js", output = null,
+                approval = ToolApprovalState.Denied("Доступ отклонён")),
+            stage3Tool("prefix_checkpoint", "root_exec", """{"command":"id"}""",
+                """{"error":"root_execution_indeterminate","reason":"checkpointed before launch"}"""),
+            stage3Tool("suffix_success", "get_time_info", output = """{"time":"2026-01-02T12:00:01Z"}"""),
+        )
+        showStage2(settings, DisplaySetting(), listOf(mandatory))
+        compose.onNodeWithTag("chat_timeline_approval_once:prefix_pending").assertExists()
+        compose.onAllNodesWithText("Нужна проверка?").onLast().assertIsDisplayed()
+        compose.onNodeWithTag("chat_timeline_tool_details:prefix_checkpoint").assertExists()
+        capture("timeline_mandatory_prefix")
+        compose.onNodeWithTag("chat_timeline_tool_details:prefix_checkpoint").performScrollTo()
+        compose.onNodeWithTag("chat_timeline_tool_details:prefix_checkpoint").assertIsDisplayed()
+        capture("timeline_mandatory_checkpoint")
+
+        val preview = stage3Message(83, stage3Tool("long_result", "unregistered_fixture_tool", output =
+            "Первая строка\\nВторая строка\\nТретья строка\\nЧетвёртая строка\\nПятая строка\\nШестая строка")
+            .copy(output = listOf(UIMessagePart.Text("Первая строка\nВторая строка\nТретья строка\nЧетвёртая строка\nПятая строка\nШестая строка"),
+                UIMessagePart.Image("file:///tmp/rikka-chat-audit/audit-image.png"))))
+        showStage2(settings, DisplaySetting(hideToolResultImages = true, autoCollapseToolSteps = false), listOf(preview))
+        compose.onNodeWithTag("chat_timeline_tool_preview:long_result").assertIsDisplayed()
+        val previewLayouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithTag("chat_timeline_tool_preview:long_result")
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(previewLayouts) }
+        assertTrue("Inline result preview must fit four visual lines", previewLayouts.single().lineCount <= 4)
+        capture("timeline_preview_images_hidden")
+        compose.onNodeWithTag("chat_timeline_tool_details:long_result").performClick()
+        settleNativeRipple()
+        capture("timeline_full_details", includeWindows = true)
+        pressBack()
+        settleNativeRipple()
+        showStage2(settings, DisplaySetting(hideToolResultImages = false, autoCollapseToolSteps = false), listOf(preview))
+        capture("timeline_preview_images_shown")
+    }
+
+    @Test fun productionChatStage3ApprovalAndInteractiveStates() {
+        val settings = MutableStateFlow(ScreenshotFixtures.settings)
+        val job = MutableStateFlow<Job?>(null)
+        val approvalJob = Job()
+        every { fixture.vm.handleToolApproval(any(), any(), any(), any(), any()) } returns approvalJob
+        val pending = stage3PendingApprovalMessage()
+        mountStage2(settings, job, listOf(pending))
+        compose.onNodeWithTag("chat_timeline_approval_once:stage3_once").assertIsDisplayed()
+        capture("timeline_pending_approvals")
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithTag("chat_timeline_approval_once:stage3_once").performClick()
+        compose.onNodeWithTag("chat_timeline_approval_once:stage3_once").performClick()
+        verify(exactly = 1) {
+            fixture.vm.handleToolApproval("stage3_once", true, "", ApprovalScope.Once, "workspace_write_file")
+        }
+        compose.onNodeWithTag("chat_timeline_approval_scopes:stage3_scoped").performClick()
+        settleNativeRipple()
+        compose.onNodeWithTag("chat_timeline_tool_sheet:stage3_scoped").assertIsDisplayed()
+        capture("timeline_approval_scopes", includeWindows = true)
+        compose.onNodeWithText("Для этого чата").performClick()
+        verify(exactly = 1) {
+            fixture.vm.handleToolApproval("stage3_scoped", true, "", ApprovalScope.ChatScope, "workspace_read_file")
+        }
+        compose.runOnIdle { approvalJob.complete() }
+        compose.mainClock.advanceTimeByFrame()
+        // Only the in-flight duplicate proof needs a frozen clock. Dialog text
+        // fields must be able to advance their focus/cursor animation afterward.
+        compose.mainClock.autoAdvance = true
+        pressBack()
+        settleNativeRipple()
+        compose.onNodeWithTag("chat_timeline_tool_sheet:stage3_scoped").assertDoesNotExist()
+        compose.onNodeWithTag("chat_timeline_approval_scopes:stage3_always").performClick()
+        settleNativeRipple()
+        compose.onNodeWithTag("chat_timeline_tool_sheet:stage3_always").assertIsDisplayed()
+        compose.onNodeWithText("∞ Всегда").performClick()
+        verify(exactly = 1) {
+            fixture.vm.handleToolApproval("stage3_always", true, "", ApprovalScope.Always, "workspace_read_file")
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        compose.onNode(
+            SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss) and
+                hasAnyAncestor(hasTestTag("chat_timeline_tool_sheet:stage3_always")),
+        ).performSemanticsAction(SemanticsActions.Dismiss) { it() }
+        settleNativeRipple()
+        compose.onNodeWithTag("chat_timeline_tool_sheet:stage3_always").assertDoesNotExist()
+    }
+
+    @Test fun productionChatStage3DenyAndServerStates() {
+        // Read-only history mounts the production recovery/export bar; this
+        // external service is present, but no backup action is requested.
+        loadKoinModules(module { single { mockk<BackupManager>(relaxed = true) } })
+        val settings = MutableStateFlow(ScreenshotFixtures.settings)
+        val job = MutableStateFlow<Job?>(null)
+        every { fixture.vm.handleToolApproval(any(), any(), any(), any(), any()) } answers { Job().apply { complete() } }
+        val pending = stage3PendingApprovalMessage()
+        mountStage2(settings, job, listOf(pending))
+        compose.onNodeWithTag("chat_timeline_approval_deny:stage3_deny").performClick()
+        settleNativeRipple()
+        capture("timeline_deny_reason", includeWindows = true)
+        // Like ChatHeaderIntegrationTest, avoid Robolectric's wrap-content
+        // selection-wrapper placement loop while exercising real field actions.
+        val denialField = hasSetTextAction() and hasAnyAncestor(isDialog())
+        val denialReason = "Отклонено пользователем"
+        compose.runWithoutImplicitWait {
+            compose.onNode(denialField).assertIsDisplayed()
+                .performSemanticsAction(SemanticsActions.SetText) { it(AnnotatedString(denialReason)) }
+        }
+        layoutDenyDialog()
+        compose.runWithoutImplicitWait {
+            compose.onNode(denialField and hasText(denialReason)).assertIsDisplayed()
+            compose.onNode(hasText(RuntimeEnvironment.getApplication().getString(R.string.chat_message_tool_deny)) and
+                hasAnyAncestor(isDialog())).assertIsDisplayed()
+                .performSemanticsAction(SemanticsActions.OnClick) { it() }
+        }
+        verify(exactly = 1) {
+            fixture.vm.handleToolApproval("stage3_deny", false, "Отклонено пользователем", ApprovalScope.Once, "root_exec")
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        compose.onNodeWithText(RuntimeEnvironment.getApplication().getString(R.string.chat_message_tool_deny_dialog_title))
+            .assertDoesNotExist()
+
+        val interactive = stage3Message(85,
+            stage3Tool("stage3_ask", "ask_user",
+                """{"questions":[{"id":"q1","question":"Продолжить проверку?","options":["Да","Нет"],"selection_type":"single"}]}""",
+                output = null, approval = ToolApprovalState.Pending),
+            UIMessagePart.ServerTool("stage3_server", "web_search", status = ServerToolStatus.FAILED),
+        )
+        showStage2(settings, DisplaySetting(), listOf(interactive))
+        compose.onAllNodesWithText("Продолжить проверку?").onLast().assertIsDisplayed()
+        capture("timeline_ask_user_server_failed")
+
+        val server = stage3Message(95, UIMessagePart.ServerTool(
+            toolCallId = "stage3_provider_search", toolName = "web_search",
+            input = Json.parseToJsonElement("""{"query":"Compose timeline"}"""),
+            output = Json.parseToJsonElement("""{"results":[{"title":"Документация Compose","url":"https://example.com/compose","snippet":"Строка первая"},{"title":"Материал","url":"https://example.com/guide","snippet":"Строка вторая"}],"summary":"Полный ответ сервера с дополнительными деталями"}"""),
+            status = ServerToolStatus.COMPLETED,
+        ))
+        showStage2(settings, DisplaySetting(), listOf(server))
+        compose.onNodeWithTag("chat_timeline_summary").performClick()
+        compose.onNodeWithTag("chat_timeline_server_preview:stage3_provider_search").assertIsDisplayed()
+        val serverPreviewLayouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithTag("chat_timeline_server_preview:stage3_provider_search")
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(serverPreviewLayouts) }
+        assertTrue("Server result preview must fit four visual lines", serverPreviewLayouts.single().lineCount <= 4)
+        capture("timeline_server_preview")
+        compose.onNodeWithTag("chat_timeline_server_details:stage3_provider_search").performClick()
+        settleNativeRipple()
+        capture("timeline_server_details", includeWindows = true)
+        pressBack()
+        settleNativeRipple()
+
+        compose.runOnIdle {
+            fixture.conversationFlow.value = fixture.conversationFlow.value.copy(historyLoadState = HistoryLoadState.INCOMPLETE)
+        }
+        compose.waitForIdle()
+        showStage2(settings, DisplaySetting(), listOf(pending))
+        compose.onNodeWithTag("chat_timeline_approval_once:stage3_once").assertDoesNotExist()
+        capture("timeline_read_only_pending")
+        compose.mainClock.autoAdvance = true
+    }
+
+    @Test fun productionChatStage3RemoteMcpPendingArguments() {
+        val settings = MutableStateFlow(ScreenshotFixtures.settings)
+        val job = MutableStateFlow<Job?>(null)
+        val remote = stage3Message(96, stage3Tool(
+            "stage3_remote_mcp", "mcp__1234abcd_Documents__search",
+            """{"query":"stage3-remote-query-unique"}""",
+            output = null, approval = ToolApprovalState.Pending,
+        ))
+        mountStage2(settings, job, listOf(remote))
+        compose.onNodeWithText("stage3-remote-query-unique", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("no_input", substring = true).assertDoesNotExist()
+        capture("timeline_remote_mcp_pending_arguments")
+        compose.onNodeWithTag("chat_timeline_tool_details:stage3_remote_mcp").performClick()
+        settleNativeRipple()
+        compose.onNodeWithTag("chat_timeline_tool_sheet:stage3_remote_mcp").assertIsDisplayed()
+        compose.onAllNodesWithText("stage3-remote-query-unique", substring = true).onLast().assertIsDisplayed()
+        compose.onNodeWithText("no_input", substring = true).assertDoesNotExist()
+        capture("timeline_remote_mcp_pending_details", includeWindows = true)
+        pressBack()
+        settleNativeRipple()
+        val control = stage3Message(97, stage3Tool(
+            "stage3_native_mcp", "mcp_add",
+            """{"name":"Аудит MCP","transport":"sse","url":"https://example.com/mcp","headers":[{"name":"Authorization","value":"Bearer stage3-secret-must-stay-hidden"}],"enabled":true}""",
+            output = null, approval = ToolApprovalState.Pending,
+        ))
+        showStage2(settings, DisplaySetting(), listOf(control))
+        compose.onNodeWithText("stage3-secret-must-stay-hidden", substring = true).assertDoesNotExist()
+        compose.onNodeWithTag("chat_timeline_tool_details:stage3_native_mcp").performClick()
+        settleNativeRipple()
+        compose.onNodeWithTag("chat_timeline_tool_sheet:stage3_native_mcp").assertIsDisplayed()
+        compose.onNodeWithText("stage3-secret-must-stay-hidden", substring = true).assertDoesNotExist()
+        capture("timeline_native_mcp_redacted_details", includeWindows = true)
+    }
+
+    @Test fun productionChatStage3ReasoningAndProducedFiles() {
+        val settings = MutableStateFlow(ScreenshotFixtures.settings.copy(displaySetting =
+            DisplaySetting(autoCloseThinking = false)))
+        val job = MutableStateFlow<Job?>(null)
+        val created = Instant.parse("2026-01-02T12:00:00Z")
+        val fixedClock = object : Clock { override fun now(): Instant = created + kotlin.time.Duration.parse("7s") }
+        val reasoningText = (1..18).joinToString("\n") { "Шаг размышления $it: проверяю данные." }
+        val active = stage3Message(86, UIMessagePart.Reasoning(reasoningText, created, null))
+        previousSystemFontScale = RuntimeEnvironment.getFontScale()
+        RuntimeEnvironment.setFontScale(fontScale)
+        every { fixture.vm.settings } returns settings
+        every { fixture.vm.conversationJob } returns job
+        fixture.conversationFlow.value = fixture.conversation.copy(messageNodes = listOf(active))
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            ScreenshotTheme(theme, fontScale) {
+                val currentSettings by settings.collectAsState()
+                CompositionLocalProvider(LocalSettings provides currentSettings,
+                    LocalChatTimelineClock provides fixedClock) {
+                    Surface(Modifier.requiredSize(411.dp, 891.dp).testTag("chat_stage1")) { fixture.Content() }
+                }
+            }
+        }
+        compose.mainClock.advanceTimeBy(300)
+        compose.waitForIdle()
+        mainChatList().performScrollToIndex(0)
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithTag("chat_reasoning_label", useUnmergedTree = true).performScrollTo()
+        compose.onNodeWithTag("chat_reasoning_label", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("chat_reasoning_preview").assertIsDisplayed()
+        capture("reasoning_active_preview")
+        compose.runOnIdle {
+            settings.value = settings.value.copy(displaySetting = settings.value.displaySetting.copy(showThinkingContent = false))
+        }
+        compose.mainClock.advanceTimeBy(300)
+        compose.waitForIdle()
+        compose.onNodeWithTag("chat_reasoning_preview").assertDoesNotExist()
+        capture("reasoning_auto_preview_off")
+        compose.onNodeWithTag("chat_reasoning_step").performClick()
+        compose.mainClock.advanceTimeBy(300)
+        compose.onNodeWithTag("chat_reasoning_expanded").assertIsDisplayed()
+        capture("reasoning_manual_open_when_preview_off")
+        compose.runOnIdle {
+            settings.value = settings.value.copy(displaySetting = settings.value.displaySetting.copy(showThinkingContent = true))
+        }
+        compose.mainClock.advanceTimeBy(300)
+        compose.onNodeWithTag("chat_reasoning_label", useUnmergedTree = true).performScrollTo()
+        compose.onNodeWithTag("chat_reasoning_step").performClick()
+        compose.mainClock.advanceTimeBy(300)
+        compose.onNodeWithTag("chat_reasoning_preview").assertIsDisplayed()
+        val completed = active.copy(messages = listOf(active.currentMessage.copy(parts = listOf(
+            UIMessagePart.Reasoning(reasoningText, created, created + kotlin.time.Duration.parse("9s"))
+        ))))
+        compose.runOnIdle { fixture.conversationFlow.value = fixture.conversationFlow.value.copy(messageNodes = listOf(completed)) }
+        compose.mainClock.advanceTimeBy(300)
+        compose.waitForIdle()
+        compose.onNodeWithTag("chat_reasoning_expanded").assertIsDisplayed()
+        capture("reasoning_completed_open")
+        compose.mainClock.autoAdvance = true
+        val timed = stage3Message(93, UIMessagePart.Reasoning("Первая проверка", created,
+            created + kotlin.time.Duration.parse("4s")), UIMessagePart.Reasoning("Вторая проверка",
+            created + kotlin.time.Duration.parse("4s"), created + kotlin.time.Duration.parse("9s")))
+        showStage2(settings, DisplaySetting(), listOf(timed))
+        compose.onNodeWithTag("chat_timeline_summary").assertIsDisplayed()
+        capture("timeline_processed_seconds")
+
+        val workspaceId = Uuid.parse("60000000-0000-0000-0000-000000000001")
+        val workspaceAssistant = ScreenshotFixtures.assistant.copy(workspaceId = workspaceId)
+        compose.runOnIdle {
+            settings.value = settings.value.copy(assistants = listOf(workspaceAssistant))
+            fixture.conversationFlow.value = fixture.conversationFlow.value.copy(
+                config = fixture.conversationFlow.value.config?.copy(workspaceId = workspaceId))
+        }
+        val files = stage3Message(88,
+            stage3Tool("created_workspace", "workspace_write_file", """{"path":"/workspace/notes.txt","text":"hello"}""",
+                """{"path":"/workspace/notes.txt","name":"notes.txt","isDirectory":false,"sizeBytes":5,"updatedAt":1}"""),
+            stage3Tool("failed_workspace", "workspace_shell", """{"command":"echo /workspace/fake.txt"}""",
+                """{"exitCode":1,"stderr":"failed","stdout":"/workspace/fake.txt"}"""),
+        )
+        showStage2(settings, DisplaySetting(autoCollapseToolSteps = false), listOf(files))
+        compose.onNodeWithTag("chat_produced_files_row").assertIsDisplayed()
+        compose.onNodeWithTag("chat_produced_file_chip").assertIsDisplayed()
+        compose.onNodeWithTag("chat_produced_file_chip").performClick()
+        compose.onNodeWithTag("chat_produced_file_actions").assertIsDisplayed()
+        compose.onNodeWithTag("chat_produced_file_open").assertDoesNotExist()
+        capture("files_created_workspace_only", includeWindows = true)
+        pressBack()
+        settleNativeRipple()
+        val document = stage3Message(89, UIMessagePart.Tool("created_report", "generate_bug_report", "{}",
+            listOf(UIMessagePart.Text("""{"ok":true}"""),
+                UIMessagePart.Document("content://me.rerere.rikkahub.test/report.zip", "report.zip", "application/zip"))))
+        showStage2(settings, DisplaySetting(autoCollapseToolSteps = false), listOf(document))
+        compose.onNodeWithTag("chat_produced_file_chip").performClick()
+        compose.onNodeWithTag("chat_produced_file_open").assertIsDisplayed()
+        capture("files_document_open_route", includeWindows = true)
+        pressBack()
+        settleNativeRipple()
+        val overflow = stage3Message(92, *(1..13).map { number ->
+            stage3Tool("written_$number", "workspace_write_file",
+                """{"path":"/workspace/file$number.txt","text":"ok"}""",
+                """{"path":"/workspace/file$number.txt","name":"file$number.txt","isDirectory":false,"sizeBytes":2,"updatedAt":1}""")
+        }.toTypedArray())
+        showStage2(settings, DisplaySetting(autoCollapseToolSteps = true), listOf(overflow))
+        compose.onNodeWithTag("chat_produced_files_more").assertIsDisplayed()
+        capture("files_thirteen_more")
+        val forty = stage3Message(94, *(1..40).map { number ->
+            stage3Tool("written_long_$number", "workspace_write_file",
+                """{"path":"/workspace/file-$number.txt","text":"ok"}""",
+                """{"path":"/workspace/file-$number.txt","name":"file-$number.txt","isDirectory":false,"sizeBytes":2,"updatedAt":1}""")
+        }.toTypedArray())
+        showStage2(settings, DisplaySetting(autoCollapseToolSteps = true), listOf(forty))
+        compose.onNodeWithTag("chat_produced_files_more").performClick()
+        compose.onNodeWithTag("chat_produced_files_all_list")
+            .performScrollToNode(hasText("/workspace/file-39.txt"))
+        compose.onNodeWithText("/workspace/file-39.txt").performClick()
+        compose.onNodeWithTag("chat_produced_file_actions").assertIsDisplayed()
+        compose.onNodeWithTag("chat_produced_file_export").assertIsDisplayed()
+        compose.onNodeWithTag("chat_produced_file_share").assertIsDisplayed()
+    }
+
+    @Test fun productionChatStage3NarrowPendingAndFiles() {
+        if (fontScale != 1.3f) return
+        val settings = MutableStateFlow(ScreenshotFixtures.settings.copy(displaySetting =
+            DisplaySetting(showUserAvatar = true, autoCollapseToolSteps = false)))
+        val job = MutableStateFlow<Job?>(null)
+        val user = stage2Message(90, MessageRole.USER, "Проверь длинное имя файла на узком экране.")
+        val assistant = stage3Message(91,
+            stage3Tool("narrow_long", "workspace_write_file",
+                """{"path":"/workspace/a-very-long-filename-for-small-screen.txt","text":"hello"}""",
+                """{"path":"/workspace/a-very-long-filename-for-small-screen.txt","name":"a-very-long-filename-for-small-screen.txt","isDirectory":false,"sizeBytes":5,"updatedAt":1}"""),
+            stage3Tool("narrow_pending", "root_exec", """{"command":"ls /sdcard/Download"}""",
+                output = null, approval = ToolApprovalState.Pending),
+        )
+        previousSystemFontScale = RuntimeEnvironment.getFontScale()
+        RuntimeEnvironment.setFontScale(fontScale)
+        val workspaceId = Uuid.parse("60000000-0000-0000-0000-000000000002")
+        settings.value = settings.value.copy(assistants = listOf(ScreenshotFixtures.assistant.copy(workspaceId = workspaceId)))
+        every { fixture.vm.settings } returns settings
+        every { fixture.vm.conversationJob } returns job
+        fixture.conversationFlow.value = fixture.conversation.copy(messageNodes = listOf(user, assistant),
+            config = fixture.conversation.config?.copy(workspaceId = workspaceId))
+        compose.setContent {
+            ScreenshotTheme(theme, fontScale) {
+                val currentSettings by settings.collectAsState()
+                CompositionLocalProvider(LocalSettings provides currentSettings) {
+                    Surface(Modifier.requiredSize(320.dp, 891.dp).testTag("chat_stage1")) { fixture.Content() }
+                }
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("chat_timeline_approval_once:narrow_pending").assertIsDisplayed()
+        compose.onNodeWithTag("chat_produced_file_chip").assertIsDisplayed()
+        compose.onAllNodesWithTag("chat_message_row").fetchSemanticsNodes().forEach { row ->
+            assertEquals("Narrow message starts at 16dp", 16f, row.boundsInRoot.left, 1f)
+            assertEquals("Narrow message ends at 16dp", 304f, row.boundsInRoot.right, 1f)
+        }
+        capture("width320")
+    }
+
+    private fun stage3PendingApprovalMessage() = stage3Message(84,
+            stage3Tool("stage3_once", "workspace_write_file", """{"path":"/workspace/a.txt","text":"a"}""",
+                output = null, approval = ToolApprovalState.Pending),
+            stage3Tool("stage3_scoped", "workspace_read_file", """{"path":"/workspace/a.txt"}""",
+                output = null, approval = ToolApprovalState.Pending),
+            stage3Tool("stage3_always", "workspace_read_file", """{"path":"/workspace/b.txt"}""",
+                output = null, approval = ToolApprovalState.Pending),
+            stage3Tool("stage3_deny", "root_exec", """{"command":"id"}""",
+                output = null, approval = ToolApprovalState.Pending),
+        )
+
+    private fun stage3Tool(
+        id: String,
+        name: String,
+        input: String = "{}",
+        output: String? = """{"success":true,"result":"Готово"}""",
+        approval: ToolApprovalState = ToolApprovalState.Auto,
+    ) = UIMessagePart.Tool(id, name, input, output?.let { listOf(UIMessagePart.Text(it)) }.orEmpty(), approval)
+
+    private fun stage3Message(index: Int, vararg parts: UIMessagePart): MessageNode =
+        stage2Message(index, MessageRole.ASSISTANT, "").let { node ->
+            node.copy(messages = listOf(node.currentMessage.copy(parts = parts.toList())))
+        }
+
     private fun stage2Message(
         index: Int,
         role: MessageRole,
@@ -705,6 +1199,7 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
             settings.value = settings.value.copy(displaySetting = display)
             fixture.conversationFlow.value = fixture.conversationFlow.value.copy(messageNodes = nodes)
         }
+        compose.mainClock.advanceTimeByFrame()
         compose.waitForIdle()
         mainChatList().performScrollToIndex(0)
         compose.waitForIdle()
@@ -733,21 +1228,38 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         val initial = stage2Message(20, MessageRole.ASSISTANT, "Ответ появляется постепенно.").let { node ->
             node.copy(messages = listOf(node.currentMessage.copy(finishedAt = null, usage = null)))
         }
-        showStage2(settings, DisplaySetting(), listOf(initial))
-        compose.mainClock.autoAdvance = false
+        // Exercise the supported no-jumper preference for precise text-animation
+        // frames. Navigation movement/visibility has dedicated enabled cases.
+        showStage2(settings, DisplaySetting(showMessageJumper = false), listOf(initial))
         compose.runOnIdle { job.value = Job() }
         compose.mainClock.advanceTimeByFrame()
         compose.waitForIdle()
+        // Drain the real navigation idle timer after changing the list/job,
+        // before freezing the precisely timed streaming frames below.
+        settleCaptureNavigation()
+        compose.mainClock.autoAdvance = false
         compose.onNodeWithTag("chat_message_streaming_text").assertIsDisplayed()
+        assertCaptureNavigationHidden()
         capture("streaming_text")
+        val appendedText = "Ответ появляется постепенно. Новый фрагмент плавно проявляется."
         compose.runOnIdle {
             fixture.conversationFlow.value = fixture.conversationFlow.value.copy(messageNodes = listOf(initial.copy(
                 messages = listOf(initial.currentMessage.copy(parts = listOf(UIMessagePart.Text(
-                    "Ответ появляется постепенно. Новый фрагмент плавно проявляется.")))),
+                    appendedText)))),
             )))
         }
+        // Markdown parses on Dispatchers.Default. Start the measured fade only
+        // after its actual rendered text has reached this streaming subtree.
+        val appendedRenderer = hasText(appendedText) and
+            hasAnyAncestor(hasTestTag("chat_message_streaming_text"))
+        compose.waitUntil(timeoutMillis = 2_000) {
+            compose.mainClock.advanceTimeByFrame()
+            compose.onAllNodes(appendedRenderer).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.mainClock.advanceTimeByFrame()
         compose.mainClock.advanceTimeBy(100)
         compose.waitForIdle()
+        assertCaptureNavigationHidden()
         capture("streaming_fade")
         val blank = stage2Message(21, MessageRole.ASSISTANT, "").let { node ->
             node.copy(messages = listOf(node.currentMessage.copy(finishedAt = null, usage = null)))
@@ -756,6 +1268,7 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         compose.mainClock.advanceTimeBy(300)
         compose.waitForIdle()
         assertMessageBounds("chat_message_waiting_dots")
+        assertCaptureNavigationHidden()
         capture("waiting_dots")
         compose.runOnIdle { job.value?.cancel(); job.value = null }
         compose.mainClock.advanceTimeByFrame()
@@ -829,24 +1342,58 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         compose.mainClock.advanceTimeBy(300)
         compose.waitForIdle()
         compose.onNodeWithTag("running-tool-bar").assertExists()
+        compose.onNodeWithTag("chat_timeline_tool_details:stage1_running_root").assertExists()
+        compose.onNodeWithText(RuntimeEnvironment.getApplication().getString(R.string.chat_timeline_status_running))
+            .assertIsDisplayed()
         capture("running_command")
         compose.runOnIdle {
             job.value?.cancel()
             job.value = null
         }
         compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        compose.onNodeWithTag("running-tool-bar").assertDoesNotExist()
+        compose.onNodeWithText(RuntimeEnvironment.getApplication().getString(R.string.chat_timeline_status_unknown))
+            .assertIsDisplayed()
+        capture("root_checkpoint_persisted")
+        compose.runOnIdle { job.value = Job() }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        compose.onNodeWithTag("running-tool-bar").assertDoesNotExist()
+        compose.onNodeWithText(RuntimeEnvironment.getApplication().getString(R.string.chat_timeline_status_unknown))
+            .assertIsDisplayed()
+        compose.runOnIdle { job.value?.cancel(); job.value = null }
+        compose.mainClock.advanceTimeByFrame()
         compose.mainClock.autoAdvance = true
     }
 
     private fun captureDetails(tool: String, name: String) {
-        val label = RuntimeEnvironment.getApplication().getString(R.string.chat_message_tool_call_generic, tool)
-        // A later Pending root call can also be precomposed below this viewport.
-        compose.onAllNodesWithText(label).onFirst().performClick()
+        val details = hasTestTag("chat_timeline_tool_details:call_$tool")
+        val target = if (tool in listOf("root_exec", "termux_run_command")) {
+            // The following approval message reuses root_exec's fixture call ID.
+            val terminalCard = hasTestTag("chat_timeline_card") and
+                hasAnyDescendant(hasTestTag("chat_timeline_tool_details:call_termux_run_command"))
+            details and hasAnyAncestor(terminalCard)
+        } else details
+        compose.onNode(target).performClick()
         settleNativeRipple()
         // Material's bottom sheet has its own window and is outside the ChatPage Surface.
         capture(name, includeWindows = true)
         pressBack()
         settleNativeRipple()
+    }
+
+    @OptIn(InternalComposeUiApi::class)
+    private fun layoutDenyDialog() {
+        compose.mainClock.advanceTimeByFrame()
+        compose.runOnUiThread {
+            org.robolectric.shadows.ShadowLooper.idleMainLooper()
+            fun layout(view: View) {
+                if (view is ViewRootForTest) view.measureAndLayoutForTest()
+                if (view is ViewGroup) for (index in 0 until view.childCount) layout(view.getChildAt(index))
+            }
+            layout(requireNotNull(org.robolectric.shadows.ShadowDialog.getLatestDialog().window).decorView)
+        }
     }
 
     private fun settleNativeRipple() {
@@ -856,6 +1403,9 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         compose.runOnUiThread {
             Shadows.shadowOf(Looper.getMainLooper()).idleFor(1_000, TimeUnit.MILLISECONDS)
         }
+        // Native back dispatch can start the sheet's Compose exit animation.
+        // Finish that animation even when streaming fixtures freeze autoAdvance.
+        compose.mainClock.advanceTimeBy(1_000)
         compose.waitForIdle()
     }
 

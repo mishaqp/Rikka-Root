@@ -9,6 +9,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
@@ -36,31 +37,40 @@ class PendingToolApprovalActionsTest {
 
     @Test fun wrappedApprovalButtonsDispatchOriginalScopesAndToolIdentity() {
         render()
-        ToolApprovalAction.entries.filter { it.approved }.forEach { action ->
+        compose.onNodeWithTag("chat_timeline_approval_once:pending-action").assertIsEnabled().performClick()
+        compose.waitForIdle()
+        assertEquals(ApprovalCall("pending-action", true, "", ApprovalScope.Once, "root_exec"), calls.last())
+        compose.onNodeWithTag("chat_timeline_approval_scopes:pending-action").assertIsEnabled().performClick()
+        listOf(ToolApprovalAction.Always, ToolApprovalAction.ChatScope).forEach { action ->
             compose.onNodeWithText(action.label).assertIsEnabled().performClick()
             compose.waitForIdle()
             assertEquals(ApprovalCall("pending-action", true, "", action.scope, "root_exec"), calls.last())
         }
         assertEquals(3, calls.size)
-        compose.onNodeWithText(ToolApprovalAction.Deny.label).assertIsEnabled()
+        compose.onNodeWithTag("chat_timeline_approval_deny:pending-action").assertIsEnabled()
     }
 
     @Test fun wrappedButtonsStayDisabledWhileSubmissionIsInFlight() {
         val save = Job()
         render(job = save)
-        compose.onNodeWithText(ToolApprovalAction.Once.label).performClick()
+        compose.onNodeWithTag("chat_timeline_approval_once:pending-action").performClick()
         compose.waitForIdle()
-        ToolApprovalAction.entries.forEach { compose.onNodeWithText(it.label).assertIsNotEnabled() }
+        compose.onNodeWithTag("chat_timeline_approval_once:pending-action").assertIsNotEnabled()
+        compose.onNodeWithTag("chat_timeline_approval_deny:pending-action").assertIsNotEnabled()
+        compose.onNodeWithTag("chat_timeline_approval_scopes:pending-action").assertIsNotEnabled()
         assertEquals(1, calls.size)
         save.complete()
         compose.waitForIdle()
-        ToolApprovalAction.entries.forEach { compose.onNodeWithText(it.label).assertIsEnabled() }
+        compose.onNodeWithTag("chat_timeline_approval_once:pending-action").assertIsEnabled()
+        compose.onNodeWithTag("chat_timeline_approval_deny:pending-action").assertIsEnabled()
+        compose.onNodeWithTag("chat_timeline_approval_scopes:pending-action").assertIsEnabled()
     }
 
     @Test fun browserJavaScriptStillOmitsAlwaysApproval() {
         render(toolName = "browser_eval_js", input = """{"code":"document.title"}""")
+        compose.onNodeWithTag("chat_timeline_approval_scopes:pending-action").performClick()
         compose.onNodeWithText(ToolApprovalAction.Always.label).assertDoesNotExist()
-        compose.onNodeWithText(ToolApprovalAction.Once.label).assertIsEnabled()
+        compose.onNodeWithTag("chat_timeline_approval_once:pending-action").assertIsEnabled()
         compose.onNodeWithText(ToolApprovalAction.ChatScope.label).assertIsEnabled().performClick()
         compose.waitForIdle()
         assertEquals(ApprovalCall("pending-action", true, "", ApprovalScope.ChatScope, "browser_eval_js"), calls.single())
@@ -69,12 +79,14 @@ class PendingToolApprovalActionsTest {
     @Test fun hardlineCommandStillRequiresPerCallApproval() {
         render(input = """{"command":"rm -rf /sdcard"}""")
         compose.onNodeWithText("Этот инструмент всегда требует отдельного подтверждения.").assertExists()
-        compose.onNodeWithText(ToolApprovalAction.Always.label).assertIsNotEnabled()
-        compose.onNodeWithText(ToolApprovalAction.ChatScope.label).assertIsNotEnabled()
-        compose.onNodeWithText(ToolApprovalAction.Once.label).assertIsEnabled().performClick()
+        compose.onNodeWithTag("chat_timeline_approval_once:pending-action").assertIsEnabled().performClick()
         compose.waitForIdle()
         assertTrue(calls.single().approved)
         assertEquals(ApprovalScope.Once, calls.single().scope)
+        compose.onNodeWithTag("chat_timeline_approval_scopes:pending-action").performClick()
+        compose.onNodeWithText(ToolApprovalAction.Always.label).assertIsNotEnabled()
+        compose.onNodeWithText(ToolApprovalAction.ChatScope.label).assertIsNotEnabled()
+        assertEquals(1, calls.size)
     }
 
     private fun render(

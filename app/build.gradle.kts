@@ -165,6 +165,7 @@ val chatScreenshotProperties = listOf(
     "chat.audit.record", "chat.audit.record.dir", "chat.stage1.record", "chat.stage1.record.dir",
     "chat.stage2.record", "chat.stage2.record.dir",
     "chat.stage2fixes.record", "chat.stage2fixes.record.dir",
+    "chat.stage3.record", "chat.stage3.record.dir",
 ).associateWith { property ->
     providers.gradleProperty(property).getOrElse(if (property.endsWith(".dir")) "" else "false")
 }

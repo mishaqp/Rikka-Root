@@ -27,7 +27,7 @@ class ChatToolRenderingContractTest {
 
     @Test fun askUserAndSuccessfulChartsRetainTheirDedicatedMessageRenderRoutes() {
         val tools = ChatProductionSource.canonical(ChatProductionSource.function("ui/components/message/ChatMessageTools.kt", "ChatMessageToolStep"))
-        assertTrue(tools.contains(ChatProductionSource.canonical("if (tool.toolName == ASK_USER_TOOL_NAME) { AskUserToolStep(tool = tool, loading = loading, onToolAnswer = onToolAnswer) return }")))
+        assertTrue(tools.contains(ChatProductionSource.canonical("if (tool.toolName == ASK_USER_TOOL_NAME) { AskUserToolStep(tool = tool, loading = loading, fontSizeRatio = fontSizeRatio, onToolAnswer = onToolAnswer) return }")))
         val message = ChatProductionSource.canonical(ChatProductionSource.function("ui/components/message/ChatMessage.kt", "MessagePartsBlock"))
         assertTrue(message.contains(ChatProductionSource.canonical("is MessagePartBlock.ChartBlock")))
         assertTrue(message.contains(ChatProductionSource.canonical("spec?.let { ChartCard(spec = it) }")))

@@ -119,6 +119,8 @@ fun ChatList(
     conversation: Conversation,
     state: LazyListState,
     loading: Boolean,
+    activeRunningToolMessageKey: String? = null,
+    activeRunningToolCallId: String? = null,
     processingStatus: String? = null,
     previewMode: Boolean,
     settings: Settings,
@@ -162,6 +164,8 @@ fun ChatList(
                 conversation = conversation,
                 state = state,
                 loading = loading,
+                activeRunningToolMessageKey = activeRunningToolMessageKey,
+                activeRunningToolCallId = activeRunningToolCallId,
                 processingStatus = processingStatus,
                 settings = settings,
                 hazeState = hazeState,
@@ -192,6 +196,8 @@ private fun ChatListNormal(
     conversation: Conversation,
     state: LazyListState,
     loading: Boolean,
+    activeRunningToolMessageKey: String?,
+    activeRunningToolCallId: String?,
     processingStatus: String? = null,
     settings: Settings,
     hazeState: HazeState,
@@ -381,6 +387,9 @@ private fun ChatListNormal(
                             onToolAnswer = onToolAnswer,
                             lastMessage = item.lastMessage,
                             pendingTools = item.pendingTools,
+                            activeToolCallId = if (activeRunningToolMessageKey ==
+                                "${node.id}/${node.selectIndex}/${node.currentMessage.id}")
+                                activeRunningToolCallId else null,
                         )
                     }
                 }

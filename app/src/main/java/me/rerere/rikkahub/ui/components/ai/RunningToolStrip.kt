@@ -60,14 +60,36 @@ fun ChatRunningToolStrip(
     onStop: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    ChatRunningToolStrip(
+        observation = rememberRunningToolObservation(conversation, loading),
+        onStop = onStop,
+        modifier = modifier,
+    )
+}
+
+/** Shared by the composer strip and message timeline on ChatPage. */
+@Composable
+internal fun rememberRunningToolObservation(
+    conversation: Conversation,
+    loading: Boolean,
+): RunningToolObservation {
     var observation by remember(conversation.id) { mutableStateOf(RunningToolObservation()) }
     val currentObservation = remember(observation, conversation, loading) {
         observeRunningTools(observation, conversation, loading, SystemClock.elapsedRealtime())
     }
     LaunchedEffect(currentObservation) { observation = currentObservation }
+    return currentObservation
+}
+
+@Composable
+internal fun ChatRunningToolStrip(
+    observation: RunningToolObservation,
+    onStop: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     // Project the current snapshot before the effect records it, so completion or a branch
     // switch cannot render the previous invocation for a frame.
-    val presentation = currentObservation.presentation ?: return
+    val presentation = observation.presentation ?: return
     var nowMillis by remember(presentation.toolCallId, presentation.observedAtMillis) {
         mutableLongStateOf(SystemClock.elapsedRealtime())
     }

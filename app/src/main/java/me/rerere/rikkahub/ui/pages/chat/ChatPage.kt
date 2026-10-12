@@ -78,6 +78,7 @@ import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.ui.components.ai.ChatAttachmentPickerActions
 import me.rerere.rikkahub.ui.components.ai.ChatRunningToolStrip
+import me.rerere.rikkahub.ui.components.ai.rememberRunningToolObservation
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.ui.components.ai.ChatInput
 import me.rerere.rikkahub.ui.components.ai.FilesPicker
@@ -312,6 +313,7 @@ private fun ChatPageContent(
     }
 
     TTSAutoPlay(vm = vm, setting = setting, conversation = conversation)
+    val runningToolObservation = rememberRunningToolObservation(conversation, loadingJob != null)
 
     Surface(
         color = MaterialTheme.colorScheme.background,
@@ -347,8 +349,7 @@ private fun ChatPageContent(
                             alignment = Alignment.BottomCenter,
                         )) {
                             ChatRunningToolStrip(
-                                conversation = conversation,
-                                loading = loadingJob != null,
+                                observation = runningToolObservation,
                                 onStop = vm::stopGeneration,
                                 modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 6.dp),
                             )
@@ -435,6 +436,8 @@ private fun ChatPageContent(
                 conversation = conversation,
                 state = chatListState,
                 loading = loadingJob != null,
+                activeRunningToolMessageKey = runningToolObservation.activeClientKey?.messageKey,
+                activeRunningToolCallId = runningToolObservation.activeClientKey?.toolCallId,
                 processingStatus = processingStatus,
                 previewMode = previewMode,
                 settings = setting,

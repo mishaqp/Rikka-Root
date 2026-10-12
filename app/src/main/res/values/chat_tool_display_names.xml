@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_timeline_tool_external_automation_add_trusted_package" translatable="false">Доверие вызывающему приложению</string>
+    <string name="chat_timeline_tool_external_automation_remove_trusted_package" translatable="false">Отзыв доверия вызывающему приложению</string>
+    <string name="chat_timeline_tool_external_automation_set_enabled" translatable="false">Переключение внешней автоматизации</string>
+    <string name="chat_timeline_tool_external_automation_status" translatable="false">Настройки и история внешних запусков</string>
+    <string name="chat_timeline_tool_browser_back" translatable="false">Переход назад в браузере</string>
+    <string name="chat_timeline_tool_browser_click" translatable="false">Нажатие на странице</string>
+    <string name="chat_timeline_tool_browser_click_and_read" translatable="false">Нажатие и чтение страницы</string>
+    <string name="chat_timeline_tool_browser_current_url" translatable="false">Адрес страницы браузера</string>
+    <string name="chat_timeline_tool_browser_done" translatable="false">Завершение задачи браузера</string>
+    <string name="chat_timeline_tool_browser_eval_js" translatable="false">JavaScript на странице браузера</string>
+    <string name="chat_timeline_tool_browser_forward" translatable="false">Переход вперёд в браузере</string>
+    <string name="chat_timeline_tool_browser_get_dom" translatable="false">DOM страницы браузера</string>
+    <string name="chat_timeline_tool_browser_get_links" translatable="false">Ссылки страницы браузера</string>
+    <string name="chat_timeline_tool_browser_get_text" translatable="false">Текст страницы браузера</string>
+    <string name="chat_timeline_tool_browser_open" translatable="false">Открытие страницы браузера</string>
+    <string name="chat_timeline_tool_browser_press_key" translatable="false">Нажатие клавиши в браузере</string>
+    <string name="chat_timeline_tool_browser_screenshot" translatable="false">Снимок страницы браузера</string>
+    <string name="chat_timeline_tool_browser_scroll" translatable="false">Прокрутка страницы</string>
+    <string name="chat_timeline_tool_browser_select" translatable="false">Выбор значения на странице</string>
+    <string name="chat_timeline_tool_browser_submit" translatable="false">Отправка формы страницы</string>
+    <string name="chat_timeline_tool_browser_type" translatable="false">Ввод на странице</string>
+    <string name="chat_timeline_tool_browser_wait_for" translatable="false">Ожидание содержимого страницы</string>
+    <string name="chat_timeline_tool_check_token_usage" translatable="false">Расход токенов текущего чата</string>
+    <string name="chat_timeline_tool_mcp_add" translatable="false">Добавление сервера MCP</string>
+    <string name="chat_timeline_tool_mcp_delete" translatable="false">Удаление сервера MCP</string>
+    <string name="chat_timeline_tool_mcp_get" translatable="false">Чтение конфигурации MCP</string>
+    <string name="chat_timeline_tool_mcp_list" translatable="false">Список серверов MCP</string>
+    <string name="chat_timeline_tool_mcp_list_tools" translatable="false">Список инструментов MCP</string>
+    <string name="chat_timeline_tool_mcp_set_enabled" translatable="false">Переключение сервера MCP</string>
+    <string name="chat_timeline_tool_mcp_set_tool_approval" translatable="false">Изменение подтверждения MCP-инструмента</string>
+    <string name="chat_timeline_tool_mcp_test" translatable="false">Проверка подключения MCP</string>
+    <string name="chat_timeline_tool_mcp_update" translatable="false">Изменение сервера MCP</string>
+    <string name="chat_timeline_tool_conversation_search" translatable="false">Поиск по чатам</string>
+    <string name="chat_timeline_tool_recent_chats" translatable="false">Недавние чаты</string>
+    <string name="chat_timeline_tool_memory_tool" translatable="false">Работа с памятью</string>
+    <string name="chat_timeline_tool_scrape_web" translatable="false">Чтение веб-страницы</string>
+    <string name="chat_timeline_tool_search_web" translatable="false">Поиск в интернете</string>
+    <string name="chat_timeline_tool_skill_get_content" translatable="false">Содержимое навыка</string>
+    <string name="chat_timeline_tool_use_skill" translatable="false">Использование навыка</string>
+    <string name="chat_timeline_tool_workspace_background_list" translatable="false">Фоновые процессы среды</string>
+    <string name="chat_timeline_tool_workspace_background_output" translatable="false">Вывод фонового процесса среды</string>
+    <string name="chat_timeline_tool_workspace_background_start" translatable="false">Запуск фонового процесса среды</string>
+    <string name="chat_timeline_tool_workspace_background_stop" translatable="false">Остановка фонового процесса среды</string>
+    <string name="chat_timeline_tool_workspace_edit_file" translatable="false">Изменение файла среды</string>
+    <string name="chat_timeline_tool_workspace_read_file" translatable="false">Чтение файла среды</string>
+    <string name="chat_timeline_tool_workspace_shell" translatable="false">Команда в рабочей среде</string>
+    <string name="chat_timeline_tool_workspace_write_file" translatable="false">Запись файла среды</string>
+    <string name="chat_timeline_tool_list_zip_contents" translatable="false">Содержимое архива</string>
+    <string name="chat_timeline_tool_unzip_file" translatable="false">Распаковка архива</string>
+    <string name="chat_timeline_tool_zip_files" translatable="false">Создание архива</string>
+    <string name="chat_timeline_tool_ask_user" translatable="false">Вопрос пользователю</string>
+    <string name="chat_timeline_tool_get_audio_info" translatable="false">Сведения об аудиофайле</string>
+    <string name="chat_timeline_tool_get_battery_status" translatable="false">Состояние батареи</string>
+    <string name="chat_timeline_tool_get_brightness" translatable="false">Чтение яркости экрана</string>
+    <string name="chat_timeline_tool_set_brightness" translatable="false">Изменение яркости экрана</string>
+    <string name="chat_timeline_tool_calendar_create" translatable="false">Создание событий календаря</string>
+    <string name="chat_timeline_tool_calendar_query" translatable="false">Поиск событий календаря</string>
+    <string name="chat_timeline_tool_list_call_log" translatable="false">Журнал звонков</string>
+    <string name="chat_timeline_tool_take_photo" translatable="false">Съёмка фото</string>
+    <string name="chat_timeline_tool_chart_display" translatable="false">Построение диаграммы</string>
+    <string name="chat_timeline_tool_clipboard_tool" translatable="false">Работа с буфером обмена</string>
+    <string name="chat_timeline_tool_list_contacts" translatable="false">Чтение контактов</string>
+    <string name="chat_timeline_tool_search_contacts" translatable="false">Поиск контактов</string>
+    <string name="chat_timeline_tool_delete_job" translatable="false">Удаление заданий</string>
+    <string name="chat_timeline_tool_get_job_history" translatable="false">История собственных заданий</string>
+    <string name="chat_timeline_tool_list_jobs" translatable="false">Список собственных заданий</string>
+    <string name="chat_timeline_tool_pause_job" translatable="false">Приостановка заданий</string>
+    <string name="chat_timeline_tool_resume_job" translatable="false">Возобновление заданий</string>
+    <string name="chat_timeline_tool_schedule_job" translatable="false">Создание заданий по расписанию</string>
+    <string name="chat_timeline_tool_trigger_job_now" translatable="false">Ручной запуск задания</string>
+    <string name="chat_timeline_tool_download_file" translatable="false">Загрузка файлов</string>
+    <string name="chat_timeline_tool_grant_directory_access" translatable="false">Предоставление доступа к папке</string>
+    <string name="chat_timeline_tool_list_granted_directories" translatable="false">Папки с предоставленным доступом</string>
+    <string name="chat_timeline_tool_list_storage_volumes" translatable="false">Список накопителей</string>
+    <string name="chat_timeline_tool_batch_copy" translatable="false">Копирование файлов</string>
+    <string name="chat_timeline_tool_batch_delete" translatable="false">Удаление файлов</string>
+    <string name="chat_timeline_tool_batch_move" translatable="false">Перемещение файлов</string>
+    <string name="chat_timeline_tool_copy_file" translatable="false">Копирование файлов</string>
+    <string name="chat_timeline_tool_create_directory" translatable="false">Создание папок</string>
+    <string name="chat_timeline_tool_delete_file" translatable="false">Удаление файлов</string>
+    <string name="chat_timeline_tool_file_info" translatable="false">Сведения о файлах</string>
+    <string name="chat_timeline_tool_find_files" translatable="false">Поиск файлов</string>
+    <string name="chat_timeline_tool_list_files" translatable="false">Список файлов</string>
+    <string name="chat_timeline_tool_move_file" translatable="false">Перемещение файлов</string>
+    <string name="chat_timeline_tool_open_file" translatable="false">Открытие файла в приложении</string>
+    <string name="chat_timeline_tool_read_file" translatable="false">Чтение файлов</string>
+    <string name="chat_timeline_tool_show_image" translatable="false">Просмотр изображения</string>
+    <string name="chat_timeline_tool_write_binary_file" translatable="false">Запись двоичных файлов</string>
+    <string name="chat_timeline_tool_click_node" translatable="false">Нажатие элемента экрана</string>
+    <string name="chat_timeline_tool_find_node" translatable="false">Поиск элемента экрана</string>
+    <string name="chat_timeline_tool_set_text" translatable="false">Ввод текста в элемент экрана</string>
+    <string name="chat_timeline_tool_verify_fingerprint" translatable="false">Биометрическая проверка</string>
+    <string name="chat_timeline_tool_global_action" translatable="false">Системное действие экрана</string>
+    <string name="chat_timeline_tool_eval_javascript" translatable="false">Выполнение JavaScript</string>
+    <string name="chat_timeline_tool_keystore_decrypt" translatable="false">Расшифровка данных</string>
+    <string name="chat_timeline_tool_keystore_delete_key" translatable="false">Удаление ключей</string>
+    <string name="chat_timeline_tool_keystore_encrypt" translatable="false">Шифрование данных</string>
+    <string name="chat_timeline_tool_keystore_generate_key" translatable="false">Создание ключей</string>
+    <string name="chat_timeline_tool_keystore_list_keys" translatable="false">Список ключей инструментов</string>
+    <string name="chat_timeline_tool_keystore_sign" translatable="false">Подпись данных ключом</string>
+    <string name="chat_timeline_tool_keystore_verify" translatable="false">Проверка подписи</string>
+    <string name="chat_timeline_tool_get_location" translatable="false">Местоположение</string>
+    <string name="chat_timeline_tool_get_media_status" translatable="false">Состояние медиаплеера</string>
+    <string name="chat_timeline_tool_pause_media" translatable="false">Пауза медиа</string>
+    <string name="chat_timeline_tool_play_media" translatable="false">Воспроизведение медиа</string>
+    <string name="chat_timeline_tool_resume_media" translatable="false">Возобновление медиа</string>
+    <string name="chat_timeline_tool_seek_media" translatable="false">Перемотка медиа</string>
+    <string name="chat_timeline_tool_stop_media" translatable="false">Остановка медиа</string>
+    <string name="chat_timeline_tool_scan_media" translatable="false">Сканирование медиафайлов</string>
+    <string name="chat_timeline_tool_record_audio" translatable="false">Запись аудио</string>
+    <string name="chat_timeline_tool_create_calendar_event" translatable="false">Создание события в приложении календаря</string>
+    <string name="chat_timeline_tool_create_contact" translatable="false">Создание контакта в приложении</string>
+    <string name="chat_timeline_tool_launch_activity" translatable="false">Запуск экрана приложения</string>
+    <string name="chat_timeline_tool_launch_app" translatable="false">Запуск приложения</string>
+    <string name="chat_timeline_tool_list_app_activities" translatable="false">Список экранов приложения</string>
+    <string name="chat_timeline_tool_list_installed_apps" translatable="false">Список видимых приложений</string>
+    <string name="chat_timeline_tool_open_url" translatable="false">Открытие ссылки</string>
+    <string name="chat_timeline_tool_open_wifi_settings" translatable="false">Открытие настроек Wi-Fi</string>
+    <string name="chat_timeline_tool_send_email_intent" translatable="false">Подготовка письма</string>
+    <string name="chat_timeline_tool_send_sms_intent" translatable="false">Подготовка SMS</string>
+    <string name="chat_timeline_tool_show_location_on_map" translatable="false">Открытие карты</string>
+    <string name="chat_timeline_tool_nfc_read_tag" translatable="false">Чтение NFC-меток</string>
+    <string name="chat_timeline_tool_nfc_status" translatable="false">Состояние NFC</string>
+    <string name="chat_timeline_tool_nfc_write_tag" translatable="false">Запись NFC-меток</string>
+    <string name="chat_timeline_tool_post_notification" translatable="false">Публикация уведомлений</string>
+    <string name="chat_timeline_tool_root_exec" translatable="false">Команда root</string>
+    <string name="chat_timeline_tool_get_screen_time" translatable="false">Время использования приложений</string>
+    <string name="chat_timeline_tool_take_screenshot" translatable="false">Снимок экрана телефона</string>
+    <string name="chat_timeline_tool_scroll" translatable="false">Прокрутка экрана</string>
+    <string name="chat_timeline_tool_list_sensors" translatable="false">Список датчиков</string>
+    <string name="chat_timeline_tool_read_sensor" translatable="false">Чтение датчика</string>
+    <string name="chat_timeline_tool_set_wallpaper" translatable="false">Смена обоев</string>
+    <string name="chat_timeline_tool_share" translatable="false">Отправка через системное меню</string>
+    <string name="chat_timeline_tool_list_sms_inbox" translatable="false">Чтение входящих SMS</string>
+    <string name="chat_timeline_tool_search_sms" translatable="false">Поиск SMS</string>
+    <string name="chat_timeline_tool_send_sms" translatable="false">Отправка SMS</string>
+    <string name="chat_timeline_tool_speech_to_text" translatable="false">Распознавание речи</string>
+    <string name="chat_timeline_tool_delete_ssh_host" translatable="false">Удаление хоста SSH</string>
+    <string name="chat_timeline_tool_list_ssh_hosts" translatable="false">Список хостов SSH</string>
+    <string name="chat_timeline_tool_save_ssh_host" translatable="false">Сохранение хоста SSH</string>
+    <string name="chat_timeline_tool_ssh_exec_saved" translatable="false">Команда SSH на сохранённом узле</string>
+    <string name="chat_timeline_tool_ssh_forget_host_key" translatable="false">Удаление доверенного ключа сервера SSH</string>
+    <string name="chat_timeline_tool_ssh_download" translatable="false">Загрузка файла по SSH</string>
+    <string name="chat_timeline_tool_ssh_upload" translatable="false">Отправка файла по SSH</string>
+    <string name="chat_timeline_tool_ssh_exec" translatable="false">Команда SSH</string>
+    <string name="chat_timeline_tool_get_storage_info" translatable="false">Сведения о хранилище</string>
+    <string name="chat_timeline_tool_swipe" translatable="false">Жест на экране</string>
+    <string name="chat_timeline_tool_long_press" translatable="false">Долгое нажатие на экране</string>
+    <string name="chat_timeline_tool_tap" translatable="false">Нажатие на экране</string>
+    <string name="chat_timeline_tool_get_telephony_info" translatable="false">Сведения о мобильной связи</string>
+    <string name="chat_timeline_tool_termux_session_kill" translatable="false">Остановка сессии Termux</string>
+    <string name="chat_timeline_tool_termux_session_list" translatable="false">Список сессий Termux</string>
+    <string name="chat_timeline_tool_termux_session_read" translatable="false">Чтение сессии Termux</string>
+    <string name="chat_timeline_tool_termux_session_send" translatable="false">Ввод в сессию Termux</string>
+    <string name="chat_timeline_tool_termux_session_start" translatable="false">Запуск сессии Termux</string>
+    <string name="chat_timeline_tool_termux_run_command" translatable="false">Команда Termux</string>
+    <string name="chat_timeline_tool_text_to_speech" translatable="false">Озвучивание текста</string>
+    <string name="chat_timeline_tool_get_time_info" translatable="false">Дата и время</string>
+    <string name="chat_timeline_tool_show_toast" translatable="false">Всплывающие сообщения</string>
+    <string name="chat_timeline_tool_set_torch" translatable="false">Управление фонариком</string>
+    <string name="chat_timeline_tool_vibrate" translatable="false">Вибрация устройства</string>
+    <string name="chat_timeline_tool_get_volume" translatable="false">Чтение громкости</string>
+    <string name="chat_timeline_tool_set_volume" translatable="false">Изменение громкости</string>
+    <string name="chat_timeline_tool_wake_screen" translatable="false">Включение экрана телефона</string>
+    <string name="chat_timeline_tool_get_wifi_info" translatable="false">Сведения о Wi-Fi</string>
+    <string name="chat_timeline_tool_read_window_tree" translatable="false">Чтение дерева экрана</string>
+    <string name="chat_timeline_tool_write_text_file" translatable="false">Запись текста в файл</string>
+    <string name="chat_timeline_tool_generate_bug_report" translatable="false">Создание отчёта об ошибке</string>
+    <string name="chat_timeline_tool_skill_install_from_text" translatable="false">Установка навыка из текста</string>
+    <string name="chat_timeline_tool_skill_install_from_url" translatable="false">Установка навыка по ссылке</string>
+    <string name="chat_timeline_tool_run_js" translatable="false">Скрипт навыка</string>
+    <string name="chat_timeline_tool_subagent_cancel" translatable="false">Остановка собственного субагента</string>
+    <string name="chat_timeline_tool_subagent_dispatch" translatable="false">Запуск субагента</string>
+    <string name="chat_timeline_tool_subagent_get" translatable="false">Чтение результатов собственного субагента</string>
+    <string name="chat_timeline_tool_subagent_list" translatable="false">Список собственных субагентов</string>
+    <string name="chat_timeline_tool_workflow_create" translatable="false">Создание сценария</string>
+    <string name="chat_timeline_tool_workflow_delete" translatable="false">Удаление сценария</string>
+    <string name="chat_timeline_tool_workflow_get" translatable="false">Чтение сценария и истории</string>
+    <string name="chat_timeline_tool_workflow_list" translatable="false">Список сценариев</string>
+    <string name="chat_timeline_tool_workflow_run" translatable="false">Запуск сценария</string>
+    <string name="chat_timeline_tool_workflow_set_enabled" translatable="false">Переключение сценария</string>
+    <string name="chat_timeline_tool_workflow_update" translatable="false">Изменение сценария</string>
+    <string name="chat_timeline_tool_remote_mcp" translatable="false">Запрос MCP</string>
+    <string name="chat_timeline_tool_unknown" translatable="false">Инструмент: %1$s</string>
+    <string name="chat_timeline_server_tool_web_search" translatable="false">Поиск в интернете</string>
+    <string name="chat_timeline_server_tool_file_search" translatable="false">Поиск по файлам</string>
+    <string name="chat_timeline_server_tool_code_interpreter" translatable="false">Выполнение кода</string>
+</resources>

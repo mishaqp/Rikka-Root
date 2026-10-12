@@ -362,6 +362,14 @@ fun SettingPreferencesUIPage(vm: SettingVM = koinViewModel()) {
             }
 
             item {
+                ToolTimelineDisplaySettings(
+                    displaySetting = displaySetting,
+                    onUpdate = ::updateDisplaySetting,
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
+            }
+
+            item {
                 MessageBehaviorDisplaySettings(
                     displaySetting = displaySetting,
                     onUpdate = ::updateDisplaySetting,
@@ -413,6 +421,53 @@ fun SettingPreferencesUIPage(vm: SettingVM = koinViewModel()) {
                 }
             }
         }
+    }
+}
+
+/** The tool timeline controls share the message display page and update existing preferences. */
+@Composable
+internal fun ToolTimelineDisplaySettings(
+    displaySetting: DisplaySetting,
+    onUpdate: ((DisplaySetting) -> DisplaySetting) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    CardGroup(
+        modifier = modifier,
+        title = { Text(stringResource(R.string.setting_display_tool_timeline_title)) },
+    ) {
+        item(
+            headlineContent = { Text(stringResource(R.string.setting_display_tool_summary_title)) },
+            supportingContent = { Text(stringResource(R.string.setting_display_tool_summary_description)) },
+            trailingContent = {
+                Switch(
+                    checked = displaySetting.showToolSummary,
+                    onCheckedChange = { value -> onUpdate { current -> current.copy(showToolSummary = value) } },
+                    modifier = Modifier.testTag("setting_tool_summary"),
+                )
+            },
+        )
+        item(
+            headlineContent = { Text(stringResource(R.string.setting_display_tool_result_images_title)) },
+            supportingContent = { Text(stringResource(R.string.setting_display_tool_result_images_description)) },
+            trailingContent = {
+                Switch(
+                    checked = displaySetting.hideToolResultImages,
+                    onCheckedChange = { value -> onUpdate { current -> current.copy(hideToolResultImages = value) } },
+                    modifier = Modifier.testTag("setting_tool_result_images"),
+                )
+            },
+        )
+        item(
+            headlineContent = { Text(stringResource(R.string.setting_display_tool_auto_collapse_title)) },
+            supportingContent = { Text(stringResource(R.string.setting_display_tool_auto_collapse_description)) },
+            trailingContent = {
+                Switch(
+                    checked = displaySetting.autoCollapseToolSteps,
+                    onCheckedChange = { value -> onUpdate { current -> current.copy(autoCollapseToolSteps = value) } },
+                    modifier = Modifier.testTag("setting_tool_auto_collapse"),
+                )
+            },
+        )
     }
 }
 

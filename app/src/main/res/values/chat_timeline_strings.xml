@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="chat_timeline_processed_steps" translatable="false">
+        <item quantity="one">Обработано · %1$d шаг</item>
+        <item quantity="few">Обработано · %1$d шага</item>
+        <item quantity="many">Обработано · %1$d шагов</item>
+        <item quantity="other">Обработано · %1$d шага</item>
+    </plurals>
+    <string name="chat_timeline_processed_seconds" translatable="false">Обработано · %1$s с</string>
+    <string name="chat_timeline_show_more" translatable="false">Показать ещё %1$d</string>
+    <string name="chat_timeline_status_waiting" translatable="false">Ожидание</string>
+    <string name="chat_timeline_status_running" translatable="false">Выполняется</string>
+    <string name="chat_timeline_status_result" translatable="false">Результат получен</string>
+    <string name="chat_timeline_status_failed" translatable="false">Ошибка</string>
+    <string name="chat_timeline_status_denied" translatable="false">Отклонено</string>
+    <string name="chat_timeline_status_blocked" translatable="false">Заблокировано</string>
+    <string name="chat_timeline_status_unknown" translatable="false">Исход выполнения неизвестен</string>
+    <string name="chat_timeline_status_approval" translatable="false">Требуется разрешение</string>
+    <string name="chat_timeline_status_answer" translatable="false">Ожидает ответа</string>
+    <string name="chat_timeline_status_answered" translatable="false">Ответ отправлен</string>
+    <string name="chat_timeline_scope_actions" translatable="false">Другие варианты разрешения</string>
+    <string name="chat_timeline_generic_title" translatable="false">Работа с инструментом</string>
+    <string name="chat_timeline_server_title" translatable="false">Инструмент сервера</string>
+    <string name="chat_timeline_server_input" translatable="false">Входные данные</string>
+    <string name="chat_timeline_server_output" translatable="false">Результат</string>
+</resources>

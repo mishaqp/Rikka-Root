@@ -21,6 +21,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.message.ChatMessageToolStep
 import me.rerere.rikkahub.ui.components.message.ToolApprovalAction
+import me.rerere.rikkahub.ui.components.message.timelineToolNameResource
 import me.rerere.rikkahub.ui.components.ui.ChainOfThought
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -69,7 +70,7 @@ class PendingToolApprovalLayoutTest internal constructor(
         }
         compose.waitForIdle()
         val card = compose.onNodeWithTag("approval_card").fetchSemanticsNode().boundsInRoot
-        val title = RuntimeEnvironment.getApplication().getString(R.string.chat_message_tool_call_generic, tool.toolName)
+        val title = RuntimeEnvironment.getApplication().getString(timelineToolNameResource(tool.toolName)!!)
         val titleNode = compose.onNodeWithText(title, useUnmergedTree = true)
         val titleBounds = titleNode.fetchSemanticsNode().boundsInRoot
         assertTrue("Pending tool title must have positive visible width: $titleBounds", titleBounds.width > 0f)
@@ -80,19 +81,19 @@ class PendingToolApprovalLayoutTest internal constructor(
         titleNode.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
         assertEquals("The production title must expose its text layout", 1, layouts.size)
         val layout = layouts.single()
-        val identityStart = title.indexOf(tool.toolName)
-        (identityStart until title.length).forEach { offset ->
+        (title.indices).forEach { offset ->
             val glyph = layout.getBoundingBox(offset)
-            assertTrue("Tool identity glyph at $offset must have visible width: $glyph", glyph.width > 0f)
-            assertContained("tool identity glyph at $offset", Rect(0f, 0f, layout.size.width.toFloat(), layout.size.height.toFloat()), glyph)
-            assertFalse("Tool identity must not be ellipsized", layout.isLineEllipsized(layout.getLineForOffset(offset)))
+            assertTrue("Tool title glyph at $offset must have visible width: $glyph", glyph.width > 0f)
+            assertContained("tool title glyph at $offset", Rect(0f, 0f, layout.size.width.toFloat(), layout.size.height.toFloat()), glyph)
+            assertFalse("Tool title must not be ellipsized", layout.isLineEllipsized(layout.getLineForOffset(offset)))
         }
 
-        val actions = ToolApprovalAction.entries.map { action ->
-            compose.onNodeWithText(action.label).fetchSemanticsNode().boundsInRoot.also { bounds ->
-                assertTrue("${action.label} must be visible", bounds.width > 0f && bounds.height > 0f)
-                assertContained(action.label, card, bounds)
-                assertFalse("${action.label} must not overlap the tool title", bounds.overlaps(titleBounds))
+        val actions = listOf("chat_timeline_approval_once:pending-root-layout",
+            "chat_timeline_approval_deny:pending-root-layout", "chat_timeline_approval_scopes:pending-root-layout").map { tag ->
+            compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot.also { bounds ->
+                assertTrue("$tag must be visible", bounds.width > 0f && bounds.height > 0f)
+                assertContained(tag, card, bounds)
+                assertFalse("$tag must not overlap the tool title", bounds.overlaps(titleBounds))
             }
         }
         actions.forEachIndexed { index, bounds ->
@@ -100,8 +101,10 @@ class PendingToolApprovalLayoutTest internal constructor(
                 assertFalse("Scope actions must not overlap: $bounds / $other", bounds.overlaps(other))
             }
         }
-        if (fontScale == 1.3f) {
-            assertTrue("Narrow large-font scope actions must wrap onto multiple rows", actions.map { it.center.y }.distinct().size >= 2)
+        assertEquals("Compact approval controls stay on one row at every supported font and width",
+            1, actions.map { it.center.y }.distinct().size)
+        actions.forEach { bounds ->
+            assertTrue("Approval target must remain comfortably touchable: $bounds", bounds.width >= 40f && bounds.height >= 40f)
         }
     }
 

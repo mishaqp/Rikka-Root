@@ -10,13 +10,20 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -34,8 +41,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -48,6 +59,8 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.BubbleChatQuestion
 import me.rerere.hugeicons.stroke.Tick01
+import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.Tools
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.message.tools.DefaultToolPreview
@@ -57,51 +70,121 @@ import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.ui.ChainOfThoughtScope
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.utils.JsonInstant
+import me.rerere.rikkahub.utils.JsonInstantPretty
 import me.rerere.ui.components.DotLoading
 import me.rerere.rikkahub.data.ai.tools.ToolPermissionPolicy
 import me.rerere.rikkahub.service.ChatService.ApprovalScope
+import me.rerere.ai.ui.ServerToolStatus
 
 private const val ASK_USER_TOOL_NAME = "ask_user"
+private val MCP_CUSTOM_APPROVAL_TOOL_NAMES = setOf(
+    "mcp_add", "mcp_update", "mcp_delete", "mcp_set_enabled", "mcp_set_tool_approval",
+)
 
 @Composable
-fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool) {
+fun ChainOfThoughtScope.ChatMessageServerToolStep(
+    tool: UIMessagePart.ServerTool,
+    status: TimelineStatus = when (tool.status) {
+        ServerToolStatus.IN_PROGRESS -> TimelineStatus.Running
+        ServerToolStatus.COMPLETED -> TimelineStatus.ResultReceived
+        ServerToolStatus.FAILED -> TimelineStatus.Failed
+    },
+    fontSizeRatio: Float = 1f,
+) {
     val loading = !tool.isFinished
-    ChainOfThoughtStep(
+    var showDetails by remember(tool.toolCallId) { mutableStateOf(false) }
+    val output = tool.output?.let { JsonInstantPretty.encodeToString(it) }
+    ControlledChainOfThoughtStep(
+        expanded = true,
+        onExpandedChange = {},
+        contentVisible = true,
+        testTag = "chat_timeline_server_details:${tool.toolCallId}",
+        onClick = { showDetails = true },
         icon = {
             if (loading) {
-                DotLoading(size = 10.dp)
+                DotLoading(size = 18.dp)
             } else {
                 Icon(
                     imageVector = HugeIcons.Tools,
                     contentDescription = null,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(18.dp),
                     tint = LocalContentColor.current.copy(alpha = 0.7f),
                 )
             }
         },
         label = {
             Text(
-                text = stringResource(R.string.chat_message_tool_call_generic, tool.toolName),
-                style = MaterialTheme.typography.titleSmall,
+                text = timelineToolDisplayName(tool.toolName),
+                style = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp * fontSizeRatio,
+                    fontFamily = LocalTextStyle.current.fontFamily),
                 color = MaterialTheme.colorScheme.secondary,
                 modifier = Modifier.shimmer(isLoading = loading),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         },
+        content = {
+            Column {
+                Text(
+                    text = tool.toolName,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (output != null) Text(
+                    text = output,
+                    modifier = Modifier.testTag("chat_timeline_server_preview:${tool.toolCallId}"),
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp * fontSizeRatio,
+                        lineHeight = 16.8.sp * fontSizeRatio, fontFamily = LocalTextStyle.current.fontFamily),
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = when (status) {
+                        TimelineStatus.Running -> stringResource(R.string.chat_timeline_status_running)
+                        TimelineStatus.Failed -> stringResource(R.string.chat_timeline_status_failed)
+                        else -> stringResource(R.string.chat_timeline_status_result)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (status == TimelineStatus.Failed) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
     )
+    if (showDetails) ModalBottomSheet(onDismissRequest = { showDetails = false }) {
+        SelectionContainer {
+            Column(
+                modifier = Modifier.fillMaxHeight(0.8f).verticalScroll(rememberScrollState()).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(tool.toolName, style = MaterialTheme.typography.titleMedium)
+                Text(timelineStatusText(status), style = MaterialTheme.typography.labelMedium)
+                tool.input?.let { input ->
+                    Text(stringResource(R.string.chat_timeline_server_input), style = MaterialTheme.typography.labelMedium)
+                    Text(JsonInstantPretty.encodeToString(input), style = MaterialTheme.typography.bodySmall)
+                }
+                tool.output?.let { result ->
+                    Text(stringResource(R.string.chat_timeline_server_output), style = MaterialTheme.typography.labelMedium)
+                    Text(JsonInstantPretty.encodeToString(result), style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+    }
 }
 
 @Composable
 fun ChainOfThoughtScope.ChatMessageToolStep(
     tool: UIMessagePart.Tool,
     loading: Boolean = false,
+    status: TimelineStatus = presentToolStatus(tool, loading),
+    options: ToolDisplayOptions? = null,
+    fontSizeRatio: Float = 1f,
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String, scope: ApprovalScope, toolName: String) -> kotlinx.coroutines.Job)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
 ) {
     // ask_user 是交互式问答流程, 不走注册式渲染框架
     if (tool.toolName == ASK_USER_TOOL_NAME) {
-        AskUserToolStep(tool = tool, loading = loading, onToolAnswer = onToolAnswer)
+        AskUserToolStep(tool = tool, loading = loading, fontSizeRatio = fontSizeRatio, onToolAnswer = onToolAnswer)
         return
     }
 
@@ -138,31 +221,59 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     val isDenied = tool.approvalState is ToolApprovalState.Denied
     val images = tool.output.filterIsInstance<UIMessagePart.Image>()
     val webviewParts = tool.output.filterIsInstance<UIMessagePart.Text>().filter { it.hasSkillWebviewMeta() }
+    val broaderScopesAllowed = remember(tool.toolName, tool.input) {
+        ToolPermissionPolicy.canGrantAlways(tool.toolName, tool.inputAsJson())
+    }
+    val chatScopeAllowed = remember(tool.toolName, tool.input) {
+        ToolPermissionPolicy.canGrantForChat(tool.toolName, tool.inputAsJson())
+    }
+    val useCustomMcpPreview = tool.toolName in MCP_CUSTOM_APPROVAL_TOOL_NAMES
+    val redactedMcpPreview = if (isPending && useCustomMcpPreview) runCatching {
+        (tool.inputAsJson() as? JsonObject)?.let {
+            me.rerere.rikkahub.data.ai.mcp.control.McpApprovalRenderer.render(tool.toolName, it)
+        }
+    }.getOrNull() else null
+    val workflowPreview = if (isPending &&
+        me.rerere.rikkahub.workflow.tools.WorkflowApprovalRenderer.isWorkflowTool(tool.toolName)) runCatching {
+        me.rerere.rikkahub.workflow.tools.WorkflowApprovalRenderer.renderPlain(tool.toolName, tool.input)
+    }.getOrNull() else null
+    val resultText = if (!tool.hasExecutionCheckpoint()) tool.output
+        .filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }.takeIf { it.isNotBlank() } else null
+    val pendingPreview = if (isPending && !useCustomMcpPreview && workflowPreview == null) {
+        ((tool.inputAsJson() as? JsonObject)?.get("command") as? JsonPrimitive)?.contentOrNull
+            ?: tool.input.takeIf { it.isNotBlank() }
+    } else null
 
     // 摘要由注册的渲染器决定; 图片输出与拒绝原因为所有工具通用
-    val hasExtraContent = renderer.hasSummary(context) || isDenied || images.isNotEmpty() || webviewParts.isNotEmpty()
+    val hasExtraContent = renderer.hasSummary(context) || isDenied || images.isNotEmpty() ||
+        webviewParts.isNotEmpty() || resultText != null || pendingPreview != null ||
+        status != TimelineStatus.ResultReceived
 
     ControlledChainOfThoughtStep(
         expanded = expanded,
         onExpandedChange = { expanded = it },
+        testTag = "chat_timeline_tool_details:${tool.toolCallId}",
         icon = {
             if (loading) {
                 DotLoading(
-                    size = 10.dp
+                    size = 18.dp
                 )
             } else {
                 Icon(
                     imageVector = renderer.icon(context),
                     contentDescription = null,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(18.dp),
                     tint = LocalContentColor.current.copy(alpha = 0.7f)
                 )
             }
         },
         label = {
             Text(
-                text = renderer.title(context),
-                style = MaterialTheme.typography.titleSmall,
+                text = timelineToolDisplayName(tool.toolName),
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontSize = 13.sp * fontSizeRatio,
+                    fontFamily = LocalTextStyle.current.fontFamily,
+                ),
                 color = MaterialTheme.colorScheme.secondary,
                 modifier = Modifier.shimmer(isLoading = loading),
                 maxLines = 2,
@@ -174,46 +285,30 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                 Column {
                     // Copied from Agent's approval-card path: secret headers must not be
                     // displayed as raw JSON before the user approves MCP configuration.
-                    if (tool.toolName.startsWith("mcp_")) {
-                        val mcpRendered = runCatching {
-                            (tool.inputAsJson() as? JsonObject)?.let {
-                                me.rerere.rikkahub.data.ai.mcp.control.McpApprovalRenderer
-                                    .render(tool.toolName, it)
-                            }
-                        }.getOrNull()
-                        if (!mcpRendered.isNullOrBlank()) {
+                    if (useCustomMcpPreview) {
+                        if (!redactedMcpPreview.isNullOrBlank()) {
                             Text(
-                                text = mcpRendered,
+                                text = redactedMcpPreview,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
-                    val broaderScopesAllowed = ToolPermissionPolicy.canGrantAlways(tool.toolName, tool.inputAsJson())
-                    val chatScopeAllowed = ToolPermissionPolicy.canGrantForChat(tool.toolName, tool.inputAsJson())
-                    if (me.rerere.rikkahub.workflow.tools.WorkflowApprovalRenderer.isWorkflowTool(tool.toolName)) {
-                        val preview = runCatching {
-                            me.rerere.rikkahub.workflow.tools.WorkflowApprovalRenderer.renderPlain(tool.toolName, tool.input)
-                        }.getOrNull()
-                        if (!preview.isNullOrBlank()) Text(preview, style = MaterialTheme.typography.labelSmall)
-                    }
+                    if (!workflowPreview.isNullOrBlank()) Text(workflowPreview, style = MaterialTheme.typography.labelSmall)
                     if (!chatScopeAllowed) Text(
                         "Этот инструмент всегда требует отдельного подтверждения.",
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.labelSmall,
                     )
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        ToolApprovalAction.entries.filterNot {
-                            tool.toolName == "browser_eval_js" && it.scope == ApprovalScope.Always
-                        }.forEach { action ->
-                            TextButton(
-                                enabled = !inFlight && when (action.scope) {
-                                    ApprovalScope.Once -> true
-                                    ApprovalScope.ChatScope -> chatScopeAllowed
-                                    ApprovalScope.Always -> broaderScopesAllowed
-                                },
+                        listOf(ToolApprovalAction.Once, ToolApprovalAction.Deny).forEach { action ->
+                            IconButton(
+                                modifier = Modifier.testTag(if (action == ToolApprovalAction.Once)
+                                    "chat_timeline_approval_once:${tool.toolCallId}" else
+                                    "chat_timeline_approval_deny:${tool.toolCallId}"),
+                                enabled = !inFlight,
                                 onClick = {
-                                    if (inFlight) return@TextButton
+                                    if (inFlight) return@IconButton
                                     if (action == ToolApprovalAction.Deny) {
                                         showDenyDialog = true
                                     } else {
@@ -222,7 +317,24 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                                         }
                                     }
                                 },
-                            ) { Text(action.label) }
+                            ) {
+                                Icon(
+                                    imageVector = if (action == ToolApprovalAction.Once) HugeIcons.Tick01 else HugeIcons.Cancel01,
+                                    contentDescription = action.label,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                            }
+                        }
+                        IconButton(
+                            modifier = Modifier.testTag("chat_timeline_approval_scopes:${tool.toolCallId}"),
+                            enabled = !inFlight,
+                            onClick = { showResult = true },
+                        ) {
+                            Icon(
+                                imageVector = HugeIcons.MoreVertical,
+                                contentDescription = stringResource(R.string.chat_timeline_scope_actions),
+                                modifier = Modifier.size(14.dp),
+                            )
                         }
                     }
                 }
@@ -235,11 +347,39 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         content = if (hasExtraContent) {
             {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    renderer.Summary(context)
+                    Text(
+                        text = timelineStatusText(status),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (status == TimelineStatus.Failed || status == TimelineStatus.Denied ||
+                            status == TimelineStatus.Blocked || status == TimelineStatus.Indeterminate)
+                            MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (!tool.hasExecutionCheckpoint()) renderer.Summary(context)
+                    if ((outputUnparsable || !renderer.hasSummary(context)) && resultText != null) Text(
+                        text = resultText,
+                        modifier = Modifier.testTag("chat_timeline_tool_preview:${tool.toolCallId}"),
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontSize = 12.sp * fontSizeRatio,
+                            lineHeight = 16.8.sp * fontSizeRatio,
+                            fontFamily = LocalTextStyle.current.fontFamily,
+                        ),
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (pendingPreview != null) Text(
+                        text = pendingPreview,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontSize = 12.sp * fontSizeRatio,
+                            lineHeight = 16.8.sp * fontSizeRatio,
+                            fontFamily = LocalTextStyle.current.fontFamily,
+                        ),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                     webviewParts.forEach { SkillWebviewCardOrNull(it) }
-                    if (images.isNotEmpty()) {
+                    if (images.isNotEmpty() && options?.hideResultImages != true) {
                         LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.wrapContentWidth(),
                         ) {
                             items(images) { image ->
@@ -247,8 +387,9 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                                     model = image.url,
                                     contentDescription = null,
                                     modifier = Modifier
-                                        .height(64.dp)
-                                        .wrapContentWidth(),
+                                        .height(120.dp)
+                                        .widthIn(max = 240.dp)
+                                        .clip(RoundedCornerShape(8.dp)),
                                 )
                             }
                         }
@@ -285,30 +426,74 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
 
     if (showResult) {
         ModalBottomSheet(
+            modifier = Modifier.testTag("chat_timeline_tool_sheet:${tool.toolCallId}"),
             sheetState = rememberBottomSheetState(
                 initialValue = SheetValue.Hidden,
                 enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)
             ),
             onDismissRequest = { showResult = false },
             content = {
-                if (outputUnparsable) {
-                    DefaultToolPreview(context = context)
-                } else {
-                    renderer.Preview(
-                        context = context,
-                        onDismissRequest = { showResult = false },
-                    )
+                Column {
+                    if (isPending && onToolApproval != null) {
+                        if (!redactedMcpPreview.isNullOrBlank()) Text(
+                            redactedMcpPreview, modifier = Modifier.padding(horizontal = 16.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        if (!workflowPreview.isNullOrBlank()) Text(
+                            workflowPreview, modifier = Modifier.padding(horizontal = 16.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        FlowRow(
+                            modifier = Modifier.padding(horizontal = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            listOf(ToolApprovalAction.ChatScope, ToolApprovalAction.Always).filterNot {
+                                tool.toolName == "browser_eval_js" && it == ToolApprovalAction.Always
+                            }.forEach { action ->
+                                TextButton(
+                                    enabled = !inFlight && if (action == ToolApprovalAction.ChatScope)
+                                        chatScopeAllowed else broaderScopesAllowed,
+                                    onClick = {
+                                        submission.submit(approvalScope) {
+                                            onToolApproval(tool.toolCallId, true, "", action.scope, tool.toolName)
+                                        }
+                                    },
+                                ) { Text(action.label) }
+                            }
+                        }
+                    }
+                    // MCP controls can carry secrets in arguments; their pending sheet shows only
+                    // the existing redacted approval preview and scoped actions.
+                    if (!isPending || !useCustomMcpPreview) {
+                        if (outputUnparsable) DefaultToolPreview(context = context)
+                        else renderer.Preview(context = context, onDismissRequest = { showResult = false })
+                    }
                 }
             },
         )
     }
 }
 
+@Composable
+private fun timelineStatusText(status: TimelineStatus): String = stringResource(when (status) {
+    TimelineStatus.Running -> R.string.chat_timeline_status_running
+    TimelineStatus.Waiting -> R.string.chat_timeline_status_waiting
+    TimelineStatus.AwaitingApproval -> R.string.chat_timeline_status_approval
+    TimelineStatus.AwaitingAnswer -> R.string.chat_timeline_status_answer
+    TimelineStatus.Answered -> R.string.chat_timeline_status_answered
+    TimelineStatus.Denied -> R.string.chat_timeline_status_denied
+    TimelineStatus.ResultReceived, TimelineStatus.Succeeded -> R.string.chat_timeline_status_result
+    TimelineStatus.Failed -> R.string.chat_timeline_status_failed
+    TimelineStatus.Blocked -> R.string.chat_timeline_status_blocked
+    TimelineStatus.Indeterminate -> R.string.chat_timeline_status_unknown
+})
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChainOfThoughtScope.AskUserToolStep(
     tool: UIMessagePart.Tool,
     loading: Boolean,
+    fontSizeRatio: Float,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)?,
 ) {
     val isPending = tool.isPending
@@ -335,8 +520,6 @@ private fun ChainOfThoughtScope.AskUserToolStep(
     // Track selected options for multi questions
     val multiAnswers = remember { mutableStateMapOf<String, Set<String>>() }
 
-    val firstQuestion = questions.firstOrNull()?.question ?: "..."
-
     var expanded by remember { mutableStateOf(true) }
 
     ControlledChainOfThoughtStep(
@@ -344,23 +527,21 @@ private fun ChainOfThoughtScope.AskUserToolStep(
         onExpandedChange = { expanded = it },
         icon = {
             if (loading) {
-                DotLoading(size = 10.dp)
+                DotLoading(size = 18.dp)
             } else {
                 Icon(
                     imageVector = HugeIcons.BubbleChatQuestion,
                     contentDescription = null,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(18.dp),
                     tint = LocalContentColor.current.copy(alpha = 0.7f)
                 )
             }
         },
         label = {
             Text(
-                text = if (questions.size <= 1) firstQuestion else stringResource(
-                    R.string.chat_message_tool_ask_questions,
-                    questions.size
-                ),
-                style = MaterialTheme.typography.titleSmall,
+                text = timelineToolDisplayName(ASK_USER_TOOL_NAME),
+                style = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp * fontSizeRatio,
+                    fontFamily = LocalTextStyle.current.fontFamily),
                 color = MaterialTheme.colorScheme.secondary,
                 modifier = Modifier.shimmer(isLoading = loading),
                 maxLines = 2,

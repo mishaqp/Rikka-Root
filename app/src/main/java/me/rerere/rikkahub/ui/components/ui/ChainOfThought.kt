@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.ui.components.ui
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +21,7 @@ import androidx.compose.material3.CardColors
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -31,12 +34,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.util.fastForEachIndexed
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowDown01
@@ -44,6 +51,7 @@ import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Sparkles
+import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.R
 
 /**
@@ -70,34 +78,78 @@ fun <T> ChainOfThought(
     steps: List<T>,
     collapsedVisibleCount: Int = 2,
     collapsedAdaptiveWidth: Boolean = false,
+    timelineStyle: Boolean = false,
+    fontSizeRatio: Float = 1f,
+    stateKey: String? = null,
+    collapsedVisibleIndices: List<Int>? = null,
+    summaryLabel: String? = null,
+    autoCollapseSummary: Boolean = true,
     content: @Composable ChainOfThoughtScope.(T) -> Unit
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    val canCollapse = steps.size > collapsedVisibleCount
+    var expanded by remember(stateKey) { mutableStateOf(false) }
+    var summaryOpen by remember(stateKey, autoCollapseSummary) { mutableStateOf(!autoCollapseSummary) }
+    val collapsedSteps = collapsedVisibleIndices?.mapNotNull { steps.getOrNull(it) }
+        ?: steps.takeLast(collapsedVisibleCount)
+    val canCollapse = collapsedSteps.size < steps.size
     val shouldFillCollapseControlWidth = expanded || !collapsedAdaptiveWidth
 
     Card(
-        modifier = modifier,
+        modifier = modifier.then(if (timelineStyle) Modifier.testTag("chat_timeline_card") else Modifier),
         colors = cardColors,
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(if (timelineStyle) 16.dp else 20.dp),
     ) {
         Column(
             modifier = Modifier
-                .padding(horizontal = 12.dp, vertical = 4.dp)
+                .padding(horizontal = if (timelineStyle) 8.dp else 12.dp, vertical = 4.dp)
                 .animateContentSize(
-                    animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
+                    animationSpec = if (timelineStyle) tween(300) else MaterialTheme.motionScheme.defaultSpatialSpec()
                 ),
         ) {
-            val visibleSteps = if (expanded || !canCollapse) {
+            if (summaryLabel != null) {
+                Row(
+                    modifier = Modifier
+                        .testTag("chat_timeline_summary")
+                        .clip(MaterialTheme.shapes.small)
+                        .clickable { summaryOpen = !summaryOpen }
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.width(24.dp), contentAlignment = Alignment.Center) {
+                        Icon(HugeIcons.Tick01, contentDescription = null, modifier = Modifier.size(15.dp))
+                    }
+                    Text(
+                        text = summaryLabel,
+                        modifier = Modifier.padding(start = 8.dp),
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontSize = 13.sp * fontSizeRatio,
+                            fontFamily = LocalTextStyle.current.fontFamily,
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    val rotation by animateFloatAsState(
+                        targetValue = if (summaryOpen) 90f else 0f,
+                        animationSpec = tween(200),
+                        label = "timeline-summary-chevron",
+                    )
+                    Icon(
+                        HugeIcons.ArrowRight01,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp).graphicsLayer(rotationZ = rotation),
+                    )
+                }
+                if (!summaryOpen) return@Column
+            }
+            val visibleSteps = if (expanded || !canCollapse || summaryLabel != null) {
                 steps
             } else {
-                steps.takeLast(collapsedVisibleCount)
+                collapsedSteps
             }
 
             // 显示展开/折叠按钮（统一在顶部）
-            if (canCollapse) {
+            if (summaryLabel == null && canCollapse) {
                 Row(
                     modifier = Modifier
+                        .then(if (timelineStyle) Modifier.testTag("chat_timeline_show_more") else Modifier)
                         .then(
                             if (shouldFillCollapseControlWidth) {
                                 Modifier.fillMaxWidth()
@@ -115,10 +167,15 @@ fun <T> ChainOfThought(
                         modifier = Modifier.width(24.dp),
                         contentAlignment = Alignment.Center,
                     ) {
+                        val rotation by animateFloatAsState(
+                            targetValue = if (expanded) 180f else 0f,
+                            animationSpec = tween(200),
+                            label = "timeline-chevron",
+                        )
                         Icon(
-                            imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                            imageVector = if (timelineStyle) HugeIcons.ArrowDown01 else if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
                             contentDescription = null,
-                            modifier = Modifier.size(16.dp),
+                            modifier = Modifier.size(16.dp).then(if (timelineStyle) Modifier.graphicsLayer(rotationZ = rotation) else Modifier),
                             tint = MaterialTheme.colorScheme.primary,
                         )
                     }
@@ -130,11 +187,15 @@ fun <T> ChainOfThought(
                             stringResource(R.string.chain_of_thought_collapse)
                         } else {
                             stringResource(
-                                R.string.chain_of_thought_show_more_steps,
-                                steps.size - collapsedVisibleCount
+                                if (timelineStyle) R.string.chat_timeline_show_more else R.string.chain_of_thought_show_more_steps,
+                                steps.size - collapsedSteps.size
                             )
                         },
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontSize = if (timelineStyle) 13.sp * fontSizeRatio else MaterialTheme.typography.labelMedium.fontSize,
+                            fontWeight = if (timelineStyle) FontWeight.SemiBold else MaterialTheme.typography.labelMedium.fontWeight,
+                            fontFamily = if (timelineStyle) LocalTextStyle.current.fontFamily else MaterialTheme.typography.labelMedium.fontFamily,
+                        ),
                         color = MaterialTheme.colorScheme.primary,
                     )
                 }
@@ -152,6 +213,7 @@ fun <T> ChainOfThought(
                             isFirst = isFirst,
                             isLast = isLast,
                             lineColor = lineColor,
+                            timelineStyle = timelineStyle,
                         )
                     }
                     scope.content(step)
@@ -184,6 +246,7 @@ interface ChainOfThoughtScope {
         label: (@Composable () -> Unit),
         extra: (@Composable () -> Unit)? = null,
         onClick: (() -> Unit)? = null,
+        testTag: String? = null,
         collapsedAdaptiveWidth: Boolean = false,
         content: (@Composable () -> Unit)? = null,
     )
@@ -212,6 +275,7 @@ interface ChainOfThoughtScope {
         label: (@Composable () -> Unit),
         extra: (@Composable () -> Unit)? = null,
         onClick: (() -> Unit)? = null,
+        testTag: String? = null,
         collapsedAdaptiveWidth: Boolean = false,
         contentVisible: Boolean = expanded,
         extraBelowLabel: Boolean = false,
@@ -223,6 +287,7 @@ private class ChainOfThoughtScopeImpl(
     private val isFirst: Boolean,
     private val isLast: Boolean,
     private val lineColor: Color,
+    private val timelineStyle: Boolean,
 ) : ChainOfThoughtScope {
     @Composable
     override fun ChainOfThoughtStep(
@@ -230,6 +295,7 @@ private class ChainOfThoughtScopeImpl(
         label: @Composable (() -> Unit),
         extra: @Composable (() -> Unit)?,
         onClick: (() -> Unit)?,
+        testTag: String?,
         collapsedAdaptiveWidth: Boolean,
         content: @Composable (() -> Unit)?
     ) {
@@ -239,6 +305,7 @@ private class ChainOfThoughtScopeImpl(
             label = label,
             extra = extra,
             onClick = onClick,
+            testTag = testTag,
             collapsedAdaptiveWidth = collapsedAdaptiveWidth,
             expanded = expanded,
             onExpandedChange = { expanded = it },
@@ -256,6 +323,7 @@ private class ChainOfThoughtScopeImpl(
         label: @Composable (() -> Unit),
         extra: @Composable (() -> Unit)?,
         onClick: (() -> Unit)?,
+        testTag: String?,
         collapsedAdaptiveWidth: Boolean,
         contentVisible: Boolean,
         extraBelowLabel: Boolean,
@@ -266,6 +334,7 @@ private class ChainOfThoughtScopeImpl(
             label = label,
             extra = extra,
             onClick = onClick,
+            testTag = testTag,
             collapsedAdaptiveWidth = collapsedAdaptiveWidth,
             expanded = expanded,
             onExpandedChange = onExpandedChange,
@@ -281,6 +350,7 @@ private class ChainOfThoughtScopeImpl(
         label: @Composable (() -> Unit),
         extra: @Composable (() -> Unit)?,
         onClick: (() -> Unit)?,
+        testTag: String?,
         collapsedAdaptiveWidth: Boolean,
         expanded: Boolean,
         onExpandedChange: (Boolean) -> Unit,
@@ -307,7 +377,7 @@ private class ChainOfThoughtScopeImpl(
                         // 节点上下的连线分段，节点（20.dp）区域留空
                         val x = 12.dp.toPx()
                         val centerY = size.height / 2
-                        val gap = 10.dp.toPx()
+                        val gap = (if (timelineStyle) 12.dp else 10.dp).toPx()
                         val strokeWidth = 1.dp.toPx()
                         if (!isFirst) {
                             drawLine(
@@ -333,6 +403,7 @@ private class ChainOfThoughtScopeImpl(
                             Modifier
                         }
                     )
+                    .then(if (testTag != null) Modifier.testTag(testTag) else Modifier)
                     .then(
                         if (onClick != null) {
                             Modifier
@@ -360,7 +431,7 @@ private class ChainOfThoughtScopeImpl(
                     ) {
                         if (icon != null) {
                             Box(
-                                modifier = Modifier.size(14.dp),
+                                modifier = Modifier.size(if (timelineStyle) 18.dp else 14.dp),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 icon()
@@ -420,7 +491,7 @@ private class ChainOfThoughtScopeImpl(
                         .fillMaxWidth()
                         .drawBehind {
                             if (!isLast) {
-                                val x = 12.dp.toPx()
+                        val x = 12.dp.toPx()
                                 drawLine(
                                     color = lineColor,
                                     start = Offset(x, 0f),

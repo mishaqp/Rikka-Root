@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_reasoning_files_title" translatable="false">Файлы · %1$d</string>
+    <string name="chat_reasoning_files_more" translatable="false">+%1$d</string>
+    <string name="chat_reasoning_files_all" translatable="false">Файлы</string>
+    <string name="chat_reasoning_files_open" translatable="false">Открыть</string>
+    <string name="chat_reasoning_files_thinking" translatable="false">Глубокое мышление</string>
+    <string name="chat_reasoning_files_seconds" translatable="false">%1$.1f с</string>
+</resources>

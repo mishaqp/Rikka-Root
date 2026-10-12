@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="setting_display_tool_timeline_title" translatable="false">Шаги инструментов</string>
+    <string name="setting_display_tool_summary_title" translatable="false">Сводка выполненных шагов</string>
+    <string name="setting_display_tool_summary_description" translatable="false">Показывать «Обработано» после завершения. Нажмите на сводку, чтобы открыть шаги и результаты.</string>
+    <string name="setting_display_tool_result_images_title" translatable="false">Скрывать изображения результатов</string>
+    <string name="setting_display_tool_result_images_description" translatable="false">Убирать миниатюры из ленты. Изображения доступны в подробностях.</string>
+    <string name="setting_display_tool_auto_collapse_title" translatable="false">Автоматически сворачивать шаги</string>
+    <string name="setting_display_tool_auto_collapse_description" translatable="false">После завершения скрывать ранние шаги. Их можно развернуть вручную.</string>
+</resources>

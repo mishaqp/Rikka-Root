@@ -3,7 +3,7 @@
 `chat-before` contains the 208 preserved audit reference PNGs (26 viewports × four
 themes × font scales 1.0/1.3). These files describe the historical interface. The
 current source cannot render that old header and composer, so the live suite now
-verifies `chat-after-stage2-fixes` and publishes reference/current directories in `ui-screenshots`.
+verifies `chat-after-stage3` and publishes reference/current directories in `ui-screenshots`.
 The audit-era `ChatBeforeScreenshotsTest` class name is retained for existing
 targeted Gradle commands; its tests capture the current production `ChatPage`.
 
@@ -23,7 +23,7 @@ same 33 captures per theme/font case. Both archives contain 264 PNGs and are
 protected alongside `chat-before`, including every child directory.
 
 `chat-after-stage2` is a preserved 448-PNG archive. `chat-after-stage2-fixes` is
-the live baseline after the 16dp list and inline-code chrome corrections. It retains
+the preserved baseline after the 16dp list and inline-code chrome corrections. It retains
 all 56 stage-2 captures and adds 11 geometry captures per theme/font combination
 (67 × 8 = 536 PNGs). The original 23 added stage-2 states include default user message;
 user avatar with timestamp; assistant bubbles at
@@ -45,6 +45,10 @@ translation animation frames use a frozen Compose clock. Production defaults
 and live settings updates are exercised directly; these captures contain no
 substitute message UI. Settings controls have a separate focused integration
 test in `MessageBehaviorDisplaySettingsTest`.
+The three precisely timed streaming text/fade/waiting captures use the existing
+`showMessageJumper=false` preference, keeping transient scroll navigation out of
+the 100ms text-fade frame. Dedicated enabled-navigation captures and runtime tests
+cover its positioning, activity, and idle hide behavior.
 An additional production-page interaction test clicks the user branch selector
 with message actions disabled and checks the real page's ViewModel update/save
 callbacks. It verifies exactly one selector with actions enabled, disables
@@ -54,18 +58,45 @@ input state's editing message unset.
 
 Normal tests always verify the committed AFTER baselines, including Daily Build
 with `-Proborazzi.test.record=true`. Global Roborazzi record does not authorize
-recording any chat baseline set. Explicit stage-2-fixes recording is:
+recording any chat baseline set. The live baseline is now `chat-after-stage3`, which
+retains all stage-2-fixes scenes and adds actual `ChatPage` timeline, approval,
+reasoning, file, and narrow-width scenes.
+
+The stage-3 Record run passed 104 test invocations (13 methods × eight theme/font
+combinations) and produced 780 PNGs: 97 scenes per combination, plus four 320dp
+scenes at font scale 1.3. The 1,720 historical PNGs retained their hashes and
+modification times. A separate Verify run checks the newly recorded baselines.
+
+The new scenes exercise text → tool → chart → text order, four completed timeline
+steps and show-more, mandatory pending/error/checkpoint rows, result previews and
+full details, scoped approvals with a single callback, deny reason, ask_user,
+server failure and provider JSON preview/full details, active/completed reasoning with live display setting changes,
+actual workspace and Document file results, and one 320dp capture per theme at
+font scale 1.3. The 320dp case asserts the 16dp message margins. A second
+mandatory-status viewport scrolls to the root checkpoint. The existing fresh
+root-command scene also checks that the timeline shares the strip's active
+observation; a new persisted-checkpoint scene shows the unknown outcome after
+generation stops.
+Remote MCP pending arguments and details retain their actual input, while the
+native MCP configuration details are checked for secret redaction. The summary
+remains manually usable when automatic collapse is disabled.
+The denial dialog uses its real accessibility SetText and confirm actions, with
+explicit layout of the actual dialog between them. This follows the existing
+header integration test workaround for Robolectric's wrap-content text-selection
+placement loop; normal idle synchronization resumes after dismissal. The test
+checks the edited reason and exact approval callback, without claiming IME coverage.
+
+Explicit stage-3 recording:
 
 ```sh
-./gradlew :app:testDebugUnitTest --tests 'me.rerere.rikkahub.ui.screenshot.ChatBeforeScreenshotsTest' -Pchat.stage2fixes.record=true --no-configuration-cache
+./gradlew :app:testDebugUnitTest --tests 'me.rerere.rikkahub.ui.screenshot.ChatBeforeScreenshotsTest' -Pchat.stage3.record=true --no-configuration-cache
 ```
 
-`-Pchat.stage2fixes.record.dir=/tmp/chat-stage2-review` redirects intentional review
-captures. The legacy `chat.stage1.record` / `chat.audit.record` switches and their
-`.dir` properties remain accepted, and target stage-2-fixes AFTER images. A stage-2-fixes
-directory takes precedence over stage-2, stage-1, then audit directory aliases. Recording
-or publishing artifacts inside any of the four historical directories is
-rejected. Review actual/diff images before accepting new baselines.
+`-Pchat.stage3.record.dir=/tmp/chat-stage3-review` redirects intentional review
+captures. Older chat record switches do not activate recording for this live suite.
+Recording or publishing artifacts inside any of the five historical directories,
+including `chat-after-stage2-fixes`, is rejected. Review actual/diff images before
+accepting new baselines.
 
 Artifacts contain historical BEFORE references and verified current AFTER images
 under `app/build/outputs/roborazzi/<testTask>/`. On a successful Verify, the copied
