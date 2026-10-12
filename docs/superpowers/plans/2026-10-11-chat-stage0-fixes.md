@@ -147,5 +147,8 @@
 - [x] Audit содержит статусы и реальные integrated commit hashes; исходная evidence закреплена на `8acbc537`. Audit и этот план подготовлены к завершающему docs-коммиту.
 - [x] Normal Roborazzi Verify проверяет 208 captures; только 64 согласованных R-37 PNG обновлены и просмотрены, 144 остальные побайтно прежние. Два read-only UI-теста дополняют обычные captures.
 - [x] Локальная компиляция затронутого приложения и связанные проверки: компиляция app и 649 связанных тестов в одном свежем прогоне: 0 failures/errors/skips; все 208 Roborazzi captures в Verify; функциональный checklist 250/250.
-- [ ] Единственный push на `ccr-e93188a6-grrqko` — ожидается после docs-коммита и проверки чистого дерева.
-- [ ] Daily Build completed/success на итоговом SHA — ожидается после push; проверить reports/ui-screenshots и подписанный APK, выдать отчёт по десяти пунктам и phone scenarios, остановиться.
+- [x] Единственный первоначально разрешённый push на `ccr-e93188a6-grrqko` выполнен: `dc645568`.
+- [x] Первый Daily Build `38189621077`:2779/0 тестовых запусков и208 PNG сверены; run failed на lint54 при ceiling51 (реальный baseline45). APK/signing/nightly skipped.
+- [x] Девять новых recovery lint findings исправлены отдельной корректировкой SVC-04 `b660971b`, без подавлений и изменений inherited45; compile/34 tests, затем final10 UI/matrix tests/208Verify; независимый APPROVE.
+- [ ] Дополнительный push локальной корректировки — на момент записи ожидается решение пользователя, исходная граница «Один push» уже использована.
+- [ ] Зелёный Daily Build и подписанный APK на исправленном SHA — ещё не подтверждены; после разрешённой публикации проверить reports/ui-screenshots/signature/nightly и выдать итоговый отчёт, остановиться.
