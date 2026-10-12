@@ -73,6 +73,7 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import com.dropbox.differ.SimpleImageComparator
 import kotlinx.coroutines.runBlocking
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.json.Json
@@ -102,6 +103,7 @@ import me.rerere.rikkahub.service.QueuedMessage
 import me.rerere.rikkahub.service.ChatService.ApprovalScope
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.ui.components.message.LocalChatTimelineClock
+import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Response
@@ -183,7 +185,9 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         image.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         bitmap.recycle()
         // Keep the real Coil decoder/render path; only remote favicon transport is fixed.
-        val offlineClient = OkHttpClient.Builder().addInterceptor { chain ->
+        // The offline reply runs on the calling thread instead of OkHttp's worker pool, so a
+        // favicon request cannot still be in flight (placeholder) when a frame is captured.
+        val offlineClient = OkHttpClient.Builder().dispatcher(Dispatcher(DirectExecutorService())).addInterceptor { chain ->
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
                 .code(404).message("Screenshot fixture: offline").body(ByteArray(0).toResponseBody()).build()
         }.build()
@@ -224,7 +228,13 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
                     completed()
                 }
             }
-        }.components {
+        }
+            // Keep the whole Coil pipeline on the requesting (main) coroutine: each request reaches
+            // its terminal state before the frame that started it settles, on every machine.
+            .interceptorCoroutineContext(EmptyCoroutineContext)
+            .fetcherCoroutineContext(EmptyCoroutineContext)
+            .decoderCoroutineContext(EmptyCoroutineContext)
+            .components {
             // Match the activity's real asset decoder: model/provider glyphs are SVG.
             add(SvgDecoder.Factory(scaleToDensity = true))
             // BitmapFactory accepts every source, so it must follow the SVG decoder.
@@ -1561,4 +1571,15 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         @JvmStatic @Parameters(name = "{0}_font{1}") fun cases(): List<Array<Any>> =
             ScreenshotThemeMode.entries.flatMap { theme -> listOf(1f, 1.3f).map { arrayOf(theme, it) } }
     }
+}
+
+/** Runs OkHttp's async calls inline; the screenshot fixture never touches the network. */
+private class DirectExecutorService : java.util.concurrent.AbstractExecutorService() {
+    @Volatile private var shutdown = false
+    override fun execute(command: Runnable) = command.run()
+    override fun shutdown() { shutdown = true }
+    override fun shutdownNow(): MutableList<Runnable> = mutableListOf<Runnable>().also { shutdown = true }
+    override fun isShutdown() = shutdown
+    override fun isTerminated() = shutdown
+    override fun awaitTermination(timeout: Long, unit: TimeUnit) = true
 }
