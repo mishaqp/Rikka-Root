@@ -2,7 +2,6 @@ package me.rerere.rikkahub.ui.components.richtext
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -27,12 +26,12 @@ import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,6 +56,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.TextUnitType
 import androidx.compose.ui.unit.dp
@@ -75,7 +75,6 @@ import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.utils.toDp
-import me.rerere.ui.table.DataTable
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.html.HtmlGenerator
 import org.intellij.markdown.parser.MarkdownParser
@@ -126,6 +125,7 @@ fun MarkdownNew(
     modifier: Modifier = Modifier,
     style: TextStyle = LocalTextStyle.current,
     onClickCitation: (String) -> Unit = {},
+    horizontalPadding: Dp = 4.dp,
 ) {
     var html by remember {
         mutableStateOf(
@@ -148,7 +148,7 @@ fun MarkdownNew(
     }
 
     ProvideTextStyle(style) {
-        Column(modifier = modifier.padding(start = 4.dp)) {
+        Column(modifier = modifier.padding(start = horizontalPadding)) {
             document.body().childNodes().fastForEach { node ->
                 HtmlBodyNode(node = node, onClickCitation = onClickCitation)
             }
@@ -188,7 +188,7 @@ private fun HtmlBodyNode(node: Node, onClickCitation: (String) -> Unit) {
         is Element -> HtmlBlockElement(element = node, onClickCitation = onClickCitation)
         is TextNode -> {
             val text = node.text().trim()
-            if (text.isNotEmpty()) Text(text = text)
+            if (text.isNotEmpty()) MarkdownStyledText(text = AnnotatedString(text))
         }
     }
 }
@@ -341,7 +341,8 @@ private fun HtmlParagraphContent(
         return
     }
 
-    val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
+    val enableLatexRendering = currentMarkdownDisplayOptions().enableLatexRendering
+    val inlineCodeFontSize = 13.sp * currentMarkdownDisplayOptions().fontSizeRatio
     val hasInlineMath = element.select("span.math").any { it.attr("inline") == "true" }
     val colorScheme = MaterialTheme.colorScheme
     val textStyle = LocalTextStyle.current
@@ -352,6 +353,7 @@ private fun HtmlParagraphContent(
         colorScheme,
         density,
         textStyle,
+        inlineCodeFontSize,
         onClickCitation,
     ) {
         val contents = mutableMapOf<String, InlineTextContent>()
@@ -363,6 +365,7 @@ private fun HtmlParagraphContent(
                     inlineContents = contents,
                     density = density,
                     style = textStyle,
+                    inlineCodeFontSize = inlineCodeFontSize,
                     enableLatexRendering = enableLatexRendering,
                     onClickCitation = onClickCitation,
                 )
@@ -371,7 +374,7 @@ private fun HtmlParagraphContent(
         text to contents
     }
 
-    Text(
+    MarkdownStyledText(
         text = annotatedString,
         inlineContent = inlineContents,
         softWrap = true,
@@ -391,7 +394,7 @@ private fun HtmlHeading(element: Element, onClickCitation: (String) -> Unit) {
     val level = element.tagName().removePrefix("h").toIntOrNull() ?: 1
     val headingStyle = HeaderStyle.fromLevel(
         level = level,
-        fontSizeRatio = LocalSettings.current.displaySetting.fontSizeRatio,
+        fontSizeRatio = currentMarkdownDisplayOptions().fontSizeRatio,
     )
     val verticalPadding = HeaderStyle.verticalPadding(level)
     ProvideTextStyle(LocalTextStyle.current.merge(headingStyle)) {
@@ -538,9 +541,7 @@ private fun HtmlCodeBlock(element: Element) {
     HighlightCodeBlock(
         code = code,
         language = language,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 4.dp),
+        modifier = Modifier.fillMaxWidth(),
         completeCodeBlock = true,
     )
 }
@@ -566,7 +567,7 @@ private fun HtmlBlockquote(element: Element, onClickCitation: (String) -> Unit) 
 
 @Composable
 private fun HtmlMathBlock(formula: String) {
-    val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
+    val enableLatexRendering = currentMarkdownDisplayOptions().enableLatexRendering
     if (enableLatexRendering) {
         MathBlock(
             latex = formula,
@@ -622,12 +623,12 @@ private fun HtmlTable(element: Element, onClickCitation: (String) -> Unit) {
         }
     }
 
-    DataTable(
+    MarkdownTableBlock(
+        headerCells = List(columnCount) { headerElements.getOrNull(it)?.text().orEmpty() },
+        rows = bodyRows.map { row -> List(columnCount) { row.select("td").getOrNull(it)?.wholeText().orEmpty() } },
         headers = headers,
-        rows = rows,
-        modifier = Modifier.padding(vertical = 8.dp),
-        columnMinWidths = List(columnCount) { 80.dp },
-        columnMaxWidths = List(columnCount) { 200.dp },
+        rowContent = rows,
+        tableMarkdown = element.outerHtml(),
     )
 }
 
@@ -696,7 +697,8 @@ private fun HtmlProgress(element: Element) {
  */
 @Composable
 private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit) {
-    val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
+    val enableLatexRendering = currentMarkdownDisplayOptions().enableLatexRendering
+    val inlineCodeFontSize = 13.sp * currentMarkdownDisplayOptions().fontSizeRatio
     val colorScheme = MaterialTheme.colorScheme
     val textStyle = LocalTextStyle.current
     val density = LocalDensity.current
@@ -708,6 +710,7 @@ private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit
         colorScheme,
         density,
         textStyle,
+        inlineCodeFontSize,
         onClickCitation,
     ) {
         val contents = mutableMapOf<String, InlineTextContent>()
@@ -719,6 +722,7 @@ private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit
                     inlineContents = contents,
                     density = density,
                     style = textStyle,
+                    inlineCodeFontSize = inlineCodeFontSize,
                     enableLatexRendering = enableLatexRendering,
                     onClickCitation = onClickCitation,
                 )
@@ -728,7 +732,7 @@ private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit
     }
 
     if (annotatedString.isNotEmpty()) {
-        Text(text = annotatedString, inlineContent = inlineContents)
+        MarkdownStyledText(text = annotatedString, inlineContent = inlineContents)
     }
 }
 
@@ -743,7 +747,7 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
     when (node) {
         is TextNode -> {
             val text = node.text()
-            if (text.isNotEmpty()) Text(text = text)
+            if (text.isNotEmpty()) MarkdownStyledText(text = AnnotatedString(text))
         }
 
         is Element -> {
@@ -777,13 +781,15 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                     val colorScheme = MaterialTheme.colorScheme
                     val textStyle = LocalTextStyle.current
                     val density = LocalDensity.current
-                    val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
+                    val enableLatexRendering = currentMarkdownDisplayOptions().enableLatexRendering
+                    val inlineCodeFontSize = 13.sp * currentMarkdownDisplayOptions().fontSizeRatio
                     val (annotated, inlineContents) = remember(
                         node.outerHtml(),
                         enableLatexRendering,
                         colorScheme,
                         density,
                         textStyle,
+                        inlineCodeFontSize,
                         onClickCitation,
                     ) {
                         val contents = mutableMapOf<String, InlineTextContent>()
@@ -794,13 +800,14 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                                 inlineContents = contents,
                                 density = density,
                                 style = textStyle,
+                                inlineCodeFontSize = inlineCodeFontSize,
                                 enableLatexRendering = enableLatexRendering,
                                 onClickCitation = onClickCitation,
                             )
                         }
                         text to contents
                     }
-                    Text(text = annotated, inlineContent = inlineContents)
+                    MarkdownStyledText(text = annotated, inlineContent = inlineContents)
                 }
             }
         }
@@ -815,6 +822,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineNode(
     inlineContents: MutableMap<String, InlineTextContent>,
     density: Density,
     style: TextStyle,
+    inlineCodeFontSize: TextUnit,
     enableLatexRendering: Boolean,
     onClickCitation: (String) -> Unit,
 ) {
@@ -826,6 +834,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineNode(
             inlineContents = inlineContents,
             density = density,
             style = style,
+            inlineCodeFontSize = inlineCodeFontSize,
             enableLatexRendering = enableLatexRendering,
             onClickCitation = onClickCitation,
         )
@@ -838,6 +847,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
     inlineContents: MutableMap<String, InlineTextContent>,
     density: Density,
     style: TextStyle,
+    inlineCodeFontSize: TextUnit,
     enableLatexRendering: Boolean,
     onClickCitation: (String) -> Unit,
 ) {
@@ -856,6 +866,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
             inlineContents = inlineContents,
             density = density,
             style = inheritedStyle,
+            inlineCodeFontSize = inlineCodeFontSize,
             enableLatexRendering = enableLatexRendering,
             onClickCitation = onClickCitation,
         )
@@ -887,13 +898,12 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
             SpanStyle(
                 fontFamily = JetbrainsMono,
                 fontFeatureSettings = "'calt' 0, 'liga' 0, 'clig' 0",
-                fontSize = 0.9.em,
-                color = colorScheme.primary,
+                fontSize = inlineCodeFontSize,
             ).merge(cssStyle ?: SpanStyle())
         ) {
-            append(' ')
+            pushStringAnnotation(INLINE_CODE_ANNOTATION, "")
             append(element.text())
-            append(' ')
+            pop()
         }
 
         "a" -> {

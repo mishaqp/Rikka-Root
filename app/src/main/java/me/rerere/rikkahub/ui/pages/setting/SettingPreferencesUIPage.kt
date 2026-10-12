@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -361,6 +362,14 @@ fun SettingPreferencesUIPage(vm: SettingVM = koinViewModel()) {
             }
 
             item {
+                MessageBehaviorDisplaySettings(
+                    displaySetting = displaySetting,
+                    onUpdate = ::updateDisplaySetting,
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
+            }
+
+            item {
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
                     title = { Text(stringResource(R.string.setting_page_code_display_settings)) },
@@ -404,6 +413,63 @@ fun SettingPreferencesUIPage(vm: SettingVM = koinViewModel()) {
                 }
             }
         }
+    }
+}
+
+/** The user-message controls share the existing display page and its atomic preference updates. */
+@Composable
+internal fun MessageBehaviorDisplaySettings(
+    displaySetting: DisplaySetting,
+    onUpdate: ((DisplaySetting) -> DisplaySetting) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    CardGroup(
+        modifier = modifier,
+        title = { Text(stringResource(R.string.setting_display_user_messages_title)) },
+    ) {
+        item(
+            headlineContent = { Text(stringResource(R.string.setting_display_collapse_user_messages_title)) },
+            supportingContent = { Text(stringResource(R.string.setting_display_collapse_user_messages_description)) },
+            trailingContent = {
+                Switch(
+                    checked = displaySetting.collapseLongUserMessages,
+                    onCheckedChange = { value -> onUpdate { it.copy(collapseLongUserMessages = value) } },
+                    modifier = Modifier.testTag("setting_user_message_collapse"),
+                )
+            },
+        )
+        if (displaySetting.collapseLongUserMessages) {
+            item(
+                headlineContent = { Text(stringResource(R.string.setting_display_user_message_collapse_lines_title)) },
+                supportingContent = {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Slider(
+                            value = displaySetting.userMessageCollapseLines.coerceIn(1, 30).toFloat(),
+                            onValueChange = { value -> onUpdate { it.copy(userMessageCollapseLines = value.roundToInt()) } },
+                            valueRange = 1f..30f,
+                            steps = 28,
+                            modifier = Modifier.weight(1f).testTag("setting_user_message_collapse_lines"),
+                        )
+                        Text(text = displaySetting.userMessageCollapseLines.toString())
+                    }
+                },
+            )
+        }
+        item(
+            headlineContent = { Text(stringResource(R.string.setting_display_user_message_actions_title)) },
+            supportingContent = { Text(stringResource(R.string.setting_display_user_message_actions_description)) },
+            trailingContent = {
+                Switch(
+                    checked = displaySetting.showUserMessageActions,
+                    onCheckedChange = { value -> onUpdate { it.copy(showUserMessageActions = value) } },
+                    modifier = Modifier.testTag("setting_user_message_actions"),
+                )
+            },
+        )
     }
 }
 

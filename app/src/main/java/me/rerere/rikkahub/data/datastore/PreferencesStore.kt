@@ -45,6 +45,7 @@ import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV2Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV3Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreV4Migration
 import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreMcpSecretsMigration
+import me.rerere.rikkahub.data.datastore.migration.PreferenceStoreMessageDisplayMigration
 import me.rerere.rikkahub.data.datastore.migration.protectLegacyMcpConfigs
 import me.rerere.rikkahub.data.ai.mcp.control.McpControlSecretStore
 import me.rerere.rikkahub.data.model.Assistant
@@ -99,6 +100,8 @@ private fun createSettingsDataStore(context: Context): DataStore<Preferences> {
             emptyPreferences()
         },
         migrations = listOf(
+            // Run before version migrations populate a fresh, otherwise empty store.
+            PreferenceStoreMessageDisplayMigration(),
             PreferenceStoreV1Migration(),
             PreferenceStoreV2Migration(),
             PreferenceStoreV3Migration(),
@@ -706,7 +709,7 @@ data class DisplaySetting(
     val userAvatar: Avatar = Avatar.Dummy,
     val userNickname: String = "",
     val useAppIconStyleLoadingIndicator: Boolean = true,
-    val showUserAvatar: Boolean = true,
+    val showUserAvatar: Boolean = false,
     val showAssistantBubble: Boolean = false,
     val bubbleOpacity: Float = 1.0f,
     val showModelIcon: Boolean = true,
@@ -715,6 +718,13 @@ data class DisplaySetting(
     val showTokenUsage: Boolean = true,
     val showThinkingContent: Boolean = true,
     val autoCloseThinking: Boolean = true,
+    val collapseLongUserMessages: Boolean = true,
+    val userMessageCollapseLines: Int = 9,
+    val showUserMessageActions: Boolean = true,
+    // Prepared for tool cards; their settings controls are added with the stage 3 timeline.
+    val showToolSummary: Boolean = true,
+    val hideToolResultImages: Boolean = false,
+    val autoCollapseToolSteps: Boolean = true,
     val updateCheckDisabledUntilEpochMillis: Long = 0L,
     val showMessageJumper: Boolean = true,
     val messageJumperOnLeft: Boolean = false,

@@ -25,6 +25,12 @@ object SettingsJsonMigrator {
         return runCatching {
             val root = JsonInstant.parseToJsonElement(settingsJson).jsonObject.toMutableMap()
 
+            // Old backups inherited showUserAvatar=true, including those without displaySetting.
+            val display = root["displaySetting"]
+            if (display == null || display is JsonObject) {
+                root["displaySetting"] = preserveLegacyUserAvatar(display as? JsonObject ?: JsonObject(emptyMap()))
+            }
+
             // V1: 修复 mcpServers 中全限定类名的 type 字段
             root["mcpServers"]?.let { element ->
                 val migrated = migrateMcpServersJson(JsonInstant.encodeToString(element))

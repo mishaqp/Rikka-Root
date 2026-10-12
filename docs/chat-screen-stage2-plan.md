@@ -27,17 +27,17 @@
 ## 2. Сообщения и настройки
 
 Файлы: ChatMessage.kt/ChatMessagePresentation.kt и отдельные message visual components; PreferencesStore.kt/SettingPreferencesUIPage.kt; richtext и token/translation/source компоненты.
-- [ ] Сначала проверить реально существующие default/serialization/settings consumers и размеры/анимации Flutter Moru.
-- [ ] Каждое существующее display поле подключить к UI-модели. Новые установки showUserAvatar=false; явные и прежние значения существующих пользователей сохранять.
-- [ ] User справа: bubble radius16 и opacity, необязательные avatar/name/time; collapse по реальным9строкам с fade и reversible expansion.
-- [ ] Assistant: без bubble по выключенной настройке; при включении radius16/surfaceContainerHigh/opacity. Маленький заголовок icon/name/time управляется настройками.
-- [ ] Stream fade + waiting three dots; code/inline/table/translation/citations стиль Moru при сохранении функций.
-- [ ] Русская token row под showTokenUsage. Новые настройки Moru отдельным блоком того же экрана; backup defaults/roundtrip/legacy tests. Инструментальные настройки подготовить к этапу3 и не менять его timeline сейчас.
-- [ ] Отдельные tests всех переключателей через production UI-модель и runtime checks ключевых callbacks; защитить checklist.
+- [x] Сначала проверить реально существующие default/serialization/settings consumers и размеры/анимации Flutter Moru.
+- [x] Каждое существующее display поле подключить к UI-модели. Новые установки showUserAvatar=false; явные и прежние значения существующих пользователей сохранять.
+- [x] User справа: bubble radius16 и opacity, необязательные avatar/name/time; collapse по реальным9строкам с fade и reversible expansion.
+- [x] Assistant: без bubble по выключенной настройке; при включении radius16/surfaceContainerHigh/opacity. Маленький заголовок icon/name/time управляется настройками.
+- [x] Stream fade + waiting three dots; code/inline/table/translation/citations стиль Moru при сохранении функций.
+- [x] Русская token row под showTokenUsage. Новые настройки Moru отдельным блоком того же экрана; backup defaults/roundtrip/legacy tests. Инструментальные настройки подготовить к этапу3 и не менять его timeline сейчас.
+- [x] Отдельные tests всех переключателей через production UI-модель и runtime checks ключевых callbacks; защитить checklist.
 
 ## 3. Сдача
 
-- [ ] Focused compile/tests, AFTER для четырёх тем×двух font scales и настроек/stream/collapse; сохранить исторические BEFORE/stage1 PNG.
-- [ ] Независимый review, исправления и подтверждение; отчёт Moru→Kotlin, ограничения и телефонный checklist.
+- [x] Focused compile/tests, AFTER для четырёх тем×двух font scales и настроек/stream/collapse; сохранить исторические BEFORE/stage1 PNG.
+- [x] Независимый review, исправления и подтверждение; отчёт Moru→Kotlin, ограничения и телефонный checklist.
 - [ ] Второй commit, один push в ccr-e93188a6-grrqko; Daily Build на итоговомSHA, при ошибке чинить и повторять.
 - [ ] Ссылки APK/run/screenshots/report; остановка до проверки телефона.

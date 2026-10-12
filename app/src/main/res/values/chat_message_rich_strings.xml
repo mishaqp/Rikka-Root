@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_message_code_label" translatable="false">Код</string>
+    <string name="chat_message_table_label" translatable="false">Таблица</string>
+    <string name="chat_message_table_copy" translatable="false">Копировать таблицу</string>
+    <string name="chat_message_table_csv" translatable="false">Сохранить таблицу в CSV</string>
+    <string name="chat_message_expand" translatable="false">Развернуть</string>
+    <string name="chat_message_collapse" translatable="false">Свернуть</string>
+    <string name="chat_message_collapsed" translatable="false">Свернуто</string>
+    <string name="chat_message_expanded" translatable="false">Развернуто</string>
+    <string name="chat_message_waiting" translatable="false">Генерация ответа</string>
+</resources>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string translatable="false" name="chat_message_sources_count">Источники: %1$d</string>
+    <string translatable="false" name="chat_message_sources_title">Источники</string>
+    <string translatable="false" name="chat_message_sources_close">Закрыть источники</string>
+</resources>

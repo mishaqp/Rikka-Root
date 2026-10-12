@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_message_token_prompt_description" translatable="false">Входные токены: %1$d</string>
+    <string name="chat_message_token_cached_description" translatable="false">Токены из кэша: %1$d</string>
+    <string name="chat_message_token_completion_description" translatable="false">Выходные токены: %1$d</string>
+    <string name="chat_message_token_total_description" translatable="false">Всего токенов: %1$d</string>
+    <string name="chat_message_token_speed_value" translatable="false">%1$s ток/с</string>
+    <string name="chat_message_token_duration_value" translatable="false">%1$s с</string>
+    <string name="chat_message_token_speed_description" translatable="false">Скорость: %1$s</string>
+    <string name="chat_message_token_duration_description" translatable="false">Длительность: %1$s</string>
+</resources>

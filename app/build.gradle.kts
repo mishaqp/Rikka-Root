@@ -163,6 +163,7 @@ val screenshotModeProperties = listOf("record", "compare", "verify").associate {
 }
 val chatScreenshotProperties = listOf(
     "chat.audit.record", "chat.audit.record.dir", "chat.stage1.record", "chat.stage1.record.dir",
+    "chat.stage2.record", "chat.stage2.record.dir",
 ).associateWith { property ->
     providers.gradleProperty(property).getOrElse(if (property.endsWith(".dir")) "" else "false")
 }

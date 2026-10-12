@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEachIndexed
 import kotlinx.coroutines.delay
 import kotlinx.datetime.toJavaLocalDateTime
+import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.hugeicons.HugeIcons
@@ -175,7 +176,8 @@ fun ColumnScope.ChatMessageActionButtons(
             enabled = presentation.mutationsEnabled,
         )
 
-        if (settings.displaySetting.showDateTimeInMessage) {
+        if (settings.displaySetting.showDateTimeInMessage &&
+            message.role != MessageRole.USER && message.role != MessageRole.ASSISTANT) {
             Text(
                 text = message.createdAt.toJavaLocalDateTime().toMessageTimeString(),
                 style = MaterialTheme.typography.labelSmall,

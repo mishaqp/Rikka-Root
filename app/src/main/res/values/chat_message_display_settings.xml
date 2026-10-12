@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string translatable="false" name="setting_display_user_messages_title">Сообщения пользователя</string>
+    <string translatable="false" name="setting_display_collapse_user_messages_title">Сворачивать длинные сообщения</string>
+    <string translatable="false" name="setting_display_collapse_user_messages_description">Показывать первые строки с возможностью раскрыть весь текст.</string>
+    <string translatable="false" name="setting_display_user_message_collapse_lines_title">Видимые строки</string>
+    <string translatable="false" name="setting_display_user_message_actions_title">Действия сообщения</string>
+    <string translatable="false" name="setting_display_user_message_actions_description">Показывать кнопки под сообщением пользователя.</string>
+</resources>

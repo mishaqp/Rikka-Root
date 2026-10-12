@@ -7,24 +7,21 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -37,20 +34,13 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.LinkAnnotation
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.util.fastAll
 import androidx.compose.ui.util.fastForEach
-import androidx.compose.ui.util.fastForEachIndexed
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import kotlinx.serialization.json.jsonArray
@@ -75,8 +65,6 @@ import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.richtext.buildMarkdownPreviewHtml
 import me.rerere.rikkahub.ui.components.ui.ChainOfThought
-import me.rerere.rikkahub.ui.components.ui.Favicon
-import me.rerere.rikkahub.ui.components.ui.FaviconRow
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.ui.pages.chat.ChatPendingToolPresentation
@@ -85,7 +73,6 @@ import me.rerere.rikkahub.ui.theme.LocalChatFontFamily
 import me.rerere.rikkahub.ui.theme.rememberChatFontFamily
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.openUrl
-import me.rerere.rikkahub.utils.urlDecode
 import me.rerere.ui.charts.ChartCard
 import me.rerere.ui.charts.ChartSpec
 import me.rerere.ui.webview.WebViewContentCache
@@ -128,10 +115,22 @@ fun ChatMessage(
         return
     }
     val settings = LocalSettings.current.displaySetting
-    val chatFontFamily = LocalChatFontFamily.current ?: rememberChatFontFamily(settings)
+    val display = presentMessageDisplay(
+        message = message,
+        settings = settings,
+        loading = loading,
+        lastMessage = lastMessage,
+        readOnly = readOnly,
+        hasAssistantIdentity = model != null || assistant?.useAssistantAvatar == true,
+        hasBranches = node.messages.size > 1,
+    )
+    val chatFontFamily = LocalChatFontFamily.current ?: rememberChatFontFamily(settings.copy(
+        chatFontFamily = display.typography.fontFamily,
+        chatCustomFontPath = display.typography.customFontPath,
+    ))
     val textStyle = LocalTextStyle.current.copy(
-        fontSize = LocalTextStyle.current.fontSize * settings.fontSizeRatio,
-        lineHeight = LocalTextStyle.current.lineHeight * settings.fontSizeRatio,
+        fontSize = LocalTextStyle.current.fontSize * display.typography.fontSizeRatio,
+        lineHeight = LocalTextStyle.current.lineHeight * display.typography.fontSizeRatio,
         fontFamily = chatFontFamily
     )
     var showActionsSheet by remember { mutableStateOf(false) }
@@ -141,33 +140,20 @@ fun ChatMessage(
     val colorScheme = MaterialTheme.colorScheme
     Column(
         modifier = modifier.fillMaxWidth(),
-        horizontalAlignment = if (presentation.role == MessageRole.USER) Alignment.End else Alignment.Start,
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+        horizontalAlignment = if (display.alignEnd) Alignment.End else Alignment.Start,
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        if (presentation.showAvatarRow) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-            ) {
-                ChatMessageAssistantAvatar(
-                    message = message,
-                    model = model,
-                    assistant = assistant,
-                    loading = loading,
-                    modifier = Modifier.weight(1f)
-                )
-                ChatMessageUserAvatar(
-                    message = message,
-                    avatar = settings.userAvatar,
-                    nickname = settings.userNickname,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
+        ChatMessageHeader(
+            message = message,
+            display = display,
+            model = model,
+            assistant = assistant,
+            loading = loading,
+        )
         ProvideTextStyle(textStyle) {
             MessagePartsBlock(
+                messageKey = message.id.toString(),
+                display = display,
                 assistant = assistant,
                 role = presentation.role,
                 parts = message.parts,
@@ -188,9 +174,19 @@ fun ChatMessage(
             }
         }
 
+        if (display.showWaitingDots) {
+            ChatMessageSurface(display.textSurface, display.bubbleOpacity) {
+                ChatWaitingDots()
+            }
+        }
+
+        if (display.showBranchSelector) {
+            ChatMessageBranchSelector(node = node, onUpdate = onUpdate, enabled = !readOnly)
+        }
+
         val motionScheme = MaterialTheme.motionScheme
         AnimatedVisibility(
-            visible = presentation.showActions,
+            visible = display.showActions,
             enter = slideInVertically(motionScheme.defaultSpatialSpec()) { it / 2 } +
                 fadeIn(motionScheme.defaultEffectsSpec()),
             exit = slideOutVertically(motionScheme.fastSpatialSpec()) { it / 2 } +
@@ -219,8 +215,10 @@ fun ChatMessage(
             assistant = assistant,
         )
 
-        ProvideTextStyle(textStyle) {
-            ChatMessageNerdLine(message = message)
+        if (display.showTokenUsage) {
+            ProvideTextStyle(textStyle) {
+                ChatMessageNerdLine(message = message)
+            }
         }
 
     }
@@ -272,6 +270,8 @@ fun ChatMessage(
 @OptIn(FlowPreview::class)
 @Composable
 private fun MessagePartsBlock(
+    messageKey: String,
+    display: MessageDisplayPresentation,
     assistant: Assistant?,
     role: MessageRole,
     model: Model?,
@@ -377,54 +377,46 @@ private fun MessagePartsBlock(
                 when (val part = block.part) {
                     is UIMessagePart.Text -> {
                         val textContent = @Composable {
-                            if (role != MessageRole.USER && SkillWebviewCardOrNull(part)) {
+                            if (display.showWaitingDots && part.text.isBlank()) {
+                                // The waiting surface owns empty streaming text.
+                            } else if (role != MessageRole.USER && SkillWebviewCardOrNull(part)) {
                                 // Agent's skill result viewer has rendered this text part.
-                            } else if (role == MessageRole.USER) {
-                                ChatMessageBubble(
-                                    role = role,
-                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = settings.displaySetting.bubbleOpacity),
-                                    onClick = { onUserMessageClick?.invoke() },
-                                    // 用户气泡不占满整行，和助手的回复错开
-                                    modifier = Modifier
-                                        .padding(start = 48.dp)
-                                        .animateContentSize(),
-                                ) {
+                            } else {
+                                val visualText = part.text.replaceRegexes(
+                                    assistant = assistant,
+                                    scope = if (role == MessageRole.USER) AssistantAffectScope.USER else AssistantAffectScope.ASSISTANT,
+                                    visual = true,
+                                )
+                                val markdown = @Composable {
                                     MarkdownBlock(
-                                        content = part.text.replaceRegexes(
-                                            assistant = assistant,
-                                            scope = AssistantAffectScope.USER,
-                                            visual = true,
-                                        ),
-                                        onClickCitation = handleClickCitation
+                                        content = visualText,
+                                        onClickCitation = handleClickCitation,
+                                        displayOptions = display.markdownOptions,
                                     )
                                 }
-                            } else {
-                                if (settings.displaySetting.showAssistantBubble) {
-                                    ChatMessageBubble(
-                                        role = role,
-                                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = settings.displaySetting.bubbleOpacity),
-                                        modifier = Modifier.animateContentSize(),
-                                    ) {
-                                        MarkdownBlock(
-                                            content = part.text.replaceRegexes(
-                                                assistant = assistant,
-                                                scope = AssistantAffectScope.ASSISTANT,
-                                                visual = true,
-                                            ),
-                                            onClickCitation = handleClickCitation,
-                                        )
+                                if (role == MessageRole.USER) {
+                                    BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopEnd) {
+                                        ChatMessageSurface(
+                                            surface = display.textSurface,
+                                            opacity = display.bubbleOpacity,
+                                            modifier = Modifier.widthIn(max = maxWidth * .75f),
+                                            onClick = onUserMessageClick,
+                                        ) {
+                                            CollapsibleUserMessageText(
+                                                messageKey = "$messageKey:${block.index}",
+                                                options = display.userText,
+                                            ) { markdown() }
+                                        }
                                     }
                                 } else {
-                                    MarkdownBlock(
-                                        content = part.text.replaceRegexes(
-                                            assistant = assistant,
-                                            scope = AssistantAffectScope.ASSISTANT,
-                                            visual = true,
-                                        ),
-                                        onClickCitation = handleClickCitation,
-                                        modifier = Modifier
-                                            .animateContentSize()
-                                    )
+                                    ChatMessageSurface(
+                                        surface = display.textSurface,
+                                        opacity = display.bubbleOpacity,
+                                    ) {
+                                        ChatStreamingText(enabled = display.streamText) {
+                                            markdown()
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -523,103 +515,5 @@ private fun MessagePartsBlock(
     // Annotations (always rendered at the end)
     if (annotations.isNotEmpty()) {
         ChatMessageCitations(annotations = annotations)
-    }
-}
-
-private val BubbleCorner = 24.dp
-private val BubbleTailCorner = 6.dp
-private val BubblePressedCorner = 12.dp
-
-/**
- * 消息气泡：大圆角，靠头像一侧的顶角收紧；可点击时按下其余圆角也跟着收紧
- */
-@Composable
-private fun ChatMessageBubble(
-    role: MessageRole,
-    color: Color,
-    modifier: Modifier = Modifier,
-    onClick: (() -> Unit)? = null,
-    content: @Composable () -> Unit,
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val pressProgress by animatePressProgress(interactionSource)
-    val corner = lerp(BubbleCorner, BubblePressedCorner, pressProgress)
-    val shape = if (role == MessageRole.USER) {
-        RoundedCornerShape(topStart = corner, topEnd = BubbleTailCorner, bottomEnd = corner, bottomStart = corner)
-    } else {
-        RoundedCornerShape(topStart = BubbleTailCorner, topEnd = corner, bottomEnd = corner, bottomStart = corner)
-    }
-    // MarkdownBlock 自带 4dp 的水平内边距
-    val contentModifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
-    if (onClick != null) {
-        Surface(
-            onClick = onClick,
-            modifier = modifier,
-            shape = shape,
-            color = color,
-            interactionSource = interactionSource,
-        ) {
-            Box(modifier = contentModifier) { content() }
-        }
-    } else {
-        Surface(
-            modifier = modifier,
-            shape = shape,
-            color = color,
-        ) {
-            Box(modifier = contentModifier) { content() }
-        }
-    }
-}
-
-@Composable
-private fun ChatMessageCitations(annotations: List<UIMessageAnnotation>) {
-    var expand by remember { mutableStateOf(false) }
-    val citations = remember(annotations) { annotations.filterIsInstance<UIMessageAnnotation.UrlCitation>() }
-    if (citations.isEmpty()) return
-    val urls = remember(citations) { citations.map { it.url } }
-    Column(
-        modifier = Modifier.animateContentSize(MaterialTheme.motionScheme.defaultSpatialSpec()),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        ChatMessageFileChip(
-            text = stringResource(R.string.citations_count, citations.size),
-            onClick = { expand = !expand },
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            icon = { FaviconRow(urls = urls, size = 18.dp) },
-        )
-        if (expand) {
-            Surface(
-                shape = MaterialTheme.shapes.large,
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-            ) {
-                ProvideTextStyle(
-                    MaterialTheme.typography.labelMedium.copy(
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        citations.fastForEachIndexed { index, annotation ->
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Favicon(annotation.url, modifier = Modifier.size(20.dp))
-                                Text(
-                                    text = buildAnnotatedString {
-                                        append("${index + 1}. ")
-                                        withLink(LinkAnnotation.Url(annotation.url)) {
-                                            append(annotation.title.urlDecode())
-                                        }
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
 }

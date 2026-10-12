@@ -1,10 +1,6 @@
 package me.rerere.rikkahub.ui.components.richtext
 
-import android.content.ClipData
 import android.content.Intent
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,7 +9,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -37,13 +32,13 @@ import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -52,11 +47,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.ClipEntry
-import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
@@ -75,6 +66,7 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -86,19 +78,13 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.mapLatest
-import kotlinx.coroutines.launch
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
 import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Copy01
-import me.rerere.hugeicons.stroke.Download04
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.modifier.onClick
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.utils.toDp
-import me.rerere.ui.table.DataTable
 import org.intellij.markdown.IElementType
 import org.intellij.markdown.MarkdownElementTypes
 import org.intellij.markdown.MarkdownTokenTypes
@@ -108,7 +94,6 @@ import org.intellij.markdown.flavours.gfm.GFMElementTypes
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.flavours.gfm.GFMTokenTypes
 import org.intellij.markdown.parser.MarkdownParser
-import kotlin.time.Clock
 
 private val flavour by lazy {
     GFMFlavourDescriptor(
@@ -235,7 +220,22 @@ fun MarkdownBlock(
     content: String,
     modifier: Modifier = Modifier,
     style: TextStyle = LocalTextStyle.current,
-    onClickCitation: (String) -> Unit = {}
+    onClickCitation: (String) -> Unit = {},
+    displayOptions: MarkdownDisplayOptions? = null,
+    horizontalPadding: Dp = 4.dp,
+) {
+    CompositionLocalProvider(LocalMarkdownDisplayOptions provides (displayOptions ?: LocalMarkdownDisplayOptions.current)) {
+        MarkdownBlockContent(content, modifier, style, onClickCitation, horizontalPadding)
+    }
+}
+
+@Composable
+private fun MarkdownBlockContent(
+    content: String,
+    modifier: Modifier,
+    style: TextStyle,
+    onClickCitation: (String) -> Unit,
+    horizontalPadding: Dp,
 ) {
     var (data, setData) = remember { mutableStateOf(parseMarkdown(content)) }
 
@@ -257,11 +257,12 @@ fun MarkdownBlock(
             modifier = modifier,
             style = style,
             onClickCitation = onClickCitation,
+            horizontalPadding = horizontalPadding,
         )
     } else {
         ProvideTextStyle(style) {
             Column(
-                modifier = modifier.padding(horizontal = 4.dp)
+                modifier = modifier.padding(horizontal = horizontalPadding)
             ) {
                 data.astTree.children.fastForEach { child ->
                     MarkdownNode(
@@ -365,7 +366,7 @@ private fun MarkdownNode(
         MarkdownElementTypes.ATX_1, MarkdownElementTypes.ATX_2, MarkdownElementTypes.ATX_3, MarkdownElementTypes.ATX_4, MarkdownElementTypes.ATX_5, MarkdownElementTypes.ATX_6 -> {
             val style = HeaderStyle.fromMarkdownType(
                 type = node.type,
-                fontSizeRatio = LocalSettings.current.displaySetting.fontSizeRatio,
+                fontSizeRatio = currentMarkdownDisplayOptions().fontSizeRatio,
             )
             val headingPadding = HeaderStyle.verticalPadding(node.type)
             ProvideTextStyle(value = LocalTextStyle.current.merge(style)) {
@@ -537,7 +538,7 @@ private fun MarkdownNode(
 
         GFMElementTypes.INLINE_MATH -> {
             val formula = node.getTextInNode(content)
-            val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
+            val enableLatexRendering = currentMarkdownDisplayOptions().enableLatexRendering
             if (enableLatexRendering) {
                 MathInline(
                     formula, modifier = modifier.padding(horizontal = 1.dp),
@@ -554,7 +555,7 @@ private fun MarkdownNode(
 
         GFMElementTypes.BLOCK_MATH -> {
             val formula = node.getTextInNode(content)
-            val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
+            val enableLatexRendering = currentMarkdownDisplayOptions().enableLatexRendering
             if (enableLatexRendering) {
                 MathBlock(
                     formula, modifier = modifier
@@ -575,11 +576,14 @@ private fun MarkdownNode(
 
         MarkdownElementTypes.CODE_SPAN -> {
             val code = node.getTextInNode(content).trim('`')
-            Text(
-                text = code,
-                fontFamily = JetbrainsMono,
-                style = LocalTextStyle.current.copy(fontFeatureSettings = "'calt' 0, 'liga' 0, 'clig' 0"),
-                modifier = modifier
+            MarkdownStyledText(
+                text = buildAnnotatedString {
+                    pushStringAnnotation(INLINE_CODE_ANNOTATION, "")
+                    append(code)
+                    pop()
+                },
+                style = LocalTextStyle.current.copy(fontFamily = JetbrainsMono, fontSize = 13.sp * currentMarkdownDisplayOptions().fontSizeRatio, fontFeatureSettings = "'calt' 0, 'liga' 0, 'clig' 0"),
+                modifier = modifier,
             )
         }
 
@@ -613,17 +617,15 @@ private fun MarkdownNode(
             HighlightCodeBlock(
                 code = code,
                 language = language,
-                modifier = Modifier
-                    .padding(bottom = 4.dp)
-                    .fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth(),
                 completeCodeBlock = hasEnd
             )
         }
 
         MarkdownTokenTypes.TEXT -> {
             val text = node.getTextInNode(content)
-            Text(
-                text = text,
+            MarkdownStyledText(
+                text = AnnotatedString(text),
                 modifier = modifier,
             )
         }
@@ -789,7 +791,8 @@ private fun Paragraph(
     val hasInlineMath = remember(node) {
         node.findChildOfTypeRecursive(GFMElementTypes.INLINE_MATH) != null
     }
-    val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
+    val enableLatexRendering = currentMarkdownDisplayOptions().enableLatexRendering
+    val inlineCodeFontSize = 13.sp * currentMarkdownDisplayOptions().fontSizeRatio
 
     val textStyle = LocalTextStyle.current
     val density = LocalDensity.current
@@ -800,7 +803,7 @@ private fun Paragraph(
             else Modifier
         )
     ) {
-        val annotatedString = remember(content, enableLatexRendering, latexColorArgb) {
+        val annotatedString = remember(content, enableLatexRendering, latexColorArgb, textStyle, inlineCodeFontSize) {
             buildAnnotatedString {
                 node.children.fastForEach { child ->
                     appendMarkdownNodeContent(
@@ -810,6 +813,7 @@ private fun Paragraph(
                         colorScheme = colorScheme,
                         onClickCitation = onClickCitation,
                         style = textStyle,
+                        inlineCodeFontSize = inlineCodeFontSize,
                         density = density,
                         trim = trim,
                         enableLatexRendering = enableLatexRendering,
@@ -818,7 +822,7 @@ private fun Paragraph(
                 }
             }
         }
-        Text(
+        MarkdownStyledText(
             text = annotatedString,
             modifier = Modifier,
             inlineContent = inlineContents,
@@ -858,6 +862,7 @@ private fun TableNode(node: ASTNode, content: String, modifier: Modifier = Modif
         @Composable {
             MarkdownBlock(
                 content = if (columnIndex < headerCells.size) headerCells[columnIndex] else "",
+                horizontalPadding = 0.dp,
             )
         }
     }
@@ -868,124 +873,20 @@ private fun TableNode(node: ASTNode, content: String, modifier: Modifier = Modif
             @Composable {
                 MarkdownBlock(
                     content = if (columnIndex < rowData.size) rowData[columnIndex] else "",
+                    horizontalPadding = 0.dp,
                 )
             }
         }
     }
 
-    val clipboardManager = LocalClipboard.current
-    val scope = rememberCoroutineScope()
-    val context = LocalContext.current
-
-    // 表格原始markdown文本（用于复制）和CSV内容（用于下载）
-    val tableMarkdown = remember(node, content) { node.getTextInNode(content).trim() }
-    val tableCsv = remember(headerCells, rows) { buildTableCsv(headerCells, rows) }
-
-    val createDocumentLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("text/csv")
-    ) { uri ->
-        uri?.let {
-            scope.launch {
-                try {
-                    context.contentResolver.openOutputStream(it)?.use { outputStream ->
-                        outputStream.write(tableCsv.toByteArray())
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
-        }
-    }
-
-    // 渲染表格卡片（工具栏 + 表格）
-    Column(
-        modifier = modifier
-            .padding(vertical = 8.dp)
-            .clip(MaterialTheme.shapes.large)
-            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), MaterialTheme.shapes.large)
-            .background(MaterialTheme.colorScheme.surfaceContainer)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "表格",
-                fontSize = 12.sp,
-                lineHeight = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.weight(1f))
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                val iconSize = 16.dp
-                val iconTint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-
-                Icon(
-                    imageVector = HugeIcons.Copy01,
-                    contentDescription = "Copy",
-                    tint = iconTint,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .onClick {
-                            scope.launch {
-                                clipboardManager.setClipEntry(ClipEntry(ClipData.newPlainText("table", tableMarkdown)))
-                            }
-                        }
-                        .padding(4.dp)
-                        .size(iconSize)
-                )
-
-                Icon(
-                    imageVector = HugeIcons.Download04,
-                    contentDescription = "Download",
-                    tint = iconTint,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .onClick {
-                            createDocumentLauncher.launch(
-                                "table_${
-                                    Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
-                                }.csv"
-                            )
-                        }
-                        .padding(4.dp)
-                        .size(iconSize)
-                )
-            }
-        }
-        DataTable(
-            headers = headers,
-            rows = rowComposables,
-            columnMinWidths = List(columnCount) { 80.dp },
-            columnMaxWidths = List(columnCount) { 200.dp },
-            outerBorder = null,
-            shape = RectangleShape,
-        )
-    }
-}
-
-// 构建CSV内容，对包含逗号/引号/换行的字段进行转义
-private fun buildTableCsv(headerCells: List<String>, rows: List<List<String>>): String {
-    fun escape(field: String): String {
-        return if (field.any { it == ',' || it == '"' || it == '\n' }) {
-            "\"${field.replace("\"", "\"\"")}\""
-        } else {
-            field
-        }
-    }
-    return buildString {
-        appendLine(headerCells.joinToString(",") { escape(it) })
-        rows.forEach { row ->
-            appendLine(row.joinToString(",") { escape(it) })
-        }
-    }
+    MarkdownTableBlock(
+        headerCells = headerCells,
+        rows = rows,
+        headers = headers,
+        rowContent = rowComposables,
+        modifier = modifier,
+        tableMarkdown = node.getTextInNode(content).trim(),
+    )
 }
 
 private fun AnnotatedString.Builder.appendMarkdownNodeContent(
@@ -996,6 +897,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
     colorScheme: ColorScheme,
     density: Density,
     style: TextStyle,
+    inlineCodeFontSize: TextUnit = 13.sp,
     enableLatexRendering: Boolean = true,
     latexColorArgb: Int = 0,
     onClickCitation: (String) -> Unit = {},
@@ -1035,6 +937,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         colorScheme = colorScheme,
                         density = density,
                         style = style,
+                        inlineCodeFontSize = inlineCodeFontSize,
                         enableLatexRendering = enableLatexRendering,
                         latexColorArgb = latexColorArgb,
                         onClickCitation = onClickCitation
@@ -1053,6 +956,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         colorScheme = colorScheme,
                         density = density,
                         style = style,
+                        inlineCodeFontSize = inlineCodeFontSize,
                         enableLatexRendering = enableLatexRendering,
                         latexColorArgb = latexColorArgb,
                         onClickCitation = onClickCitation
@@ -1071,6 +975,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         colorScheme = colorScheme,
                         density = density,
                         style = style,
+                        inlineCodeFontSize = inlineCodeFontSize,
                         enableLatexRendering = enableLatexRendering,
                         latexColorArgb = latexColorArgb,
                         onClickCitation = onClickCitation
@@ -1151,13 +1056,12 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                 SpanStyle(
                     fontFamily = JetbrainsMono,
                     fontFeatureSettings = "'calt' 0, 'liga' 0, 'clig' 0",
-                    fontSize = 0.9.em,
-                    color = colorScheme.primary,
+                    fontSize = inlineCodeFontSize,
                 )
             ) {
-                append(' ')
+                pushStringAnnotation(INLINE_CODE_ANNOTATION, "")
                 append(code)
-                append(' ')
+                pop()
             }
         }
 
@@ -1238,6 +1142,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                     colorScheme = colorScheme,
                     density = density,
                     style = style,
+                    inlineCodeFontSize = inlineCodeFontSize,
                     enableLatexRendering = enableLatexRendering,
                     latexColorArgb = latexColorArgb,
                     onClickCitation = onClickCitation

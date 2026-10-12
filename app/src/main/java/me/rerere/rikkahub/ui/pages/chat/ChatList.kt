@@ -100,7 +100,7 @@ import me.rerere.rikkahub.data.model.withConversation
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.ui.components.message.ChatMessage
 import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
-import me.rerere.rikkahub.ui.components.ui.RabbitLoadingIndicator
+import me.rerere.rikkahub.ui.components.message.ChatWaitingDots
 import me.rerere.rikkahub.ui.hooks.ImeLazyListAutoScroller
 import me.rerere.rikkahub.ui.theme.ChatFontProvider
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
@@ -404,9 +404,9 @@ private fun ChatListNormal(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        RabbitLoadingIndicator(
-                            modifier = Modifier.size(28.dp)
-                        )
+                        if (showChatFooterWaiting(conversation.currentMessages.lastOrNull())) {
+                            ChatWaitingDots()
+                        }
                         AnimatedVisibility(
                             visible = loadingIndicator.processingStatus != null,
                         ) {
