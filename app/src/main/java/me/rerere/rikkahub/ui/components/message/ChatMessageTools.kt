@@ -230,6 +230,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         } else {
             null
         },
+        extraBelowLabel = isPending && onToolApproval != null,
         onClick = { showResult = true },
         content = if (hasExtraContent) {
             {

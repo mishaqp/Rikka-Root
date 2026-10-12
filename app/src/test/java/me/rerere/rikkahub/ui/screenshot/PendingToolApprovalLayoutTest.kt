@@ -1,0 +1,120 @@
+package me.rerere.rikkahub.ui.screenshot
+
+import android.app.Application
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Job
+import me.rerere.ai.ui.ToolApprovalState
+import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.R
+import me.rerere.rikkahub.ui.components.message.ChatMessageToolStep
+import me.rerere.rikkahub.ui.components.message.ToolApprovalAction
+import me.rerere.rikkahub.ui.components.ui.ChainOfThought
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.ParameterizedRobolectricTestRunner
+import org.robolectric.ParameterizedRobolectricTestRunner.Parameters
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+
+/** Measures the real pending tool renderer, including the actual scope buttons. */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(sdk = [35], application = Application::class, qualifiers = "ru-rRU-w411dp-h891dp-mdpi",
+    shadows = [FixedSeedDynamicColors::class])
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+class PendingToolApprovalLayoutTest internal constructor(
+    private val theme: ScreenshotThemeMode,
+    private val fontScale: Float,
+    private val width: Int,
+) {
+    @get:Rule val compose = createComposeRule()
+
+    @Test fun pendingToolIdentityAndWrappedActionsRemainVisibleInsideCard() {
+        val tool = UIMessagePart.Tool(
+            toolCallId = "pending-root-layout",
+            toolName = "root_exec",
+            input = """{"command":"ls /sdcard"}""",
+            approvalState = ToolApprovalState.Pending,
+        )
+        compose.setContent {
+            ScreenshotTheme(theme, fontScale) {
+                Surface {
+                    Box(Modifier.width(width.dp)) {
+                        ChainOfThought(
+                            modifier = Modifier.fillMaxWidth().testTag("approval_card"),
+                            steps = listOf(tool),
+                        ) {
+                            ChatMessageToolStep(it, onToolApproval = { _, _, _, _, _ -> Job().apply { complete() } })
+                        }
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
+        val card = compose.onNodeWithTag("approval_card").fetchSemanticsNode().boundsInRoot
+        val title = RuntimeEnvironment.getApplication().getString(R.string.chat_message_tool_call_generic, tool.toolName)
+        val titleNode = compose.onNodeWithText(title, useUnmergedTree = true)
+        val titleBounds = titleNode.fetchSemanticsNode().boundsInRoot
+        assertTrue("Pending tool title must have positive visible width: $titleBounds", titleBounds.width > 0f)
+        assertTrue("Pending tool title must have positive visible height: $titleBounds", titleBounds.height > 0f)
+        assertContained("tool title", card, titleBounds)
+
+        val layouts = mutableListOf<TextLayoutResult>()
+        titleNode.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertEquals("The production title must expose its text layout", 1, layouts.size)
+        val layout = layouts.single()
+        val identityStart = title.indexOf(tool.toolName)
+        (identityStart until title.length).forEach { offset ->
+            val glyph = layout.getBoundingBox(offset)
+            assertTrue("Tool identity glyph at $offset must have visible width: $glyph", glyph.width > 0f)
+            assertContained("tool identity glyph at $offset", Rect(0f, 0f, layout.size.width.toFloat(), layout.size.height.toFloat()), glyph)
+            assertFalse("Tool identity must not be ellipsized", layout.isLineEllipsized(layout.getLineForOffset(offset)))
+        }
+
+        val actions = ToolApprovalAction.entries.map { action ->
+            compose.onNodeWithText(action.label).fetchSemanticsNode().boundsInRoot.also { bounds ->
+                assertTrue("${action.label} must be visible", bounds.width > 0f && bounds.height > 0f)
+                assertContained(action.label, card, bounds)
+                assertFalse("${action.label} must not overlap the tool title", bounds.overlaps(titleBounds))
+            }
+        }
+        actions.forEachIndexed { index, bounds ->
+            actions.drop(index + 1).forEach { other ->
+                assertFalse("Scope actions must not overlap: $bounds / $other", bounds.overlaps(other))
+            }
+        }
+        if (fontScale == 1.3f) {
+            assertTrue("Narrow large-font scope actions must wrap onto multiple rows", actions.map { it.center.y }.distinct().size >= 2)
+        }
+    }
+
+    private fun assertContained(name: String, outer: Rect, inner: Rect) {
+        assertTrue("$name must stay inside $outer: $inner",
+            inner.left >= outer.left - 0.5f && inner.top >= outer.top - 0.5f &&
+                inner.right <= outer.right + 0.5f && inner.bottom <= outer.bottom + 0.5f)
+    }
+
+    companion object {
+        @JvmStatic @Parameters(name = "{0}_font{1}_width{2}") fun cases(): List<Array<Any>> =
+            ScreenshotThemeMode.entries.flatMap { theme ->
+                listOf(1f, 1.3f).flatMap { font -> listOf(320, 360, 411).map { arrayOf(theme, font, it) } }
+            }
+    }
+}

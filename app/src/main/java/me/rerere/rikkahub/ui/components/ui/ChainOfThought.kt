@@ -201,6 +201,7 @@ interface ChainOfThoughtScope {
      * @param onClick 自定义点击行为；设置后优先于展开/折叠逻辑
      * @param collapsedAdaptiveWidth 是否在折叠且内容隐藏时使用自适应宽度
      * @param contentVisible 是否展示内容区域，可与 [expanded] 解耦
+     * @param extraBelowLabel 将附加信息放在标题下方，不受展开状态影响
      * @param content 步骤内容；为 `null` 时步骤不可展开
      */
     @Composable
@@ -213,6 +214,7 @@ interface ChainOfThoughtScope {
         onClick: (() -> Unit)? = null,
         collapsedAdaptiveWidth: Boolean = false,
         contentVisible: Boolean = expanded,
+        extraBelowLabel: Boolean = false,
         content: (@Composable () -> Unit)? = null,
     )
 }
@@ -241,6 +243,7 @@ private class ChainOfThoughtScopeImpl(
             expanded = expanded,
             onExpandedChange = { expanded = it },
             contentVisible = expanded,
+            extraBelowLabel = false,
             content = content,
         )
     }
@@ -255,6 +258,7 @@ private class ChainOfThoughtScopeImpl(
         onClick: (() -> Unit)?,
         collapsedAdaptiveWidth: Boolean,
         contentVisible: Boolean,
+        extraBelowLabel: Boolean,
         content: @Composable (() -> Unit)?
     ) {
         ChainOfThoughtStepContent(
@@ -266,6 +270,7 @@ private class ChainOfThoughtScopeImpl(
             expanded = expanded,
             onExpandedChange = onExpandedChange,
             contentVisible = contentVisible,
+            extraBelowLabel = extraBelowLabel,
             content = content,
         )
     }
@@ -280,6 +285,7 @@ private class ChainOfThoughtScopeImpl(
         expanded: Boolean,
         onExpandedChange: (Boolean) -> Unit,
         contentVisible: Boolean,
+        extraBelowLabel: Boolean,
         content: @Composable (() -> Unit)?
     ) {
         val hasContent = content != null
@@ -384,7 +390,7 @@ private class ChainOfThoughtScopeImpl(
                 }
 
                 // Extra
-                if (extra != null) {
+                if (extra != null && !extraBelowLabel) {
                     extra()
                 }
 
@@ -403,6 +409,29 @@ private class ChainOfThoughtScopeImpl(
                         modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+            }
+
+            // Pending approval controls need the full label width and stay visible
+            // independently of the expandable summary below them.
+            if (extraBelowLabel && extra != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .drawBehind {
+                            if (!isLast) {
+                                val x = 12.dp.toPx()
+                                drawLine(
+                                    color = lineColor,
+                                    start = Offset(x, 0f),
+                                    end = Offset(x, size.height),
+                                    strokeWidth = 1.dp.toPx(),
+                                )
+                            }
+                        }
+                        .padding(start = 32.dp, bottom = 8.dp)
+                ) {
+                    extra()
                 }
             }
 

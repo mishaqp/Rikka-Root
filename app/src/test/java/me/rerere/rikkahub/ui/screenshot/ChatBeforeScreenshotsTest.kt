@@ -153,8 +153,15 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
     }
 
     private fun capture(name: String, includeWindows: Boolean = false) {
-        val baseline = File("src/test/screenshots/chat-before/${theme.fileName}_font${fontScale}/$name.png")
         val record = System.getProperty("chat.audit.record").toBoolean()
+        // Allow explicit review captures outside the committed baselines. Verification
+        // always uses the normal paths, including Daily Build's global record mode.
+        val baselineDirectory = if (record) {
+            System.getProperty("chat.audit.record.dir", "src/test/screenshots/chat-before")
+        } else {
+            "src/test/screenshots/chat-before"
+        }
+        val baseline = File(baselineDirectory, "${theme.fileName}_font${fontScale}/$name.png")
         val options = RoborazziOptions(taskType = if (record) RoborazziTaskType.Record else RoborazziTaskType.Verify)
         requireNotNull(baseline.parentFile).mkdirs()
         if (includeWindows) {
