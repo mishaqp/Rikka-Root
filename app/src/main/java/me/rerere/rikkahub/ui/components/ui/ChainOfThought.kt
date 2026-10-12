@@ -491,7 +491,7 @@ private class ChainOfThoughtScopeImpl(
                         .fillMaxWidth()
                         .drawBehind {
                             if (!isLast) {
-                        val x = 12.dp.toPx()
+                                val x = 12.dp.toPx()
                                 drawLine(
                                     color = lineColor,
                                     start = Offset(x, 0f),
