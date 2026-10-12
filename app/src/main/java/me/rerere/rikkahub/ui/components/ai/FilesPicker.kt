@@ -3,14 +3,25 @@ package me.rerere.rikkahub.ui.components.ai
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -19,16 +30,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.text.TextAutoSize
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Badge
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItemDefaults
-import androidx.compose.material3.ListItemShapes
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SegmentedListItem
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -38,13 +50,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.util.fastForEach
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlin.uuid.Uuid
 import kotlinx.coroutines.Job
 import me.rerere.ai.provider.Model
@@ -59,25 +76,31 @@ import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.MusicNote03
+import me.rerere.hugeicons.stroke.McpServer
 import me.rerere.hugeicons.stroke.Package
 import me.rerere.hugeicons.stroke.Package01
 import me.rerere.hugeicons.stroke.PaintBoard
 import me.rerere.hugeicons.stroke.Settings02
 import me.rerere.hugeicons.stroke.Video01
 import me.rerere.hugeicons.stroke.Voice
+import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.ai.mcp.McpManager
+import me.rerere.rikkahub.data.ai.mcp.McpStatus
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
+import me.rerere.rikkahub.data.datastore.getQuickMessagesOfAssistant
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.QuickMessage
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.ui.components.ui.ExtensionSelector
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.hooks.ChatInputState
+import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import me.rerere.workspace.WorkspaceShellStatus
 import org.koin.compose.koinInject
 
@@ -110,6 +133,9 @@ internal fun FilesPicker(
     onStartVoiceMode: (() -> Unit)? = null,
 ) {
     val settings = LocalSettings.current
+    val quickMessages = remember(settings.quickMessages, assistant.quickMessageIds) {
+        settings.getQuickMessagesOfAssistant(assistant)
+    }
     val provider = chatModel?.findProvider(providers = settings.providers)
     val navController = LocalNavController.current
     val workspaceRepository: WorkspaceRepository = koinInject()
@@ -159,39 +185,57 @@ internal fun FilesPicker(
             FilesPickerPage.MAIN -> Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp)
                     .padding(bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                AttachmentGrid(
-                    actions = buildList {
-                        add(AttachmentAction(HugeIcons.Camera01, R.string.take_picture, onTakePic))
-                        add(AttachmentAction(HugeIcons.Image02, R.string.photo, onPickImage))
-                        add(AttachmentAction(HugeIcons.PaintBoard, R.string.sketch, onSketch))
-                        if (provider != null && provider is ProviderSetting.Google) {
-                            add(AttachmentAction(HugeIcons.Video01, R.string.video, onPickVideo))
-                            add(AttachmentAction(HugeIcons.MusicNote03, R.string.audio, onPickAudio))
-                        }
-                        add(AttachmentAction(HugeIcons.Files02, R.string.upload_file, onPickFile))
-                        onStartVoiceMode?.let { start ->
-                            add(AttachmentAction(HugeIcons.Voice, R.string.chat_page_voice_title, start))
-                        }
-                    }
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    AttachmentTile(
+                        action = AttachmentAction(HugeIcons.Camera01, R.string.take_picture, onTakePic),
+                        label = stringResource(R.string.chat_plus_camera),
+                        modifier = Modifier.weight(1f),
+                    )
+                    AttachmentTile(
+                        action = AttachmentAction(HugeIcons.Image02, R.string.photo, onPickImage),
+                        label = stringResource(R.string.chat_plus_photos),
+                        modifier = Modifier.weight(1f),
+                    )
+                    AttachmentTile(
+                        action = AttachmentAction(HugeIcons.Files02, R.string.upload_file, onPickFile),
+                        label = stringResource(R.string.chat_plus_files),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
 
-                // 分段列表：各项按显示条件依次占位，首尾项才有大圆角
                 val showWorkspace = workspaces.isNotEmpty()
                 val showMcp = settings.mcpServers.isNotEmpty()
-                val itemCount = 2 + listOf(showWorkspace, showWorkspace && showCwd, showMcp).count { it }
-                var itemIndex = 0
                 Column(
-                    verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    AttachmentRow(AttachmentAction(HugeIcons.PaintBoard, R.string.sketch, onSketch))
+                    if (quickMessages.isNotEmpty()) {
+                        QuickMessagesSheetRow(
+                            quickMessages = quickMessages,
+                            state = state,
+                            onDismiss = onDismiss,
+                        )
+                    }
+                    if (provider != null && provider is ProviderSetting.Google) {
+                        AttachmentRow(AttachmentAction(HugeIcons.Video01, R.string.video, onPickVideo))
+                        AttachmentRow(AttachmentAction(HugeIcons.MusicNote03, R.string.audio, onPickAudio))
+                    }
+                    onStartVoiceMode?.let { start ->
+                        AttachmentRow(AttachmentAction(HugeIcons.Voice, R.string.chat_page_voice_title, start))
+                    }
+
                     if (showWorkspace) {
                         WorkspacePickerListItem(
                             assistant = assistant,
                             workspaces = workspaces,
-                            shapes = ListItemDefaults.segmentedShapes(index = itemIndex++, count = itemCount),
                             onUpdateAssistant = onUpdateAssistant,
                             onNavigateToDetail = { id ->
                                 onDismiss()
@@ -209,35 +253,22 @@ internal fun FilesPicker(
 
                         // Workspace CWD
                         if (showCwd) {
-                            SegmentedListItem(
+                            ToolsSheetRow(
+                                icon = HugeIcons.Folder01,
+                                label = conversation.workspaceCwd ?: "/workspace",
                                 onClick = { showCwdSheet = true },
-                                shapes = ListItemDefaults.segmentedShapes(index = itemIndex++, count = itemCount),
-                                leadingContent = {
-                                    Icon(
-                                        imageVector = HugeIcons.Folder01,
-                                        contentDescription = stringResource(R.string.workspace_cwd_select_directory),
-                                    )
-                                },
-                                trailingContent = {
-                                    Icon(HugeIcons.ArrowRight01, contentDescription = null)
-                                },
-                            ) {
-                                Text(
-                                    text = conversation.workspaceCwd ?: "/workspace",
-                                    // 路径的末尾更有辨识度，放不下时省略开头
-                                    maxLines = 1,
-                                    overflow = TextOverflow.StartEllipsis,
-                                )
-                            }
+                                onClickLabel = stringResource(R.string.workspace_cwd_select_directory),
+                                // 路径的末尾更有辨识度，放不下时省略开头
+                                labelOverflow = TextOverflow.StartEllipsis,
+                            )
                         }
                     }
 
                     if (showMcp) {
-                        McpPickerListItem(
+                        McpToolsSheetRow(
                             assistant = assistant,
-                            servers = settings.mcpServers,
+                            settings = settings,
                             mcpManager = mcpManager,
-                            shapes = ListItemDefaults.segmentedShapes(index = itemIndex++, count = itemCount),
                             onClick = { page = FilesPickerPage.MCP },
                         )
                     }
@@ -248,34 +279,24 @@ internal fun FilesPicker(
                             assistant.modeInjectionIds.size +
                             assistant.lorebookIds.size +
                             assistant.enabledSkills.size
-                    SegmentedListItem(
+                    ToolsSheetRow(
+                        icon = HugeIcons.Package,
+                        label = stringResource(R.string.assistant_page_tab_extensions),
                         onClick = { page = FilesPickerPage.EXTENSIONS },
-                        shapes = ListItemDefaults.segmentedShapes(index = itemIndex++, count = itemCount),
-                        leadingContent = {
-                            Icon(
-                                imageVector = HugeIcons.Package,
-                                contentDescription = null,
-                            )
-                        },
                         trailingContent = {
                             if (activeCount > 0) {
                                 CountBadge(count = activeCount)
+                            } else {
+                                ToolsSheetChevron()
                             }
                         },
-                    ) {
-                        Text(stringResource(R.string.assistant_page_tab_extensions))
-                    }
+                    )
 
                     // Compress History Button
-                    SegmentedListItem(
+                    ToolsSheetRow(
+                        icon = HugeIcons.Package01,
+                        label = stringResource(R.string.chat_page_compress_context),
                         onClick = { onShowCompressDialogChange(true) },
-                        shapes = ListItemDefaults.segmentedShapes(index = itemIndex++, count = itemCount),
-                        leadingContent = {
-                            Icon(
-                                imageVector = HugeIcons.Package01,
-                                contentDescription = null,
-                            )
-                        },
                         trailingContent = {
                             if (conversation.messageNodes.isNotEmpty()) {
                                 Text(
@@ -283,11 +304,11 @@ internal fun FilesPicker(
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
+                            } else {
+                                ToolsSheetChevron()
                             }
                         },
-                    ) {
-                        Text(stringResource(R.string.chat_page_compress_context))
-                    }
+                    )
                 }
             }
         }
@@ -319,7 +340,6 @@ internal fun FilesPicker(
 private fun WorkspacePickerListItem(
     assistant: Assistant,
     workspaces: List<WorkspaceEntity>,
-    shapes: ListItemShapes,
     onUpdateAssistant: ((Assistant) -> Assistant) -> Unit,
     onNavigateToDetail: (String) -> Unit,
     onNavigateToTerminal: (String) -> Unit,
@@ -330,22 +350,11 @@ private fun WorkspacePickerListItem(
         workspaces.find { it.id == assistant.workspaceId?.toString() }
     }
 
-    SegmentedListItem(
+    ToolsSheetRow(
+        icon = HugeIcons.Codesandbox,
+        label = stringResource(R.string.assistant_page_workspace),
         onClick = { showSheet = true },
-        shapes = shapes,
-        leadingContent = {
-            Icon(
-                imageVector = HugeIcons.Codesandbox,
-                contentDescription = null,
-            )
-        },
-        supportingContent = {
-            Text(
-                text = boundWorkspace?.name ?: stringResource(R.string.assistant_page_workspace_unbound),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        },
+        subtitle = boundWorkspace?.name ?: stringResource(R.string.assistant_page_workspace_unbound),
         trailingContent = {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -355,6 +364,7 @@ private fun WorkspacePickerListItem(
                         Icon(
                             imageVector = HugeIcons.Settings02,
                             contentDescription = stringResource(R.string.workspace_detail),
+                            modifier = Modifier.size(20.dp),
                         )
                     }
                     if (boundWorkspace.shellStatus != WorkspaceShellStatus.DISABLED.name) {
@@ -362,15 +372,16 @@ private fun WorkspacePickerListItem(
                             Icon(
                                 imageVector = HugeIcons.ComputerTerminal01,
                                 contentDescription = stringResource(R.string.workspace_terminal),
+                                modifier = Modifier.size(20.dp),
                             )
                         }
                     }
+                } else {
+                    ToolsSheetChevron()
                 }
             }
         },
-    ) {
-        Text(stringResource(R.string.assistant_page_workspace))
-    }
+    )
 
     if (showSheet) {
         WorkspaceSelectSheet(
@@ -446,27 +457,58 @@ private class AttachmentAction(
     val onClick: () -> Unit,
 )
 
-// 附件入口：一行最多四个，再多就均分成两行
 @Composable
-private fun AttachmentGrid(
-    actions: List<AttachmentAction>,
-    modifier: Modifier = Modifier,
+private fun AttachmentRow(action: AttachmentAction) {
+    ToolsSheetRow(
+        icon = action.icon,
+        label = stringResource(action.label),
+        onClick = action.onClick,
+    )
+}
+
+@Composable
+private fun QuickMessagesSheetRow(
+    quickMessages: List<QuickMessage>,
+    state: ChatInputState,
+    onDismiss: () -> Unit,
 ) {
-    val perRow = if (actions.size <= 4) actions.size else (actions.size + 1) / 2
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        actions.chunked(perRow).fastForEach { row ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                row.fastForEach { action ->
-                    AttachmentTile(
-                        action = action,
-                        modifier = Modifier.weight(1f),
-                    )
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier = Modifier.fillMaxWidth()) {
+        ToolsSheetRow(
+            icon = HugeIcons.Zap,
+            label = stringResource(R.string.chat_plus_quick_messages),
+            onClick = { expanded = !expanded },
+        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            modifier = Modifier.widthIn(min = 200.dp, max = 360.dp),
+        ) {
+            quickMessages.forEach { quickMessage ->
+                Surface(
+                    onClick = {
+                        state.appendText(quickMessage.content)
+                        expanded = false
+                        onDismiss()
+                    },
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(modifier = Modifier.padding(8.dp)) {
+                        Text(
+                            text = quickMessage.title,
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = quickMessage.content,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
         }
@@ -474,39 +516,181 @@ private fun AttachmentGrid(
 }
 
 @Composable
+private fun McpToolsSheetRow(
+    assistant: Assistant,
+    settings: Settings,
+    mcpManager: McpManager,
+    onClick: () -> Unit,
+) {
+    val status by mcpManager.syncingStatus.collectAsStateWithLifecycle()
+    val loading = status.values.any { it == McpStatus.Connecting }
+    val enabledCount = settings.mcpServers.count {
+        it.commonOptions.enable && assistant.mcpServers.contains(it.id)
+    }
+    ToolsSheetRow(
+        icon = HugeIcons.McpServer,
+        label = stringResource(R.string.mcp_picker_title),
+        onClick = onClick,
+        leadingContent = {
+            if (loading) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp))
+            } else {
+                Icon(HugeIcons.McpServer, contentDescription = null, modifier = Modifier.size(20.dp))
+            }
+        },
+        trailingContent = {
+            if (enabledCount > 0) {
+                CountBadge(count = enabledCount)
+            } else {
+                ToolsSheetChevron()
+            }
+        },
+    )
+}
+
+@Composable
 private fun AttachmentTile(
     action: AttachmentAction,
+    label: String,
     modifier: Modifier = Modifier,
 ) {
-    FilledTonalButton(
+    ToolsSheetSurface(
         onClick = action.onClick,
-        // 按下时圆角收紧
-        shapes = ButtonDefaults.shapes(
-            shape = MaterialTheme.shapes.extraLarge,
-            pressedShape = MaterialTheme.shapes.medium,
-        ),
-        modifier = modifier.heightIn(min = 88.dp),
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 16.dp),
+        modifier = modifier.heightIn(min = 72.dp),
+        pressedScale = 0.98f,
     ) {
         Column(
+            modifier = Modifier.align(Alignment.Center).padding(horizontal = 8.dp, vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Icon(
                 imageVector = action.icon,
                 contentDescription = null,
-                modifier = Modifier.size(28.dp),
+                modifier = Modifier.size(24.dp),
             )
             Text(
-                text = stringResource(action.label),
-                // 四个并排时较长的译文放不下，自动缩小字号
-                autoSize = TextAutoSize.StepBased(minFontSize = 11.sp, maxFontSize = 14.sp),
-                maxLines = 1,
-                softWrap = false,
+                text = label,
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }
     }
+}
+
+// Moru ToolsSheetRow: 48dp / 56dp, radius 14dp, icon 20dp, horizontal padding 12dp.
+@Composable
+private fun ToolsSheetRow(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    subtitle: String? = null,
+    onClickLabel: String? = null,
+    labelOverflow: TextOverflow = TextOverflow.Ellipsis,
+    leadingContent: (@Composable () -> Unit)? = null,
+    trailingContent: (@Composable () -> Unit)? = null,
+) {
+    ToolsSheetSurface(
+        onClick = onClick,
+        onClickLabel = onClickLabel,
+        modifier = Modifier.fillMaxWidth().heightIn(min = if (subtitle == null) 48.dp else 56.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            if (leadingContent != null) {
+                leadingContent()
+            } else {
+                Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium),
+                    maxLines = 1,
+                    overflow = labelOverflow,
+                )
+                if (subtitle != null) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (trailingContent != null) trailingContent() else ToolsSheetChevron()
+        }
+    }
+}
+
+@Composable
+private fun ToolsSheetChevron() {
+    Icon(
+        imageVector = HugeIcons.ArrowRight01,
+        contentDescription = null,
+        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+        modifier = Modifier.size(18.dp),
+    )
+}
+
+private val ToolsSheetPressEasing = CubicBezierEasing(0.215f, 0.61f, 0.355f, 1f)
+
+// Moru IosCardPress: color / optional 0.98 scale tween, 260ms easeOutCubic.
+// Sheet fills stay opaque and use the active MaterialTheme.
+@Composable
+private fun ToolsSheetSurface(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onClickLabel: String? = null,
+    pressedScale: Float = 1f,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val hovered by interactionSource.collectIsHoveredAsState()
+    val base = MaterialTheme.colorScheme.surfaceContainerLow
+    val washStrength = if (LocalDarkMode.current) 0.14f else 0.12f
+    val targetColor = when {
+        pressed -> lerp(base, MaterialTheme.colorScheme.onSurface, washStrength)
+        hovered -> lerp(base, MaterialTheme.colorScheme.onSurface, washStrength * 0.7f)
+        else -> base
+    }
+    val color by animateColorAsState(
+        targetValue = targetColor,
+        animationSpec = tween(260, easing = ToolsSheetPressEasing),
+        label = "ToolsSheetPressColor",
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) pressedScale else 1f,
+        animationSpec = tween(260, easing = ToolsSheetPressEasing),
+        label = "ToolsSheetPressScale",
+    )
+    Box(
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(RoundedCornerShape(14.dp))
+            .background(color)
+            .hoverable(interactionSource)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Button,
+                onClickLabel = onClickLabel,
+                onClick = onClick,
+            ),
+        content = content,
+    )
 }
 
 // 列表项尾部的已启用数量
@@ -522,15 +706,25 @@ internal fun CountBadge(count: Int) {
 
 @Preview(showBackground = true)
 @Composable
-private fun AttachmentGridPreview() {
-    AttachmentGrid(
-        actions = listOf(
-            AttachmentAction(HugeIcons.Camera01, R.string.take_picture) {},
-            AttachmentAction(HugeIcons.Image02, R.string.photo) {},
-            AttachmentAction(HugeIcons.Video01, R.string.video) {},
-            AttachmentAction(HugeIcons.MusicNote03, R.string.audio) {},
-            AttachmentAction(HugeIcons.Files02, R.string.upload_file) {},
-        ),
-        modifier = Modifier.padding(16.dp),
-    )
+private fun AttachmentTilesPreview() {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        AttachmentTile(
+            action = AttachmentAction(HugeIcons.Camera01, R.string.take_picture) {},
+            label = stringResource(R.string.chat_plus_camera),
+            modifier = Modifier.weight(1f),
+        )
+        AttachmentTile(
+            action = AttachmentAction(HugeIcons.Image02, R.string.photo) {},
+            label = stringResource(R.string.chat_plus_photos),
+            modifier = Modifier.weight(1f),
+        )
+        AttachmentTile(
+            action = AttachmentAction(HugeIcons.Files02, R.string.upload_file) {},
+            label = stringResource(R.string.chat_plus_files),
+            modifier = Modifier.weight(1f),
+        )
+    }
 }

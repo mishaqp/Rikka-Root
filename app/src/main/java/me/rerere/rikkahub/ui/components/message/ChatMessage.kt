@@ -61,7 +61,6 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.ai.ui.isEmptyUIMessage
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.MusicNote03
@@ -80,6 +79,7 @@ import me.rerere.rikkahub.ui.components.ui.Favicon
 import me.rerere.rikkahub.ui.components.ui.FaviconRow
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.modifier.shimmer
+import me.rerere.rikkahub.ui.pages.chat.ChatPendingToolPresentation
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.theme.LocalChatFontFamily
 import me.rerere.rikkahub.ui.theme.rememberChatFontFamily
@@ -113,9 +113,11 @@ fun ChatMessage(
     onClearTranslation: (UIMessage) -> Unit = {},
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String, scope: me.rerere.rikkahub.service.ChatService.ApprovalScope, toolName: String) -> kotlinx.coroutines.Job)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
+    pendingTools: List<ChatPendingToolPresentation> = emptyList(),
 ) {
     val message = node.messages[node.selectIndex]
-    if (message.isContextCheckpoint) {
+    val presentation = presentChatMessage(message, loading, lastMessage, readOnly)
+    if (presentation.isCheckpoint) {
         ChatMessageContextCheckpoint(
             message = message,
             readOnly = readOnly,
@@ -139,10 +141,10 @@ fun ChatMessage(
     val colorScheme = MaterialTheme.colorScheme
     Column(
         modifier = modifier.fillMaxWidth(),
-        horizontalAlignment = if (message.role == MessageRole.USER) Alignment.End else Alignment.Start,
+        horizontalAlignment = if (presentation.role == MessageRole.USER) Alignment.End else Alignment.Start,
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        if (!message.parts.isEmptyUIMessage()) {
+        if (presentation.showAvatarRow) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth(),
@@ -167,14 +169,15 @@ fun ChatMessage(
         ProvideTextStyle(textStyle) {
             MessagePartsBlock(
                 assistant = assistant,
-                role = message.role,
+                role = presentation.role,
                 parts = message.parts,
                 annotations = message.annotations,
                 loading = loading,
                 model = model,
-                onToolApproval = if (readOnly) null else onToolApproval,
-                onToolAnswer = if (readOnly) null else onToolAnswer,
-                onUserMessageClick = if (!readOnly && message.role == MessageRole.USER) onEdit else null,
+                onToolApproval = if (presentation.canInteractWithTools) onToolApproval else null,
+                onToolAnswer = if (presentation.canInteractWithTools) onToolAnswer else null,
+                onUserMessageClick = if (presentation.canEditFromBubble) onEdit else null,
+                pendingTools = pendingTools.filter { it.key.messageId == presentation.messageId },
             )
 
             message.translation?.let { translation ->
@@ -185,15 +188,9 @@ fun ChatMessage(
             }
         }
 
-        val showActions = if (lastMessage) {
-            !loading
-        } else {
-            message.parts.isEmptyUIMessage().not()
-        }
-
         val motionScheme = MaterialTheme.motionScheme
         AnimatedVisibility(
-            visible = showActions,
+            visible = presentation.showActions,
             enter = slideInVertically(motionScheme.defaultSpatialSpec()) { it / 2 } +
                 fadeIn(motionScheme.defaultEffectsSpec()),
             exit = slideOutVertically(motionScheme.fastSpatialSpec()) { it / 2 } +
@@ -284,6 +281,7 @@ private fun MessagePartsBlock(
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String, scope: me.rerere.rikkahub.service.ChatService.ApprovalScope, toolName: String) -> kotlinx.coroutines.Job)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onUserMessageClick: (() -> Unit)? = null,
+    pendingTools: List<ChatPendingToolPresentation> = emptyList(),
 ) {
     val context = LocalContext.current
     // 消息输出HapticFeedback
@@ -349,7 +347,8 @@ private fun MessagePartsBlock(
                             }
 
                             is ThinkingStep.ToolStep -> {
-                                key(step.tool.toolCallId.ifBlank { step.hashCode().toString() }) {
+                                val pending = pendingTools.firstOrNull { it.tool == step.tool }
+                                key(pending?.renderKey ?: step.tool.toolCallId.ifBlank { step.hashCode().toString() }) {
                                     ChatMessageToolStep(
                                         tool = step.tool,
                                         loading = loading && !step.tool.isExecuted,

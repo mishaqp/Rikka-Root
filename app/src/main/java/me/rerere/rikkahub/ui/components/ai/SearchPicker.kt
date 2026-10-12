@@ -54,6 +54,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
@@ -98,11 +99,25 @@ fun SearchPickerButton(
     onUpdateSearchMode: (SearchMode) -> Unit,
     onUpdateSearchService: (Int) -> Unit,
     model: Model?,
+    compact: Boolean = false,
 ) {
     var showSearchPicker by remember { mutableStateOf(false) }
     val currentService = settings.searchServices.getOrNull(settings.searchServiceSelected)
 
-    ToggleSurface(
+    if (compact) {
+        CompactComposerButton(
+            onClick = { showSearchPicker = true },
+            description = stringResource(R.string.use_web_search),
+            active = enableSearch || model?.tools?.contains(BuiltInTools.Search) == true,
+            modifier = modifier.testTag("chat_composer_search"),
+        ) {
+            when {
+                model?.tools?.contains(BuiltInTools.Search) == true ->
+                    Icon(HugeIcons.AiSearch02, null, Modifier.size(20.dp))
+                else -> Icon(HugeIcons.Search01, null, Modifier.size(20.dp))
+            }
+        }
+    } else ToggleSurface(
         modifier = modifier,
         checked = enableSearch || model?.tools?.contains(BuiltInTools.Search) == true,
         onClick = {

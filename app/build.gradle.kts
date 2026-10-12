@@ -161,15 +161,21 @@ val screenshotModeProperties = listOf("record", "compare", "verify").associate {
     val property = "roborazzi.test.$mode"
     property to providers.gradleProperty(property).getOrElse("false")
 }
-val recordScreenshots = screenshotModeProperties.getValue("roborazzi.test.record").toBoolean()
+val chatScreenshotProperties = listOf(
+    "chat.audit.record", "chat.audit.record.dir", "chat.stage1.record", "chat.stage1.record.dir",
+).associateWith { property ->
+    providers.gradleProperty(property).getOrElse(if (property.endsWith(".dir")) "" else "false")
+}
+val recordScreenshots = screenshotModeProperties.getValue("roborazzi.test.record").toBoolean() ||
+    chatScreenshotProperties.filterKeys { it.endsWith(".record") }.values.any(String::toBoolean)
 val screenshotOutputDirectory = layout.buildDirectory.dir("outputs/roborazzi").get().asFile.absolutePath
 
 tasks.withType<Test>().configureEach {
     outputs.upToDateWhen { !recordScreenshots }
     systemProperties(screenshotModeProperties)
     systemProperty("ui.screenshots.dir", file("$screenshotOutputDirectory/$name").absolutePath)
-    // Opt-in baseline regeneration; Daily Build must verify the committed chat images.
-    systemProperty("chat.audit.record", providers.gradleProperty("chat.audit.record").getOrElse("false"))
+    // Chat baselines require their own opt-in, even when Daily Build records other UI.
+    systemProperties(chatScreenshotProperties)
 }
 
 composeCompiler {

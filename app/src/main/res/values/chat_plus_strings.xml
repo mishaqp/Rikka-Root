@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_plus_camera" translatable="false">Камера</string>
+    <string name="chat_plus_photos" translatable="false">Фото</string>
+    <string name="chat_plus_files" translatable="false">Файлы</string>
+    <string name="chat_plus_quick_messages" translatable="false">Быстрые сообщения</string>
+</resources>

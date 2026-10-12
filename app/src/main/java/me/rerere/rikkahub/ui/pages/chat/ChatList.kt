@@ -92,7 +92,6 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.model.HistoryLoadState
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.withConversation
 import me.rerere.rikkahub.service.ChatError
@@ -108,8 +107,6 @@ import kotlin.math.roundToInt
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatList"
-private const val LoadingIndicatorKey = "LoadingIndicator"
-private const val ScrollBottomKey = "ScrollBottomKey"
 
 @Composable
 fun ChatList(
@@ -277,7 +274,20 @@ private fun ChatListNormal(
             .flatMap { it.models }
             .associateBy { it.id }
     }
-    val lastMessageIndex = conversation.messageNodes.lastIndex
+    val allowSystemPrompt = assistant?.allowConversationSystemPrompt == true
+    val canChangeSystemPrompt = onConversationSystemPromptChange != null
+    val presentation = remember(conversation, loading, processingStatus, errors, allowSystemPrompt, canChangeSystemPrompt) {
+        presentChatList(
+            conversation = conversation,
+            loading = loading,
+            processingStatus = processingStatus,
+            errors = errors,
+            allowSystemPrompt = allowSystemPrompt,
+            canChangeSystemPrompt = canChangeSystemPrompt,
+        )
+    }
+    val systemPrompt = presentation.items.filterIsInstance<ChatListItemPresentation.SystemPrompt>().firstOrNull()
+    val loadingIndicator = presentation.items.filterIsInstance<ChatListItemPresentation.Loading>().firstOrNull()
 
     Box(
         modifier = Modifier
@@ -322,9 +332,10 @@ private fun ChatListNormal(
                     .padding(top = innerPadding.calculateTopPadding()),
             ) {
             itemsIndexed(
-                items = conversation.messageNodes,
-                key = { index, item -> item.id },
-            ) { index, node ->
+                items = presentation.items.filterIsInstance<ChatListItemPresentation.Message>(),
+                key = { _, item -> item.key },
+            ) { _, item ->
+                val node = item.node
                 Column {
                     ListSelectableItem(
                         key = node.id,
@@ -340,11 +351,11 @@ private fun ChatListNormal(
                     ) {
                         ChatMessage(
                             node = node,
-                            readOnly = conversation.historyLoadState != HistoryLoadState.COMPLETE,
+                            readOnly = item.readOnly,
                             model = node.currentMessage.modelId?.let(modelById::get)
                                 ?: node.currentMessage.snapshotModel(),
                             assistant = assistant,
-                            loading = loading && index == lastMessageIndex,
+                            loading = item.loading,
                             onRegenerate = {
                                 onRegenerate(node.currentMessage)
                             },
@@ -374,23 +385,24 @@ private fun ChatListNormal(
                             onClearTranslation = onClearTranslation,
                             onToolApproval = onToolApproval,
                             onToolAnswer = onToolAnswer,
-                            lastMessage = index == lastMessageIndex,
+                            lastMessage = item.lastMessage,
+                            pendingTools = item.pendingTools,
                         )
                     }
                 }
             }
 
-            if (conversation.historyLoadState == HistoryLoadState.COMPLETE && !loading && assistant?.allowConversationSystemPrompt == true && onConversationSystemPromptChange != null) {
-                item(key = "ConversationSystemPrompt") {
+            if (systemPrompt != null && onConversationSystemPromptChange != null) {
+                item(key = systemPrompt.key) {
                     ConversationSystemPromptButton(
-                        customSystemPrompt = conversation.customSystemPrompt,
+                        customSystemPrompt = systemPrompt.customSystemPrompt,
                         onSystemPromptChange = onConversationSystemPromptChange,
                     )
                 }
             }
 
-            if (loading) {
-                item(LoadingIndicatorKey) {
+            if (loadingIndicator != null) {
+                item(loadingIndicator.key) {
                     Row(
                         modifier = Modifier.padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -400,10 +412,10 @@ private fun ChatListNormal(
                             modifier = Modifier.size(28.dp)
                         )
                         AnimatedVisibility(
-                            visible = processingStatus != null,
+                            visible = loadingIndicator.processingStatus != null,
                         ) {
                             Text(
-                                text = processingStatus ?: "",
+                                text = loadingIndicator.processingStatus ?: "",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -413,7 +425,7 @@ private fun ChatListNormal(
             }
 
             // 为了能正确滚动到这
-            item(ScrollBottomKey) {
+            item(ChatListItemPresentation.BottomSpacer.key) {
                 Spacer(
                     Modifier
                         .fillMaxWidth()
@@ -430,7 +442,7 @@ private fun ChatListNormal(
         ) {
             // 错误消息卡片
             ErrorCardsDisplay(
-                errors = errors,
+                errors = presentation.errors.map { it.error },
                 onDismissError = onDismissError,
                 onClearAllErrors = onClearAllErrors,
                 modifier = Modifier

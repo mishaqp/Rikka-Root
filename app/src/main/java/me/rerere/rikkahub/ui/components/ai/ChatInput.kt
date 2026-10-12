@@ -1,10 +1,15 @@
 package me.rerere.rikkahub.ui.components.ai
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -19,29 +24,28 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.material3.BasicAlertDialog
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -49,6 +53,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -59,33 +64,28 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import com.dokar.sonner.ToastType
-import dev.chrisbanes.haze.HazeInput
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.blur.HazeBlurStyle
-import dev.chrisbanes.haze.blur.hazeBlur
-import dev.chrisbanes.haze.blur.material3.Material3
-import dev.chrisbanes.haze.glass.GlassDefaults
-import dev.chrisbanes.haze.glass.GlassStyle
-import dev.chrisbanes.haze.glass.OpticalSizeValue
-import dev.chrisbanes.haze.glass.hazeGlass
-import dev.chrisbanes.haze.glass.material3.Material3
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collectLatest
 import me.rerere.ai.provider.Model
@@ -98,14 +98,11 @@ import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.ArrowUp02
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Fullscreen
-import me.rerere.hugeicons.stroke.Zap
+import me.rerere.hugeicons.stroke.Stop
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.datastore.BackgroundEffectType
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.getQuickMessagesOfAssistant
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
-import me.rerere.rikkahub.data.model.QuickMessage
 import me.rerere.rikkahub.service.MessageQueueState
 import me.rerere.rikkahub.service.QueuedMessage
 import me.rerere.rikkahub.ui.components.ai.completion.ChatCompletionContext
@@ -154,23 +151,14 @@ fun ChatInput(
     onStartVoiceMode: (() -> Unit)? = null,
     voiceState: VoiceSessionState = VoiceSessionState(),
     onStopVoiceMode: () -> Unit = {},
+    contextUsageTokens: Int? = null,
 ) {
     val toaster = LocalToaster.current
-    val hazeTintColor = MaterialTheme.colorScheme.surfaceContainerLow
-    val inputHazeStyle = HazeBlurStyle.Material3 {
-        blurRadius(12.dp)
-    }
 
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
 
-    val themeShape = MaterialTheme.shapes.largeIncreased
-    val containerShape = RoundedCornerShape(
-        topStart = themeShape.topStart,
-        topEnd = themeShape.topEnd,
-        bottomEnd = themeShape.bottomEnd,
-        bottomStart = themeShape.bottomStart,
-    )
+    val containerShape = RoundedCornerShape(20.dp)
     val modelListState = rememberModelListState(
         modelId = chatModel?.id,
         providers = settings.providers,
@@ -220,26 +208,14 @@ fun ChatInput(
         }
     }
 
-    // 底部渐变遮罩：从输入区顶部一直过渡到屏幕底部（键盘弹出时到键盘上沿），避免消息透到系统导航栏
-    val scrimColor = MaterialTheme.colorScheme.background
-    val imeInsets = WindowInsets.ime
     Surface(
-        color = Color.Transparent,
-        modifier = Modifier.drawWithCache {
-            val brush = Brush.verticalGradient(
-                colors = listOf(scrimColor.copy(alpha = 0f), scrimColor),
-                startY = 0f,
-                endY = (size.height - imeInsets.getBottom(this)).coerceAtLeast(1f),
-            )
-            onDrawBehind { drawRect(brush) }
-        },
+        color = MaterialTheme.colorScheme.background,
     ) {
         Column(
             modifier = modifier
                 .imePadding()
                 .navigationBarsPadding()
-                .padding(horizontal = 8.dp)
-                .padding(bottom = 8.dp),
+                .padding(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             MessageQueuePanel(
@@ -252,39 +228,15 @@ fun ChatInput(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(containerShape)
-                    .then(
-                        if (settings.displaySetting.enableBlurEffect) {
-                            when (settings.displaySetting.backgroundEffectType) {
-                                BackgroundEffectType.BLUR -> Modifier.hazeBlur(
-                                    input = HazeInput.Sources(hazeState),
-                                    style = inputHazeStyle,
-                                )
-                                BackgroundEffectType.GLASS -> Modifier.hazeGlass(
-                                    input = HazeInput.Sources(hazeState),
-                                    style = GlassStyle.Material3(
-                                        containerColor = hazeTintColor,
-                                        tint = hazeTintColor.copy(alpha = 0.3f),
-                                    ) {
-                                        // Keep background text from competing with the input text.
-                                        optics(GlassDefaults.optics.copy(
-                                            blurRadius = OpticalSizeValue.Fixed(16.dp),
-                                            depth = OpticalSizeValue.Fixed(0.5f),
-                                        ))
-                                        shape(containerShape)
-                                    },
-                                )
-                            }
-                        } else Modifier
-                    ),
+                    .testTag("chat_composer")
+                    .clip(containerShape),
                 shape = containerShape,
                 tonalElevation = 0.dp,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                color = if (settings.displaySetting.enableBlurEffect) Color.Transparent else hazeTintColor,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
             ) {
                 Column(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                    verticalArrangement = Arrangement.spacedBy(0.dp)
                 ) {
                     if (voiceState.phase != VoicePhase.Off) {
                         VoiceModeRow(
@@ -302,116 +254,122 @@ fun ChatInput(
 
                     TextInputRow(
                         state = state,
-                        assistant = assistant,
                         completionProviders = completionProviders,
                         onSendMessage = { sendMessage() },
                     )
 
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
+                    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
                         Row(
                             modifier = Modifier
-                                .weight(1f)
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                .fillMaxWidth()
+                                .padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(0.dp),
                         ) {
-                            // Model Picker
-                            ModelSelectorButton(
-                                state = modelListState,
-                                onlyIcon = true,
-                                modifier = Modifier,
-                            )
-
-                            // Search
-                            val enableSearchMsg = stringResource(R.string.web_search_enabled)
-                            val disableSearchMsg = stringResource(R.string.web_search_disabled)
-                            SearchPickerButton(
-                                enableSearch = assistant.enableWebSearch,
-                                settings = settings,
-                                onUpdateSearchMode = { mode ->
-                                    onUpdateSearchMode(mode)
-                                    val enabled = mode != SearchMode.OFF
-                                    toaster.show(
-                                        message = if (enabled) enableSearchMsg else disableSearchMsg,
-                                        duration = 1.seconds,
-                                        type = if (enabled) {
-                                            ToastType.Success
-                                        } else {
-                                            ToastType.Normal
-                                        }
-                                    )
-                                },
-                                onUpdateSearchService = onUpdateSearchService,
-                                model = chatModel,
-                            )
-
-                            // Reasoning
-                            if (chatModel?.abilities?.contains(ModelAbility.REASONING) == true) {
-                                ReasoningButton(
-                                    reasoningLevel = assistant.reasoningLevel,
-                                    onUpdateReasoningLevel = {
-                                        onUpdateAssistant { current -> current.copy(reasoningLevel = it) }
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                // Search
+                                val enableSearchMsg = stringResource(R.string.web_search_enabled)
+                                val disableSearchMsg = stringResource(R.string.web_search_disabled)
+                                SearchPickerButton(
+                                    enableSearch = assistant.enableWebSearch,
+                                    settings = settings,
+                                    onUpdateSearchMode = { mode ->
+                                        onUpdateSearchMode(mode)
+                                        val enabled = mode != SearchMode.OFF
+                                        toaster.show(
+                                            message = if (enabled) enableSearchMsg else disableSearchMsg,
+                                            duration = 1.seconds,
+                                            type = if (enabled) {
+                                                ToastType.Success
+                                            } else {
+                                                ToastType.Normal
+                                            }
+                                        )
                                     },
-                                    onlyIcon = true,
+                                    onUpdateSearchService = onUpdateSearchService,
+                                    model = chatModel,
+                                    compact = true,
                                 )
+
+                                // Reasoning
+                                if (chatModel?.abilities?.contains(ModelAbility.REASONING) == true) {
+                                    ReasoningButton(
+                                        reasoningLevel = assistant.reasoningLevel,
+                                        onUpdateReasoningLevel = {
+                                            onUpdateAssistant { current -> current.copy(reasoningLevel = it) }
+                                        },
+                                        onlyIcon = true,
+                                        compact = true,
+                                    )
+                                }
+
                             }
 
-                        }
+                            chatContextUsagePresentation(contextUsageTokens)?.let { usage ->
+                                ContextUsageRing(promptTokens = usage.promptTokens)
+                                Spacer(Modifier.width(4.dp))
+                            }
 
-                        ActionIconButton(
-                            onClick = onMoreClick
-                        ) {
-                            Icon(
-                                imageVector = HugeIcons.Add01,
-                                contentDescription = stringResource(R.string.more_options)
-                            )
-                        }
+                            ActionIconButton(
+                                onClick = onMoreClick,
+                                modifier = Modifier.testTag("chat_composer_more"),
+                            ) {
+                                Icon(
+                                    imageVector = HugeIcons.Add01,
+                                    contentDescription = stringResource(R.string.chat_composer_more_actions),
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                            Spacer(Modifier.width(8.dp))
 
-                        if (!voiceState.isActive && (asrState.isAvailable || asrState.isRecording)) {
-                            AsrButton(
-                                state = asrState,
-                                onClick = {
-                                    when (asrState.status) {
-                                        ASRStatus.Listening -> asr.stop()
-                                        ASRStatus.Idle, ASRStatus.Error -> {
-                                            if (!asrPermission.allRequiredPermissionsGranted) {
-                                                asrPermission.requestPermissions()
-                                            } else {
-                                                asrBaseText = state.textContent.text.toString()
-                                                asr.start { transcript ->
-                                                    val spacer =
-                                                        if (asrBaseText.isBlank() || transcript.isBlank()) "" else " "
-                                                    state.setMessageText(asrBaseText + spacer + transcript)
+                            if (!voiceState.isActive && (asrState.isAvailable || asrState.isRecording)) {
+                                AsrButton(
+                                    state = asrState,
+                                    compact = true,
+                                    onClick = {
+                                        when (asrState.status) {
+                                            ASRStatus.Listening -> asr.stop()
+                                            ASRStatus.Idle, ASRStatus.Error -> {
+                                                if (!asrPermission.allRequiredPermissionsGranted) {
+                                                    asrPermission.requestPermissions()
+                                                } else {
+                                                    asrBaseText = state.textContent.text.toString()
+                                                    asr.start { transcript ->
+                                                        val spacer =
+                                                            if (asrBaseText.isBlank() || transcript.isBlank()) "" else " "
+                                                        state.setMessageText(asrBaseText + spacer + transcript)
+                                                    }
                                                 }
                                             }
+
+                                            ASRStatus.Connecting, ASRStatus.Stopping -> {}
                                         }
-
-                                        ASRStatus.Connecting, ASRStatus.Stopping -> {}
                                     }
-                                }
-                            )
-                        }
+                                )
+                                Spacer(Modifier.width(8.dp))
+                            }
 
-                        if (loading) {
-                            KeepScreenOn()
-                        }
+                            if (loading) {
+                                KeepScreenOn()
+                            }
 
-                        AnimatedVisibility(
-                            visible = !asrState.isRecording,
-                            enter = fadeIn() + scaleIn(),
-                            exit = fadeOut() + scaleOut(),
-                        ) {
-                            SendButton(
-                                loading = loading,
-                                empty = state.isEmpty(),
-                                onClick = { sendMessage() },
-                                onLongClick = { sendMessageWithoutAnswer() },
-                            )
+                            AnimatedVisibility(
+                                visible = !asrState.isRecording,
+                                enter = fadeIn() + scaleIn(),
+                                exit = fadeOut() + scaleOut(),
+                            ) {
+                                SendButton(
+                                    loading = loading,
+                                    empty = state.isEmpty(),
+                                    onClick = { sendMessage() },
+                                    onLongClick = { sendMessageWithoutAnswer() },
+                                )
+                            }
                         }
                     }
                 }
@@ -434,25 +392,27 @@ private fun SendButton(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val showStop = loading && empty
+    val presentation = chatInputPresentation(loading = loading, empty = empty)
+    val showStop = presentation.showStop
     val containerColor = when {
-        showStop -> MaterialTheme.colorScheme.errorContainer
-        empty -> MaterialTheme.colorScheme.surfaceContainerHigh
+        showStop -> MaterialTheme.colorScheme.primary
+        empty -> MaterialTheme.colorScheme.surfaceContainerHighest
         else -> MaterialTheme.colorScheme.primary
     }
     val contentColor = when {
-        showStop -> MaterialTheme.colorScheme.onErrorContainer
+        showStop -> MaterialTheme.colorScheme.onPrimary
         empty -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
         else -> MaterialTheme.colorScheme.onPrimary
     }
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
-            .size(30.dp)
+            .size(32.dp)
             .testTag("chat_send_button")
             .clip(CircleShape)
             .combinedClickable(
-                enabled = showStop || !empty,
+                enabled = presentation.sendEnabled,
+                role = Role.Button,
                 onClick = onClick,
                 onLongClick = onLongClick,
             )
@@ -463,23 +423,33 @@ private fun SendButton(
             color = containerColor,
             content = {},
         )
-        Icon(
-            imageVector = if (showStop) HugeIcons.Cancel01 else HugeIcons.ArrowUp02,
-            contentDescription = stringResource(if (showStop) R.string.stop else R.string.send),
-            tint = contentColor,
-            modifier = Modifier.size(18.dp)
-        )
+        AnimatedContent(
+            targetState = showStop,
+            transitionSpec = {
+                fadeIn(tween(200)) + scaleIn(tween(200)) togetherWith
+                    fadeOut(tween(200)) + scaleOut(tween(200))
+            },
+            label = "composer_send_stop",
+        ) { stop ->
+            Icon(
+                imageVector = if (stop) HugeIcons.Stop else HugeIcons.ArrowUp02,
+                contentDescription = stringResource(if (stop) R.string.stop else R.string.send),
+                tint = contentColor,
+                modifier = Modifier.size(18.dp),
+            )
+        }
     }
 }
 
 @Composable
 private fun ActionIconButton(
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     Surface(
         onClick = onClick,
-        modifier = Modifier.size(30.dp),
+        modifier = modifier.size(32.dp),
         shape = CircleShape,
         tonalElevation = 0.dp,
         color = Color.Transparent,
@@ -493,17 +463,43 @@ private fun ActionIconButton(
 }
 
 @Composable
+internal fun CompactComposerButton(
+    onClick: () -> Unit,
+    description: String,
+    modifier: Modifier = Modifier,
+    active: Boolean? = null,
+    content: @Composable () -> Unit,
+) {
+    val contentColor by animateColorAsState(
+        targetValue = if (active == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        animationSpec = tween(200, easing = CubicBezierEasing(0.215f, 0.61f, 0.355f, 1f)),
+        label = "composer_mode_color",
+    )
+    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+        Surface(
+            onClick = onClick,
+            modifier = modifier.size(32.dp).semantics(mergeDescendants = true) {
+                contentDescription = description
+                active?.let { selected = it }
+            },
+            shape = CircleShape,
+            color = Color.Transparent,
+            contentColor = contentColor,
+            tonalElevation = 0.dp,
+        ) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { content() }
+        }
+    }
+}
+
+@Composable
 private fun TextInputRow(
     state: ChatInputState,
-    assistant: Assistant,
     completionProviders: List<ChatCompletionProvider>,
     onSendMessage: () -> Unit,
 ) {
     val settings = LocalSettings.current
     val filesManager: FilesManager = koinInject()
-    val quickMessages = remember(settings.quickMessages, assistant.quickMessageIds) {
-        settings.getQuickMessagesOfAssistant(assistant)
-    }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -620,56 +616,61 @@ private fun TextInputRow(
             )
         }
 
-        TextField(
-            state = state.textContent,
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("chat_input")
-                .contentReceiver(receiveContentListener)
-                .onFocusChanged {
-                    isFocused = it.isFocused
-                },
-            shape = MaterialTheme.shapes.largeIncreased,
-            placeholder = {
-                Text(stringResource(R.string.chat_input_placeholder))
-            },
-            lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 5),
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.Sentences,
-                imeAction = if (settings.displaySetting.sendOnEnter) ImeAction.Send else ImeAction.Default
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(
+                start = 16.dp, top = 4.dp, end = 16.dp, bottom = 8.dp,
             ),
-            onKeyboardAction = {
-                if (settings.displaySetting.sendOnEnter && !state.isEmpty()) {
-                    onSendMessage()
-                }
-            },
-            colors = TextFieldDefaults.colors().copy(
-                unfocusedIndicatorColor = Color.Transparent,
-                focusedIndicatorColor = Color.Transparent,
-                focusedContainerColor = Color.Transparent,
-                unfocusedContainerColor = Color.Transparent,
-            ),
-            trailingIcon = {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    if (isFocused) {
-                        IconButton(
-                            onClick = {
-                                isFullScreen = !isFullScreen
-                            }) {
-                            Icon(HugeIcons.Fullscreen, null)
-                        }
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            BasicTextField(
+                state = state.textContent,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("chat_input")
+                    .contentReceiver(receiveContentListener)
+                    .onFocusChanged { isFocused = it.isFocused }
+                    .padding(vertical = 2.dp),
+                lineLimits = TextFieldLineLimits.MultiLine(
+                    minHeightInLines = 1,
+                    maxHeightInLines = 5,
+                ),
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    fontSize = 15.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                ),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Sentences,
+                    imeAction = if (settings.displaySetting.sendOnEnter) ImeAction.Send else ImeAction.Default,
+                ),
+                onKeyboardAction = {
+                    if (settings.displaySetting.sendOnEnter && !state.isEmpty()) {
+                        onSendMessage()
                     }
+                },
+                decorator = { innerTextField ->
+                    Box {
+                        if (state.textContent.text.isEmpty()) {
+                            Text(
+                                text = stringResource(R.string.chat_input_placeholder),
+                                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        innerTextField()
+                    }
+                },
+            )
+            if (isFocused) {
+                CompactComposerButton(
+                    onClick = { isFullScreen = !isFullScreen },
+                    description = stringResource(R.string.chat_composer_fullscreen),
+                ) {
+                    Icon(HugeIcons.Fullscreen, null, Modifier.size(16.dp))
                 }
-            },
-            leadingIcon = if (quickMessages.isNotEmpty()) {
-                {
-                    QuickMessageButton(quickMessages = quickMessages, state = state)
-                }
-            } else null,
-        )
+            }
+        }
         if (isFullScreen) {
             FullScreenEditor(state = state) {
                 isFullScreen = false
@@ -760,54 +761,6 @@ private fun ChatInputState.applyCompletion(
 }
 
 @Composable
-private fun QuickMessageButton(
-    quickMessages: List<QuickMessage>,
-    state: ChatInputState,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    IconButton(
-        onClick = {
-            expanded = !expanded
-        }) {
-        Icon(HugeIcons.Zap, null)
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            modifier = Modifier
-                .widthIn(min = 200.dp, max = 360.dp)
-        ) {
-            quickMessages.forEach { quickMessage ->
-                Surface(
-                    onClick = {
-                        state.appendText(quickMessage.content)
-                        expanded = false
-                    },
-                    color = Color.Transparent,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(
-                        modifier = Modifier.padding(8.dp)
-                    ) {
-                        Text(
-                            text = quickMessage.title,
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            text = quickMessage.content,
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun FullScreenEditor(
     state: ChatInputState, onDone: () -> Unit
 ) {
@@ -851,6 +804,7 @@ private fun FullScreenEditor(
                         state = state.textContent,
                         modifier = Modifier
                             .padding(bottom = 2.dp)
+                            .testTag("chat_fullscreen_editor")
                             .fillMaxSize(),
                         shape = RoundedCornerShape(32.dp),
                         placeholder = {

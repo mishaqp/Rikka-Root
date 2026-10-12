@@ -37,10 +37,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEachIndexed
 import kotlinx.coroutines.delay
 import kotlinx.datetime.toJavaLocalDateTime
-import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
-import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.hugeicons.stroke.Delete01
@@ -80,6 +78,7 @@ fun ColumnScope.ChatMessageActionButtons(
 ) {
     val context = LocalContext.current
     val settings = LocalSettings.current
+    val presentation = presentChatMessageActions(message, readOnly, canTranslate = onTranslate != null)
     var isPendingDelete by remember { mutableStateOf(false) }
     var showTranslateDialog by remember { mutableStateOf(false) }
     var showRegenerateConfirm by remember { mutableStateOf(false) }
@@ -104,9 +103,9 @@ fun ColumnScope.ChatMessageActionButtons(
         ChatMessageActionButton(
             icon = HugeIcons.Refresh03,
             contentDescription = stringResource(R.string.regenerate),
-            enabled = !readOnly,
+            enabled = presentation.mutationsEnabled,
             onClick = {
-                if (message.role == MessageRole.USER) {
+                if (presentation.confirmRegeneration) {
                     showRegenerateConfirm = true
                 } else {
                     onRegenerate()
@@ -114,7 +113,7 @@ fun ColumnScope.ChatMessageActionButtons(
             },
         )
 
-        if (message.role == MessageRole.ASSISTANT) {
+        if (presentation.showTts) {
             val tts = LocalTTSState.current
             val isSpeaking by tts.isSpeaking.collectAsState()
             val isAvailable by tts.isAvailable.collectAsState()
@@ -139,7 +138,7 @@ fun ColumnScope.ChatMessageActionButtons(
                     },
                     shapes = IconButtonDefaults.toggleableShapes(),
                     modifier = Modifier.size(IconButtonDefaults.extraSmallContainerSize()),
-                    enabled = isAvailable,
+                    enabled = presentation.canSpeak(isAvailable),
                     colors = IconButtonDefaults.iconToggleButtonColors(
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         checkedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
@@ -155,7 +154,7 @@ fun ColumnScope.ChatMessageActionButtons(
             }
 
             // Translation button
-            if (!readOnly && onTranslate != null) {
+            if (presentation.showTranslation) {
                 ChatMessageActionButton(
                     icon = HugeIcons.Translate,
                     contentDescription = stringResource(R.string.translate),
@@ -173,7 +172,7 @@ fun ColumnScope.ChatMessageActionButtons(
         ChatMessageBranchSelector(
             node = node,
             onUpdate = onUpdate,
-            enabled = !readOnly,
+            enabled = presentation.mutationsEnabled,
         )
 
         if (settings.displaySetting.showDateTimeInMessage) {
@@ -276,30 +275,24 @@ fun ChatMessageActionsSheet(
         onDismissRequest = onDismissRequest,
         sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)),
     ) {
-        // WebView Preview (only show if message has text content)
-        val hasTextContent = message.parts.filterIsInstance<UIMessagePart.Text>()
-            .any { it.text.isNotBlank() }
-        val actions = buildList {
-            add(MessageSheetAction(HugeIcons.TextSelection, stringResource(R.string.select_and_copy), onClick = onSelectAndCopy))
-            if (hasTextContent) {
-                add(MessageSheetAction(HugeIcons.WebDesign01, stringResource(R.string.render_with_webview), onClick = onWebViewPreview))
-            }
-            if (!readOnly) add(MessageSheetAction(HugeIcons.Edit01, stringResource(R.string.edit), onClick = onEdit))
-            add(MessageSheetAction(HugeIcons.Share04, stringResource(R.string.share), onClick = onShare))
-            if (!readOnly) add(MessageSheetAction(HugeIcons.GitFork, stringResource(R.string.create_fork), onClick = onFork))
-            if (!readOnly && onToggleFavorite != null) {
-                add(
-                    MessageSheetAction(
-                        icon = HugeIcons.FavouriteCircle,
-                        label = stringResource(
-                            if (isFavorite) R.string.chat_message_remove_favorite
-                            else R.string.chat_message_add_favorite
-                        ),
-                        onClick = onToggleFavorite,
-                    )
+        val presentation = presentChatMessageActions(message, readOnly, canToggleFavorite = onToggleFavorite != null)
+        val actions = presentation.sheetActions.map { action ->
+            when (action) {
+                ChatMessageSheetAction.SelectAndCopy -> MessageSheetAction(HugeIcons.TextSelection, stringResource(R.string.select_and_copy), onClick = onSelectAndCopy)
+                ChatMessageSheetAction.WebPreview -> MessageSheetAction(HugeIcons.WebDesign01, stringResource(R.string.render_with_webview), onClick = onWebViewPreview)
+                ChatMessageSheetAction.Edit -> MessageSheetAction(HugeIcons.Edit01, stringResource(R.string.edit), onClick = onEdit)
+                ChatMessageSheetAction.Share -> MessageSheetAction(HugeIcons.Share04, stringResource(R.string.share), onClick = onShare)
+                ChatMessageSheetAction.Fork -> MessageSheetAction(HugeIcons.GitFork, stringResource(R.string.create_fork), onClick = onFork)
+                ChatMessageSheetAction.Favorite -> MessageSheetAction(
+                    icon = HugeIcons.FavouriteCircle,
+                    label = stringResource(
+                        if (isFavorite) R.string.chat_message_remove_favorite
+                        else R.string.chat_message_add_favorite
+                    ),
+                    onClick = requireNotNull(onToggleFavorite),
                 )
+                ChatMessageSheetAction.Delete -> MessageSheetAction(HugeIcons.Delete01, stringResource(R.string.delete), destructive = true, onClick = onDelete)
             }
-            if (!readOnly) add(MessageSheetAction(HugeIcons.Delete01, stringResource(R.string.delete), destructive = true, onClick = onDelete))
         }
 
         Column(

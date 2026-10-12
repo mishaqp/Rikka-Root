@@ -56,7 +56,9 @@ private enum class AsrDisplayState {
 internal fun AsrButton(
     state: ASRState,
     onClick: () -> Unit,
+    compact: Boolean = false,
 ) {
+    val buttonSize = if (compact) 32.dp else 36.dp
     val isIdle = state.status == ASRStatus.Idle
     val targetContainerColor = when (state.status) {
         ASRStatus.Idle -> Color.Transparent
@@ -74,12 +76,12 @@ internal fun AsrButton(
     }
     val containerColor by animateColorAsState(
         targetValue = targetContainerColor,
-        animationSpec = tween(300),
+        animationSpec = tween(if (compact) 200 else 300),
         label = "asr_container"
     )
     val contentColor by animateColorAsState(
         targetValue = targetContentColor,
-        animationSpec = tween(300),
+        animationSpec = tween(if (compact) 200 else 300),
         label = "asr_content"
     )
 
@@ -92,8 +94,8 @@ internal fun AsrButton(
     Surface(
         onClick = onClick,
         modifier = Modifier
-            .height(36.dp)
-            .widthIn(min = 36.dp)
+            .height(buttonSize)
+            .widthIn(min = buttonSize)
             .animateContentSize(animationSpec = MotionScheme.expressive().defaultSpatialSpec()),
         shape = CircleShape,
         tonalElevation = if (isIdle) 0.dp else 2.dp,
@@ -110,12 +112,13 @@ internal fun AsrButton(
             when (display) {
                 AsrDisplayState.Idle -> {
                     Box(
-                        modifier = Modifier.size(36.dp),
+                        modifier = Modifier.size(buttonSize),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = HugeIcons.Voice,
                             contentDescription = stringResource(R.string.asr_button_content_description),
+                            modifier = if (compact) Modifier.size(20.dp) else Modifier,
                             tint = contentColor
                         )
                     }
@@ -123,7 +126,7 @@ internal fun AsrButton(
 
                 AsrDisplayState.Connecting -> {
                     Box(
-                        modifier = Modifier.size(36.dp),
+                        modifier = Modifier.size(buttonSize),
                         contentAlignment = Alignment.Center
                     ) {
                         val infiniteTransition = rememberInfiniteTransition(label = "asr_pulse")

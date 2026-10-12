@@ -1,0 +1,3752 @@
+{
+  "captures": 208,
+  "equal_captures": 148,
+  "compared_pixels": 53165316,
+  "changed_pixels": 56016,
+  "captures_detail": [
+    {
+      "capture": "amoled_font1.0/approval.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.0/ask_user.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 47
+    },
+    {
+      "capture": "amoled_font1.0/automation.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.0/browser_screen.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.0/calendar_skill.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.0/chart.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 4
+    },
+    {
+      "capture": "amoled_font1.0/clipboard_speech.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.0/generic.png",
+      "vertical_offset": 30,
+      "before_crop": [
+        0,
+        80,
+        411,
+        670
+      ],
+      "after_crop": [
+        0,
+        110,
+        411,
+        700
+      ],
+      "compared_pixels": 242490,
+      "changed_pixels": 788
+    },
+    {
+      "capture": "amoled_font1.0/history.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.0/markdown.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.0/mcp_pending.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.0/media.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.0/memory_search.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 7
+    },
+    {
+      "capture": "amoled_font1.0/overview.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.0/provider_error.png",
+      "vertical_offset": 30,
+      "before_crop": [
+        0,
+        80,
+        411,
+        670
+      ],
+      "after_crop": [
+        0,
+        110,
+        411,
+        700
+      ],
+      "compared_pixels": 242490,
+      "changed_pixels": 788
+    },
+    {
+      "capture": "amoled_font1.0/reasoning.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.0/scrape_time.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.0/screen_calendar.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.0/server_legacy.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 18
+    },
+    {
+      "capture": "amoled_font1.0/terminal.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.0/tool_error_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.0/tool_plaintext_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.0/tool_success_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.0/workspace_edit.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.0/workspace_files.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.0/workspace_shell.png",
+      "vertical_offset": 30,
+      "before_crop": [
+        0,
+        80,
+        411,
+        670
+      ],
+      "after_crop": [
+        0,
+        110,
+        411,
+        700
+      ],
+      "compared_pixels": 242490,
+      "changed_pixels": 788
+    },
+    {
+      "capture": "amoled_font1.3/approval.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.3/ask_user.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 48
+    },
+    {
+      "capture": "amoled_font1.3/automation.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.3/browser_screen.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.3/calendar_skill.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.3/chart.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 4
+    },
+    {
+      "capture": "amoled_font1.3/clipboard_speech.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.3/generic.png",
+      "vertical_offset": 29,
+      "before_crop": [
+        0,
+        80,
+        411,
+        671
+      ],
+      "after_crop": [
+        0,
+        109,
+        411,
+        700
+      ],
+      "compared_pixels": 242901,
+      "changed_pixels": 2162
+    },
+    {
+      "capture": "amoled_font1.3/history.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.3/markdown.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.3/mcp_pending.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.3/media.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.3/memory_search.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 69
+    },
+    {
+      "capture": "amoled_font1.3/overview.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 3
+    },
+    {
+      "capture": "amoled_font1.3/provider_error.png",
+      "vertical_offset": 29,
+      "before_crop": [
+        0,
+        80,
+        411,
+        671
+      ],
+      "after_crop": [
+        0,
+        109,
+        411,
+        700
+      ],
+      "compared_pixels": 242901,
+      "changed_pixels": 2138
+    },
+    {
+      "capture": "amoled_font1.3/reasoning.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.3/scrape_time.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.3/screen_calendar.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.3/server_legacy.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 15
+    },
+    {
+      "capture": "amoled_font1.3/terminal.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.3/tool_error_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.3/tool_plaintext_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.3/tool_success_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.3/workspace_edit.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.3/workspace_files.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "amoled_font1.3/workspace_shell.png",
+      "vertical_offset": 29,
+      "before_crop": [
+        0,
+        80,
+        411,
+        671
+      ],
+      "after_crop": [
+        0,
+        109,
+        411,
+        700
+      ],
+      "compared_pixels": 242901,
+      "changed_pixels": 2162
+    },
+    {
+      "capture": "dark_font1.0/approval.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.0/ask_user.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 46
+    },
+    {
+      "capture": "dark_font1.0/automation.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.0/browser_screen.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.0/calendar_skill.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.0/chart.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 4
+    },
+    {
+      "capture": "dark_font1.0/clipboard_speech.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.0/generic.png",
+      "vertical_offset": 30,
+      "before_crop": [
+        0,
+        80,
+        411,
+        670
+      ],
+      "after_crop": [
+        0,
+        110,
+        411,
+        700
+      ],
+      "compared_pixels": 242490,
+      "changed_pixels": 695
+    },
+    {
+      "capture": "dark_font1.0/history.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.0/markdown.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.0/mcp_pending.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.0/media.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.0/memory_search.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 7
+    },
+    {
+      "capture": "dark_font1.0/overview.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.0/provider_error.png",
+      "vertical_offset": 30,
+      "before_crop": [
+        0,
+        80,
+        411,
+        670
+      ],
+      "after_crop": [
+        0,
+        110,
+        411,
+        700
+      ],
+      "compared_pixels": 242490,
+      "changed_pixels": 695
+    },
+    {
+      "capture": "dark_font1.0/reasoning.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.0/scrape_time.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.0/screen_calendar.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.0/server_legacy.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 18
+    },
+    {
+      "capture": "dark_font1.0/terminal.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.0/tool_error_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.0/tool_plaintext_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.0/tool_success_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.0/workspace_edit.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.0/workspace_files.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.0/workspace_shell.png",
+      "vertical_offset": 30,
+      "before_crop": [
+        0,
+        80,
+        411,
+        670
+      ],
+      "after_crop": [
+        0,
+        110,
+        411,
+        700
+      ],
+      "compared_pixels": 242490,
+      "changed_pixels": 695
+    },
+    {
+      "capture": "dark_font1.3/approval.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.3/ask_user.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 46
+    },
+    {
+      "capture": "dark_font1.3/automation.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.3/browser_screen.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.3/calendar_skill.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.3/chart.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 4
+    },
+    {
+      "capture": "dark_font1.3/clipboard_speech.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.3/generic.png",
+      "vertical_offset": 29,
+      "before_crop": [
+        0,
+        80,
+        411,
+        671
+      ],
+      "after_crop": [
+        0,
+        109,
+        411,
+        700
+      ],
+      "compared_pixels": 242901,
+      "changed_pixels": 2165
+    },
+    {
+      "capture": "dark_font1.3/history.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.3/markdown.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.3/mcp_pending.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.3/media.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.3/memory_search.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 69
+    },
+    {
+      "capture": "dark_font1.3/overview.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 3
+    },
+    {
+      "capture": "dark_font1.3/provider_error.png",
+      "vertical_offset": 29,
+      "before_crop": [
+        0,
+        80,
+        411,
+        671
+      ],
+      "after_crop": [
+        0,
+        109,
+        411,
+        700
+      ],
+      "compared_pixels": 242901,
+      "changed_pixels": 2151
+    },
+    {
+      "capture": "dark_font1.3/reasoning.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.3/scrape_time.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.3/screen_calendar.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.3/server_legacy.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 15
+    },
+    {
+      "capture": "dark_font1.3/terminal.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.3/tool_error_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.3/tool_plaintext_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.3/tool_success_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.3/workspace_edit.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.3/workspace_files.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dark_font1.3/workspace_shell.png",
+      "vertical_offset": 29,
+      "before_crop": [
+        0,
+        80,
+        411,
+        671
+      ],
+      "after_crop": [
+        0,
+        109,
+        411,
+        700
+      ],
+      "compared_pixels": 242901,
+      "changed_pixels": 2165
+    },
+    {
+      "capture": "dynamic_font1.0/approval.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.0/ask_user.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 92
+    },
+    {
+      "capture": "dynamic_font1.0/automation.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.0/browser_screen.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.0/calendar_skill.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.0/chart.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 28
+    },
+    {
+      "capture": "dynamic_font1.0/clipboard_speech.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.0/generic.png",
+      "vertical_offset": 30,
+      "before_crop": [
+        0,
+        80,
+        411,
+        670
+      ],
+      "after_crop": [
+        0,
+        110,
+        411,
+        700
+      ],
+      "compared_pixels": 242490,
+      "changed_pixels": 812
+    },
+    {
+      "capture": "dynamic_font1.0/history.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.0/markdown.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.0/mcp_pending.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.0/media.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.0/memory_search.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 26
+    },
+    {
+      "capture": "dynamic_font1.0/overview.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.0/provider_error.png",
+      "vertical_offset": 30,
+      "before_crop": [
+        0,
+        80,
+        411,
+        670
+      ],
+      "after_crop": [
+        0,
+        110,
+        411,
+        700
+      ],
+      "compared_pixels": 242490,
+      "changed_pixels": 812
+    },
+    {
+      "capture": "dynamic_font1.0/reasoning.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.0/scrape_time.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.0/screen_calendar.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.0/server_legacy.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 41
+    },
+    {
+      "capture": "dynamic_font1.0/terminal.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.0/tool_error_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.0/tool_plaintext_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.0/tool_success_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.0/workspace_edit.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.0/workspace_files.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.0/workspace_shell.png",
+      "vertical_offset": 30,
+      "before_crop": [
+        0,
+        80,
+        411,
+        670
+      ],
+      "after_crop": [
+        0,
+        110,
+        411,
+        700
+      ],
+      "compared_pixels": 242490,
+      "changed_pixels": 812
+    },
+    {
+      "capture": "dynamic_font1.3/approval.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.3/ask_user.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 92
+    },
+    {
+      "capture": "dynamic_font1.3/automation.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.3/browser_screen.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.3/calendar_skill.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.3/chart.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 28
+    },
+    {
+      "capture": "dynamic_font1.3/clipboard_speech.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.3/generic.png",
+      "vertical_offset": 29,
+      "before_crop": [
+        0,
+        80,
+        411,
+        671
+      ],
+      "after_crop": [
+        0,
+        109,
+        411,
+        700
+      ],
+      "compared_pixels": 242901,
+      "changed_pixels": 2106
+    },
+    {
+      "capture": "dynamic_font1.3/history.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.3/markdown.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.3/mcp_pending.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.3/media.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.3/memory_search.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 118
+    },
+    {
+      "capture": "dynamic_font1.3/overview.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 22
+    },
+    {
+      "capture": "dynamic_font1.3/provider_error.png",
+      "vertical_offset": 29,
+      "before_crop": [
+        0,
+        80,
+        411,
+        671
+      ],
+      "after_crop": [
+        0,
+        109,
+        411,
+        700
+      ],
+      "compared_pixels": 242901,
+      "changed_pixels": 2120
+    },
+    {
+      "capture": "dynamic_font1.3/reasoning.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.3/scrape_time.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.3/screen_calendar.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.3/server_legacy.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 36
+    },
+    {
+      "capture": "dynamic_font1.3/terminal.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.3/tool_error_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.3/tool_plaintext_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.3/tool_success_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.3/workspace_edit.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.3/workspace_files.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "dynamic_font1.3/workspace_shell.png",
+      "vertical_offset": 29,
+      "before_crop": [
+        0,
+        80,
+        411,
+        671
+      ],
+      "after_crop": [
+        0,
+        109,
+        411,
+        700
+      ],
+      "compared_pixels": 242901,
+      "changed_pixels": 2106
+    },
+    {
+      "capture": "light_font1.0/approval.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.0/ask_user.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 95
+    },
+    {
+      "capture": "light_font1.0/automation.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.0/browser_screen.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.0/calendar_skill.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.0/chart.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 26
+    },
+    {
+      "capture": "light_font1.0/clipboard_speech.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.0/generic.png",
+      "vertical_offset": 30,
+      "before_crop": [
+        0,
+        80,
+        411,
+        670
+      ],
+      "after_crop": [
+        0,
+        110,
+        411,
+        700
+      ],
+      "compared_pixels": 242490,
+      "changed_pixels": 735
+    },
+    {
+      "capture": "light_font1.0/history.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.0/markdown.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.0/mcp_pending.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.0/media.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.0/memory_search.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 28
+    },
+    {
+      "capture": "light_font1.0/overview.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.0/provider_error.png",
+      "vertical_offset": 30,
+      "before_crop": [
+        0,
+        80,
+        411,
+        670
+      ],
+      "after_crop": [
+        0,
+        110,
+        411,
+        700
+      ],
+      "compared_pixels": 242490,
+      "changed_pixels": 20546
+    },
+    {
+      "capture": "light_font1.0/reasoning.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.0/scrape_time.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.0/screen_calendar.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.0/server_legacy.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 42
+    },
+    {
+      "capture": "light_font1.0/terminal.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.0/tool_error_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.0/tool_plaintext_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.0/tool_success_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.0/workspace_edit.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.0/workspace_files.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.0/workspace_shell.png",
+      "vertical_offset": 30,
+      "before_crop": [
+        0,
+        80,
+        411,
+        670
+      ],
+      "after_crop": [
+        0,
+        110,
+        411,
+        700
+      ],
+      "compared_pixels": 242490,
+      "changed_pixels": 735
+    },
+    {
+      "capture": "light_font1.3/approval.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.3/ask_user.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 99
+    },
+    {
+      "capture": "light_font1.3/automation.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.3/browser_screen.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.3/calendar_skill.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.3/chart.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 26
+    },
+    {
+      "capture": "light_font1.3/clipboard_speech.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.3/generic.png",
+      "vertical_offset": 29,
+      "before_crop": [
+        0,
+        80,
+        411,
+        671
+      ],
+      "after_crop": [
+        0,
+        109,
+        411,
+        700
+      ],
+      "compared_pixels": 242901,
+      "changed_pixels": 2138
+    },
+    {
+      "capture": "light_font1.3/history.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.3/markdown.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.3/mcp_pending.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.3/media.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.3/memory_search.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 118
+    },
+    {
+      "capture": "light_font1.3/overview.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 27
+    },
+    {
+      "capture": "light_font1.3/provider_error.png",
+      "vertical_offset": 29,
+      "before_crop": [
+        0,
+        80,
+        411,
+        671
+      ],
+      "after_crop": [
+        0,
+        109,
+        411,
+        700
+      ],
+      "compared_pixels": 242901,
+      "changed_pixels": 2152
+    },
+    {
+      "capture": "light_font1.3/reasoning.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.3/scrape_time.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.3/screen_calendar.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.3/server_legacy.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 41
+    },
+    {
+      "capture": "light_font1.3/terminal.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.3/tool_error_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.3/tool_plaintext_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.3/tool_success_details.png",
+      "vertical_offset": 0,
+      "before_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "after_crop": [
+        0,
+        225,
+        411,
+        891
+      ],
+      "compared_pixels": 273726,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.3/workspace_edit.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.3/workspace_files.png",
+      "vertical_offset": -8,
+      "before_crop": [
+        0,
+        80,
+        411,
+        700
+      ],
+      "after_crop": [
+        0,
+        72,
+        411,
+        692
+      ],
+      "compared_pixels": 254820,
+      "changed_pixels": 0
+    },
+    {
+      "capture": "light_font1.3/workspace_shell.png",
+      "vertical_offset": 29,
+      "before_crop": [
+        0,
+        80,
+        411,
+        671
+      ],
+      "after_crop": [
+        0,
+        109,
+        411,
+        700
+      ],
+      "compared_pixels": 242901,
+      "changed_pixels": 2138
+    }
+  ]
+}

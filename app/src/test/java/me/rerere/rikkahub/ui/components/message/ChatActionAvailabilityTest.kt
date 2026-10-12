@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -113,6 +114,47 @@ class ChatActionAvailabilityTest {
         assertEquals(listOf("speak:Read this response"), tts.invocations)
         control.performClick()
         assertEquals(listOf("speak:Read this response", "stop"), tts.invocations)
+    }
+
+    @Test fun readOnlyButtonsKeepSharedActionsAndSpeechWhileDisablingRegeneration() {
+        val role = mutableStateOf(MessageRole.USER)
+        compose.setContent {
+            TestTheme {
+                Column {
+                    val message = UIMessage(role = role.value, parts = listOf(UIMessagePart.Text("Message")))
+                    ChatMessageActionButtons(message, MessageNode.of(message), {}, {}, {},
+                        onTranslate = { _, _ -> }, readOnly = true)
+                }
+            }
+        }
+        MessageRole.entries.forEach { nextRole ->
+            compose.runOnIdle { role.value = nextRole }
+            compose.onNodeWithContentDescription(label(R.string.copy)).assertIsEnabled()
+            compose.onNodeWithContentDescription(label(R.string.more_options)).assertIsEnabled()
+            compose.onNodeWithContentDescription(label(R.string.regenerate)).assertIsNotEnabled()
+            compose.onNodeWithContentDescription(label(R.string.translate)).assertDoesNotExist()
+            if (nextRole == MessageRole.ASSISTANT) {
+                compose.onNodeWithContentDescription(label(R.string.tts)).assertIsEnabled()
+            } else {
+                compose.onNodeWithContentDescription(label(R.string.tts)).assertDoesNotExist()
+            }
+        }
+    }
+
+    @Test fun readOnlySheetKeepsSelectPreviewAndShareWithoutMutationActions() {
+        compose.setContent {
+            TestTheme {
+                ChatMessageActionsSheet(
+                    message = UIMessage.assistant("Answer"), model = null,
+                    onDelete = {}, onEdit = {}, onShare = {}, onFork = {}, onSelectAndCopy = {},
+                    onToggleFavorite = {}, onWebViewPreview = {}, onDismissRequest = {}, readOnly = true,
+                )
+            }
+        }
+        listOf(R.string.select_and_copy, R.string.render_with_webview, R.string.share)
+            .forEach { compose.onNodeWithText(label(it)).assertExists() }
+        listOf(R.string.edit, R.string.create_fork, R.string.chat_message_add_favorite, R.string.delete)
+            .forEach { compose.onNodeWithText(label(it)).assertDoesNotExist() }
     }
 
     @Test fun moreButtonDispatchesTheProductionSheetCallback() {

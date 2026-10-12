@@ -48,13 +48,13 @@ class ChatSketchFunctionChecklistTest(
             row("permission rationale proceed cancel and app settings", "ui/components/ui/permission/PermissionRationaleDialog.kt", "PermissionRationaleDialog", "if (hasPermanentlyDenied)", "onClick = onProceed", "onClick = onCancel", "R.string.permission_go_to_settings", "R.string.confirm"),
             row("compression cancellation and dialog dismiss", INPUT + "CompressContextDialog.kt", "CompressContextDialog", "TextButton(onClick = { currentJob?.cancel() currentJob = null })", "onDismissRequest = { if (!isLoading) { onDismiss() } }"),
             row("history edit cancel", INPUT + "ChatInput.kt", "TextInputRow", "R.string.cancel_edit", "modifier = Modifier.clickable { state.clearInput() }"),
-            row("quick messages open and dismiss menu", INPUT + "ChatInput.kt", "QuickMessageButton", "IconButton( onClick = { expanded = !expanded })", "DropdownMenu(", "onDismissRequest = { expanded = false }"),
+            row("quick messages open and dismiss menu", INPUT + "FilesPicker.kt", "QuickMessagesSheetRow", "ToolsSheetRow(", "onClick = { expanded = !expanded }", "DropdownMenu(", "onDismissRequest = { expanded = false }"),
             row("model search and sheet dismiss", INPUT + "ModelList.kt", "ModelList", "OutlinedTextField(", "onValueChange = { searchKeywords = it }"),
             row("model sheet dismiss", INPUT + "ModelList.kt", "ModelListSheet", "ModalBottomSheet( onDismissRequest = { state.close() }", "sheetState.hide() state.close()"),
             row("search sheet dismiss and provider back", INPUT + "SearchPicker.kt", "SearchPickerButton", "onDismissRequest = { showSearchPicker = false }", "BackHandler(enabled = selectingProvider) { selectingProvider = false }"),
             row("search provider back button", INPUT + "SearchPicker.kt", "SearchProviderPicker", "IconButton(onClick = onBack)"),
             row("reasoning picker open and dismiss", INPUT + "ReasoningPicker.kt", "ReasoningButton", "onClick = { showPicker = true }", "onDismissRequest = { showPicker = false }"),
-            row("input keyboard editing selection and ordinary paste", INPUT + "ChatInput.kt", "TextInputRow", "TextField( state = state.textContent", "else -> transferableContent", "TextFieldLineLimits.MultiLine(maxHeightInLines = 5)"),
+            row("input keyboard editing selection and ordinary paste", INPUT + "ChatInput.kt", "TextInputRow", "BasicTextField( state = state.textContent", "else -> transferableContent", "TextFieldLineLimits.MultiLine( minHeightInLines = 1, maxHeightInLines = 5, )"),
             row("fullscreen editing uses shared input state", INPUT + "ChatInput.kt", "FullScreenEditor", "TextField( state = state.textContent", "onDismissRequest = { onDone() }"),
         )
     }

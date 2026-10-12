@@ -1,0 +1,12 @@
+<resources>
+    <string name="chat_header_open_drawer" translatable="false">Открыть список чатов</string>
+    <string name="chat_header_menu" translatable="false">Меню чата</string>
+    <string name="chat_header_new_chat" translatable="false">Новый чат</string>
+    <string name="chat_header_preview" translatable="false">Обзор и поиск сообщений</string>
+    <string name="chat_header_back_to_chat" translatable="false">Вернуться в чат</string>
+    <string name="chat_header_files" translatable="false">Файлы</string>
+    <string name="chat_header_terminal" translatable="false">Терминал</string>
+    <string name="chat_header_browser" translatable="false">Браузер</string>
+    <string name="chat_header_choose_model" translatable="false">Выбрать модель</string>
+    <string name="chat_header_model_required" translatable="false">Сначала выберите модель</string>
+</resources>
