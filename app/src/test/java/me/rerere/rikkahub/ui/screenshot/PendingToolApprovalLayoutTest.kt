@@ -21,7 +21,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.components.message.ChatMessageToolStep
 import me.rerere.rikkahub.ui.components.message.ToolApprovalAction
-import me.rerere.rikkahub.ui.components.message.timelineToolNameResource
+import me.rerere.rikkahub.ui.components.message.presentToolHeadline
 import me.rerere.rikkahub.ui.components.ui.ChainOfThought
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -31,7 +31,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.ParameterizedRobolectricTestRunner
 import org.robolectric.ParameterizedRobolectricTestRunner.Parameters
-import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
@@ -70,7 +69,9 @@ class PendingToolApprovalLayoutTest internal constructor(
         }
         compose.waitForIdle()
         val card = compose.onNodeWithTag("approval_card").fetchSemanticsNode().boundsInRoot
-        val title = RuntimeEnvironment.getApplication().getString(timelineToolNameResource(tool.toolName)!!)
+        // The step title carries the call's essence instead of the bare tool name.
+        val title = presentToolHeadline(tool.toolName, tool.inputAsJson())!!
+        assertEquals("Root: ls /sdcard", title)
         val titleNode = compose.onNodeWithText(title, useUnmergedTree = true)
         val titleBounds = titleNode.fetchSemanticsNode().boundsInRoot
         assertTrue("Pending tool title must have positive visible width: $titleBounds", titleBounds.width > 0f)
