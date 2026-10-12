@@ -3,4 +3,7 @@
     <string name="chat_composer_more_actions" translatable="false">Дополнительные действия</string>
     <string name="chat_composer_fullscreen" translatable="false">Развернуть редактор</string>
     <string name="chat_composer_context_usage" translatable="false">Входные токены последнего запроса: %1$d. Размер контекста модели неизвестен.</string>
+    <string name="chat_composer_context_usage_known" translatable="false">Входные токены последнего запроса: %1$d из %2$d (%3$d%%).</string>
+    <string name="chat_composer_model" translatable="false">Модель: %1$s</string>
+    <string name="chat_composer_placeholder" translatable="false">Сообщение</string>
 </resources>

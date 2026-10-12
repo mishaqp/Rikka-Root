@@ -1,10 +1,14 @@
 package me.rerere.rikkahub.ui.screenshot
 
 import android.app.Application
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -13,6 +17,8 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import me.rerere.rikkahub.ui.pages.chat.ChatHeader
 import org.junit.Assert.assertEquals
@@ -30,47 +36,117 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ChatHeaderLayoutTest(private val width: Int, private val fontScale: Float) {
     @get:Rule val compose = createComposeRule()
+    private var expectedTitleColor = Color.Unspecified
 
-    @Test fun longNamesLeaveAllHeaderActionsReachable() {
+    @Test fun longTitleLeavesAllHeaderActionsReachable() {
         val clicks = IntArray(7)
         render(clicks)
         compose.onNodeWithTag("chat_header_title").assertIsDisplayed().performClick()
-        compose.onNodeWithTag("chat_header_model").assertIsDisplayed().performClick()
         listOf("Открыть список чатов", "Новый чат", "Файлы", "Терминал", "Браузер").forEachIndexed { index, label ->
             val node = compose.onNodeWithContentDescription(label).assertIsDisplayed().assertHasClickAction()
             val bounds = node.fetchSemanticsNode().boundsInRoot
             assertTrue("$label fits the $width dp viewport", bounds.left >= 0f && bounds.right <= width)
             node.performClick()
-            assertEquals(1, clicks[index + 2])
+            assertEquals(1, clicks[index + 1])
         }
         assertEquals(1, clicks[0])
-        assertEquals(1, clicks[1])
         compose.onNodeWithContentDescription("Меню чата").performClick()
-        compose.onNodeWithText("Обзор и поиск сообщений").assertIsDisplayed()
+        compose.onNodeWithText("Обзор и поиск сообщений").assertIsDisplayed().performClick()
+        assertEquals(1, clicks[6])
+        compose.onNodeWithText("Обзор и поиск сообщений").assertDoesNotExist()
     }
 
-    @Test fun readOnlyRetainsNavigationAndDisablesMutations() {
-        render(IntArray(7), readOnly = true)
-        compose.onNodeWithTag("chat_header_title").assertIsNotEnabled()
-        compose.onNodeWithTag("chat_header_model").assertIsNotEnabled()
-        compose.onNodeWithContentDescription("Новый чат").assertHasClickAction()
+    @Test fun shortAvatarAndTitleGroupIsCenteredBetweenNavigationAndActions() {
+        render(IntArray(7), title = "Чат")
+        assertCenteredIdentity()
+        val identity = compose.onNodeWithTag("chat_header_identity").fetchSemanticsNode().boundsInRoot
+        val leading = compose.onNodeWithTag("chat_header_leading").fetchSemanticsNode().boundsInRoot
+        val actions = compose.onNodeWithTag("chat_header_actions").fetchSemanticsNode().boundsInRoot
+        assertTrue("A short identity wraps its content instead of filling the middle", identity.width < actions.left - leading.right)
+        val avatar = compose.onNodeWithTag("chat_header_avatar").fetchSemanticsNode().boundsInRoot
+        val title = compose.onNodeWithText("Чат", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertEquals("Center the visible avatar and text without spare title width", (leading.right + actions.left) / 2f, (avatar.left + title.right) / 2f, 1f)
+        assertAvatarAndHeaderSize()
     }
 
-    private fun render(clicks: IntArray, readOnly: Boolean = false) {
+    @Test fun longTitleIsSingleLineEllipsizedAndUsesOnSurface() {
+        render(IntArray(7))
+        assertCenteredIdentity()
+        assertAvatarAndHeaderSize()
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithText(LONG_TITLE, useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val layout = layouts.single()
+        assertEquals(1, layout.lineCount)
+        assertTrue("The long title must ellipsize rather than hide actions", layout.isLineEllipsized(0))
+        assertEquals(expectedTitleColor, layout.layoutInput.style.color)
+        compose.onNodeWithTag("chat_header_model").assertDoesNotExist()
+    }
+
+    @Test fun readOnlyDisablesRenameAndRetainsNavigationAndPreview() {
+        val clicks = IntArray(7)
+        render(clicks, readOnly = true, previewMode = true)
+        compose.onNodeWithTag("chat_header_title").assertIsNotEnabled().performClick()
+        assertEquals(0, clicks[0])
+        compose.onNodeWithContentDescription("Открыть список чатов").performClick()
+        compose.onNodeWithContentDescription("Новый чат").assertHasClickAction().performClick()
+        assertEquals(1, clicks[1])
+        assertEquals(1, clicks[2])
+        compose.onNodeWithContentDescription("Меню чата").performClick()
+        compose.onNodeWithText("Вернуться в чат").assertIsDisplayed().performClick()
+        assertEquals(1, clicks[6])
+    }
+
+    @Test fun bigScreenCentersIdentityAfterLeadingInsetAndHidesDrawer() {
+        render(IntArray(7), title = "Чат", bigScreen = true, showWorkspace = false)
+        compose.onNodeWithContentDescription("Открыть список чатов").assertDoesNotExist()
+        compose.onNodeWithTag("chat_header_workspace").assertDoesNotExist()
+        val leading = compose.onNodeWithTag("chat_header_leading").fetchSemanticsNode().boundsInRoot
+        assertEquals("The leading inset must retain its measured horizontal padding", 4f, leading.left, 0.5f)
+        assertEquals("Big screens retain the 12dp leading inset", 12f, leading.width, 0.5f)
+        assertEquals("The leading slot must expose nonempty header bounds", 56f, leading.height, 0.5f)
+        assertCenteredIdentity()
+        assertAvatarAndHeaderSize()
+    }
+
+    private fun assertCenteredIdentity() {
+        val identity = compose.onNodeWithTag("chat_header_identity").fetchSemanticsNode().boundsInRoot
+        val leading = compose.onNodeWithTag("chat_header_leading").fetchSemanticsNode().boundsInRoot
+        val actions = compose.onNodeWithTag("chat_header_actions").fetchSemanticsNode().boundsInRoot
+        assertEquals("Center the whole avatar/title group in the available space", (leading.right + actions.left) / 2f, identity.center.x, 1f)
+        assertTrue("The identity must stay clear of navigation", identity.left >= leading.right)
+        assertTrue("The identity must stay clear of menu and new chat", identity.right <= actions.left)
+    }
+
+    private fun assertAvatarAndHeaderSize() {
+        val avatar = compose.onNodeWithTag("chat_header_avatar").fetchSemanticsNode().boundsInRoot
+        assertEquals(16f, avatar.width, 0.5f)
+        assertEquals(16f, avatar.height, 0.5f)
+        val bar = compose.onNodeWithTag("chat_header_bar").fetchSemanticsNode().boundsInRoot
+        assertEquals(56f, bar.height, 0.5f)
+    }
+
+    private fun render(
+        clicks: IntArray,
+        title: String = LONG_TITLE,
+        readOnly: Boolean = false,
+        previewMode: Boolean = false,
+        bigScreen: Boolean = false,
+        showWorkspace: Boolean = true,
+    ) {
         compose.setContent {
             ScreenshotTheme(ScreenshotThemeMode.Light, fontScale) {
+                expectedTitleColor = MaterialTheme.colorScheme.onSurface
                 Surface(Modifier.requiredSize(width.dp, 180.dp)) {
                     ChatHeader(
-                        title = "Очень длинное русское название текущего разговора",
-                        modelName = "Очень длинная модель с расширенным рассуждением",
-                        modelDescription = "Модель и провайдер полностью доступны для чтения",
-                        bigScreen = false, previewMode = false,
-                        canRename = !readOnly, canSelectModel = !readOnly, showWorkspace = true,
-                        avatar = { Text("А") },
-                        onClickTitle = { clicks[0]++ }, onSelectModel = { clicks[1]++ },
-                        onOpenDrawer = { clicks[2]++ }, onNewChat = { clicks[3]++ },
-                        onFiles = { clicks[4]++ }, onTerminal = { clicks[5]++ },
-                        onBrowser = { clicks[6]++ }, onClickMenu = {},
+                        title = title,
+                        bigScreen = bigScreen, previewMode = previewMode,
+                        canRename = !readOnly, showWorkspace = showWorkspace,
+                        avatar = { Box(Modifier.size(16.dp)) },
+                        onClickTitle = { clicks[0]++ },
+                        onOpenDrawer = { clicks[1]++ }, onNewChat = { clicks[2]++ },
+                        onFiles = { clicks[3]++ }, onTerminal = { clicks[4]++ },
+                        onBrowser = { clicks[5]++ }, onClickMenu = { clicks[6]++ },
                     )
                 }
             }
@@ -78,6 +154,7 @@ class ChatHeaderLayoutTest(private val width: Int, private val fontScale: Float)
     }
 
     companion object {
+        private const val LONG_TITLE = "Очень длинное русское название текущего разговора"
         @JvmStatic @Parameters(name = "width{0}_font{1}") fun cases(): List<Array<Any>> =
             listOf(320, 411).flatMap { width -> listOf(1f, 1.3f).map { arrayOf(width, it) } }
     }

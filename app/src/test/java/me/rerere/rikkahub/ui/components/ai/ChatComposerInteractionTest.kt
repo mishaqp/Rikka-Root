@@ -28,10 +28,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.asr.ASRState
 import me.rerere.asr.ASRStatus
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.ui.context.LocalASRState
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
@@ -52,6 +54,7 @@ import org.koin.core.context.stopKoin
 import org.koin.dsl.module
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import kotlin.uuid.Uuid
 
 /** Exercises the production composer; external audio and disk services are the only boundaries. */
 @RunWith(RobolectricTestRunner::class)
@@ -66,14 +69,19 @@ class ChatComposerInteractionTest {
     private var stops = 0
     private var more = 0
     private var searchMode: SearchMode? = null
+    private var selectedModel: Model? = null
+    private val persistedSettings = MutableStateFlow(ScreenshotFixtures.settings)
 
     @Before fun installBoundaries() {
         every { asr.state } returns audio
         val files = mockk<FilesManager>(relaxed = true)
         every { files.observe() } returns flowOf(emptyList())
+        val settingsStore = mockk<SettingsStore>(relaxed = true)
+        every { settingsStore.settingsFlow } returns persistedSettings
         stopKoin()
         startKoin { modules(module {
             single { files }
+            single { settingsStore }
             single { mockk<SoundEffectPlayer>(relaxed = true) }
         }) }
     }
@@ -139,6 +147,43 @@ class ChatComposerInteractionTest {
         compose.runOnIdle { assertEquals(1, more) }
     }
 
+    @Test fun `model tap opens the existing picker and selection reaches its callback`() {
+        val otherModel = ScreenshotFixtures.model.copy(
+            id = Uuid.parse("10000000-0000-0000-0000-000000000002"),
+            displayName = "Другая модель",
+        )
+        show(models = listOf(ScreenshotFixtures.model, otherModel))
+        compose.onNodeWithTag("chat_composer_model").performClick()
+        compose.onNodeWithText("Другая модель").performClick()
+        compose.runOnIdle { assertEquals(otherModel, selectedModel) }
+    }
+
+    @Test fun `model long press shows the full name without opening the picker`() {
+        val fullName = "Полное имя модели для проверки подсказки без сокращения"
+        show(modelName = fullName)
+        compose.onNodeWithTag("chat_composer_model").performTouchInput { longClick() }
+        compose.onNodeWithText(fullName).assertExists()
+        compose.onNodeWithText("Введите название модели для поиска").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(null, selectedModel) }
+    }
+
+    @Test fun `empty composer uses the exact short placeholder`() {
+        show()
+        compose.onNodeWithText("Сообщение").assertExists()
+        compose.onNodeWithText("Общайтесь с ИИ").assertDoesNotExist()
+    }
+
+    @Test fun `model is the first action before search and reasoning`() {
+        show(reasoningLevel = ReasoningLevel.HIGH)
+        val model = compose.onNodeWithTag("chat_composer_model").fetchSemanticsNode().boundsInRoot
+        val search = compose.onNodeWithTag("chat_composer_search").fetchSemanticsNode().boundsInRoot
+        val reasoning = compose.onNodeWithTag("chat_composer_reasoning").fetchSemanticsNode().boundsInRoot
+        assertTrue("Model must precede search", model.right <= search.left)
+        assertTrue("Search must precede reasoning", search.right <= reasoning.left)
+        assertEquals(32f, model.width, 0.01f)
+        assertEquals(32f, model.height, 0.01f)
+    }
+
     @Test fun `send remains hidden during dictation`() {
         audio.value = ASRState(status = ASRStatus.Listening, isAvailable = true)
         show()
@@ -158,6 +203,31 @@ class ChatComposerInteractionTest {
         ).assertExists()
     }
 
+    @Test fun `unknown model window displays compact usage without a ring`() {
+        show(contextUsageTokens = 214_000)
+        compose.onNodeWithText("214K").assertExists()
+        compose.onNodeWithTag("chat_context_usage_ring", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag("chat_context_usage").performClick()
+        compose.onNodeWithText(
+            "Входные токены последнего запроса: 214000. Размер контекста модели неизвестен.",
+        ).assertExists()
+    }
+
+    @Test fun `known model window displays a ring with usage and percentage tooltip`() {
+        show(contextUsageTokens = 214_000, modelId = "deepseek-v4-pro")
+        compose.onNodeWithTag("chat_context_usage_ring", useUnmergedTree = true).assertExists()
+        compose.onNodeWithText("214K").assertDoesNotExist()
+        compose.onNodeWithTag("chat_context_usage").performClick()
+        compose.onNodeWithText("Входные токены последнего запроса: 214000 из 1000000 (21%).").assertExists()
+    }
+
+    @Test fun `reported zero usage is shown truthfully with a known window`() {
+        show(contextUsageTokens = 0, modelId = "deepseek-v4-pro")
+        compose.onNodeWithTag("chat_context_usage_ring", useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag("chat_context_usage").performClick()
+        compose.onNodeWithText("Входные токены последнего запроса: 0 из 1000000 (0%).").assertExists()
+    }
+
     @Test fun `active compact modes remain selected and search changes reach its callback`() {
         show(enableSearch = true, reasoningLevel = ReasoningLevel.HIGH)
         compose.onNodeWithTag("chat_composer_search").assertIsSelected().performClick()
@@ -174,7 +244,7 @@ class ChatComposerInteractionTest {
     @Test fun `all primary actions stay inside a narrow screen with microphone and context`() {
         audio.value = ASRState(isAvailable = true)
         show(width = 320.dp, contextUsageTokens = 120, enableSearch = true, reasoningLevel = ReasoningLevel.HIGH)
-        for (tag in listOf("chat_composer_search", "chat_composer_reasoning", "chat_context_usage", "chat_composer_more", "chat_send_button")) {
+        for (tag in listOf("chat_composer_model", "chat_composer_search", "chat_composer_reasoning", "chat_context_usage", "chat_composer_more", "chat_send_button")) {
             val bounds = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
             assertTrue("$tag left edge must remain visible: $bounds", bounds.left >= 0f)
             assertTrue("$tag right edge must remain visible: $bounds", bounds.right <= 320f)
@@ -220,10 +290,20 @@ class ChatComposerInteractionTest {
         enableSearch: Boolean = false,
         reasoningLevel: ReasoningLevel? = null,
         width: Dp = 411.dp,
+        modelId: String = ScreenshotFixtures.model.modelId,
+        modelName: String = ScreenshotFixtures.model.displayName,
+        models: List<Model>? = null,
     ) {
+        val model = ScreenshotFixtures.model.copy(
+            modelId = modelId,
+            displayName = modelName,
+            abilities = if (reasoningLevel != null) listOf(ModelAbility.REASONING) else emptyList(),
+        )
         val settings = ScreenshotFixtures.settings.copy(
             displaySetting = ScreenshotFixtures.settings.displaySetting.copy(sendOnEnter = sendOnEnter),
+            providers = listOf(ScreenshotFixtures.settings.providers.single().copyProvider(models = models ?: listOf(model))),
         )
+        persistedSettings.value = settings
         compose.setContent {
             ScreenshotTheme {
                 Box(Modifier.width(width)) {
@@ -240,12 +320,10 @@ class ChatComposerInteractionTest {
                                 enableWebSearch = enableSearch,
                                 reasoningLevel = reasoningLevel ?: ReasoningLevel.AUTO,
                             ),
-                            chatModel = ScreenshotFixtures.model.copy(
-                                abilities = if (reasoningLevel != null) listOf(ModelAbility.REASONING) else emptyList(),
-                            ),
+                            chatModel = model,
                             hazeState = HazeState(),
                             onUpdateSearchMode = { searchMode = it },
-                            onUpdateChatModel = {},
+                            onUpdateChatModel = { selectedModel = it },
                             onUpdateAssistant = {},
                             onUpdateSearchService = {},
                             onMoreClick = { more++ },

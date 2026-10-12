@@ -3,7 +3,7 @@
 `chat-before` contains the 208 preserved audit reference PNGs (26 viewports × four
 themes × font scales 1.0/1.3). These files describe the historical interface. The
 stage-1 source cannot render that old header and composer, so the live suite now
-verifies `chat-after-stage1` and publishes both directories in `ui-screenshots`.
+verifies `chat-after-stage1-fixes` and publishes reference/current directories in `ui-screenshots`.
 The audit-era `ChatBeforeScreenshotsTest` class name is retained for existing
 targeted Gradle commands; its tests capture the current production `ChatPage`.
 
@@ -16,6 +16,10 @@ publish output at completion. The screenshot clock freezes the pulsing indicator
 The new state tests also set Android's resource font scale, so the separate “+”
 dialog window uses the requested 1.0/1.3 scale; its actual text layout is asserted.
 The 26 historical viewport comparisons retain their original density fixture.
+
+`chat-after-stage1` is now a preserved archive of commit3c2adc4a. The current
+stage-1 corrections are recorded separately in `chat-after-stage1-fixes`, with
+the same33 captures per theme/font case.
 
 Normal tests always verify the committed AFTER baselines, including Daily Build
 with `-Proborazzi.test.record=true`. Global Roborazzi record does not authorize

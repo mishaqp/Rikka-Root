@@ -31,7 +31,7 @@ class ChatStage1ScreenshotPathsTest {
         System.setProperty("chat.stage1.record.dir", "/tmp/chat-stage1-unused-review")
         val paths = ChatStage1ScreenshotPaths("light", 1f)
         assertFalse(paths.record)
-        assertEquals(File("src/test/screenshots/chat-after-stage1/light_font1.0/overview.png"), paths.baseline("overview"))
+        assertEquals(File("src/test/screenshots/chat-after-stage1-fixes/light_font1.0/overview.png"), paths.baseline("overview"))
     }
 
     @Test fun explicitRecordAndLegacyAuditAliasTargetAfter() {
@@ -39,7 +39,7 @@ class ChatStage1ScreenshotPathsTest {
             System.setProperty(property, "true")
             val paths = ChatStage1ScreenshotPaths("dark", 1.3f)
             assertTrue(paths.record)
-            assertEquals(File("src/test/screenshots/chat-after-stage1/dark_font1.3/overview.png").canonicalFile, paths.baseline("overview"))
+            assertEquals(File("src/test/screenshots/chat-after-stage1-fixes/dark_font1.3/overview.png").canonicalFile, paths.baseline("overview"))
             System.clearProperty(property)
         }
     }
@@ -53,7 +53,7 @@ class ChatStage1ScreenshotPathsTest {
 
     @Test fun recordCannotOverwriteHistoricalBefore() {
         System.setProperty("chat.stage1.record", "true")
-        listOf("src/test/screenshots/chat-before", "src/test/screenshots/chat-before/light_font1.0").forEach { directory ->
+        listOf("src/test/screenshots/chat-before", "src/test/screenshots/chat-before/light_font1.0", "src/test/screenshots/chat-after-stage1", "src/test/screenshots/chat-after-stage1/light_font1.0").forEach { directory ->
             System.setProperty("chat.stage1.record.dir", directory)
             val result = runCatching { ChatStage1ScreenshotPaths("light", 1f) }
             assertTrue("Historical recording must be rejected: $directory", result.exceptionOrNull() is IllegalArgumentException)

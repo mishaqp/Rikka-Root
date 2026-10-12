@@ -80,9 +80,9 @@ class ChatHeaderIntegrationTest {
             }
         }
     }
-    @Test fun headerModelOpensExistingPickerAndSelectionReachesViewModel() {
+    @Test fun composerModelOpensExistingPickerAndSelectionReachesViewModel() {
         render()
-        compose.onNodeWithTag("chat_header_model").assertIsDisplayed().assertHasClickAction().performClick()
+        compose.onNodeWithTag("chat_composer_model").assertIsDisplayed().assertHasClickAction().performClick()
         compose.onNode(hasText("GPT-4.1") and SemanticsMatcher.keyIsDefined(SemanticsActions.OnLongClick)).performClick()
         verify(exactly = 1) { fixture.vm.setChatModel(ScreenshotFixtures.model) }
     }

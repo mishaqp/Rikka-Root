@@ -31,6 +31,11 @@ import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.annotation.DelicateCoilApi
 import coil3.decode.BitmapFactoryDecoder
+import coil3.svg.SvgDecoder
+import coil3.svg.css
+import androidx.compose.material3.dynamicLightColorScheme
+import me.rerere.rikkahub.ui.theme.findPresetTheme
+import me.rerere.rikkahub.utils.toCssHex
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
@@ -117,6 +122,9 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
                 .code(404).message("Screenshot fixture: offline").body(ByteArray(0).toResponseBody()).build()
         }.build()
         imageLoader = ImageLoader.Builder(context).components {
+            // Match the activity's real asset decoder: model/provider glyphs are SVG.
+            add(SvgDecoder.Factory(scaleToDensity = true))
+            // BitmapFactory accepts every source, so it must follow the SVG decoder.
             // ImageDecoder is not implemented for this Robolectric SDK; decode the real PNG.
             add(BitmapFactoryDecoder.Factory())
             add(OkHttpNetworkFetcherFactory(callFactory = { offlineClient }))
@@ -124,6 +132,15 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         SingletonImageLoader.setUnsafe(imageLoader)
         val decoded = runBlocking { imageLoader.execute(ImageRequest.Builder(context).data(image.toURI().toString()).build()) }
         assertTrue("The fixture attachment must decode through real Coil: ${(decoded as? ErrorResult)?.throwable}", decoded is SuccessResult)
+        val scheme = if (theme == ScreenshotThemeMode.Dynamic) dynamicLightColorScheme(context)
+            else findPresetTheme(ScreenshotFixtures.settings.themeId).getColorScheme(dark = theme.dark)
+        val decodedModel = runBlocking {
+            imageLoader.execute(ImageRequest.Builder(context)
+                .data("file:///android_asset/icons/openai.svg")
+                .css("svg { fill: ${scheme.onSurface.toCssHex()}; }")
+                .size(20, 20).build())
+        }
+        assertTrue("The real model asset must decode before capture: ${(decodedModel as? ErrorResult)?.throwable}", decodedModel is SuccessResult)
         fixture = ChatBeforeFixture(image)
         fixture.install()
         snapshots.publishBeforeReferences()

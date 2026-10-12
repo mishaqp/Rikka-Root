@@ -22,6 +22,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -48,12 +49,14 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -70,6 +73,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalScrollCaptureInProgress
@@ -85,7 +89,6 @@ import androidx.compose.ui.zIndex
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.R
@@ -100,6 +103,7 @@ import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
 import me.rerere.rikkahub.ui.components.ui.RabbitLoadingIndicator
 import me.rerere.rikkahub.ui.hooks.ImeLazyListAutoScroller
 import me.rerere.rikkahub.ui.theme.ChatFontProvider
+import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import me.rerere.rikkahub.utils.plus
 import me.rerere.ui.components.ListSelectableItem
 import me.rerere.ui.components.Tooltip
@@ -209,7 +213,7 @@ private fun ChatListNormal(
 ) {
     val scope = rememberCoroutineScope()
     val loadingState by rememberUpdatedState(loading)
-    var isRecentScroll by remember { mutableStateOf(false) }
+    val scrollNavigation = rememberChatScrollNavigationVisibility(state)
     val conversationUpdated by rememberUpdatedState(conversation)
     val density = LocalDensity.current
     val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity
@@ -308,18 +312,6 @@ private fun ChatListNormal(
             }
         }
 
-        // 判断最近是否滚动
-        LaunchedEffect(state.isScrollInProgress) {
-            if (state.isScrollInProgress) {
-                isRecentScroll = true
-                delay(1500)
-                isRecentScroll = false
-            } else {
-                delay(1500)
-                isRecentScroll = false
-            }
-        }
-
         ChatFontProvider(displaySetting = settings.displaySetting) {
             LazyColumn(
                 state = state,
@@ -328,6 +320,10 @@ private fun ChatListNormal(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier
                     .fillMaxSize()
+                    .padding(chatScrollNavigationGutter(
+                        settings.displaySetting.showMessageJumper,
+                        settings.displaySetting.messageJumperOnLeft,
+                    ))
                     .hazeSource(state = hazeState)
                     .padding(top = innerPadding.calculateTopPadding()),
             ) {
@@ -533,10 +529,11 @@ private fun ChatListNormal(
 
             // 消息快速跳转
             MessageJumper(
-                show = isRecentScroll && !state.isScrollInProgress && settings.displaySetting.showMessageJumper && !captureProgress,
+                show = scrollNavigation.visible && settings.displaySetting.showMessageJumper && !captureProgress,
                 onLeft = settings.displaySetting.messageJumperOnLeft,
                 scope = scope,
-                state = state
+                state = state,
+                onInteraction = scrollNavigation::onInteraction,
             )
 
             // Suggestion
@@ -769,19 +766,20 @@ private fun ChatSuggestionsRow(
 }
 
 @Composable
-private fun BoxScope.MessageJumper(
+internal fun BoxScope.MessageJumper(
     show: Boolean,
     onLeft: Boolean,
     scope: CoroutineScope,
-    state: LazyListState
+    state: LazyListState,
+    onInteraction: () -> Unit = {},
 ) {
     AnimatedVisibility(
         visible = show,
         modifier = Modifier.align(if (onLeft) Alignment.CenterStart else Alignment.CenterEnd),
-        enter = slideInHorizontally(
+        enter = fadeIn() + slideInHorizontally(
             initialOffsetX = { if (onLeft) -it * 2 else it * 2 },
         ),
-        exit = slideOutHorizontally(
+        exit = fadeOut() + slideOutHorizontally(
             targetOffsetX = { if (onLeft) -it * 2 else it * 2 },
         )
     ) {
@@ -789,27 +787,21 @@ private fun BoxScope.MessageJumper(
             modifier = Modifier.padding(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Surface(
+            MessageJumperButton(
+                icon = HugeIcons.ArrowUpDouble,
+                contentDescription = "К началу чата",
                 onClick = {
+                    onInteraction()
                     scope.launch {
                         state.scrollToItem(0)
                     }
                 },
-                shape = CircleShape,
-                tonalElevation = 4.dp,
-                color = MaterialTheme.colorScheme.surfaceColorAtElevation(
-                    4.dp
-                ).copy(alpha = 0.65f)
-            ) {
-                Icon(
-                    imageVector = HugeIcons.ArrowUpDouble,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .padding(4.dp)
-                )
-            }
-            Surface(
+            )
+            MessageJumperButton(
+                icon = HugeIcons.ArrowUp01,
+                contentDescription = "Предыдущее сообщение",
                 onClick = {
+                    onInteraction()
                     scope.launch {
                         state.animateScrollToItem(
                             (state.firstVisibleItemIndex - 1).fastCoerceAtLeast(
@@ -818,54 +810,47 @@ private fun BoxScope.MessageJumper(
                         )
                     }
                 },
-                shape = CircleShape,
-                tonalElevation = 4.dp,
-                color = MaterialTheme.colorScheme.surfaceColorAtElevation(
-                    4.dp
-                ).copy(alpha = 0.65f)
-            ) {
-                Icon(
-                    imageVector = HugeIcons.ArrowUp01,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .padding(4.dp)
-                )
-            }
-            Surface(
+            )
+            MessageJumperButton(
+                icon = HugeIcons.ArrowDown01,
+                contentDescription = "Следующее сообщение",
                 onClick = {
+                    onInteraction()
                     scope.launch {
                         state.animateScrollToItem(state.firstVisibleItemIndex + 1)
                     }
                 },
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceColorAtElevation(
-                    4.dp
-                ).copy(alpha = 0.65f)
-            ) {
-                Icon(
-                    imageVector = HugeIcons.ArrowDown01,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .padding(4.dp)
-                )
-            }
-            Surface(
+            )
+            MessageJumperButton(
+                icon = HugeIcons.ArrowDownDouble,
+                contentDescription = stringResource(R.string.chat_page_scroll_to_bottom),
                 onClick = {
+                    onInteraction()
                     scope.launch {
                         state.scrollToItem(state.layoutInfo.totalItemsCount - 1)
                     }
                 },
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceColorAtElevation(
-                    4.dp
-                ).copy(alpha = 0.65f),
-            ) {
-                Icon(
-                    imageVector = HugeIcons.ArrowDownDouble,
-                    contentDescription = stringResource(R.string.chat_page_scroll_to_bottom),
-                    modifier = Modifier
-                        .padding(4.dp)
-                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun MessageJumperButton(icon: ImageVector, contentDescription: String, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val dark = LocalDarkMode.current
+    // The visual stays 36dp; Compose retains its expanded minimum touch target.
+    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+        Surface(
+            onClick = onClick,
+            modifier = Modifier.size(36.dp),
+            shape = CircleShape,
+            color = colors.surface.copy(alpha = if (dark) 0.4f else 0.85f),
+            border = BorderStroke(1.dp, if (dark) colors.onSurface.copy(alpha = 0.12f) else colors.outline.copy(alpha = 0.2f)),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(icon, contentDescription, Modifier.size(20.dp),
+                    tint = colors.onSurface.copy(alpha = if (dark) 1f else 0.87f))
             }
         }
     }

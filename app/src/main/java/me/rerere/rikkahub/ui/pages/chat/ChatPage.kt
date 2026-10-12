@@ -62,7 +62,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
-import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.Screen
@@ -79,8 +78,6 @@ import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.ui.components.ai.ChatAttachmentPickerActions
 import me.rerere.rikkahub.ui.components.ai.ChatRunningToolStrip
-import me.rerere.rikkahub.ui.components.ai.ModelListSheet
-import me.rerere.rikkahub.ui.components.ai.rememberModelListState
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.ui.components.ai.ChatInput
 import me.rerere.rikkahub.ui.components.ai.FilesPicker
@@ -325,9 +322,7 @@ private fun ChatPageContent(
             topBar = {
                 Column {
                     TopBar(
-                        settings = setting,
                         assistant = assistant,
-                        chatModel = currentChatModel,
                         conversation = conversation,
                         bigScreen = bigScreen,
                         drawerState = drawerState,
@@ -338,7 +333,6 @@ private fun ChatPageContent(
                         onClickMenu = {
                             previewMode = !previewMode
                         },
-                        onUpdateChatModel = vm::setChatModel,
                         onUpdateTitle = {
                             vm.updateTitle(it)
                         }
@@ -608,16 +602,13 @@ private fun ChatFilesPickerSheet(
 
 @Composable
 private fun TopBar(
-    settings: Settings,
     assistant: Assistant,
-    chatModel: Model?,
     conversation: Conversation,
     drawerState: DrawerState,
     bigScreen: Boolean,
     previewMode: Boolean,
     onClickMenu: () -> Unit,
     onNewChat: () -> Unit,
-    onUpdateChatModel: (Model) -> Unit,
     onUpdateTitle: (String) -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -631,23 +622,13 @@ private fun TopBar(
     val workspaceRepository: WorkspaceRepository = koinInject()
     val workspaces by workspaceRepository.listFlow().collectAsState(initial = emptyList())
     val workspaceId = workspaces.firstOrNull { it.id == assistant.workspaceId?.toString() }?.id
-    val modelListState = rememberModelListState(
-        modelId = chatModel?.id,
-        providers = settings.providers,
-        type = ModelType.CHAT,
-    )
     val editTitleWarning = stringResource(R.string.chat_page_edit_title_warning)
-    val provider = chatModel?.findProvider(providers = settings.providers, checkOverwrite = false)
     val title = conversation.title.ifBlank { stringResource(R.string.chat_page_new_chat) }
-    val modelName = chatModel?.displayName ?: stringResource(R.string.chat_header_choose_model)
     ChatHeader(
         title = title,
-        modelName = modelName,
-        modelDescription = if (provider == null) modelName else "$modelName (${provider.name})",
         bigScreen = bigScreen,
         previewMode = previewMode,
         canRename = conversation.historyLoadState == HistoryLoadState.COMPLETE,
-        canSelectModel = conversation.historyLoadState == HistoryLoadState.COMPLETE,
         showWorkspace = workspaceId != null,
         avatar = {
             UIAvatar(name = assistant.name, value = assistant.avatar, modifier = Modifier.size(16.dp),
@@ -661,14 +642,12 @@ private fun TopBar(
                 toaster.show(editTitleWarning, type = ToastType.Warning)
             }
         },
-        onSelectModel = { modelListState.open() },
         onClickMenu = { onClickMenu() },
         onNewChat = { onNewChat() },
         onFiles = { workspaceId?.let { navController.navigate(Screen.WorkspaceDetail(it, openFiles = true)) } },
         onTerminal = { workspaceId?.let { navController.navigate(Screen.WorkspaceTerminal(it)) } },
         onBrowser = { context.startActivity(BrowserActivity.intent(context, conversationId = conversation.id.toString())) },
     )
-    ModelListSheet(state = modelListState, onSelect = onUpdateChatModel)
     titleState.EditStateContent { title, onUpdate ->
         AlertDialog(
             onDismissRequest = {

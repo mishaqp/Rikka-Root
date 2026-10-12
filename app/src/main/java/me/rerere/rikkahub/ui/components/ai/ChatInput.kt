@@ -45,13 +45,18 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -59,6 +64,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -69,6 +75,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -85,9 +92,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import com.dokar.sonner.ToastType
+import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.svg.css
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
@@ -96,11 +108,13 @@ import me.rerere.asr.ASRStatus
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.ArrowUp02
+import me.rerere.hugeicons.stroke.Brain02
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Fullscreen
 import me.rerere.hugeicons.stroke.Stop
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.service.MessageQueueState
@@ -118,6 +132,8 @@ import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.utils.SoundEffectPlayer
+import me.rerere.rikkahub.utils.computeAIIconByName
+import me.rerere.rikkahub.utils.toCssHex
 import org.koin.compose.koinInject
 import kotlin.time.Duration.Companion.seconds
 import me.rerere.rikkahub.ui.pages.chat.VoicePhase
@@ -272,6 +288,12 @@ fun ChatInput(
                                     .horizontalScroll(rememberScrollState()),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                ComposerModelButton(
+                                    model = chatModel,
+                                    providerName = chatModel?.findProvider(settings.providers)?.name,
+                                    onClick = { modelListState.open() },
+                                )
+
                                 // Search
                                 val enableSearchMsg = stringResource(R.string.web_search_enabled)
                                 val disableSearchMsg = stringResource(R.string.web_search_disabled)
@@ -310,8 +332,8 @@ fun ChatInput(
 
                             }
 
-                            chatContextUsagePresentation(contextUsageTokens)?.let { usage ->
-                                ContextUsageRing(promptTokens = usage.promptTokens)
+                            contextUsagePresentation(contextUsageTokens, chatModel?.modelId)?.let { usage ->
+                                ContextUsageRing(usage = usage)
                                 Spacer(Modifier.width(4.dp))
                             }
 
@@ -382,6 +404,64 @@ fun ChatInput(
         state = modelListState,
         onSelect = onUpdateChatModel,
     )
+}
+
+@Composable
+private fun ComposerModelButton(
+    model: Model?,
+    providerName: String?,
+    onClick: () -> Unit,
+) {
+    val fullName = model?.displayName?.takeIf { it.isNotBlank() }
+        ?: model?.modelId?.takeIf { it.isNotBlank() }
+        ?: stringResource(R.string.model_list_select_model)
+    val description = stringResource(R.string.chat_composer_model, fullName)
+    val tooltipState = rememberTooltipState(isPersistent = true)
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(tooltipState.isVisible) {
+        if (tooltipState.isVisible) {
+            delay(4_000)
+            tooltipState.dismiss()
+        }
+    }
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(),
+        tooltip = { PlainTooltip { Text(fullName) } },
+        state = tooltipState,
+        enableUserInput = false,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .testTag("chat_composer_model")
+                .clip(CircleShape)
+                .semantics { contentDescription = description }
+                .combinedClickable(
+                    role = Role.Button,
+                    onClick = onClick,
+                    onLongClick = { scope.launch { tooltipState.show() } },
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            val path = remember(model?.modelId, providerName) {
+                model?.modelId?.let(::computeAIIconByName)
+                    ?: providerName?.let(::computeAIIconByName)
+            }
+            if (path == null) {
+                Icon(HugeIcons.Brain02, null, Modifier.size(20.dp))
+            } else {
+                val context = LocalContext.current
+                val color = LocalContentColor.current
+                val request = remember(path, context, color) {
+                    ImageRequest.Builder(context)
+                        .data("file:///android_asset/icons/$path")
+                        .css("svg { fill: ${color.toCssHex()}; }")
+                        .build()
+                }
+                AsyncImage(request, contentDescription = null, modifier = Modifier.size(20.dp))
+            }
+        }
+    }
 }
 
 @Composable
@@ -653,7 +733,7 @@ private fun TextInputRow(
                     Box {
                         if (state.textContent.text.isEmpty()) {
                             Text(
-                                text = stringResource(R.string.chat_input_placeholder),
+                                text = stringResource(R.string.chat_composer_placeholder),
                                 style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -808,7 +888,7 @@ private fun FullScreenEditor(
                             .fillMaxSize(),
                         shape = RoundedCornerShape(32.dp),
                         placeholder = {
-                            Text(stringResource(R.string.chat_input_placeholder))
+                            Text(stringResource(R.string.chat_composer_placeholder))
                         },
                         keyboardOptions = KeyboardOptions(
                             capitalization = KeyboardCapitalization.Sentences,

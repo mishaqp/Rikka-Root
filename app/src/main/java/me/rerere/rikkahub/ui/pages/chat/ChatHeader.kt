@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -55,21 +56,17 @@ import me.rerere.hugeicons.stroke.MessageAdd01
 import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.rikkahub.R
 
-/** Moru's compact name/model line and workspace capsule, using opaque theme surfaces. */
+/** Compact centered assistant/title line and workspace capsule, using opaque theme surfaces. */
 @Composable
 internal fun ChatHeader(
     title: String,
-    modelName: String,
-    modelDescription: String,
     bigScreen: Boolean,
     previewMode: Boolean,
     canRename: Boolean,
-    canSelectModel: Boolean,
     showWorkspace: Boolean,
     avatar: @Composable () -> Unit,
     onOpenDrawer: () -> Unit,
     onClickTitle: () -> Unit,
-    onSelectModel: () -> Unit,
     onClickMenu: () -> Unit,
     onNewChat: () -> Unit,
     onFiles: () -> Unit,
@@ -81,58 +78,68 @@ internal fun ChatHeader(
     Surface(color = colors.background) {
         Column(Modifier.fillMaxWidth().statusBarsPadding()) {
             Row(
-                Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 4.dp),
+                Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 4.dp)
+                    .testTag("chat_header_bar"),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (!bigScreen) {
-                    IconButton(onClick = onOpenDrawer, modifier = Modifier.size(40.dp)) {
-                        Icon(HugeIcons.Menu03, stringResource(R.string.chat_header_open_drawer), Modifier.size(20.dp))
-                    }
-                } else Spacer(Modifier.width(12.dp))
-                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                    avatar()
-                    Spacer(Modifier.width(6.dp))
-                    Surface(
-                        onClick = onClickTitle,
-                        enabled = canRename,
-                        color = colors.background,
-                        shape = RoundedCornerShape(6.dp),
-                        modifier = Modifier.weight(1.2f).testTag("chat_header_title")
-                            .semantics { contentDescription = title },
-                    ) {
-                        Box(Modifier.height(48.dp), contentAlignment = Alignment.CenterStart) {
-                            HeaderText(title, MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp, fontWeight = FontWeight.Medium))
+                Box(
+                    Modifier.fillMaxHeight().testTag("chat_header_leading"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (!bigScreen) {
+                        IconButton(onClick = onOpenDrawer, modifier = Modifier.size(40.dp)) {
+                            Icon(HugeIcons.Menu03, stringResource(R.string.chat_header_open_drawer), Modifier.size(20.dp))
                         }
-                    }
-                    Text(" · ", color = colors.onSurfaceVariant, fontSize = 12.sp)
-                    Surface(
-                        onClick = onSelectModel,
-                        enabled = canSelectModel,
-                        color = colors.background,
-                        shape = RoundedCornerShape(6.dp),
-                        modifier = Modifier.weight(1f).testTag("chat_header_model")
-                            .semantics { contentDescription = modelDescription },
+                    } else Spacer(Modifier.width(12.dp))
+                }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    Row(
+                        Modifier.testTag("chat_header_identity"),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Box(Modifier.height(48.dp), contentAlignment = Alignment.CenterStart) {
-                            HeaderText(modelName, MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium, color = colors.onSurfaceVariant))
+                        Box(Modifier.size(16.dp).testTag("chat_header_avatar"), contentAlignment = Alignment.Center) {
+                            avatar()
+                        }
+                        Text(" · ", color = colors.onSurfaceVariant, fontSize = 12.sp)
+                        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+                            Surface(
+                                onClick = onClickTitle,
+                                enabled = canRename,
+                                color = colors.background,
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.weight(1f, fill = false).testTag("chat_header_title")
+                                    .semantics { contentDescription = title },
+                            ) {
+                                Box(Modifier.height(48.dp), contentAlignment = Alignment.CenterStart) {
+                                    HeaderText(
+                                        title,
+                                        MaterialTheme.typography.bodySmall.copy(
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = colors.onSurface,
+                                        ),
+                                    )
+                                }
+                            }
                         }
                     }
                 }
-                Box {
-                    IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
-                        Icon(HugeIcons.MoreVertical, stringResource(R.string.chat_header_menu), Modifier.size(20.dp))
+                Row(Modifier.testTag("chat_header_actions"), verticalAlignment = Alignment.CenterVertically) {
+                    Box {
+                        IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
+                            Icon(HugeIcons.MoreVertical, stringResource(R.string.chat_header_menu), Modifier.size(20.dp))
+                        }
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(if (previewMode) R.string.chat_header_back_to_chat else R.string.chat_header_preview)) },
+                                leadingIcon = { Icon(HugeIcons.LeftToRightListBullet, null, Modifier.size(20.dp)) },
+                                onClick = { menuOpen = false; onClickMenu() },
+                            )
+                        }
                     }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(if (previewMode) R.string.chat_header_back_to_chat else R.string.chat_header_preview)) },
-                            leadingIcon = { Icon(HugeIcons.LeftToRightListBullet, null, Modifier.size(20.dp)) },
-                            onClick = { menuOpen = false; onClickMenu() },
-                        )
+                    IconButton(onClick = onNewChat, modifier = Modifier.size(44.dp).testTag("chat_header_new_chat")) {
+                        Icon(HugeIcons.MessageAdd01, stringResource(R.string.chat_header_new_chat), Modifier.size(22.dp))
                     }
-                }
-                IconButton(onClick = onNewChat, modifier = Modifier.size(44.dp).testTag("chat_header_new_chat")) {
-                    Icon(HugeIcons.MessageAdd01, stringResource(R.string.chat_header_new_chat), Modifier.size(22.dp))
                 }
             }
             if (showWorkspace) {
