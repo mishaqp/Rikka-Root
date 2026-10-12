@@ -4,8 +4,6 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowUp01
-import me.rerere.hugeicons.stroke.ArrowDownDouble
-import me.rerere.hugeicons.stroke.ArrowUpDouble
 import me.rerere.hugeicons.stroke.CursorPointer01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Cancel01
@@ -85,7 +83,6 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.util.fastCoerceAtLeast
 import androidx.compose.ui.zIndex
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
@@ -795,7 +792,7 @@ internal fun BoxScope.MessageJumper(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             MessageJumperButton(
-                icon = HugeIcons.ArrowUpDouble,
+                icon = HugeIcons.ArrowUp01,
                 contentDescription = "К началу чата",
                 onClick = {
                     onInteraction()
@@ -805,31 +802,7 @@ internal fun BoxScope.MessageJumper(
                 },
             )
             MessageJumperButton(
-                icon = HugeIcons.ArrowUp01,
-                contentDescription = "Предыдущее сообщение",
-                onClick = {
-                    onInteraction()
-                    scope.launch {
-                        state.animateScrollToItem(
-                            (state.firstVisibleItemIndex - 1).fastCoerceAtLeast(
-                                0
-                            )
-                        )
-                    }
-                },
-            )
-            MessageJumperButton(
                 icon = HugeIcons.ArrowDown01,
-                contentDescription = "Следующее сообщение",
-                onClick = {
-                    onInteraction()
-                    scope.launch {
-                        state.animateScrollToItem(state.firstVisibleItemIndex + 1)
-                    }
-                },
-            )
-            MessageJumperButton(
-                icon = HugeIcons.ArrowDownDouble,
                 contentDescription = stringResource(R.string.chat_page_scroll_to_bottom),
                 onClick = {
                     onInteraction()
@@ -846,17 +819,17 @@ internal fun BoxScope.MessageJumper(
 private fun MessageJumperButton(icon: ImageVector, contentDescription: String, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val dark = LocalDarkMode.current
-    // The visual stays 36dp; Compose retains its expanded minimum touch target.
+    // Moru-sized 32dp overlay circles; they float over the list and reserve no space.
     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
         Surface(
             onClick = onClick,
-            modifier = Modifier.size(36.dp),
+            modifier = Modifier.size(32.dp),
             shape = CircleShape,
             color = colors.surface.copy(alpha = if (dark) 0.4f else 0.85f),
             border = BorderStroke(1.dp, if (dark) colors.onSurface.copy(alpha = 0.12f) else colors.outline.copy(alpha = 0.2f)),
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(icon, contentDescription, Modifier.size(20.dp),
+                Icon(icon, contentDescription, Modifier.size(18.dp),
                     tint = colors.onSurface.copy(alpha = if (dark) 1f else 0.87f))
             }
         }

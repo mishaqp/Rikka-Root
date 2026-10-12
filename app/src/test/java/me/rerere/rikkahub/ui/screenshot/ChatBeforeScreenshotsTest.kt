@@ -1174,6 +1174,38 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         capture("width320")
     }
 
+    @Test fun productionChatStage4ToolPreviewsAndTitles() {
+        val settings = MutableStateFlow(ScreenshotFixtures.settings)
+        val job = MutableStateFlow<Job?>(null)
+        val previews = stage3Message(96,
+            stage3Tool("preview_root", "root_exec", """{"command":"ls /sdcard"}""",
+                """{"backend":"root","success":true,"stdout":"Alarms\nDCIM\nDownload\nMusic\nPictures\n","stderr":"","exit_code":0}"""),
+            stage3Tool("preview_termux", "termux_run_command", """{"command":"echo привет"}""",
+                """{"error":"termux_run_failed","reason":"Not allowed to start service Intent: app is in background"}"""),
+            stage3Tool("preview_ssh", "ssh_exec_saved", """{"name":"home","command":"cat /etc/missing"}""",
+                """{"success":false,"exit_code":1,"stdout":"","stderr":"cat: /etc/missing: No such file or directory"}"""),
+            stage3Tool("preview_file", "write_text_file", """{"path":"/sdcard/Download/test.txt","content":"x"}""",
+                """{"success":true,"path":"/sdcard/Download/test.txt","bytes_written":12}"""),
+            stage3Tool("preview_browser", "browser_open", """{"url":"https://example.com/"}""",
+                """{"success":true,"url":"https://example.com/","title":"Example Domain"}"""),
+        )
+        mountStage2(settings, job, listOf(previews))
+        showStage2(settings, DisplaySetting(autoCollapseToolSteps = false), listOf(previews))
+        listOf("Root: ls /sdcard", "Termux: echo привет", "SSH home: cat /etc/missing",
+            "Файл: записан test.txt", "Браузер: открыта example.com").forEach { title ->
+            compose.onNodeWithText(title).assertIsDisplayed()
+        }
+        compose.onNodeWithText("Termux не разрешает запуск из фона — дайте Termux разрешение «Поверх других приложений»")
+            .assertIsDisplayed()
+        compose.onNodeWithText("код выхода 1").assertIsDisplayed()
+        val rootLayouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithTag("chat_timeline_tool_preview:preview_root")
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(rootLayouts) }
+        assertEquals("Command output keeps real line breaks up to four lines", 4, rootLayouts.single().lineCount)
+        compose.onAllNodesWithText("{", substring = true).assertCountEquals(0)
+        capture("timeline_tool_previews")
+    }
+
     private fun stage3PendingApprovalMessage() = stage3Message(84,
             stage3Tool("stage3_once", "workspace_write_file", """{"path":"/workspace/a.txt","text":"a"}""",
                 output = null, approval = ToolApprovalState.Pending),

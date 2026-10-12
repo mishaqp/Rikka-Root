@@ -12,6 +12,7 @@
     <string name="chat_timeline_status_running" translatable="false">Выполняется</string>
     <string name="chat_timeline_status_result" translatable="false">Результат получен</string>
     <string name="chat_timeline_status_failed" translatable="false">Ошибка</string>
+    <string name="chat_timeline_exit_code" translatable="false">код выхода %1$d</string>
     <string name="chat_timeline_status_denied" translatable="false">Отклонено</string>
     <string name="chat_timeline_status_blocked" translatable="false">Заблокировано</string>
     <string name="chat_timeline_status_unknown" translatable="false">Исход выполнения неизвестен</string>

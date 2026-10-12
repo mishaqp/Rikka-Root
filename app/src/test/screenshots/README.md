@@ -3,7 +3,7 @@
 `chat-before` contains the 208 preserved audit reference PNGs (26 viewports × four
 themes × font scales 1.0/1.3). These files describe the historical interface. The
 current source cannot render that old header and composer, so the live suite now
-verifies `chat-after-stage3` and publishes reference/current directories in `ui-screenshots`.
+verifies `chat-after-stage4` and publishes reference/current directories in `ui-screenshots`.
 The audit-era `ChatBeforeScreenshotsTest` class name is retained for existing
 targeted Gradle commands; its tests capture the current production `ChatPage`.
 
@@ -127,3 +127,12 @@ Tool-detail windows use a fixed modal-content rectangle. The report includes
 every crop boundary and offset; differing captures receive diagnostic crops in
 `/tmp/chat-stage1-message-qa`. This proves equality only in the reported crops,
 not in excluded or offscreen message areas. Python Pillow and NumPy are needed.
+
+`chat-after-stage3` is now a preserved 780-PNG archive. The live baseline is
+`chat-after-stage4`; only `-Pchat.stage4.record=true` may write it. Its first
+recording contains the stage-3 corrections checked on the phone: readable tool
+result previews (command stdout/stderr with real line breaks, Russian error
+reasons, short summaries instead of JSON), one-line titles with the call's
+essence, per-category tool icons and two 32dp scroll buttons. The new
+`timeline_tool_previews` scene shows root, Termux, SSH, file and browser steps
+(14 methods × eight theme/font cases = 112 tests, 788 PNGs).

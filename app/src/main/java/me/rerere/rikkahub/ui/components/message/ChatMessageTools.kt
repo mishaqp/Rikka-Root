@@ -44,6 +44,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -93,7 +94,10 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(
 ) {
     val loading = !tool.isFinished
     var showDetails by remember(tool.toolCallId) { mutableStateOf(false) }
-    val output = tool.output?.let { JsonInstantPretty.encodeToString(it) }
+    val preview = remember(tool.output) {
+        tool.output?.let { presentToolResult(tool.toolName, it.toString(), it) }
+    }
+    val headline = remember(tool.input) { presentToolHeadline(tool.toolName, tool.input) }
     ControlledChainOfThoughtStep(
         expanded = true,
         onExpandedChange = {},
@@ -105,7 +109,7 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(
                 DotLoading(size = 18.dp)
             } else {
                 Icon(
-                    imageVector = HugeIcons.Tools,
+                    imageVector = timelineToolIcon(tool.toolName) ?: HugeIcons.Tools,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp),
                     tint = LocalContentColor.current.copy(alpha = 0.7f),
@@ -113,30 +117,14 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(
             }
         },
         label = {
-            Text(
-                text = timelineToolDisplayName(tool.toolName),
-                style = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp * fontSizeRatio,
-                    fontFamily = LocalTextStyle.current.fontFamily),
-                color = MaterialTheme.colorScheme.secondary,
-                modifier = Modifier.shimmer(isLoading = loading),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            TimelineStepTitle(headline ?: timelineToolDisplayName(tool.toolName), loading, fontSizeRatio)
         },
         content = {
-            Column {
-                Text(
-                    text = tool.toolName,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (output != null) Text(
-                    text = output,
-                    modifier = Modifier.testTag("chat_timeline_server_preview:${tool.toolCallId}"),
-                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp * fontSizeRatio,
-                        lineHeight = 16.8.sp * fontSizeRatio, fontFamily = LocalTextStyle.current.fontFamily),
-                    maxLines = 4,
-                    overflow = TextOverflow.Ellipsis,
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                if (preview != null) ToolResultPreviewText(
+                    preview = preview,
+                    testTag = "chat_timeline_server_preview:${tool.toolCallId}",
+                    fontSizeRatio = fontSizeRatio,
                 )
                 Text(
                     text = when (status) {
@@ -239,6 +227,13 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     }.getOrNull() else null
     val resultText = if (!tool.hasExecutionCheckpoint()) tool.output
         .filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }.takeIf { it.isNotBlank() } else null
+    val resultPreview = remember(tool, outputJson) {
+        presentToolResult(tool.toolName, resultText, outputJson)
+    }
+    val headline = remember(tool.toolName, tool.input) { presentToolHeadline(tool.toolName, tool.inputAsJson()) }
+    // Command output and errors are always shown as text; other tools keep their own summary renderer.
+    val ownPreview = resultPreview != null && (resultPreview !is ToolResultPreview.Summary ||
+        outputUnparsable || !renderer.hasSummary(context))
     val pendingPreview = if (isPending && !useCustomMcpPreview && workflowPreview == null) {
         ((tool.inputAsJson() as? JsonObject)?.get("command") as? JsonPrimitive)?.contentOrNull
             ?: tool.input.takeIf { it.isNotBlank() }
@@ -260,7 +255,8 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                 )
             } else {
                 Icon(
-                    imageVector = renderer.icon(context),
+                    imageVector = if (renderer.toolName.isNotEmpty()) renderer.icon(context)
+                        else timelineToolIcon(tool.toolName) ?: renderer.icon(context),
                     contentDescription = null,
                     modifier = Modifier.size(18.dp),
                     tint = LocalContentColor.current.copy(alpha = 0.7f)
@@ -268,17 +264,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
             }
         },
         label = {
-            Text(
-                text = timelineToolDisplayName(tool.toolName),
-                style = MaterialTheme.typography.labelMedium.copy(
-                    fontSize = 13.sp * fontSizeRatio,
-                    fontFamily = LocalTextStyle.current.fontFamily,
-                ),
-                color = MaterialTheme.colorScheme.secondary,
-                modifier = Modifier.shimmer(isLoading = loading),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            TimelineStepTitle(headline ?: timelineToolDisplayName(tool.toolName), loading, fontSizeRatio)
         },
         extra = if (isPending && onToolApproval != null) {
             {
@@ -354,18 +340,11 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             status == TimelineStatus.Blocked || status == TimelineStatus.Indeterminate)
                             MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    if (!tool.hasExecutionCheckpoint()) renderer.Summary(context)
-                    if ((outputUnparsable || !renderer.hasSummary(context)) && resultText != null) Text(
-                        text = resultText,
-                        modifier = Modifier.testTag("chat_timeline_tool_preview:${tool.toolCallId}"),
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontSize = 12.sp * fontSizeRatio,
-                            lineHeight = 16.8.sp * fontSizeRatio,
-                            fontFamily = LocalTextStyle.current.fontFamily,
-                        ),
-                        maxLines = 4,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    if (ownPreview && resultPreview != null) ToolResultPreviewText(
+                        preview = resultPreview,
+                        testTag = "chat_timeline_tool_preview:${tool.toolCallId}",
+                        fontSizeRatio = fontSizeRatio,
+                    ) else if (!tool.hasExecutionCheckpoint()) renderer.Summary(context)
                     if (pendingPreview != null) Text(
                         text = pendingPreview,
                         style = MaterialTheme.typography.bodySmall.copy(
@@ -470,6 +449,78 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                     }
                 }
             },
+        )
+    }
+}
+
+@Composable
+private fun TimelineStepTitle(text: String, loading: Boolean, fontSizeRatio: Float) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium.copy(
+            fontSize = 13.sp * fontSizeRatio,
+            fontFamily = LocalTextStyle.current.fontFamily,
+        ),
+        color = MaterialTheme.colorScheme.secondary,
+        modifier = Modifier.shimmer(isLoading = loading),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+/** Up to four lines of result: command output in monospace, a readable error or a short summary. */
+@Composable
+private fun ToolResultPreviewText(preview: ToolResultPreview, testTag: String, fontSizeRatio: Float) {
+    val base = MaterialTheme.typography.bodySmall.copy(
+        fontSize = 12.sp * fontSizeRatio,
+        lineHeight = 16.8.sp * fontSizeRatio,
+        fontFamily = LocalTextStyle.current.fontFamily,
+    )
+    val mono = base.copy(fontFamily = FontFamily.Monospace, fontSize = 11.5.sp * fontSizeRatio)
+    val error = MaterialTheme.colorScheme.error
+    when (preview) {
+        is ToolResultPreview.Command -> Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            val hasOut = preview.stdout.isNotBlank()
+            val hasErr = preview.stderr.isNotBlank()
+            if (hasOut) Text(
+                text = preview.stdout,
+                modifier = Modifier.testTag(testTag),
+                style = mono,
+                maxLines = if (hasErr) 2 else 4,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (hasErr) Text(
+                text = preview.stderr,
+                modifier = if (hasOut) Modifier else Modifier.testTag(testTag),
+                style = mono,
+                color = error,
+                maxLines = if (hasOut) 2 else 4,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (preview.exitCode != null) Text(
+                text = stringResource(R.string.chat_timeline_exit_code, preview.exitCode),
+                modifier = if (hasOut || hasErr) Modifier else Modifier.testTag(testTag),
+                style = MaterialTheme.typography.labelSmall,
+                color = error,
+            )
+        }
+
+        is ToolResultPreview.Error -> Text(
+            text = preview.message,
+            modifier = Modifier.testTag(testTag),
+            style = base,
+            color = error,
+            maxLines = 4,
+            overflow = TextOverflow.Ellipsis,
+        )
+
+        is ToolResultPreview.Summary -> Text(
+            text = preview.text,
+            modifier = Modifier.testTag(testTag),
+            style = base,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 4,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }

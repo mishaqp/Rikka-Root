@@ -37,7 +37,7 @@ class ChatScrollNavigationLayoutTest(private val width: Int, private val fontSca
     @get:Rule val compose = createComposeRule()
 
     @Test
-    fun `36dp circles overlay 16dp message margins without resizing content`() {
+    fun `32dp circles overlay 16dp message margins without resizing content`() {
         val enabled = mutableStateOf(true)
         compose.setContent {
             ScreenshotTheme(fontScale = fontScale) {
@@ -57,10 +57,10 @@ class ChatScrollNavigationLayoutTest(private val width: Int, private val fontSca
         val content = compose.onNodeWithTag("scroll_message_content").fetchSemanticsNode().boundsInRoot
         assertEquals(16f, content.left, .5f)
         assertEquals(width - 16f, content.right, .5f)
-        listOf("К началу чата", "Предыдущее сообщение", "Следующее сообщение", "Прокрутить вниз").forEach { label ->
+        listOf("К началу чата", "Прокрутить вниз").forEach { label ->
             val node = compose.onNodeWithContentDescription(label).assertIsDisplayed().assertHasClickAction().fetchSemanticsNode()
-            assertEquals("$label has a 36dp circle", 36f, node.boundsInRoot.width, .5f)
-            assertEquals("$label has a 36dp circle", 36f, node.boundsInRoot.height, .5f)
+            assertEquals("$label has a 32dp circle", 32f, node.boundsInRoot.width, .5f)
+            assertEquals("$label has a 32dp circle", 32f, node.boundsInRoot.height, .5f)
             assertTrue("$label retains a minimum touch target", node.touchBoundsInRoot.width >= 48f)
             assertTrue("$label floats over the message margin", if (onLeft) {
                 node.touchBoundsInRoot.left < content.left && node.touchBoundsInRoot.right > content.left
@@ -71,6 +71,9 @@ class ChatScrollNavigationLayoutTest(private val width: Int, private val fontSca
 
         compose.runOnIdle { enabled.value = false }
         compose.onNodeWithContentDescription("К началу чата").assertDoesNotExist()
+        listOf("Предыдущее сообщение", "Следующее сообщение").forEach { removed ->
+            compose.onNodeWithContentDescription(removed).assertDoesNotExist()
+        }
         val fullContent = compose.onNodeWithTag("scroll_message_content").fetchSemanticsNode().boundsInRoot
         assertEquals(16f, fullContent.left, .5f)
         assertEquals(width - 16f, fullContent.right, .5f)
