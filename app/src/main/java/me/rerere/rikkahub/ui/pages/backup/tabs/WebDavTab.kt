@@ -83,8 +83,8 @@ fun WebDavTab(
     var restoringItemId by remember { mutableStateOf<String?>(null) }
     var isBackingUp by remember { mutableStateOf(false) }
 
-    fun updateWebDavConfig(newConfig: WebDavConfig) {
-        vm.updateSettings(settings.copy(webDavConfig = newConfig))
+    fun updateWebDavConfig(transform: (WebDavConfig) -> WebDavConfig) {
+        vm.updateSettings { current -> current.copy(webDavConfig = transform(current.webDavConfig)) }
     }
 
     val lastBackupText = if (settings.backupReminderConfig.lastBackupTime == 0L) {
@@ -127,7 +127,7 @@ fun WebDavTab(
                         OutlinedTextField(
                             modifier = Modifier.fillMaxWidth(),
                             value = webDavConfig.url,
-                            onValueChange = { updateWebDavConfig(webDavConfig.copy(url = it.trim())) },
+                            onValueChange = { updateWebDavConfig { current -> current.copy(url = it.trim()) } },
                             placeholder = { Text("https://example.com/dav") },
                             singleLine = true
                         )
@@ -140,11 +140,9 @@ fun WebDavTab(
                             modifier = Modifier.fillMaxWidth(),
                             value = webDavConfig.username,
                             onValueChange = {
-                                updateWebDavConfig(
-                                    webDavConfig.copy(
+                                updateWebDavConfig { current -> current.copy(
                                         username = it.trim()
-                                    )
-                                )
+                                    ) }
                             },
                             singleLine = true
                         )
@@ -157,7 +155,7 @@ fun WebDavTab(
                         OutlinedTextField(
                             modifier = Modifier.fillMaxWidth(),
                             value = webDavConfig.password,
-                            onValueChange = { updateWebDavConfig(webDavConfig.copy(password = it.trim())) },
+                            onValueChange = { updateWebDavConfig { current -> current.copy(password = it.trim()) } },
                             visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                             trailingIcon = {
                                 val image = if (passwordVisible) {
@@ -179,7 +177,7 @@ fun WebDavTab(
                         OutlinedTextField(
                             modifier = Modifier.fillMaxWidth(),
                             value = webDavConfig.path,
-                            onValueChange = { updateWebDavConfig(webDavConfig.copy(path = it.trim())) },
+                            onValueChange = { updateWebDavConfig { current -> current.copy(path = it.trim()) } },
                             singleLine = true
                         )
                     },
@@ -200,12 +198,7 @@ fun WebDavTab(
                                     count = WebDavConfig.BackupItem.entries.size
                                 ),
                                 onCheckedChange = { checked ->
-                                    val newItems = if (checked) {
-                                        webDavConfig.items + item
-                                    } else {
-                                        webDavConfig.items - item
-                                    }
-                                    updateWebDavConfig(webDavConfig.copy(items = newItems))
+                                    updateWebDavConfig { current -> current.copy(items = if (checked) current.items + item else current.items - item) }
                                 },
                                 checked = item in webDavConfig.items
                             ) {

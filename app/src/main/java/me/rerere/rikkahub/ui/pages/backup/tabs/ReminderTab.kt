@@ -31,8 +31,8 @@ fun ReminderTab(vm: BackupVM) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val config = settings.backupReminderConfig
 
-    fun updateConfig(update: BackupReminderConfig) {
-        vm.updateSettings(settings.copy(backupReminderConfig = update))
+    fun updateConfig(update: (BackupReminderConfig) -> BackupReminderConfig) {
+        vm.updateBackupReminder(update)
     }
 
     Column(
@@ -50,7 +50,7 @@ fun ReminderTab(vm: BackupVM) {
                 trailingContent = {
                     Switch(
                         checked = config.enabled,
-                        onCheckedChange = { updateConfig(config.copy(enabled = it)) },
+                        onCheckedChange = { updateConfig { current -> current.copy(enabled = it) } },
                     )
                 },
                 headlineContent = { Text(stringResource(R.string.backup_page_reminder_enable)) },
@@ -70,7 +70,7 @@ fun ReminderTab(vm: BackupVM) {
                                         index = index,
                                         count = intervals.size,
                                     ),
-                                    onClick = { updateConfig(config.copy(intervalDays = days)) },
+                                    onClick = { updateConfig { current -> current.copy(intervalDays = days) } },
                                     selected = config.intervalDays == days,
                                 ) {
                                     Text(stringResource(R.string.backup_page_reminder_interval_days, days))

@@ -54,9 +54,9 @@ fun SettingPreferencesNotificationPage(vm: SettingVM = koinViewModel()) {
     var showUpdatePauseDialog by remember { mutableStateOf(false) }
     var selectedUpdatePauseDays by remember { mutableStateOf(UPDATE_PAUSE_DAY_OPTIONS.first()) }
 
-    fun updateDisplaySetting(setting: DisplaySetting) {
-        displaySetting = setting
-        vm.updateSettings(settings.copy(displaySetting = setting))
+    fun updateDisplaySetting(setting: (DisplaySetting) -> DisplaySetting) {
+        displaySetting = setting(displaySetting)
+        vm.updateDisplaySetting(setting)
     }
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -128,7 +128,7 @@ fun SettingPreferencesNotificationPage(vm: SettingVM = koinViewModel()) {
                                     if (it && !permissionState.allPermissionsGranted) {
                                         permissionState.requestPermissions()
                                     }
-                                    updateDisplaySetting(displaySetting.copy(enableNotificationOnMessageGeneration = it))
+                                    updateDisplaySetting { current -> current.copy(enableNotificationOnMessageGeneration = it) }
                                 }
                             )
                         },
@@ -141,7 +141,7 @@ fun SettingPreferencesNotificationPage(vm: SettingVM = koinViewModel()) {
                                 Switch(
                                     checked = displaySetting.enableLiveUpdateNotification,
                                     onCheckedChange = {
-                                        updateDisplaySetting(displaySetting.copy(enableLiveUpdateNotification = it))
+                                        updateDisplaySetting { current -> current.copy(enableLiveUpdateNotification = it) }
                                     }
                                 )
                             },
@@ -178,9 +178,7 @@ fun SettingPreferencesNotificationPage(vm: SettingVM = koinViewModel()) {
                     if (!updateChecksEnabled) {
                         TextButton(
                             onClick = {
-                                updateDisplaySetting(
-                                    displaySetting.copy(updateCheckDisabledUntilEpochMillis = 0L)
-                                )
+                                updateDisplaySetting { current -> current.copy(updateCheckDisabledUntilEpochMillis = 0L) }
                                 showUpdatePauseDialog = false
                             },
                             modifier = Modifier.fillMaxWidth(),
@@ -193,12 +191,10 @@ fun SettingPreferencesNotificationPage(vm: SettingVM = koinViewModel()) {
             confirmButton = {
                 TextButton(
                     onClick = {
-                        updateDisplaySetting(
-                            displaySetting.copy(
+                        updateDisplaySetting { current -> current.copy(
                                 updateCheckDisabledUntilEpochMillis =
                                     System.currentTimeMillis() + selectedUpdatePauseDays * MILLIS_PER_DAY,
-                            )
-                        )
+                            ) }
                         showUpdatePauseDialog = false
                     }
                 ) {

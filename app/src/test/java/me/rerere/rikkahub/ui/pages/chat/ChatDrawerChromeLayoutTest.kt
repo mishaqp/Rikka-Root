@@ -249,7 +249,7 @@ class ChatDrawerChromeLayoutTest {
                 Box(Modifier.width(288.dp)) {
                     ChatDrawerAssistantCard(
                         settings = settings.value,
-                        onUpdateSettings = { settings.value = it },
+                        onUpdateSettings = { settings.value = it(settings.value) },
                         onNavigate = { destinations += it },
                         avatarContent = { _, _, modifier, _ -> Box(modifier) },
                     )

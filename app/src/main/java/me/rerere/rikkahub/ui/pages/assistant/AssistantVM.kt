@@ -24,67 +24,60 @@ class AssistantVM(
     val settings: StateFlow<Settings> = settingsStore.settingsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, Settings.dummy())
 
-    fun updateSettings(settings: Settings) {
+    fun updateSettings(transform: (Settings) -> Settings) {
         viewModelScope.launch {
-            settingsStore.update(settings)
+            settingsStore.update(transform)
         }
     }
 
     fun addAssistant(assistant: Assistant) {
         viewModelScope.launch {
-            val settings = settings.value
-            settingsStore.update(
-                settings.copy(
-                    assistants = settings.assistants.plus(assistant)
-                )
-            )
+            settingsStore.update { current -> current.copy(
+                    assistants = (current.assistants + assistant).distinctBy { it.id }
+                ) }
         }
     }
 
     fun removeAssistant(assistant: Assistant) {
         viewModelScope.launch {
-            cleanupAssistantFiles(assistant)
-
-            val settings = settings.value
-            settingsStore.update(
-                settings.copy(
-                    assistants = settings.assistants.filter { it.id != assistant.id }
-                )
-            )
+            var removed: Assistant? = null
+            val committed = settingsStore.update { current -> current.copy(
+                    assistants = current.assistants.filter { row ->
+                        if (row.id == assistant.id) { removed = row; false } else true
+                    }
+                ) }
+            removed?.let { cleanupAssistantFiles(it, committed) }
             memoryRepository.deleteMemoriesOfAssistant(assistant.id.toString())
             conversationRepo.deleteConversationOfAssistant(assistant.id)
         }
     }
 
-    private fun cleanupAssistantFiles(assistant: Assistant) {
+    private fun cleanupAssistantFiles(assistant: Assistant, retained: Settings) {
         val uris = buildList {
             (assistant.avatar as? Avatar.Image)?.let { add(it.url.toUri()) }
             assistant.background?.let { add(it.toUri()) }
         }
 
-        if (uris.isNotEmpty()) {
-            filesManager.deleteChatFiles(uris)
-        }
+        val referenced = retained.assistants.flatMap { row ->
+            listOfNotNull((row.avatar as? Avatar.Image)?.url, row.background)
+        } + listOfNotNull((retained.displaySetting.userAvatar as? Avatar.Image)?.url)
+        val unused = uris.filterNot { it.toString() in referenced }
+        if (unused.isNotEmpty()) filesManager.deleteChatFiles(unused)
     }
 
     fun copyAssistant(assistant: Assistant, copyMemories: Boolean = false) {
+        val newId = kotlin.uuid.Uuid.random()
         viewModelScope.launch {
-            val settings = settings.value
-            val copiedAssistant = assistant.copy(
-                id = kotlin.uuid.Uuid.random(),
-                name = "${assistant.name} (Clone)",
-                avatar = if(assistant.avatar is Avatar.Image) Avatar.Dummy else assistant.avatar,
-            )
-            settingsStore.update(
-                settings.copy(
-                    assistants = settings.assistants.plus(copiedAssistant)
-                )
-            )
-            if (copyMemories) {
-                memoryRepository.copyMemories(
-                    fromAssistantId = assistant.id.toString(),
-                    toAssistantId = copiedAssistant.id.toString(),
-                )
+            var copiedAssistant: Assistant? = null
+            settingsStore.update { current ->
+                val source = current.assistants.find { it.id == assistant.id } ?: return@update current
+                val copied = source.copy(id = newId, name = "${source.name} (Clone)",
+                    avatar = if (source.avatar is Avatar.Image) Avatar.Dummy else source.avatar)
+                copiedAssistant = copied
+                current.copy(assistants = current.assistants + copied)
+            }
+            if (copyMemories && copiedAssistant != null) {
+                memoryRepository.copyMemories(fromAssistantId = assistant.id.toString(), toAssistantId = newId.toString())
             }
         }
     }

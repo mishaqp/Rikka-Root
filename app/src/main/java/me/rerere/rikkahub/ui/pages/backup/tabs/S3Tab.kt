@@ -78,8 +78,8 @@ fun S3Tab(
     var restoringItemId by remember { mutableStateOf<String?>(null) }
     var isBackingUp by remember { mutableStateOf(false) }
 
-    fun updateS3Config(newConfig: S3Config) {
-        vm.updateSettings(settings.copy(s3Config = newConfig))
+    fun updateS3Config(transform: (S3Config) -> S3Config) {
+        vm.updateSettings { current -> current.copy(s3Config = transform(current.s3Config)) }
     }
 
     val lastBackupText = if (settings.backupReminderConfig.lastBackupTime == 0L) {
@@ -133,12 +133,7 @@ fun S3Tab(
                                         count = S3Config.BackupItem.entries.size
                                     ),
                                     onCheckedChange = { checked ->
-                                        val newItems = if (checked) {
-                                            s3Config.items + item
-                                        } else {
-                                            s3Config.items - item
-                                        }
-                                        updateS3Config(s3Config.copy(items = newItems))
+                                        updateS3Config { current -> current.copy(items = if (checked) current.items + item else current.items - item) }
                                     },
                                     checked = item in s3Config.items
                                 ) {

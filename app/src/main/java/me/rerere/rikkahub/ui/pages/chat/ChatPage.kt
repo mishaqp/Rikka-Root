@@ -397,11 +397,7 @@ private fun ChatPageContent(
                     onUpdateChatModel = vm::setChatModel,
                     onUpdateAssistant = vm::updateAssistant,
                     onUpdateSearchService = { index ->
-                        vm.updateSettings(
-                            setting.copy(
-                                searchServiceSelected = index
-                            )
-                        )
+                        vm.updateSettings { it.copy(searchServiceSelected = index) }
                     },
                     onMoreClick = {
                         showFilesSheet = true

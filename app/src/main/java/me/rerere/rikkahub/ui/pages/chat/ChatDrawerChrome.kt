@@ -250,7 +250,7 @@ internal fun ChatDrawerSearchBar(
 @Composable
 internal fun ChatDrawerAssistantCard(
     settings: Settings,
-    onUpdateSettings: (Settings) -> Unit,
+    onUpdateSettings: ((Settings) -> Settings) -> Unit,
     onNavigate: (Screen) -> Unit,
     modifier: Modifier = Modifier,
     avatarContent: @Composable (String, Avatar, Modifier, () -> Unit) -> Unit = { name, avatar, avatarModifier, onClick ->

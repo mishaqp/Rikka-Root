@@ -102,79 +102,53 @@ class AssistantDetailVM(
             initialValue = emptyList(),
         )
 
-    fun updateTags(tagIds: List<Uuid>, tags: List<Tag>) {
+    fun updateTags(beforeIds: List<Uuid>, tagIds: List<Uuid>, beforeTags: List<Tag>, tags: List<Tag>) {
         viewModelScope.launch {
-            val settings = settings.value
-            settingsStore.update(
-                settings = settings.copy(
-                    assistantTags = tags
-                )
-            )
-            update(
-                assistant.value.copy(
-                    tags = tagIds.toList()
-                )
-            )
-            Log.d(TAG, "updateTags: ${tagIds.joinToString(",")}")
-            cleanupUnusedTags()
+            settingsStore.update { current ->
+                val added = tags.filter { tag -> beforeTags.none { it.id == tag.id } }
+                val changed = tags.filter { tag -> beforeTags.any { it.id == tag.id && it != tag } }.associateBy { it.id }
+                val globalTags = current.assistantTags.map { changed[it.id] ?: it } + added.filter { tag -> current.assistantTags.none { it.id == tag.id } }
+                cleanTags(current.copy(
+                    assistantTags = globalTags,
+                    assistants = current.assistants.map { row ->
+                        if (row.id == assistantId) row.copy(tags = (row.tags.filterNot { it in beforeIds && it !in tagIds } + tagIds.filter { it !in beforeIds }).distinct()) else row
+                    }
+                ))
+            }
         }
+    }
+
+    private fun cleanTags(current: Settings): Settings {
+        val validIds = current.assistantTags.map { it.id }.toSet()
+        val assistants = current.assistants.map { it.copy(tags = it.tags.filter { id -> id in validIds }) }
+        val used = assistants.flatMap { it.tags }.toSet()
+        return current.copy(assistants = assistants, assistantTags = current.assistantTags.filter { it.id in used })
     }
 
     fun cleanupUnusedTags() {
-        viewModelScope.launch {
-            val settings = settings.value
-            val validTagIds = settings.assistantTags.map { it.id }.toSet()
-
-            // 清理 assistant 中的无效 tag id
-            val cleanedAssistants = settings.assistants.map { assistant ->
-                val validTags = assistant.tags.filter { tagId ->
-                    validTagIds.contains(tagId)
-                }
-                if (validTags.size != assistant.tags.size) {
-                    assistant.copy(tags = validTags)
-                } else {
-                    assistant
-                }
-            }
-
-            // 获取清理后的 assistant 中使用的 tag id
-            val usedTagIds = cleanedAssistants.flatMap { it.tags }.toSet()
-
-            // 清理未使用的 tags
-            val cleanedTags = settings.assistantTags.filter { tag ->
-                usedTagIds.contains(tag.id)
-            }
-
-            // 检查是否需要更新
-            val needUpdateAssistants = cleanedAssistants != settings.assistants
-            val needUpdateTags = cleanedTags.size != settings.assistantTags.size
-
-            if (needUpdateAssistants || needUpdateTags) {
-                settingsStore.update(
-                    settings = settings.copy(
-                        assistants = cleanedAssistants,
-                        assistantTags = cleanedTags
-                    )
-                )
-            }
-        }
+        viewModelScope.launch { settingsStore.update(::cleanTags) }
     }
 
-    fun update(assistant: Assistant) {
-        viewModelScope.launch {
-            val settings = settings.value
-            settingsStore.update(
-                settings = settings.copy(
-                    assistants = settings.assistants.map {
-                        if (it.id == assistant.id) {
-                            checkAvatarDelete(old = it, new = assistant) // 删除旧头像
-                            checkBackgroundDelete(old = it, new = assistant) // 删除旧背景
-                            assistant
-                        } else {
-                            it
-                        }
-                    })
-            )
+    fun update(transform: (Assistant) -> Assistant) = viewModelScope.launch {
+        persistAssistantUpdate(transform)
+    }
+
+    internal suspend fun persistAssistantUpdate(transform: (Assistant) -> Assistant) {
+        var changed: Pair<Assistant, Assistant>? = null
+        val committed = settingsStore.update { current ->
+            current.copy(assistants = current.assistants.map { row ->
+                if (row.id == assistantId) transform(row).also { changed = row to it } else row
+            })
+        }
+        changed?.let { (old, new) ->
+            val avatarUrl = (old.avatar as? Avatar.Image)?.url
+            val userAvatarUrl = (committed.displaySetting.userAvatar as? Avatar.Image)?.url
+            if (avatarUrl != userAvatarUrl && committed.assistants.none { (it.avatar as? Avatar.Image)?.url == avatarUrl || it.background == avatarUrl }) {
+                checkAvatarDelete(old, new)
+            }
+            if (old.background != userAvatarUrl && committed.assistants.none { it.background == old.background || (it.avatar as? Avatar.Image)?.url == old.background }) {
+                checkBackgroundDelete(old, new)
+            }
         }
     }
 

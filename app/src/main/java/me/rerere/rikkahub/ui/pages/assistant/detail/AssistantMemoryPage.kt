@@ -101,7 +101,7 @@ private fun AssistantMemoryContent(
     innerPadding: PaddingValues,
     assistant: Assistant,
     memories: List<AssistantMemory>,
-    onUpdateAssistant: (Assistant) -> Unit,
+    onUpdateAssistant: ((Assistant) -> Assistant) -> Unit,
     onAddMemory: (AssistantMemory) -> Unit,
     onUpdateMemory: (AssistantMemory) -> Unit,
     onDeleteMemory: (AssistantMemory) -> Unit,
@@ -139,7 +139,7 @@ private fun AssistantMemoryContent(
                     enabled = interval != null,
                     onClick = {
                         interval?.let {
-                            onUpdateAssistant(assistant.copy(timeReminderIntervalMinutes = it))
+                            onUpdateAssistant { current -> current.copy(timeReminderIntervalMinutes = it) }
                         }
                         showTimeReminderIntervalDialog = false
                     },
@@ -219,11 +219,9 @@ private fun AssistantMemoryContent(
                     Switch(
                         checked = assistant.enableMemory,
                         onCheckedChange = {
-                            onUpdateAssistant(
-                                assistant.copy(
+                            onUpdateAssistant { current -> current.copy(
                                     enableMemory = it
-                                )
-                            )
+                                ) }
                         }
                     )
                 }
@@ -239,11 +237,9 @@ private fun AssistantMemoryContent(
                     Switch(
                         checked = assistant.useGlobalMemory,
                         onCheckedChange = {
-                            onUpdateAssistant(
-                                assistant.copy(
+                            onUpdateAssistant { current -> current.copy(
                                     useGlobalMemory = it
-                                )
-                            )
+                                ) }
                         },
                         enabled = assistant.enableMemory
                     )
@@ -260,11 +256,9 @@ private fun AssistantMemoryContent(
                     Switch(
                         checked = assistant.enableRecentChatsReference,
                         onCheckedChange = {
-                            onUpdateAssistant(
-                                assistant.copy(
+                            onUpdateAssistant { current -> current.copy(
                                     enableRecentChatsReference = it
-                                )
-                            )
+                                ) }
                         }
                     )
                 }
@@ -283,11 +277,9 @@ private fun AssistantMemoryContent(
                     Switch(
                         checked = assistant.enableTimeReminder,
                         onCheckedChange = {
-                            onUpdateAssistant(
-                                assistant.copy(
+                            onUpdateAssistant { current -> current.copy(
                                     enableTimeReminder = it
-                                )
-                            )
+                                ) }
                         }
                     )
                 }

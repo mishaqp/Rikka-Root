@@ -96,7 +96,7 @@ internal fun FilesPicker(
     state: ChatInputState,
     mcpManager: McpManager,
     onCompressContext: (additionalPrompt: String, targetTokens: Int, keepRecentMessages: Int) -> Job,
-    onUpdateAssistant: (Assistant) -> Unit,
+    onUpdateAssistant: ((Assistant) -> Assistant) -> Unit,
     onUpdateConversation: (Conversation) -> Unit,
     showCompressDialog: Boolean,
     onShowCompressDialogChange: (Boolean) -> Unit,
@@ -320,7 +320,7 @@ private fun WorkspacePickerListItem(
     assistant: Assistant,
     workspaces: List<WorkspaceEntity>,
     shapes: ListItemShapes,
-    onUpdateAssistant: (Assistant) -> Unit,
+    onUpdateAssistant: ((Assistant) -> Assistant) -> Unit,
     onNavigateToDetail: (String) -> Unit,
     onNavigateToTerminal: (String) -> Unit,
     onNavigateToManage: () -> Unit,
@@ -380,7 +380,7 @@ private fun WorkspacePickerListItem(
                 val newId = workspaceId?.let { Uuid.parse(it) }
                 if (newId != assistant.workspaceId) {
                     // 会话的工作目录随工作区一并重置
-                    onUpdateAssistant(assistant.copy(workspaceId = newId))
+                    onUpdateAssistant { current -> current.copy(workspaceId = newId) }
                 }
                 showSheet = false
             },
@@ -398,7 +398,7 @@ private fun WorkspacePickerListItem(
 private fun ExtensionPickerPage(
     assistant: Assistant,
     settings: Settings,
-    onUpdateAssistant: (Assistant) -> Unit,
+    onUpdateAssistant: ((Assistant) -> Assistant) -> Unit,
     onBack: () -> Unit,
     onDismissAll: () -> Unit,
 ) {

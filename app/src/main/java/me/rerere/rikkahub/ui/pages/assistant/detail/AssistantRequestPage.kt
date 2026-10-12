@@ -65,7 +65,7 @@ fun AssistantRequestPage(id: String) {
 internal fun AssistantRequestContent(
     innerPadding: PaddingValues,
     assistant: Assistant,
-    onUpdate: (Assistant) -> Unit
+    onUpdate: ((Assistant) -> Assistant) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -79,11 +79,9 @@ internal fun AssistantRequestContent(
         CustomHeaders(
             headers = assistant.customHeaders,
             onUpdate = {
-                onUpdate(
-                    assistant.copy(
-                        customHeaders = it
-                    )
-                )
+                onUpdate { current -> current.copy(
+                        customHeaders = it(current.customHeaders)
+                    ) }
             }
         )
 
@@ -92,11 +90,9 @@ internal fun AssistantRequestContent(
         CustomBodies(
             customBodies = assistant.customBodies,
             onUpdate = {
-                onUpdate(
-                    assistant.copy(
-                        customBodies = it
-                    )
-                )
+                onUpdate { current -> current.copy(
+                        customBodies = it(current.customBodies)
+                    ) }
             }
         )
     }

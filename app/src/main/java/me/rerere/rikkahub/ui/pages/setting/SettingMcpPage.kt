@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.setting
 
+import me.rerere.rikkahub.data.datastore.applyMcpDraft
+
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -115,6 +117,7 @@ import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.hooks.EditState
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.useEditState
+import me.rerere.rikkahub.ui.hooks.useDraftEditState
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.utils.writeClipboardText
@@ -156,23 +159,15 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val mcpConfigs = settings.mcpServers
     val creationState = useEditState<McpServerConfig> {
-        vm.updateSettings(
-            settings.copy(
-                mcpServers = mcpConfigs + protectMcpSettingsSecrets(it, emptyMap(), secretStore)
-            )
-        )
+        vm.updateSettings { current -> current.copy(
+                mcpServers = current.mcpServers + protectMcpSettingsSecrets(it, emptyMap(), secretStore)
+            ) }
     }
-    val editState = useEditState<McpServerConfig> { newConfig ->
-        vm.updateSettings(
-            settings.copy(
-                mcpServers = mcpConfigs.map {
-                    if (it.id == newConfig.id) {
-                        protectMcpSettingsSecrets(newConfig, emptyMap(), secretStore)
-                    } else {
-                        it
-                    }
-                }
-            ))
+    val editState = useDraftEditState<McpServerConfig> { before, requested ->
+        val protected = protectMcpSettingsSecrets(requested, emptyMap(), secretStore)
+        vm.updateSettings { current -> current.copy(mcpServers = current.mcpServers.map { row ->
+            if (row.id == before.id) applyMcpDraft(row, before, protected) else row
+        }) }
     }
     var showImportDialog by remember { mutableStateOf(false) }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -242,11 +237,9 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
                             editState.open(mcpConfig)
                         },
                         onDelete = {
-                            vm.updateSettings(
-                                settings.copy(
-                                    mcpServers = mcpConfigs.filter { it.id != mcpConfig.id }
-                                )
-                            )
+                            vm.updateSettings { current -> current.copy(
+                                    mcpServers = current.mcpServers.filter { it.id != mcpConfig.id }
+                                ) }
                         },
                         modifier = Modifier.animateItem()
                     )
@@ -274,12 +267,14 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
         McpImportModal(
             onDismiss = { showImportDialog = false },
             onImport = { newConfigs ->
-                val existingIds = mcpConfigs.map { it.commonOptions.name }.toSet()
-                val toAdd = newConfigs.filter { it.commonOptions.name.isNotBlank() && it.commonOptions.name !in existingIds }
+                val toAdd = newConfigs.filter { it.commonOptions.name.isNotBlank() }.distinctBy { it.commonOptions.name }
                 pageScope.launch {
                     try {
                         val protected = withContext(Dispatchers.IO) { toAdd.map { protectMcpSettingsSecrets(it, emptyMap(), secretStore) } }
-                        vm.updateSettings(settings.copy(mcpServers = mcpConfigs + protected))
+                        vm.updateSettings { current ->
+                            val names = current.mcpServers.map { it.commonOptions.name }.toSet()
+                            current.copy(mcpServers = current.mcpServers + protected.filter { it.commonOptions.name !in names })
+                        }
                         showImportDialog = false
                     } catch (cancelled: CancellationException) {
                         throw cancelled

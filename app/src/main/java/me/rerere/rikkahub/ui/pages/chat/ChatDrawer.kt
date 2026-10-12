@@ -145,13 +145,11 @@ fun ChatDrawerContent(
 
     // 昵称编辑状态
     val nicknameEditState = useEditState<String> { newNickname ->
-        vm.updateSettings(
-            settings.copy(
-                displaySetting = settings.displaySetting.copy(
+        vm.updateSettings { current -> current.copy(
+                displaySetting = current.displaySetting.copy(
                     userNickname = newNickname
                 )
-            )
-        )
+            ) }
     }
 
     // 移动对话状态
@@ -210,7 +208,7 @@ fun ChatDrawerContent(
                         settings = settings,
                         onEditNickname = { nicknameEditState.open(settings.displaySetting.userNickname) },
                         onUpdateAvatar = { avatar ->
-                            vm.updateSettings(settings.copy(displaySetting = settings.displaySetting.copy(userAvatar = avatar)))
+                            vm.updateSettings { current -> current.copy(displaySetting = current.displaySetting.copy(userAvatar = avatar)) }
                         },
                         onNavigate = { navController.navigate(it) },
                         showUpdateStatus = updateChecksEnabled && !isPlayStore,
@@ -221,13 +219,14 @@ fun ChatDrawerContent(
                     ChatDrawerAssistantCard(
                         settings = settings,
                         onUpdateSettings = { updated ->
+                            val selectedId = updated(settings).assistantId
                             val updateJob = vm.updateSettings(updated)
                             scope.launch {
                                 updateJob.join()
                                 val id = if (context.readBooleanPreference("create_new_conversation_on_start", true)) {
                                     Uuid.random()
                                 } else {
-                                    repo.getConversationsOfAssistant(updated.assistantId).first().firstOrNull()?.id ?: Uuid.random()
+                                    repo.getConversationsOfAssistant(selectedId).first().firstOrNull()?.id ?: Uuid.random()
                                 }
                                 navigateToChatPage(navController, id)
                             }
@@ -243,7 +242,7 @@ fun ChatDrawerContent(
                             },
                             sortOrder = settings.displaySetting.conversationSortOrder,
                             onSortOrderChange = { sortOrder ->
-                                vm.updateSettings(settings.copy(displaySetting = settings.displaySetting.copy(conversationSortOrder = sortOrder)))
+                                vm.updateSettings { current -> current.copy(displaySetting = current.displaySetting.copy(conversationSortOrder = sortOrder)) }
                                 scope.launch { conversationListState.scrollToItem(0) }
                             },
                         ) },

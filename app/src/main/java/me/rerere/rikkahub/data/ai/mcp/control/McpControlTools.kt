@@ -557,14 +557,20 @@ fun mcpUpdateTool(settingsStore: SettingsStore, manager: McpManager, secretStore
             existingTools = old.commonOptions.tools, // preserve known tools across update
         )
         manager.removeClient(old)
-        settingsStore.update { s ->
-            s.copy(mcpServers = s.mcpServers.map { if (it.id == serverId) newConfig else it })
+        val committed = settingsStore.update { s ->
+            s.copy(mcpServers = s.mcpServers.map { row ->
+                if (row.id == serverId) newConfig.clone(commonOptions = newConfig.commonOptions.copy(
+                    tools = row.commonOptions.tools, oauth = row.commonOptions.oauth,
+                )) else row
+            })
         }
+        val savedConfig = committed.mcpServers.find { it.id == serverId }
+            ?: return@Tool errEnv("unknown_mcp_server_id", "Сервер MCP с id $serverId не найден")
         if (enabled) {
-            manager.addClient(newConfig)
+            manager.addClient(savedConfig)
             awaitTerminal(manager, serverId, timeoutSec * 1000L)
         }
-        val finalConfig = settingsStore.settingsFlow.value.mcpServers.firstOrNull { it.id == serverId } ?: newConfig
+        val finalConfig = settingsStore.settingsFlow.value.mcpServers.firstOrNull { it.id == serverId } ?: savedConfig
         val finalStatus = manager.syncingStatus.value[serverId]
         listOf(UIMessagePart.Text(serverViewEnvelope(finalConfig, finalStatus).toString()))
     },
@@ -639,24 +645,19 @@ fun mcpSetEnabledTool(settingsStore: SettingsStore, manager: McpManager, secretS
             val urlCheck = withContext(Dispatchers.IO) { McpUrlGuard.check(urlOf(old), headless = false) }
             if (urlCheck is McpUrlGuard.Result.Reject) return@Tool errEnv(urlCheck.error, urlCheck.detail)
         }
-        if (old.commonOptions.enable == enabled && (!enabled || old.commonOptions.publicAddressOnly)) {
-            // No-op: still return the current view so the LLM knows.
-            return@Tool listOf(
-                UIMessagePart.Text(
-                    serverViewEnvelope(old, manager.syncingStatus.value[serverId]).toString()
-                )
-            )
-        }
-        val protected = if (enabled) {
+        if (enabled) {
             withContext(Dispatchers.IO) { runCatching { secureMcpConfigForPersistence(old, secretStore) } }
                 .getOrElse { return@Tool errEnv("missing_mcp_secret", "Не удалось сохранить защищённые заголовки MCP. Введите их в настройках MCP этого устройства.") }
-        } else old
-        val newConfig = protected.clone(commonOptions = protected.commonOptions.copy(
-            enable = enabled, publicAddressOnly = protected.commonOptions.publicAddressOnly || enabled,
-        ))
-        settingsStore.update { s ->
-            s.copy(mcpServers = s.mcpServers.map { if (it.id == serverId) newConfig else it })
         }
+        val committed = settingsStore.update { s ->
+            s.copy(mcpServers = s.mcpServers.map { row ->
+                if (row.id == serverId) row.clone(commonOptions = row.commonOptions.copy(
+                    enable = enabled, publicAddressOnly = row.commonOptions.publicAddressOnly || enabled,
+                )) else row
+            })
+        }
+        val newConfig = committed.mcpServers.find { it.id == serverId }
+            ?: return@Tool errEnv("unknown_mcp_server_id", "Сервер MCP с id $serverId не найден")
         // Manager's settings-flow collector will pick up the change and add/remove the
         // client. We don't await sync here — the call returns the post-write view.
         listOf(
@@ -700,7 +701,7 @@ fun mcpTestTool(settingsStore: SettingsStore, manager: McpManager, secretStore: 
             .getOrElse { return@Tool errEnv("missing_mcp_secret", "Не удалось сохранить защищённые заголовки MCP. Введите их в настройках MCP этого устройства.") }
         val guarded = protected.clone(commonOptions = protected.commonOptions.copy(publicAddressOnly = true))
         if (guarded != current) settingsStore.update { s ->
-            s.copy(mcpServers = s.mcpServers.map { if (it.id == serverId) guarded else it })
+            s.copy(mcpServers = s.mcpServers.map { row -> if (row.id == serverId) row.clone(commonOptions = row.commonOptions.copy(publicAddressOnly = true)) else row })
         }
         manager.forceResync(serverId)
         awaitTerminal(manager, serverId, timeoutSec * 1000L)
@@ -797,34 +798,27 @@ fun mcpSetToolApprovalTool(settingsStore: SettingsStore): Tool = Tool(
         val all = settingsStore.settingsFlow.value.mcpServers
         val server = all.firstOrNull { it.id == serverId }
             ?: return@Tool errEnv("unknown_mcp_server_id", "Сервер MCP с id $serverId не найден")
-        val tool = server.commonOptions.tools.firstOrNull { it.name == toolName }
-            ?: return@Tool errEnv(
-                "unknown_tool_name",
-                "На сервере '${server.commonOptions.name}' нет инструмента '$toolName'"
-            )
-        if (tool.needsApproval == needs) {
-            return@Tool okEnv {
-                put("server_id", serverId.toString())
-                put("tool_name", toolName)
-                put("needs_approval", needs)
-                put("changed", false)
-            }
-        }
-        val newServer = server.clone(
-            commonOptions = server.commonOptions.copy(
-                tools = server.commonOptions.tools.map { t ->
-                    if (t.name == toolName) t.copy(needsApproval = needs) else t
-                }
-            )
+        if (server.commonOptions.tools.none { it.name == toolName }) return@Tool errEnv(
+            "unknown_tool_name", "На сервере '${server.commonOptions.name}' нет инструмента '$toolName'"
         )
+        var changed = false
         settingsStore.update { s ->
-            s.copy(mcpServers = s.mcpServers.map { if (it.id == serverId) newServer else it })
+            s.copy(mcpServers = s.mcpServers.map { row ->
+                if (row.id == serverId) row.clone(commonOptions = row.commonOptions.copy(
+                    tools = row.commonOptions.tools.map { currentTool ->
+                        if (currentTool.name == toolName) {
+                            if (currentTool.needsApproval != needs) changed = true
+                            currentTool.copy(needsApproval = needs)
+                        } else currentTool
+                    }
+                )) else row
+            })
         }
         okEnv {
             put("server_id", serverId.toString())
             put("tool_name", toolName)
             put("needs_approval", needs)
-            put("changed", true)
+            put("changed", changed)
         }
     },
 )

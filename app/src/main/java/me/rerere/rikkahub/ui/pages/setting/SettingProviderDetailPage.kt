@@ -1,5 +1,9 @@
 package me.rerere.rikkahub.ui.pages.setting
 
+import me.rerere.rikkahub.data.datastore.applyProviderDraft
+import me.rerere.rikkahub.data.datastore.applyModelDraft
+import me.rerere.rikkahub.data.datastore.moveSettingsItem
+
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Package01
 import me.rerere.hugeicons.stroke.Connect
@@ -67,6 +71,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberBottomSheetState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -117,6 +122,7 @@ import me.rerere.rikkahub.ui.components.ui.rememberShareSheetState
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.useEditState
+import me.rerere.rikkahub.ui.hooks.useDraftEditState
 import me.rerere.rikkahub.ui.pages.assistant.detail.CustomBodies
 import me.rerere.rikkahub.ui.pages.assistant.detail.CustomHeaders
 import me.rerere.rikkahub.ui.pages.setting.components.withRefreshedCodexModels
@@ -147,23 +153,13 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
     val toaster = LocalToaster.current
     val context = LocalContext.current
 
-    val onEdit = { newProvider: ProviderSetting ->
-        val newSettings = settings.copy(
-            providers = settings.providers.map {
-                if (newProvider.id == it.id) {
-                    newProvider
-                } else {
-                    it
-                }
-            }
-        )
-        vm.updateSettings(newSettings)
+    val onEdit: ((ProviderSetting) -> ProviderSetting) -> Unit = { transform ->
+        vm.updateSettings { current -> current.copy(providers = current.providers.map { row ->
+            if (row.id == id) transform(row) else row
+        }) }
     }
     val onDelete = {
-        val newSettings = settings.copy(
-            providers = settings.providers - provider
-        )
-        vm.updateSettings(newSettings)
+        vm.updateSettings { current -> current.copy(providers = current.providers.filterNot { it.id == id }) }
         navController.popBackStack()
     }
 
@@ -251,12 +247,13 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                                 type = ToastType.Success
                             )
                         },
+                        onSaveDraft = vm::updateProviderDraft,
                         onDelete = {
                             onDelete()
                         },
                         onCodexModelsRefreshed = { models, afterLogin ->
-                            // Read the latest state after network IO to preserve concurrent edits.
-                            vm.updateSettings(vm.settings.value.withRefreshedCodexModels(id, models, afterLogin))
+                            // Merge the response with the current persisted row inside the transaction.
+                            vm.updateSettings { it.withRefreshedCodexModels(id, models, afterLogin) }
                         },
                     )
                 }
@@ -282,7 +279,8 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
 @Composable
 private fun SettingProviderConfigPage(
     provider: ProviderSetting,
-    onEdit: (ProviderSetting) -> Unit,
+    onEdit: ((ProviderSetting) -> ProviderSetting) -> Unit,
+    onSaveDraft: (ProviderSetting, ProviderSetting) -> Unit,
     onDelete: () -> Unit,
     onCodexModelsRefreshed: (List<Model>, Boolean) -> Unit,
 ) {
@@ -292,14 +290,21 @@ private fun SettingProviderConfigPage(
                 .verticalScroll(rememberScrollState()).padding(16.dp),
         ) {
             CodexProviderConfigure(
-                provider = provider, onEdit = onEdit,
+                provider = provider, onEdit = { requested -> onEdit { current -> applyProviderDraft(current, provider, requested) } },
                 onModelsRefreshed = onCodexModelsRefreshed,
             )
         }
         return
     }
 
-    var internalProvider by remember(provider) { mutableStateOf(provider) }
+    var draftBaseline by remember(provider.id) { mutableStateOf(provider) }
+    var internalProvider by remember(provider.id) { mutableStateOf(provider) }
+    LaunchedEffect(provider) {
+        if (applyProviderDraft(provider, draftBaseline, internalProvider) == provider) {
+            draftBaseline = provider
+            internalProvider = provider
+        }
+    }
     var showDeleteDialog by remember { mutableStateOf(false) }
 
     Column(
@@ -362,7 +367,7 @@ private fun SettingProviderConfigPage(
             Button(
                 onClick = {
                     val providerToSave: ProviderSetting = internalProvider
-                    onEdit(providerToSave.copyProvider(name = providerToSave.name.trim()))
+                    onSaveDraft(draftBaseline, providerToSave.copyProvider(name = providerToSave.name.trim()))
                 }
             ) {
                 Text(stringResource(R.string.setting_provider_page_save))
@@ -411,7 +416,7 @@ private fun SettingProviderConfigPage(
 @Composable
 private fun SettingProviderModelPage(
     provider: ProviderSetting,
-    onEdit: (ProviderSetting) -> Unit
+    onEdit: ((ProviderSetting) -> ProviderSetting) -> Unit
 ) {
     ModelList(
         providerSetting = provider,
@@ -422,7 +427,7 @@ private fun SettingProviderModelPage(
 @Composable
 private fun SettingProviderAdvancedPage(
     provider: ProviderSetting,
-    onEdit: (ProviderSetting) -> Unit
+    onEdit: ((ProviderSetting) -> ProviderSetting) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -435,7 +440,7 @@ private fun SettingProviderAdvancedPage(
         CustomHeaders(
             headers = provider.customHeaders,
             onUpdate = { headers ->
-                onEdit(provider.copyProvider(customHeaders = headers))
+                onEdit { current -> current.copyProvider(customHeaders = headers(current.customHeaders)) }
             }
         )
     }
@@ -444,7 +449,7 @@ private fun SettingProviderAdvancedPage(
 @Composable
 private fun ModelList(
     providerSetting: ProviderSetting,
-    onUpdateProvider: (ProviderSetting) -> Unit
+    onUpdateProvider: ((ProviderSetting) -> ProviderSetting) -> Unit
 ) {
     val providerManager = koinInject<ProviderManager>()
     val modelList by produceState(emptyList(), providerSetting) {
@@ -461,7 +466,11 @@ private fun ModelList(
     var expanded by rememberSaveable { mutableStateOf(true) }
     val lazyListState = rememberLazyListState()
     val reorderableLazyListState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        onUpdateProvider(providerSetting.moveMove(from.index, to.index))
+        val moved = providerSetting.models.getOrNull(from.index)?.id
+        val anchor = providerSetting.models.getOrNull(to.index)?.id
+        if (moved != null && anchor != null) onUpdateProvider { current -> current.copyProvider(
+            models = moveSettingsItem(current.models, moved, anchor, from.index < to.index) { it.id }
+        ) }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -509,10 +518,10 @@ private fun ModelList(
                         ModelCard(
                             model = item,
                             onDelete = {
-                                onUpdateProvider(providerSetting.delModel(item))
+                                onUpdateProvider { current -> current.copyProvider(models = current.models.filterNot { it.id == item.id }) }
                             },
-                            onEdit = { editedModel ->
-                                onUpdateProvider(providerSetting.editModel(editedModel))
+                            onEdit = { before, editedModel ->
+                                onUpdateProvider { current -> current.copyProvider(models = current.models.map { row -> if (row.id == before.id) applyModelDraft(row, before, editedModel) else row }) }
                             },
                             parentProvider = providerSetting,
                             modifier = longPressReorder(isDragging),
@@ -531,10 +540,10 @@ private fun ModelList(
                 models = modelList,
                 selectedModels = providerSetting.models,
                 onAddModel = {
-                    onUpdateProvider(providerSetting.addModel(it))
+                    onUpdateProvider { current -> current.copyProvider(models = (current.models + it).distinctBy { model -> model.id }) }
                 },
                 onRemoveModel = {
-                    onUpdateProvider(providerSetting.delModel(it))
+                    onUpdateProvider { current -> current.copyProvider(models = current.models.filterNot { model -> model.id == it.id }) }
                 },
                 expanded = expanded,
                 parentProvider = providerSetting,
@@ -698,14 +707,14 @@ private fun ModelSettingsForm(
                         CustomHeaders(
                             headers = model.customHeaders,
                             onUpdate = { headers ->
-                                onModelChange(model.copy(customHeaders = headers))
+                                onModelChange(model.copy(customHeaders = headers(model.customHeaders)))
                             }
                         )
 
                         CustomBodies(
                             customBodies = model.customBodies,
                             onUpdate = { bodies ->
-                                onModelChange(model.copy(customBodies = bodies))
+                                onModelChange(model.copy(customBodies = bodies(model.customBodies)))
                             }
                         )
                     }
@@ -733,7 +742,7 @@ private fun AddModelButton(
     onAddModel: (Model) -> Unit,
     onRemoveModel: (Model) -> Unit,
     parentProvider: ProviderSetting,
-    onUpdateProvider: (ProviderSetting) -> Unit
+    onUpdateProvider: ((ProviderSetting) -> ProviderSetting) -> Unit
 ) {
     val dialogState = useEditState<Model> {
         onAddModel(it.copy(displayName = it.displayName.trim()))
@@ -763,10 +772,9 @@ private fun AddModelButton(
                 onRemoveModel(model)
             },
             onAllModelSelected = {
-                onUpdateProvider(
-                    parentProvider.copyProvider(
-                        models = parentProvider.models + it.filter { model ->
-                            parentProvider.models.none { existing -> existing.modelId == model.modelId }
+                onUpdateProvider { current -> current.copyProvider(
+                        models = current.models + it.filter { model ->
+                            current.models.none { existing -> existing.modelId == model.modelId }
                         }.map { model ->
                             model.copy(
                                 inputModalities = ModelRegistry.MODEL_INPUT_MODALITIES.getData(model.modelId),
@@ -774,17 +782,14 @@ private fun AddModelButton(
                                 abilities = ModelRegistry.MODEL_ABILITIES.getData(model.modelId)
                             )
                         }
-                    )
-                )
+                    ) }
             },
             onAllModelDeselected = { filteredModels ->
-                onUpdateProvider(
-                    parentProvider.copyProvider(
-                        models = parentProvider.models.filter { model ->
+                onUpdateProvider { current -> current.copyProvider(
+                        models = current.models.filter { model ->
                             filteredModels.none { filtered -> filtered.modelId == model.modelId }
                         }
-                    )
-                )
+                    ) }
             }
         )
 
@@ -1213,11 +1218,11 @@ private fun ModelCard(
     model: Model,
     modifier: Modifier = Modifier,
     onDelete: () -> Unit,
-    onEdit: (Model) -> Unit,
+    onEdit: (Model, Model) -> Unit,
     parentProvider: ProviderSetting
 ) {
-    val dialogState = useEditState<Model> {
-        onEdit(it.copy(displayName = it.displayName.trim()))
+    val dialogState = useDraftEditState<Model> { before, requested ->
+        onEdit(before, requested.copy(displayName = requested.displayName.trim()))
     }
     val scope = rememberCoroutineScope()
     var showDeleteDialog by remember { mutableStateOf(false) }

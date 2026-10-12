@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.assistant
 
+import me.rerere.rikkahub.data.datastore.moveSettingsItem
+
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.hugeicons.stroke.Add01
@@ -146,10 +148,10 @@ fun AssistantPage(vm: AssistantVM = koinViewModel()) {
             val isFiltering = selectedTagIds.isNotEmpty() || searchQuery.isNotBlank()
             val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
                 if (!isFiltering) {
-                    val newAssistants = settings.assistants.toMutableList().apply {
-                        add(to.index, removeAt(from.index))
-                    }
-                    vm.updateSettings(settings.copy(assistants = newAssistants))
+                    val moved = from.key as? Uuid
+        val anchor = to.key as? Uuid
+        if (moved != null && anchor != null) vm.updateSettings { current -> current.copy(assistants =
+            moveSettingsItem(current.assistants, moved, anchor, from.index < to.index) { it.id }) }
                 }
             }
 
@@ -285,10 +287,10 @@ private fun AssistantTagsFilterRow(
     if (settings.assistantTags.isNotEmpty()) {
         val tagsListState = rememberLazyListState()
         val tagsReorderableState = rememberReorderableLazyListState(tagsListState) { from, to ->
-            val newTags = settings.assistantTags.toMutableList().apply {
-                add(to.index, removeAt(from.index))
-            }
-            vm.updateSettings(settings.copy(assistantTags = newTags))
+            val moved = from.key as? Uuid
+        val anchor = to.key as? Uuid
+        if (moved != null && anchor != null) vm.updateSettings { current -> current.copy(assistantTags =
+            moveSettingsItem(current.assistantTags, moved, anchor, from.index < to.index) { it.id }) }
         }
 
         LazyRow(

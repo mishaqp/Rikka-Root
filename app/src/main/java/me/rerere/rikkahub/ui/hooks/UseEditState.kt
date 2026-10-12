@@ -9,7 +9,11 @@ import androidx.compose.runtime.setValue
 @Composable
 fun <T> useEditState(
     onUpdate: (T) -> Unit
-): EditState<T> {
+): EditState<T> = useDraftEditState { _, requested -> onUpdate(requested) }
+
+@Composable
+fun <T> useDraftEditState(onUpdate: (T, T) -> Unit): EditState<T> {
+    var before by remember { mutableStateOf<T?>(null) }
     var isEditing by remember { mutableStateOf(false) }
     var currentState by remember { mutableStateOf<T?>(null) }
 
@@ -28,12 +32,13 @@ fun <T> useEditState(
 
         override fun open(initialState: T) {
             isEditing = true
+            before = initialState
             currentState = initialState
         }
 
         override fun confirm() {
             if (currentState != null) {
-                onUpdate(currentState!!)
+                onUpdate(requireNotNull(before), currentState!!)
                 isEditing = false
                 currentState = null
             }

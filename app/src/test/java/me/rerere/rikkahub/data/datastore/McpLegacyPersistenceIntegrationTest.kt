@@ -118,7 +118,7 @@ class McpLegacyPersistenceIntegrationTest {
         val emitted = mutableListOf<Settings>()
         val observer = launch(Dispatchers.Unconfined) { settingsStore.settingsFlow.collect { emitted += it } }
         try {
-            settingsStore.update(current.copy(mcpServers = listOf(original)))
+            settingsStore.update { it.copy(mcpServers = listOf(original)) }
             @Suppress("UNCHECKED_CAST")
             val persisted = singletonField().get(null) as DataStore<Preferences>
             assertProtected(persisted.data.first(), original)
@@ -145,7 +145,7 @@ class McpLegacyPersistenceIntegrationTest {
         val observer = launch(Dispatchers.Unconfined) { settingsStore.settingsFlow.collect { emitted += it } }
         try {
             val failure = runCatching {
-                settingsStore.update(current.copy(mcpServers = listOf(legacyConfig())))
+                settingsStore.update { it.copy(mcpServers = listOf(legacyConfig())) }
             }.exceptionOrNull()
             assertTrue("Unavailable vault must reject the update", failure != null)
             assertEquals("Failed protection must not publish the supplied plaintext settings", listOf(current), emitted)

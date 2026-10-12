@@ -160,12 +160,14 @@ class ChatVM(
     val mcpManager = chatService.mcpManager
 
     // 更新设置
-    fun updateSettings(newSettings: Settings): Job {
+    fun updateSettings(transform: (Settings) -> Settings): Job {
         return viewModelScope.launch {
-            val oldSettings = settings.value
-            // 检查用户头像是否有变化，如果有则删除旧头像
-            checkUserAvatarDelete(oldSettings, newSettings)
-            settingsStore.update(newSettings)
+            var before: Settings? = null
+            val committed = settingsStore.update { current ->
+                before = current
+                transform(current)
+            }
+            before?.let { checkUserAvatarDelete(it, committed) }
         }
     }
 
@@ -174,15 +176,18 @@ class ChatVM(
         val oldAvatar = oldSettings.displaySetting.userAvatar
         val newAvatar = newSettings.displaySetting.userAvatar
 
+        if (oldAvatar is Avatar.Image && newSettings.assistants.any {
+                (it.avatar as? Avatar.Image)?.url == oldAvatar.url || it.background == oldAvatar.url
+            }) return
         if (oldAvatar is Avatar.Image && oldAvatar != newAvatar) {
             filesManager.deleteChatFiles(listOf(oldAvatar.url.toUri()))
         }
     }
 
     // 聊天页对助手的修改：新会话直接改助手，会话开始后只改当前会话
-    fun updateAssistant(assistant: Assistant) {
+    fun updateAssistant(transform: (Assistant) -> Assistant) {
         launchMutation {
-            chatService.updateChatAssistant(_conversationId) { assistant }
+            chatService.updateChatAssistant(_conversationId, transform)
         }
     }
 

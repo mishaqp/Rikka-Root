@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.setting
 
+import me.rerere.rikkahub.data.datastore.moveSettingsItem
+
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Delete01
@@ -105,12 +107,10 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
             val toIndex = to.index
 
             if (fromIndex >= 0 && toIndex >= 0 && fromIndex < settings.searchServices.size && toIndex < settings.searchServices.size) {
-                val newServices = settings.searchServices.toMutableList().apply {
-                    add(toIndex, removeAt(fromIndex))
-                }
-                vm.updateSettings(
-                    settings.copy(searchServices = newServices)
-                )
+                val moved = settings.searchServices[fromIndex].id
+                val anchor = settings.searchServices[toIndex].id
+                vm.updateSettings { current -> current.copy(searchServices =
+                    moveSettingsItem(current.searchServices, moved, anchor, fromIndex < toIndex) { it.id }) }
             }
         }
 
@@ -147,9 +147,7 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                 CommonOptions(
                     settings = settings,
                     onUpdate = { options ->
-                        vm.updateSettings(
-                            settings.copy(searchCommonOptions = options)
-                        )
+                        vm.updateSettings { current -> current.copy(searchCommonOptions = options(current.searchCommonOptions)) }
                     }
                 )
             }
@@ -161,11 +159,9 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
             onDismiss = { showAddDialog = false },
             onConfirm = { options ->
                 showAddDialog = false
-                vm.updateSettings(
-                    settings.copy(
-                        searchServices = listOf(options) + settings.searchServices
-                    )
-                )
+                vm.updateSettings { current -> current.copy(
+                        searchServices = listOf(options) + current.searchServices
+                    ) }
                 scope.launch {
                     lazyListState.animateScrollToItem(0)
                 }
@@ -180,9 +176,7 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
         dismissText = stringResource(R.string.cancel),
         onConfirm = {
             deleteTarget?.let { target ->
-                vm.updateSettings(
-                    settings.copy(searchServices = settings.searchServices.filter { it.id != target.id })
-                )
+                vm.updateSettings { current -> current.copy(searchServices = current.searchServices.filter { it.id != target.id }) }
             }
             deleteTarget = null
         },
@@ -347,7 +341,7 @@ fun SearchAbilityTagLine(
 @Composable
 private fun CommonOptions(
     settings: me.rerere.rikkahub.data.datastore.Settings,
-    onUpdate: (SearchCommonOptions) -> Unit
+    onUpdate: ((SearchCommonOptions) -> SearchCommonOptions) -> Unit
 ) {
     var commonOptions by remember(settings.searchCommonOptions) {
         mutableStateOf(settings.searchCommonOptions)
@@ -377,7 +371,7 @@ private fun CommonOptions(
                     value = commonOptions.resultSize,
                     onValueChange = {
                         commonOptions = commonOptions.copy(resultSize = it)
-                        onUpdate(commonOptions)
+                        onUpdate { current -> current.copy(resultSize = it) }
                     },
                     modifier = Modifier.fillMaxWidth()
                 )

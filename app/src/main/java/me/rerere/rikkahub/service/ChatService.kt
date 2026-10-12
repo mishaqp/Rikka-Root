@@ -1314,17 +1314,17 @@ class ChatService(
             requireWritableSession(session)
             val settings = settingsStore.settingsFlow.first()
             val conversation = session.state.value
-            val stored = settings.getStoredAssistantOf(conversation)
+            val targetAssistantId = settings.getStoredAssistantOf(conversation).id
             val updated = update(settings.getAssistantOf(conversation))
-            val assistant = updated.withoutConversationFields(conversation, stored)
             session.updateMetadata(
                 update = { it.withAssistantUpdate(updated, settings) },
                 persist = conversationRepo::updateConversationConfig,
             )
-            if (assistant != stored) {
-                settingsStore.update { latest ->
-                    latest.copy(assistants = latest.assistants.map { if (it.id == assistant.id) assistant else it })
-                }
+            settingsStore.update { latest ->
+                val current = latest.assistants.find { it.id == targetAssistantId } ?: return@update latest
+                val requested = update(latest.getAssistantOf(conversation.copy(assistantId = targetAssistantId)))
+                    .withoutConversationFields(conversation, current)
+                latest.copy(assistants = latest.assistants.map { if (it.id == current.id) requested else it })
             }
         }
     }

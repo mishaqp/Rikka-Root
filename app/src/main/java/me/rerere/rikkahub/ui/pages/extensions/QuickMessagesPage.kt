@@ -136,7 +136,8 @@ fun QuickMessagesPage(vm: QuickMessagesVM = koinViewModel()) {
             onDismiss = { editTarget = null },
             onConfirm = { title, content ->
                 vm.updateQuickMessage(
-                    quickMessage.copy(
+                    before = quickMessage,
+                    updated = quickMessage.copy(
                         title = title,
                         content = content,
                     )

@@ -1,5 +1,12 @@
 package me.rerere.rikkahub.ui.pages.assistant.detail
 
+import me.rerere.rikkahub.data.datastore.updateHeaderName
+import me.rerere.rikkahub.data.datastore.updateHeaderValue
+import me.rerere.rikkahub.data.datastore.updateBodyKey
+import me.rerere.rikkahub.data.datastore.updateBodyValue
+import me.rerere.rikkahub.data.datastore.deleteHeaderRow
+import me.rerere.rikkahub.data.datastore.deleteBodyRow
+
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Delete01
@@ -16,6 +23,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.runtime.key
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -66,8 +74,68 @@ private fun commonHeaderNames(input: String): List<String> {
     return matched.ifEmpty { COMMON_HEADER_NAMES }
 }
 
+/** Local row tokens and pending intents are editor state only, never part of the saved schema. */
+private class PendingPropertyRows<T>(initial: List<T>) {
+    private class Pending<T>(val mutation: (List<T>) -> List<T>, val order: List<Int>) {
+        var applied by mutableStateOf<List<T>?>(null)
+        fun apply(current: List<T>) = mutation(current).also { applied = it }
+    }
+    var rows by mutableStateOf(initial)
+        private set
+    var order by mutableStateOf(initial.indices.toList())
+        private set
+    private var nextToken = initial.size
+    private val pending = mutableListOf<Pending<T>>()
+
+    fun receive(committed: List<T>) {
+        // Applied snapshots come from the real transform, including concurrent fields it retained.
+        // A later snapshot may arrive directly when StateFlow conflates intermediate commits.
+        val acknowledged = pending.indexOfLast { it.applied == committed }
+        if (acknowledged >= 0) {
+            val committedOrder = pending[acknowledged].order
+            repeat(acknowledged + 1) { pending.removeAt(0) }
+            if (pending.isEmpty()) order = committedOrder
+        }
+        if (pending.isEmpty() && rows != committed) {
+            if (rows.size != committed.size) order = committed.map { nextToken++ }
+            rows = committed
+        }
+    }
+
+    fun edit(token: Int, transform: (T) -> T, mutation: (List<T>, List<T>, Int) -> List<T>): ((List<T>) -> List<T>)? {
+        val target = order.indexOf(token)
+        if (target < 0) return null
+        val observed = rows
+        rows = rows.mapIndexed { i, row -> if (i == target) transform(row) else row }
+        return enqueue { current -> mutation(current, observed, target) }
+    }
+
+    fun delete(token: Int, mutation: (List<T>, List<T>, Int) -> List<T>): ((List<T>) -> List<T>)? {
+        val target = order.indexOf(token)
+        if (target < 0) return null
+        val observed = rows
+        rows = rows.filterIndexed { i, _ -> i != target }
+        order = order.filterIndexed { i, _ -> i != target }
+        return enqueue { current -> mutation(current, observed, target) }
+    }
+
+    fun add(row: T): (List<T>) -> List<T> {
+        rows = rows + row
+        order = order + nextToken++
+        return enqueue { it + row }
+    }
+
+    private fun enqueue(mutation: (List<T>) -> List<T>): (List<T>) -> List<T> {
+        val intent = Pending(mutation, order)
+        pending += intent
+        return intent::apply
+    }
+}
+
 @Composable
-fun CustomHeaders(headers: List<CustomHeader>, onUpdate: (List<CustomHeader>) -> Unit) {
+fun CustomHeaders(headers: List<CustomHeader>, onUpdate: ((List<CustomHeader>) -> List<CustomHeader>) -> Unit) {
+    val pending = remember { PendingPropertyRows(headers) }
+    pending.receive(headers)
     Column(
         modifier = Modifier.padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -75,67 +143,67 @@ fun CustomHeaders(headers: List<CustomHeader>, onUpdate: (List<CustomHeader>) ->
         Text(stringResource(R.string.assistant_page_custom_headers))
         Spacer(Modifier.height(8.dp))
 
-        headers.forEachIndexed { index, header ->
-            var headerName by remember(header.name) { mutableStateOf(header.name) }
-            var headerValue by remember(header.value) { mutableStateOf(header.value) }
+        pending.rows.forEachIndexed { index, header ->
+            val token = pending.order[index]
+            key(token) {
+                var headerName by remember(header.name) { mutableStateOf(header.name) }
+                var headerValue by remember(header.value) { mutableStateOf(header.value) }
 
-            CardGroup {
-                item(
-                    supportingContent = {
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            val updateHeaderName = { name: String ->
-                                headerName = name
-                                val updatedHeaders = headers.toMutableList()
-                                updatedHeaders[index] = updatedHeaders[index].copy(name = name.trim())
-                                onUpdate(updatedHeaders)
+                CardGroup {
+                    item(
+                        supportingContent = {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                val updateHeaderName: (String) -> Unit = { name ->
+                                    headerName = name
+                                    pending.edit(token, { it.copy(name = name.trim()) }) { current, observed, target ->
+                                        updateHeaderName(current, observed, target, name.trim())
+                                    }?.let(onUpdate)
+                                }
+                                SelectTextField(
+                                    value = headerName,
+                                    options = commonHeaderNames(headerName),
+                                    onValueChange = updateHeaderName,
+                                    onOptionSelected = updateHeaderName,
+                                    label = { Text(stringResource(R.string.assistant_page_header_name)) },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                OutlinedTextField(
+                                    value = headerValue,
+                                    onValueChange = {
+                                        headerValue = it
+                                        val value = it.trim()
+                                        pending.edit(token, { row -> row.copy(value = value) }) { current, observed, target ->
+                                            updateHeaderValue(current, observed, target, value)
+                                        }?.let(onUpdate)
+                                    },
+                                    label = { Text(stringResource(R.string.assistant_page_header_value)) },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
                             }
-                            SelectTextField(
-                                value = headerName,
-                                options = commonHeaderNames(headerName),
-                                onValueChange = updateHeaderName,
-                                onOptionSelected = updateHeaderName,
-                                label = { Text(stringResource(R.string.assistant_page_header_name)) },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            OutlinedTextField(
-                                value = headerValue,
-                                onValueChange = {
-                                    headerValue = it
-                                    val updatedHeaders = headers.toMutableList()
-                                    updatedHeaders[index] =
-                                        updatedHeaders[index].copy(value = it.trim())
-                                    onUpdate(updatedHeaders)
-                                },
-                                label = { Text(stringResource(R.string.assistant_page_header_value)) },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    },
-                    trailingContent = {
-                        IconButton(onClick = {
-                            val updatedHeaders = headers.toMutableList()
-                            updatedHeaders.removeAt(index)
-                            onUpdate(updatedHeaders)
-                        }) {
-                            Icon(
-                                HugeIcons.Delete01,
-                                contentDescription = stringResource(R.string.assistant_page_delete_header)
-                            )
-                        }
-                    },
-                    headlineContent = {},
-                )
+                        },
+                        trailingContent = {
+                            IconButton(onClick = {
+                                pending.delete(token, ::deleteHeaderRow)?.let(onUpdate)
+                            }) {
+                                Icon(
+                                    HugeIcons.Delete01,
+                                    contentDescription = stringResource(R.string.assistant_page_delete_header)
+                                )
+                            }
+                        },
+                        headlineContent = {},
+                    )
+                }
             }
         }
 
         Button(
             onClick = {
-                val updatedHeaders = headers.toMutableList()
-                updatedHeaders.add(CustomHeader("", ""))
-                onUpdate(updatedHeaders)
+                val added = CustomHeader("", "")
+                onUpdate(pending.add(added))
             },
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -147,7 +215,9 @@ fun CustomHeaders(headers: List<CustomHeader>, onUpdate: (List<CustomHeader>) ->
 }
 
 @Composable
-fun CustomBodies(customBodies: List<CustomBody>, onUpdate: (List<CustomBody>) -> Unit) {
+fun CustomBodies(customBodies: List<CustomBody>, onUpdate: ((List<CustomBody>) -> List<CustomBody>) -> Unit) {
+    val pending = remember { PendingPropertyRows(customBodies) }
+    pending.receive(customBodies)
     val context = LocalContext.current
     Column(
         modifier = Modifier.padding(8.dp),
@@ -156,91 +226,91 @@ fun CustomBodies(customBodies: List<CustomBody>, onUpdate: (List<CustomBody>) ->
         Text(stringResource(R.string.assistant_page_custom_bodies))
         Spacer(Modifier.height(8.dp))
 
-        customBodies.forEachIndexed { index, body ->
-            var bodyKey by remember(body.key) { mutableStateOf(body.key) }
-            var bodyValueString by remember(body.value) {
-                mutableStateOf(jsonLenient.encodeToString(JsonElement.serializer(), body.value))
-            }
-            var jsonParseError by remember { mutableStateOf<String?>(null) }
+        pending.rows.forEachIndexed { index, body ->
+            val token = pending.order[index]
+            key(token) {
+                var bodyKey by remember(body.key) { mutableStateOf(body.key) }
+                var bodyValueString by remember(body.value) {
+                    mutableStateOf(jsonLenient.encodeToString(JsonElement.serializer(), body.value))
+                }
+                var jsonParseError by remember { mutableStateOf<String?>(null) }
 
-            CardGroup {
-                item(
-                    supportingContent = {
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            OutlinedTextField(
-                                value = bodyKey,
-                                onValueChange = {
-                                    bodyKey = it
-                                    val updatedBodies = customBodies.toMutableList()
-                                    updatedBodies[index] = updatedBodies[index].copy(key = it.trim())
-                                    onUpdate(updatedBodies)
-                                },
-                                label = { Text(stringResource(R.string.assistant_page_body_key)) },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            OutlinedTextField(
-                                value = bodyValueString,
-                                onValueChange = { newString ->
-                                    bodyValueString = newString
-                                    try {
-                                        val newJsonValue = jsonLenient.parseToJsonElement(newString)
-                                        val updatedBodies = customBodies.toMutableList()
-                                        updatedBodies[index] =
-                                            updatedBodies[index].copy(value = newJsonValue)
-                                        onUpdate(updatedBodies)
-                                        jsonParseError = null
-                                    } catch (e: Exception) {
-                                        jsonParseError =
-                                            context.getString(
-                                                R.string.assistant_page_invalid_json,
-                                                e.message?.take(100) ?: ""
-                                            )
-                                    }
-                                },
-                                label = { Text(stringResource(R.string.assistant_page_body_value)) },
+                CardGroup {
+                    item(
+                        supportingContent = {
+                            Column(
                                 modifier = Modifier.fillMaxWidth(),
-                                isError = jsonParseError != null,
-                                supportingText = {
-                                    if (jsonParseError != null) {
-                                        Text(jsonParseError!!)
-                                    }
-                                },
-                                minLines = 3,
-                                maxLines = 5,
-                                visualTransformation = HighlightCodeVisualTransformation(
-                                    language = "json",
-                                    highlighter = LocalCodeHighlighter.current,
-                                    darkMode = LocalDarkMode.current
-                                ),
-                                textStyle = LocalTextStyle.current.merge(fontFamily = JetbrainsMono),
-                            )
-                        }
-                    },
-                    trailingContent = {
-                        IconButton(onClick = {
-                            val updatedBodies = customBodies.toMutableList()
-                            updatedBodies.removeAt(index)
-                            onUpdate(updatedBodies)
-                        }) {
-                            Icon(
-                                HugeIcons.Delete01,
-                                contentDescription = stringResource(R.string.assistant_page_delete_body)
-                            )
-                        }
-                    },
-                    headlineContent = {},
-                )
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                OutlinedTextField(
+                                    value = bodyKey,
+                                    onValueChange = {
+                                        bodyKey = it
+                                        val key = it.trim()
+                                        pending.edit(token, { row -> row.copy(key = key) }) { current, observed, target ->
+                                            updateBodyKey(current, observed, target, key)
+                                        }?.let(onUpdate)
+                                    },
+                                    label = { Text(stringResource(R.string.assistant_page_body_key)) },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                OutlinedTextField(
+                                    value = bodyValueString,
+                                    onValueChange = { newString ->
+                                        bodyValueString = newString
+                                        try {
+                                            val newJsonValue = jsonLenient.parseToJsonElement(newString)
+                                            pending.edit(token, { row -> row.copy(value = newJsonValue) }) { current, observed, target ->
+                                                updateBodyValue(current, observed, target, newJsonValue)
+                                            }?.let(onUpdate)
+                                            jsonParseError = null
+                                        } catch (e: Exception) {
+                                            jsonParseError =
+                                                context.getString(
+                                                    R.string.assistant_page_invalid_json,
+                                                    e.message?.take(100) ?: ""
+                                                )
+                                        }
+                                    },
+                                    label = { Text(stringResource(R.string.assistant_page_body_value)) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    isError = jsonParseError != null,
+                                    supportingText = {
+                                        if (jsonParseError != null) {
+                                            Text(jsonParseError!!)
+                                        }
+                                    },
+                                    minLines = 3,
+                                    maxLines = 5,
+                                    visualTransformation = HighlightCodeVisualTransformation(
+                                        language = "json",
+                                        highlighter = LocalCodeHighlighter.current,
+                                        darkMode = LocalDarkMode.current
+                                    ),
+                                    textStyle = LocalTextStyle.current.merge(fontFamily = JetbrainsMono),
+                                )
+                            }
+                        },
+                        trailingContent = {
+                            IconButton(onClick = {
+                                pending.delete(token, ::deleteBodyRow)?.let(onUpdate)
+                            }) {
+                                Icon(
+                                    HugeIcons.Delete01,
+                                    contentDescription = stringResource(R.string.assistant_page_delete_body)
+                                )
+                            }
+                        },
+                        headlineContent = {},
+                    )
+                }
             }
         }
 
         Button(
             onClick = {
-                val updatedBodies = customBodies.toMutableList()
-                updatedBodies.add(CustomBody("", JsonPrimitive("")))
-                onUpdate(updatedBodies)
+                val added = CustomBody("", JsonPrimitive(""))
+                onUpdate(pending.add(added))
             },
             modifier = Modifier.fillMaxWidth()
         ) {

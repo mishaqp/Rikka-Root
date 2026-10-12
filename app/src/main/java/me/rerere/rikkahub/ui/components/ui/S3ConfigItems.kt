@@ -25,7 +25,7 @@ import me.rerere.rikkahub.data.sync.s3.S3Config
  */
 fun CardGroupScope.s3ConnectionItems(
     config: S3Config,
-    onUpdate: (S3Config) -> Unit,
+    onUpdate: ((S3Config) -> S3Config) -> Unit,
 ) {
     item(
         headlineContent = { Text(stringResource(R.string.backup_page_s3_endpoint)) },
@@ -33,7 +33,7 @@ fun CardGroupScope.s3ConnectionItems(
             OutlinedTextField(
                 modifier = Modifier.fillMaxWidth(),
                 value = config.endpoint,
-                onValueChange = { onUpdate(config.copy(endpoint = it.trim())) },
+                onValueChange = { onUpdate { current -> current.copy(endpoint = it.trim()) } },
                 placeholder = { Text("https://s3.amazonaws.com") },
                 singleLine = true
             )
@@ -45,7 +45,7 @@ fun CardGroupScope.s3ConnectionItems(
             OutlinedTextField(
                 modifier = Modifier.fillMaxWidth(),
                 value = config.accessKeyId,
-                onValueChange = { onUpdate(config.copy(accessKeyId = it.trim())) },
+                onValueChange = { onUpdate { current -> current.copy(accessKeyId = it.trim()) } },
                 singleLine = true
             )
         },
@@ -57,7 +57,7 @@ fun CardGroupScope.s3ConnectionItems(
             OutlinedTextField(
                 modifier = Modifier.fillMaxWidth(),
                 value = config.secretAccessKey,
-                onValueChange = { onUpdate(config.copy(secretAccessKey = it.trim())) },
+                onValueChange = { onUpdate { current -> current.copy(secretAccessKey = it.trim()) } },
                 visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
                     val image = if (passwordVisible) {
@@ -79,7 +79,7 @@ fun CardGroupScope.s3ConnectionItems(
             OutlinedTextField(
                 modifier = Modifier.fillMaxWidth(),
                 value = config.bucket,
-                onValueChange = { onUpdate(config.copy(bucket = it.trim())) },
+                onValueChange = { onUpdate { current -> current.copy(bucket = it.trim()) } },
                 placeholder = { Text("my-bucket") },
                 singleLine = true
             )
@@ -91,7 +91,7 @@ fun CardGroupScope.s3ConnectionItems(
         trailingContent = {
             Switch(
                 checked = config.pathStyle,
-                onCheckedChange = { onUpdate(config.copy(pathStyle = it)) },
+                onCheckedChange = { onUpdate { current -> current.copy(pathStyle = it) } },
             )
         },
     )
@@ -101,7 +101,7 @@ fun CardGroupScope.s3ConnectionItems(
             OutlinedTextField(
                 modifier = Modifier.fillMaxWidth(),
                 value = config.region,
-                onValueChange = { onUpdate(config.copy(region = it.trim())) },
+                onValueChange = { onUpdate { current -> current.copy(region = it.trim()) } },
                 placeholder = { Text("auto") },
                 singleLine = true
             )

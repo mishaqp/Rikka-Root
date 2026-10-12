@@ -77,11 +77,11 @@ fun SettingSearchDetailPage(
     val serviceIndex = settings.searchServices.indexOf(service)
     var options by remember(service) { mutableStateOf(service) }
 
-    fun save(updated: SearchServiceOptions) {
-        options = updated
-        val newServices = settings.searchServices.toMutableList()
-        newServices[serviceIndex] = updated
-        vm.updateSettings(settings.copy(searchServices = newServices))
+    fun save(transform: (SearchServiceOptions) -> SearchServiceOptions) {
+        options = transform(options)
+        vm.updateSettings { current -> current.copy(searchServices = current.searchServices.map { row ->
+            if (row.id == serviceId) transform(row) else row
+        }) }
     }
 
     Scaffold(
@@ -97,9 +97,7 @@ fun SettingSearchDetailPage(
                     if (settings.searchServices.size > 1) {
                         IconButton(
                             onClick = {
-                                val newServices = settings.searchServices.toMutableList()
-                                newServices.removeAt(serviceIndex)
-                                vm.updateSettings(settings.copy(searchServices = newServices))
+                                vm.updateSettings { current -> current.copy(searchServices = current.searchServices.filterNot { it.id == serviceId }) }
                                 nav.popBackStack()
                             }
                         ) {
@@ -168,64 +166,64 @@ fun SettingSearchDetailPage(
 @Composable
 private fun SearchServiceOptionsEditor(
     options: SearchServiceOptions,
-    onUpdateOptions: (SearchServiceOptions) -> Unit
+    onUpdateOptions: ((SearchServiceOptions) -> SearchServiceOptions) -> Unit
 ) {
     when (options) {
         is SearchServiceOptions.TavilyOptions -> {
-            TavilyOptions(options) { onUpdateOptions(it) }
+            TavilyOptions(options) { edit -> onUpdateOptions { current -> if (current::class == options::class) edit(current as SearchServiceOptions.TavilyOptions) else current } }
         }
         is SearchServiceOptions.ExaOptions -> {
-            ExaOptions(options) { onUpdateOptions(it) }
+            ExaOptions(options) { edit -> onUpdateOptions { current -> if (current::class == options::class) edit(current as SearchServiceOptions.ExaOptions) else current } }
         }
         is SearchServiceOptions.ZhipuOptions -> {
-            ZhipuOptions(options) { onUpdateOptions(it) }
+            ZhipuOptions(options) { edit -> onUpdateOptions { current -> if (current::class == options::class) edit(current as SearchServiceOptions.ZhipuOptions) else current } }
         }
         is SearchServiceOptions.DoubaoOptions -> {
-            DoubaoOptions(options) { onUpdateOptions(it) }
+            DoubaoOptions(options) { edit -> onUpdateOptions { current -> if (current::class == options::class) edit(current as SearchServiceOptions.DoubaoOptions) else current } }
         }
         is SearchServiceOptions.SearXNGOptions -> {
-            SearXNGOptions(options) { onUpdateOptions(it) }
+            SearXNGOptions(options) { edit -> onUpdateOptions { current -> if (current::class == options::class) edit(current as SearchServiceOptions.SearXNGOptions) else current } }
         }
         is SearchServiceOptions.LinkUpOptions -> {
-            SearchLinkUpOptions(options) { onUpdateOptions(it) }
+            SearchLinkUpOptions(options) { edit -> onUpdateOptions { current -> if (current::class == options::class) edit(current as SearchServiceOptions.LinkUpOptions) else current } }
         }
         is SearchServiceOptions.BraveOptions -> {
-            BraveOptions(options) { onUpdateOptions(it) }
+            BraveOptions(options) { edit -> onUpdateOptions { current -> if (current::class == options::class) edit(current as SearchServiceOptions.BraveOptions) else current } }
         }
         is SearchServiceOptions.MetasoOptions -> {
-            MetasoOptions(options) { onUpdateOptions(it) }
+            MetasoOptions(options) { edit -> onUpdateOptions { current -> if (current::class == options::class) edit(current as SearchServiceOptions.MetasoOptions) else current } }
         }
         is SearchServiceOptions.OllamaOptions -> {
-            OllamaOptions(options) { onUpdateOptions(it) }
+            OllamaOptions(options) { edit -> onUpdateOptions { current -> if (current::class == options::class) edit(current as SearchServiceOptions.OllamaOptions) else current } }
         }
         is SearchServiceOptions.PerplexityOptions -> {
-            PerplexityOptions(options) { onUpdateOptions(it) }
+            PerplexityOptions(options) { edit -> onUpdateOptions { current -> if (current::class == options::class) edit(current as SearchServiceOptions.PerplexityOptions) else current } }
         }
         is SearchServiceOptions.BingLocalOptions -> {}
         is SearchServiceOptions.DuckDuckGoOptions -> {}
         is SearchServiceOptions.FirecrawlOptions -> {
-            FirecrawlOptions(options) { onUpdateOptions(it) }
+            FirecrawlOptions(options) { edit -> onUpdateOptions { current -> if (current::class == options::class) edit(current as SearchServiceOptions.FirecrawlOptions) else current } }
         }
         is SearchServiceOptions.JinaOptions -> {
-            JinaOptions(options) { onUpdateOptions(it) }
+            JinaOptions(options) { edit -> onUpdateOptions { current -> if (current::class == options::class) edit(current as SearchServiceOptions.JinaOptions) else current } }
         }
         is SearchServiceOptions.BochaOptions -> {
-            BochaOptions(options) { onUpdateOptions(it) }
+            BochaOptions(options) { edit -> onUpdateOptions { current -> if (current::class == options::class) edit(current as SearchServiceOptions.BochaOptions) else current } }
         }
         is SearchServiceOptions.RikkaHubOptions -> {
-            RikkaHubOptions(options) { onUpdateOptions(it) }
+            RikkaHubOptions(options) { edit -> onUpdateOptions { current -> if (current::class == options::class) edit(current as SearchServiceOptions.RikkaHubOptions) else current } }
         }
         is SearchServiceOptions.GrokOptions -> {
-            GrokOptions(options) { onUpdateOptions(it) }
+            GrokOptions(options) { edit -> onUpdateOptions { current -> if (current::class == options::class) edit(current as SearchServiceOptions.GrokOptions) else current } }
         }
         is SearchServiceOptions.TinyfishOptions -> {
-            TinyfishOptions(options) { onUpdateOptions(it) }
+            TinyfishOptions(options) { edit -> onUpdateOptions { current -> if (current::class == options::class) edit(current as SearchServiceOptions.TinyfishOptions) else current } }
         }
         is SearchServiceOptions.SerperOptions -> {
-            SerperOptions(options) { onUpdateOptions(it) }
+            SerperOptions(options) { edit -> onUpdateOptions { current -> if (current::class == options::class) edit(current as SearchServiceOptions.SerperOptions) else current } }
         }
         is SearchServiceOptions.CustomJsOptions -> {
-            CustomJsOptions(options) { onUpdateOptions(it) }
+            CustomJsOptions(options) { edit -> onUpdateOptions { current -> if (current::class == options::class) edit(current as SearchServiceOptions.CustomJsOptions) else current } }
         }
     }
 }
@@ -354,7 +352,7 @@ private fun SearchTestSection(
 @Composable
 internal fun TavilyOptions(
     options: SearchServiceOptions.TavilyOptions,
-    onUpdateOptions: (SearchServiceOptions.TavilyOptions) -> Unit
+    onUpdateOptions: ((SearchServiceOptions.TavilyOptions) -> SearchServiceOptions.TavilyOptions) -> Unit
 ) {
     FormItem(
         label = {
@@ -364,7 +362,7 @@ internal fun TavilyOptions(
         OutlinedTextField(
             value = options.apiKey,
             onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
+                onUpdateOptions { current -> current.copy(apiKey = it) }
             },
             modifier = Modifier.fillMaxWidth()
         )
@@ -383,7 +381,7 @@ internal fun TavilyOptions(
                 SegmentedButton(
                     shape = SegmentedButtonDefaults.itemShape(index = index, count = depthOptions.size),
                     onClick = {
-                        onUpdateOptions(options.copy(depth = depth))
+                        onUpdateOptions { current -> current.copy(depth = depth) }
                     },
                     selected = options.depth == depth
                 ) {
@@ -397,7 +395,7 @@ internal fun TavilyOptions(
 @Composable
 internal fun ExaOptions(
     options: SearchServiceOptions.ExaOptions,
-    onUpdateOptions: (SearchServiceOptions.ExaOptions) -> Unit
+    onUpdateOptions: ((SearchServiceOptions.ExaOptions) -> SearchServiceOptions.ExaOptions) -> Unit
 ) {
     FormItem(
         label = {
@@ -407,7 +405,7 @@ internal fun ExaOptions(
         OutlinedTextField(
             value = options.apiKey,
             onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
+                onUpdateOptions { current -> current.copy(apiKey = it) }
             },
             modifier = Modifier.fillMaxWidth()
         )
@@ -417,7 +415,7 @@ internal fun ExaOptions(
 @Composable
 internal fun ZhipuOptions(
     options: SearchServiceOptions.ZhipuOptions,
-    onUpdateOptions: (SearchServiceOptions.ZhipuOptions) -> Unit
+    onUpdateOptions: ((SearchServiceOptions.ZhipuOptions) -> SearchServiceOptions.ZhipuOptions) -> Unit
 ) {
     FormItem(
         label = {
@@ -427,7 +425,7 @@ internal fun ZhipuOptions(
         OutlinedTextField(
             value = options.apiKey,
             onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
+                onUpdateOptions { current -> current.copy(apiKey = it) }
             },
             modifier = Modifier.fillMaxWidth()
         )
@@ -437,12 +435,12 @@ internal fun ZhipuOptions(
 @Composable
 internal fun DoubaoOptions(
     options: SearchServiceOptions.DoubaoOptions,
-    onUpdateOptions: (SearchServiceOptions.DoubaoOptions) -> Unit
+    onUpdateOptions: ((SearchServiceOptions.DoubaoOptions) -> SearchServiceOptions.DoubaoOptions) -> Unit
 ) {
     FormItem(label = { Text(stringResource(R.string.search_detail_api_key)) }) {
         OutlinedTextField(
             value = options.apiKey,
-            onValueChange = { onUpdateOptions(options.copy(apiKey = it)) },
+            onValueChange = { onUpdateOptions { current -> current.copy(apiKey = it) } },
             modifier = Modifier.fillMaxWidth()
         )
     }
@@ -453,7 +451,7 @@ internal fun DoubaoOptions(
             modes.forEachIndexed { index, mode ->
                 SegmentedButton(
                     shape = SegmentedButtonDefaults.itemShape(index, modes.size),
-                    onClick = { onUpdateOptions(options.copy(mode = mode)) },
+                    onClick = { onUpdateOptions { current -> current.copy(mode = mode) } },
                     selected = options.mode == mode
                 ) {
                     Text(mode.name.lowercase().replaceFirstChar(Char::uppercase))
@@ -466,7 +464,7 @@ internal fun DoubaoOptions(
 @Composable
 internal fun SearXNGOptions(
     options: SearchServiceOptions.SearXNGOptions,
-    onUpdateOptions: (SearchServiceOptions.SearXNGOptions) -> Unit
+    onUpdateOptions: ((SearchServiceOptions.SearXNGOptions) -> SearchServiceOptions.SearXNGOptions) -> Unit
 ) {
     FormItem(
         label = {
@@ -476,7 +474,7 @@ internal fun SearXNGOptions(
         OutlinedTextField(
             value = options.url,
             onValueChange = {
-                onUpdateOptions(options.copy(url = it))
+                onUpdateOptions { current -> current.copy(url = it) }
             },
             modifier = Modifier.fillMaxWidth()
         )
@@ -490,7 +488,7 @@ internal fun SearXNGOptions(
         OutlinedTextField(
             value = options.engines,
             onValueChange = {
-                onUpdateOptions(options.copy(engines = it))
+                onUpdateOptions { current -> current.copy(engines = it) }
             },
             modifier = Modifier.fillMaxWidth()
         )
@@ -504,7 +502,7 @@ internal fun SearXNGOptions(
         OutlinedTextField(
             value = options.language,
             onValueChange = {
-                onUpdateOptions(options.copy(language = it))
+                onUpdateOptions { current -> current.copy(language = it) }
             },
             modifier = Modifier.fillMaxWidth()
         )
@@ -518,7 +516,7 @@ internal fun SearXNGOptions(
         OutlinedTextField(
             value = options.username,
             onValueChange = {
-                onUpdateOptions(options.copy(username = it))
+                onUpdateOptions { current -> current.copy(username = it) }
             },
             modifier = Modifier.fillMaxWidth()
         )
@@ -532,7 +530,7 @@ internal fun SearXNGOptions(
         OutlinedTextField(
             value = options.password,
             onValueChange = {
-                onUpdateOptions(options.copy(password = it))
+                onUpdateOptions { current -> current.copy(password = it) }
             },
             modifier = Modifier.fillMaxWidth()
         )
@@ -542,7 +540,7 @@ internal fun SearXNGOptions(
 @Composable
 internal fun SearchLinkUpOptions(
     options: SearchServiceOptions.LinkUpOptions,
-    onUpdateOptions: (SearchServiceOptions.LinkUpOptions) -> Unit
+    onUpdateOptions: ((SearchServiceOptions.LinkUpOptions) -> SearchServiceOptions.LinkUpOptions) -> Unit
 ) {
     FormItem(
         label = {
@@ -552,7 +550,7 @@ internal fun SearchLinkUpOptions(
         OutlinedTextField(
             value = options.apiKey,
             onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
+                onUpdateOptions { current -> current.copy(apiKey = it) }
             },
             modifier = Modifier.fillMaxWidth()
         )
@@ -571,7 +569,7 @@ internal fun SearchLinkUpOptions(
                 SegmentedButton(
                     shape = SegmentedButtonDefaults.itemShape(index = index, count = depthOptions.size),
                     onClick = {
-                        onUpdateOptions(options.copy(depth = depth))
+                        onUpdateOptions { current -> current.copy(depth = depth) }
                     },
                     selected = options.depth == depth
                 ) {
@@ -585,7 +583,7 @@ internal fun SearchLinkUpOptions(
 @Composable
 internal fun BraveOptions(
     options: SearchServiceOptions.BraveOptions,
-    onUpdateOptions: (SearchServiceOptions.BraveOptions) -> Unit
+    onUpdateOptions: ((SearchServiceOptions.BraveOptions) -> SearchServiceOptions.BraveOptions) -> Unit
 ) {
     FormItem(
         label = {
@@ -595,7 +593,7 @@ internal fun BraveOptions(
         OutlinedTextField(
             value = options.apiKey,
             onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
+                onUpdateOptions { current -> current.copy(apiKey = it) }
             },
             modifier = Modifier.fillMaxWidth()
         )
@@ -605,7 +603,7 @@ internal fun BraveOptions(
 @Composable
 internal fun SerperOptions(
     options: SearchServiceOptions.SerperOptions,
-    onUpdateOptions: (SearchServiceOptions.SerperOptions) -> Unit
+    onUpdateOptions: ((SearchServiceOptions.SerperOptions) -> SearchServiceOptions.SerperOptions) -> Unit
 ) {
     FormItem(
         label = {
@@ -615,7 +613,7 @@ internal fun SerperOptions(
         OutlinedTextField(
             value = options.apiKey,
             onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
+                onUpdateOptions { current -> current.copy(apiKey = it) }
             },
             modifier = Modifier.fillMaxWidth()
         )
@@ -625,7 +623,7 @@ internal fun SerperOptions(
 @Composable
 internal fun MetasoOptions(
     options: SearchServiceOptions.MetasoOptions,
-    onUpdateOptions: (SearchServiceOptions.MetasoOptions) -> Unit
+    onUpdateOptions: ((SearchServiceOptions.MetasoOptions) -> SearchServiceOptions.MetasoOptions) -> Unit
 ) {
     FormItem(
         label = {
@@ -635,7 +633,7 @@ internal fun MetasoOptions(
         OutlinedTextField(
             value = options.apiKey,
             onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
+                onUpdateOptions { current -> current.copy(apiKey = it) }
             },
             modifier = Modifier.fillMaxWidth()
         )
@@ -645,7 +643,7 @@ internal fun MetasoOptions(
 @Composable
 internal fun OllamaOptions(
     options: SearchServiceOptions.OllamaOptions,
-    onUpdateOptions: (SearchServiceOptions.OllamaOptions) -> Unit
+    onUpdateOptions: ((SearchServiceOptions.OllamaOptions) -> SearchServiceOptions.OllamaOptions) -> Unit
 ) {
     FormItem(
         label = {
@@ -655,7 +653,7 @@ internal fun OllamaOptions(
         OutlinedTextField(
             value = options.apiKey,
             onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
+                onUpdateOptions { current -> current.copy(apiKey = it) }
             },
             modifier = Modifier.fillMaxWidth()
         )
@@ -665,7 +663,7 @@ internal fun OllamaOptions(
 @Composable
 internal fun PerplexityOptions(
     options: SearchServiceOptions.PerplexityOptions,
-    onUpdateOptions: (SearchServiceOptions.PerplexityOptions) -> Unit
+    onUpdateOptions: ((SearchServiceOptions.PerplexityOptions) -> SearchServiceOptions.PerplexityOptions) -> Unit
 ) {
     FormItem(
         label = {
@@ -675,7 +673,7 @@ internal fun PerplexityOptions(
         OutlinedTextField(
             value = options.apiKey,
             onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
+                onUpdateOptions { current -> current.copy(apiKey = it) }
             },
             modifier = Modifier.fillMaxWidth()
         )
@@ -689,7 +687,7 @@ internal fun PerplexityOptions(
         OutlinedTextField(
             value = options.maxTokens?.takeIf { it > 0 }?.toString() ?: "",
             onValueChange = { value ->
-                onUpdateOptions(options.copy(maxTokens = value.toIntOrNull()))
+                onUpdateOptions { current -> current.copy(maxTokens = value.toIntOrNull()) }
             },
             modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
@@ -704,7 +702,7 @@ internal fun PerplexityOptions(
         OutlinedTextField(
             value = options.maxTokensPerPage?.takeIf { it > 0 }?.toString() ?: "",
             onValueChange = { value ->
-                onUpdateOptions(options.copy(maxTokensPerPage = value.toIntOrNull()))
+                onUpdateOptions { current -> current.copy(maxTokensPerPage = value.toIntOrNull()) }
             },
             modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
@@ -715,7 +713,7 @@ internal fun PerplexityOptions(
 @Composable
 internal fun FirecrawlOptions(
     options: SearchServiceOptions.FirecrawlOptions,
-    onUpdateOptions: (SearchServiceOptions.FirecrawlOptions) -> Unit
+    onUpdateOptions: ((SearchServiceOptions.FirecrawlOptions) -> SearchServiceOptions.FirecrawlOptions) -> Unit
 ) {
     FormItem(
         label = {
@@ -725,7 +723,7 @@ internal fun FirecrawlOptions(
         OutlinedTextField(
             value = options.apiKey,
             onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
+                onUpdateOptions { current -> current.copy(apiKey = it) }
             },
             modifier = Modifier.fillMaxWidth()
         )
@@ -735,7 +733,7 @@ internal fun FirecrawlOptions(
 @Composable
 internal fun JinaOptions(
     options: SearchServiceOptions.JinaOptions,
-    onUpdateOptions: (SearchServiceOptions.JinaOptions) -> Unit
+    onUpdateOptions: ((SearchServiceOptions.JinaOptions) -> SearchServiceOptions.JinaOptions) -> Unit
 ) {
     FormItem(
         label = {
@@ -745,7 +743,7 @@ internal fun JinaOptions(
         OutlinedTextField(
             value = options.apiKey,
             onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
+                onUpdateOptions { current -> current.copy(apiKey = it) }
             },
             modifier = Modifier.fillMaxWidth()
         )
@@ -759,7 +757,7 @@ internal fun JinaOptions(
         OutlinedTextField(
             value = options.searchUrl,
             onValueChange = {
-                onUpdateOptions(options.copy(searchUrl = it.trim()))
+                onUpdateOptions { current -> current.copy(searchUrl = it.trim()) }
             },
             modifier = Modifier.fillMaxWidth(),
             placeholder = {
@@ -776,7 +774,7 @@ internal fun JinaOptions(
         OutlinedTextField(
             value = options.scrapeUrl,
             onValueChange = {
-                onUpdateOptions(options.copy(scrapeUrl = it.trim()))
+                onUpdateOptions { current -> current.copy(scrapeUrl = it.trim()) }
             },
             modifier = Modifier.fillMaxWidth(),
             placeholder = {
@@ -789,7 +787,7 @@ internal fun JinaOptions(
 @Composable
 internal fun BochaOptions(
     options: SearchServiceOptions.BochaOptions,
-    onUpdateOptions: (SearchServiceOptions.BochaOptions) -> Unit
+    onUpdateOptions: ((SearchServiceOptions.BochaOptions) -> SearchServiceOptions.BochaOptions) -> Unit
 ) {
     FormItem(
         label = {
@@ -799,7 +797,7 @@ internal fun BochaOptions(
         OutlinedTextField(
             value = options.apiKey,
             onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
+                onUpdateOptions { current -> current.copy(apiKey = it) }
             },
             modifier = Modifier.fillMaxWidth()
         )
@@ -816,7 +814,7 @@ internal fun BochaOptions(
             Switch(
                 checked = options.summary,
                 onCheckedChange = { checked ->
-                    onUpdateOptions(options.copy(summary = checked))
+                    onUpdateOptions { current -> current.copy(summary = checked) }
                 }
             )
         }
@@ -826,7 +824,7 @@ internal fun BochaOptions(
 @Composable
 internal fun RikkaHubOptions(
     options: SearchServiceOptions.RikkaHubOptions,
-    onUpdateOptions: (SearchServiceOptions.RikkaHubOptions) -> Unit
+    onUpdateOptions: ((SearchServiceOptions.RikkaHubOptions) -> SearchServiceOptions.RikkaHubOptions) -> Unit
 ) {
     FormItem(
         label = {
@@ -836,7 +834,7 @@ internal fun RikkaHubOptions(
         OutlinedTextField(
             value = options.apiKey,
             onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
+                onUpdateOptions { current -> current.copy(apiKey = it) }
             },
             modifier = Modifier.fillMaxWidth()
         )
@@ -855,7 +853,7 @@ internal fun RikkaHubOptions(
                 SegmentedButton(
                     shape = SegmentedButtonDefaults.itemShape(index = index, count = depthOptions.size),
                     onClick = {
-                        onUpdateOptions(options.copy(depth = depth))
+                        onUpdateOptions { current -> current.copy(depth = depth) }
                     },
                     selected = options.depth == depth
                 ) {
@@ -869,7 +867,7 @@ internal fun RikkaHubOptions(
 @Composable
 internal fun TinyfishOptions(
     options: SearchServiceOptions.TinyfishOptions,
-    onUpdateOptions: (SearchServiceOptions.TinyfishOptions) -> Unit
+    onUpdateOptions: ((SearchServiceOptions.TinyfishOptions) -> SearchServiceOptions.TinyfishOptions) -> Unit
 ) {
     FormItem(
         label = {
@@ -879,7 +877,7 @@ internal fun TinyfishOptions(
         OutlinedTextField(
             value = options.apiKey,
             onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
+                onUpdateOptions { current -> current.copy(apiKey = it) }
             },
             modifier = Modifier.fillMaxWidth()
         )
@@ -889,7 +887,7 @@ internal fun TinyfishOptions(
 @Composable
 internal fun GrokOptions(
     options: SearchServiceOptions.GrokOptions,
-    onUpdateOptions: (SearchServiceOptions.GrokOptions) -> Unit
+    onUpdateOptions: ((SearchServiceOptions.GrokOptions) -> SearchServiceOptions.GrokOptions) -> Unit
 ) {
     FormItem(
         label = {
@@ -899,7 +897,7 @@ internal fun GrokOptions(
         OutlinedTextField(
             value = options.apiKey,
             onValueChange = {
-                onUpdateOptions(options.copy(apiKey = it))
+                onUpdateOptions { current -> current.copy(apiKey = it) }
             },
             modifier = Modifier.fillMaxWidth()
         )
@@ -913,7 +911,7 @@ internal fun GrokOptions(
         OutlinedTextField(
             value = options.model,
             onValueChange = {
-                onUpdateOptions(options.copy(model = it))
+                onUpdateOptions { current -> current.copy(model = it) }
             },
             modifier = Modifier.fillMaxWidth()
         )
@@ -927,7 +925,7 @@ internal fun GrokOptions(
         OutlinedTextField(
             value = options.customUrl,
             onValueChange = {
-                onUpdateOptions(options.copy(customUrl = it))
+                onUpdateOptions { current -> current.copy(customUrl = it) }
             },
             modifier = Modifier.fillMaxWidth()
         )
@@ -941,7 +939,7 @@ internal fun GrokOptions(
         OutlinedTextField(
             value = options.systemPrompt,
             onValueChange = {
-                onUpdateOptions(options.copy(systemPrompt = it))
+                onUpdateOptions { current -> current.copy(systemPrompt = it) }
             },
             minLines = 3,
             modifier = Modifier.fillMaxWidth()
@@ -952,7 +950,7 @@ internal fun GrokOptions(
 @Composable
 internal fun CustomJsOptions(
     options: SearchServiceOptions.CustomJsOptions,
-    onUpdateOptions: (SearchServiceOptions.CustomJsOptions) -> Unit
+    onUpdateOptions: ((SearchServiceOptions.CustomJsOptions) -> SearchServiceOptions.CustomJsOptions) -> Unit
 ) {
     FormItem(
         label = {
@@ -962,7 +960,7 @@ internal fun CustomJsOptions(
         OutlinedTextField(
             value = options.name,
             onValueChange = {
-                onUpdateOptions(options.copy(name = it))
+                onUpdateOptions { current -> current.copy(name = it) }
             },
             modifier = Modifier.fillMaxWidth(),
             placeholder = { Text(stringResource(R.string.search_detail_custom_search_placeholder)) }
@@ -980,7 +978,7 @@ internal fun CustomJsOptions(
         OutlinedTextField(
             value = options.searchScript,
             onValueChange = {
-                onUpdateOptions(options.copy(searchScript = it))
+                onUpdateOptions { current -> current.copy(searchScript = it) }
             },
             modifier = Modifier.fillMaxWidth(),
             minLines = 8,
@@ -1005,7 +1003,7 @@ internal fun CustomJsOptions(
         OutlinedTextField(
             value = options.scrapeScript,
             onValueChange = {
-                onUpdateOptions(options.copy(scrapeScript = it))
+                onUpdateOptions { current -> current.copy(scrapeScript = it) }
             },
             modifier = Modifier.fillMaxWidth(),
             minLines = 4,

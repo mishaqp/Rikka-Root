@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.setting
 
+import me.rerere.rikkahub.data.datastore.moveSettingsItem
+
 import android.net.Uri
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Camera01
@@ -99,10 +101,10 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
     var deleteTarget by remember { mutableStateOf<ProviderSetting?>(null) }
     val lazyListState = rememberLazyListState()
     val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        val newProviders = settings.providers.toMutableList().apply {
-            add(to.index, removeAt(from.index))
-        }
-        vm.updateSettings(settings.copy(providers = newProviders))
+        val moved = from.key as? Uuid
+        val anchor = to.key as? Uuid
+        if (moved != null && anchor != null) vm.updateSettings { current -> current.copy(providers =
+            moveSettingsItem(current.providers, moved, anchor, from.index < to.index) { it.id }) }
     }
 
     val filteredProviders = remember(settings.providers, searchQuery) {
@@ -126,25 +128,21 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                 },
                 actions = {
                     RecommendProviderButton { provider ->
-                        vm.updateSettings(
-                            settings.copy(
-                                providers = listOf(provider.copyProvider(Uuid.random())) + settings.providers
-                            )
-                        )
+                        val addition = provider.copyProvider(Uuid.random())
+                        vm.updateSettings { current -> current.copy(
+                                providers = listOf(addition) + current.providers
+                            ) }
                     }
                     ImportProviderButton {
-                        vm.updateSettings(
-                            settings.copy(
-                                providers = listOf(it.copyProvider(Uuid.random())) + settings.providers
-                            )
-                        )
+                        val addition = it.copyProvider(Uuid.random())
+                        vm.updateSettings { current -> current.copy(
+                                providers = listOf(addition) + current.providers
+                            ) }
                     }
                     AddButton {
-                        vm.updateSettings(
-                            settings.copy(
-                                providers = listOf(it) + settings.providers
-                            )
-                        )
+                        vm.updateSettings { current -> current.copy(
+                                providers = listOf(it) + current.providers
+                            ) }
                     }
                 },
                 scrollBehavior = scrollBehavior,
@@ -222,7 +220,7 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
         dismissText = stringResource(R.string.cancel),
         onConfirm = {
             deleteTarget?.let { target ->
-                vm.updateSettings(settings.copy(providers = settings.providers.filter { it.id != target.id }))
+                vm.updateSettings { current -> current.copy(providers = current.providers.filter { it.id != target.id }) }
             }
             deleteTarget = null
         },

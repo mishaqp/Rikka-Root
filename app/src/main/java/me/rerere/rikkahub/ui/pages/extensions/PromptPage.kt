@@ -1,5 +1,9 @@
 package me.rerere.rikkahub.ui.pages.extensions
 
+import me.rerere.rikkahub.data.datastore.moveSettingsItem
+import me.rerere.rikkahub.data.datastore.applyModeDraft
+import me.rerere.rikkahub.data.datastore.applyLorebookDraft
+
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Book01
 import me.rerere.hugeicons.stroke.ArrowDown01
@@ -94,6 +98,7 @@ import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.components.ui.longPressReorder
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.useEditState
+import me.rerere.rikkahub.ui.hooks.useDraftEditState
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 import me.rerere.ui.components.FormItem
@@ -151,12 +156,12 @@ fun PromptPage(vm: PromptVM = koinViewModel()) {
             when (page) {
                 0 -> ModeInjectionTab(
                     modeInjections = settings.modeInjections,
-                    onUpdate = { vm.updateSettings(settings.copy(modeInjections = it)) }
+                    onUpdate = { vm.updateSettings { current -> current.copy(modeInjections = it(current.modeInjections)) } }
                 )
 
                 1 -> LorebookTab(
                     lorebooks = settings.lorebooks,
-                    onUpdate = { vm.updateSettings(settings.copy(lorebooks = it)) }
+                    onUpdate = { vm.updateSettings { current -> current.copy(lorebooks = it(current.lorebooks)) } }
                 )
             }
         }
@@ -166,31 +171,30 @@ fun PromptPage(vm: PromptVM = koinViewModel()) {
 @Composable
 private fun ModeInjectionTab(
     modeInjections: List<PromptInjection.ModeInjection>,
-    onUpdate: (List<PromptInjection.ModeInjection>) -> Unit
+    onUpdate: ((List<PromptInjection.ModeInjection>) -> List<PromptInjection.ModeInjection>) -> Unit
 ) {
     var expanded by rememberSaveable { mutableStateOf(true) }
     val lazyListState = rememberLazyListState()
     val toaster = LocalToaster.current
     val currentModeInjections by rememberUpdatedState(modeInjections)
     val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        val newList = modeInjections.toMutableList()
-        val item = newList.removeAt(from.index)
-        newList.add(to.index, item)
-        onUpdate(newList)
+        val moved = modeInjections[from.index].id
+        val anchor = modeInjections[to.index].id
+        onUpdate { current -> moveSettingsItem(current, moved, anchor, from.index < to.index) { it.id } }
     }
-    val editState = useEditState<PromptInjection.ModeInjection> { edited ->
-        val index = modeInjections.indexOfFirst { it.id == edited.id }
-        if (index >= 0) {
-            onUpdate(modeInjections.toMutableList().apply { set(index, edited) })
-        } else {
-            onUpdate(modeInjections + edited)
+    var editingExisting by remember { mutableStateOf(false) }
+    val editState = useDraftEditState<PromptInjection.ModeInjection> { before, edited ->
+        val existing = editingExisting
+        onUpdate { current ->
+            if (existing) current.map { row -> if (row.id == before.id) applyModeDraft(row, before, edited) else row }
+            else (current + edited).distinctBy { it.id }
         }
     }
     val importSuccessMsg = stringResource(R.string.export_import_success)
     val importFailedMsg = stringResource(R.string.export_import_failed)
     val importer = rememberImporter(ModeInjectionSerializer) { result ->
         result.onSuccess { imported ->
-            onUpdate(currentModeInjections + imported)
+            onUpdate { current -> (current + imported).distinctBy { it.id } }
             toaster.show(importSuccessMsg)
         }.onFailure { error ->
             toaster.show(importFailedMsg.format(error.message))
@@ -240,8 +244,8 @@ private fun ModeInjectionTab(
                         ModeInjectionCard(
                             injection = injection,
                             modifier = longPressReorder(isDragging),
-                            onEdit = { editState.open(injection) },
-                            onDelete = { onUpdate(modeInjections - injection) }
+                            onEdit = { editingExisting = true; editState.open(injection) },
+                            onDelete = { onUpdate { current -> current.filterNot { it.id == injection.id } } }
                         )
                     }
                 }
@@ -259,7 +263,7 @@ private fun ModeInjectionTab(
                 }
             },
         ) {
-            Button(onClick = { editState.open(PromptInjection.ModeInjection()) }) {
+            Button(onClick = { editingExisting = false; editState.open(PromptInjection.ModeInjection()) }) {
                 Row(
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
@@ -568,31 +572,30 @@ private fun getRoleLabel(role: MessageRole): String = when (role) {
 @Composable
 private fun LorebookTab(
     lorebooks: List<Lorebook>,
-    onUpdate: (List<Lorebook>) -> Unit
+    onUpdate: ((List<Lorebook>) -> List<Lorebook>) -> Unit
 ) {
     var expanded by rememberSaveable { mutableStateOf(true) }
     val lazyListState = rememberLazyListState()
     val toaster = LocalToaster.current
     val currentLorebooks by rememberUpdatedState(lorebooks)
     val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        val newList = lorebooks.toMutableList()
-        val item = newList.removeAt(from.index)
-        newList.add(to.index, item)
-        onUpdate(newList)
+        val moved = lorebooks[from.index].id
+        val anchor = lorebooks[to.index].id
+        onUpdate { current -> moveSettingsItem(current, moved, anchor, from.index < to.index) { it.id } }
     }
-    val editState = useEditState<Lorebook> { edited ->
-        val index = lorebooks.indexOfFirst { it.id == edited.id }
-        if (index >= 0) {
-            onUpdate(lorebooks.toMutableList().apply { set(index, edited) })
-        } else {
-            onUpdate(lorebooks + edited)
+    var editingExisting by remember { mutableStateOf(false) }
+    val editState = useDraftEditState<Lorebook> { before, edited ->
+        val existing = editingExisting
+        onUpdate { current ->
+            if (existing) current.map { row -> if (row.id == before.id) applyLorebookDraft(row, before, edited) else row }
+            else (current + edited).distinctBy { it.id }
         }
     }
     val importSuccessMsg = stringResource(R.string.export_import_success)
     val importFailedMsg = stringResource(R.string.export_import_failed)
     val importer = rememberImporter(LorebookSerializer) { result ->
         result.onSuccess { imported ->
-            onUpdate(currentLorebooks + imported)
+            onUpdate { current -> (current + imported).distinctBy { it.id } }
             toaster.show(importSuccessMsg)
         }.onFailure { error ->
             toaster.show(importFailedMsg.format(error.message))
@@ -642,8 +645,8 @@ private fun LorebookTab(
                         LorebookCard(
                             book = book,
                             modifier = longPressReorder(isDragging),
-                            onEdit = { editState.open(book) },
-                            onDelete = { onUpdate(lorebooks - book) }
+                            onEdit = { editingExisting = true; editState.open(book) },
+                            onDelete = { onUpdate { current -> current.filterNot { it.id == book.id } } }
                         )
                     }
                 }
@@ -661,7 +664,7 @@ private fun LorebookTab(
                 }
             },
         ) {
-            Button(onClick = { editState.open(Lorebook()) }) {
+            Button(onClick = { editingExisting = false; editState.open(Lorebook()) }) {
                 Row(
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically

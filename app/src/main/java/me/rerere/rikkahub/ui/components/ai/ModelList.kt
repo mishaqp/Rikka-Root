@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.components.ai
 
+import me.rerere.rikkahub.data.datastore.moveSettingsItem
+
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -432,13 +434,11 @@ private fun ColumnScope.ModelList(
         if (fromIndex >= 0 && toIndex >= 0 &&
             fromIndex < favoriteModels.size && toIndex < favoriteModels.size
         ) {
-            val newFavoriteModels = settings.value.favoriteModels.toMutableList().apply {
-                add(toIndex, removeAt(fromIndex))
-            }
+            val moved = favoriteModels[fromIndex].first.id
+            val anchor = favoriteModels[toIndex].first.id
             coroutineScope.launch {
-                settingsStore.update { oldSettings ->
-                    oldSettings.copy(favoriteModels = newFavoriteModels)
-                }
+                settingsStore.update { current -> current.copy(favoriteModels =
+                    moveSettingsItem(current.favoriteModels, moved, anchor, fromIndex < toIndex) { it }) }
             }
         }
     }
@@ -641,7 +641,7 @@ private fun ColumnScope.ModelList(
 
                                         } else {
                                             settings.copy(
-                                                favoriteModels = settings.favoriteModels + model.id
+                                                favoriteModels = (settings.favoriteModels + model.id).distinct()
                                             )
                                         }
                                     }

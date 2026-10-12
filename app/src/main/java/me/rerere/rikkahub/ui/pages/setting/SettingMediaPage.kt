@@ -1,5 +1,9 @@
 package me.rerere.rikkahub.ui.pages.setting
 
+import kotlin.uuid.Uuid
+import me.rerere.rikkahub.data.datastore.applyMediaDraft
+import me.rerere.rikkahub.data.datastore.moveSettingsItem
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -100,11 +104,9 @@ fun SettingMediaPage(vm: SettingVM = koinViewModel()) {
                 actions = {
                     if (selectedPage == 0) {
                         AddMediaProviderButton {
-                            vm.updateSettings(
-                                settings.copy(
-                                    mediaGenerationProviders = listOf(it) + settings.mediaGenerationProviders
-                                )
-                            )
+                            vm.updateSettings { current -> current.copy(
+                                    mediaGenerationProviders = listOf(it) + current.mediaGenerationProviders
+                                ) }
                         }
                     }
                 },
@@ -155,13 +157,11 @@ fun SettingMediaPage(vm: SettingVM = koinViewModel()) {
             initial = provider,
             confirmText = stringResource(R.string.chat_page_save),
             onConfirm = { edited ->
-                vm.updateSettings(
-                    settings.copy(
-                        mediaGenerationProviders = settings.mediaGenerationProviders.map {
-                            if (it.id == provider.id) edited else it
+                vm.updateSettings { current -> current.copy(
+                        mediaGenerationProviders = current.mediaGenerationProviders.map {
+                            if (it.id == provider.id) applyMediaDraft(it, provider, edited) else it
                         }
-                    )
-                )
+                    ) }
             },
             onDismiss = { editingProvider = null }
         )
@@ -171,16 +171,16 @@ fun SettingMediaPage(vm: SettingVM = koinViewModel()) {
 @Composable
 private fun MediaProviderList(
     settings: Settings,
-    onUpdateSettings: (Settings) -> Unit,
+    onUpdateSettings: ((Settings) -> Settings) -> Unit,
     onEdit: (MediaGenerationProviderSetting) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val lazyListState = rememberLazyListState()
     val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        val newProviders = settings.mediaGenerationProviders.toMutableList().apply {
-            add(to.index, removeAt(from.index))
-        }
-        onUpdateSettings(settings.copy(mediaGenerationProviders = newProviders))
+        val moved = from.key as? Uuid
+        val anchor = to.key as? Uuid
+        if (moved != null && anchor != null) onUpdateSettings { current -> current.copy(mediaGenerationProviders =
+            moveSettingsItem(current.mediaGenerationProviders, moved, anchor, from.index < to.index) { it.id }) }
     }
     var deleteTarget by remember { mutableStateOf<MediaGenerationProviderSetting?>(null) }
 
@@ -231,11 +231,9 @@ private fun MediaProviderList(
         dismissText = stringResource(R.string.cancel),
         onConfirm = {
             deleteTarget?.let { target ->
-                onUpdateSettings(
-                    settings.copy(
-                        mediaGenerationProviders = settings.mediaGenerationProviders.filter { it.id != target.id }
-                    )
-                )
+                onUpdateSettings { current -> current.copy(
+                        mediaGenerationProviders = current.mediaGenerationProviders.filter { it.id != target.id }
+                    ) }
             }
             deleteTarget = null
         },
@@ -428,7 +426,7 @@ private fun MediaProviderSheet(
 @Composable
 private fun MediaUploadS3Tab(
     settings: Settings,
-    onUpdateSettings: (Settings) -> Unit,
+    onUpdateSettings: ((Settings) -> Settings) -> Unit,
     modifier: Modifier = Modifier,
     remoteFileStore: RemoteFileStore = koinInject(),
 ) {
@@ -462,8 +460,8 @@ private fun MediaUploadS3Tab(
                 s3ConnectionItems(
                     config = config,
                     onUpdate = {
-                        config = it
-                        onUpdateSettings(settings.copy(uploadS3Config = it))
+                        config = it(config)
+                        onUpdateSettings { current -> current.copy(uploadS3Config = it(current.uploadS3Config)) }
                     }
                 )
             }

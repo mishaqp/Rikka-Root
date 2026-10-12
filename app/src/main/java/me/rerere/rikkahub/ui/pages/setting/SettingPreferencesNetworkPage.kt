@@ -80,6 +80,8 @@ fun SettingPreferencesNetworkPage(vm: SettingVM = koinViewModel()) {
     var proxyPassword by remember(settings.networkSetting.proxyPassword) {
         mutableStateOf(settings.networkSetting.proxyPassword)
     }
+    var proxyBaseline by remember { mutableStateOf(settings.networkSetting) }
+    var proxyReset by remember { mutableStateOf(false) }
     var proxyUrlDraft by remember { mutableStateOf("") }
     var proxyUsernameDraft by remember { mutableStateOf("") }
     var proxyPasswordDraft by remember { mutableStateOf("") }
@@ -95,26 +97,24 @@ fun SettingPreferencesNetworkPage(vm: SettingVM = koinViewModel()) {
 
     fun updateUserAgent(value: String) {
         userAgent = value
-        vm.updateSettings(
-            settings.copy(
-                networkSetting = settings.networkSetting.copy(userAgent = value),
-            )
-        )
+        vm.updateSettings { current -> current.copy(
+                networkSetting = current.networkSetting.copy(userAgent = value),
+            ) }
     }
 
     fun saveProxy() {
-        vm.updateSettings(
-            settings.copy(
-                networkSetting = settings.networkSetting.copy(
-                    proxyUrl = proxyUrlDraft,
-                    proxyUsername = proxyUsernameDraft,
-                    proxyPassword = proxyPasswordDraft,
-                ),
-            )
-        )
+        val url = proxyUrlDraft
+        val username = proxyUsernameDraft
+        val password = proxyPasswordDraft
+        vm.updateProxyDraft(proxyBaseline, proxyBaseline.copy(
+            proxyUrl = url,
+            proxyUsername = username,
+            proxyPassword = password,
+        ), reset = proxyReset)
     }
 
     fun resetProxy() {
+        proxyReset = true
         proxyUrlDraft = ""
         proxyUsernameDraft = ""
         proxyPasswordDraft = ""
@@ -291,13 +291,11 @@ fun SettingPreferencesNetworkPage(vm: SettingVM = koinViewModel()) {
                             Switch(
                                 checked = settings.networkSetting.enableAutoRetry,
                                 onCheckedChange = { enabled ->
-                                    vm.updateSettings(
-                                        settings.copy(
-                                            networkSetting = settings.networkSetting.copy(
+                                    vm.updateSettings { current -> current.copy(
+                                            networkSetting = current.networkSetting.copy(
                                                 enableAutoRetry = enabled,
                                             ),
-                                        )
-                                    )
+                                        ) }
                                 },
                             )
                         },
@@ -356,6 +354,8 @@ fun SettingPreferencesNetworkPage(vm: SettingVM = koinViewModel()) {
                 ) {
                     item(
                         onClick = {
+                            proxyBaseline = settings.networkSetting
+                            proxyReset = false
                             proxyUrlDraft = proxyUrl
                             proxyUsernameDraft = proxyUsername
                             proxyPasswordDraft = proxyPassword

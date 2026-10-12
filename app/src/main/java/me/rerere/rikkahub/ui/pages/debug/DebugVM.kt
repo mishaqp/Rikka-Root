@@ -73,13 +73,18 @@ class DebugVM(
         val recovered = missing.mapIndexed { index, (id, _) ->
             Assistant(id = id, name = "恢复的助手 ${index + 1}")
         }
-        settingsStore.update(settings.copy(assistants = settings.assistants + recovered))
-        return recovered.size
+        var restored = 0
+        settingsStore.update { current ->
+            val additions = recovered.filter { row -> current.assistants.none { it.id == row.id } }
+            restored = additions.size
+            current.copy(assistants = current.assistants + additions)
+        }
+        return restored
     }
 
-    fun updateSettings(settings: Settings) {
+    fun updateSettings(transform: (Settings) -> Settings) {
         viewModelScope.launch {
-            settingsStore.update(settings)
+            settingsStore.update(transform)
         }
     }
 
