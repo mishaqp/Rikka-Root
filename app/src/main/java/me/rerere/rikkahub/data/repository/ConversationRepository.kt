@@ -2,6 +2,8 @@ package me.rerere.rikkahub.data.repository
 
 import android.database.sqlite.SQLiteBlobTooBigException
 import android.database.sqlite.SQLiteException
+import android.net.Uri
+import android.util.Log
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.PagingData
@@ -15,6 +17,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.datastore.ConversationSortOrder
 import me.rerere.rikkahub.data.db.AppDatabase
@@ -26,6 +30,7 @@ import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.data.files.AttachmentReferenceCoordinator
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.HistoryLoadState
@@ -49,6 +54,7 @@ class ConversationRepository(
     private val mcpSecretSanitizer: McpToolSecretSanitizer? = null,
 ) {
     private val historyLoads = java.util.concurrent.ConcurrentHashMap<String, HistoryLoadState>()
+    internal val attachmentReferences = AttachmentReferenceCoordinator()
 
     /** Also reject reconstructed snapshots of an ID whose latest load failed. */
     fun requireWritableHistory(conversation: Conversation) {
@@ -73,6 +79,24 @@ class ConversationRepository(
 
     suspend fun hasFileReference(fileUrl: String): Boolean =
         messageNodeDAO.hasFileReference(JsonInstant.encodeToString(fileUrl))
+
+    /** Global cleanup for UI, assistant, Web and queue callers. Unknown references retain bytes. */
+    internal suspend fun cleanupChatFiles(candidates: Collection<Uri>): Set<String> {
+        val localFiles = candidates.filter { it.toString().startsWith("file://") }.distinct()
+        if (localFiles.isEmpty()) return emptySet()
+        return try {
+            database.withTransaction {
+                // The transaction excludes Room writers from the query/delete window.
+                val unreferenced = localFiles.filterNot { hasFileReference(it.toString()) }
+                currentCoroutineContext().ensureActive()
+                attachmentReferences.deleteUnreferenced(unreferenced, filesManager::deleteChatFiles)
+            }
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            Log.w("ConversationRepository", "Failed to confirm attachment references; retaining files", error)
+            emptySet()
+        }
+    }
 
     suspend fun getRecentConversations(assistantId: Uuid, limit: Int = 10): List<Conversation> {
         return conversationDAO.getRecentConversationsOfAssistant(
@@ -409,27 +433,33 @@ class ConversationRepository(
     suspend fun insertConversation(conversation: Conversation) {
         requireWritableHistory(conversation)
         val safeConversation = sanitizeSshConversation(conversation, sshToolSecrets, mcpSecretSanitizer)
-        database.withTransaction {
-            conversationDAO.insert(
-                conversationToConversationEntity(safeConversation)
-            )
-            saveMessageNodes(safeConversation.id.toString(), safeConversation.messageNodes)
+        attachmentReferences.withFileReservation(safeConversation.files.map { it.toString() }) {
+            database.withTransaction {
+                conversationDAO.insert(
+                    conversationToConversationEntity(safeConversation)
+                )
+                saveMessageNodes(safeConversation.id.toString(), safeConversation.messageNodes)
+                attachmentReferences.conversationWritten(safeConversation.id)
+            }
+            messageFtsManager.indexConversation(safeConversation)
         }
-        messageFtsManager.indexConversation(safeConversation)
     }
 
     suspend fun updateConversation(conversation: Conversation) {
         requireWritableHistory(conversation)
         val safeConversation = sanitizeSshConversation(conversation, sshToolSecrets, mcpSecretSanitizer)
-        database.withTransaction {
-            conversationDAO.update(
-                conversationToConversationEntity(safeConversation)
-            )
-            // 删除旧的节点，插入新的节点
-            messageNodeDAO.deleteByConversation(conversation.id.toString())
-            saveMessageNodes(safeConversation.id.toString(), safeConversation.messageNodes)
+        attachmentReferences.withFileReservation(safeConversation.files.map { it.toString() }) {
+            database.withTransaction {
+                conversationDAO.update(
+                    conversationToConversationEntity(safeConversation)
+                )
+                // 删除旧的节点，插入新的节点
+                messageNodeDAO.deleteByConversation(conversation.id.toString())
+                saveMessageNodes(safeConversation.id.toString(), safeConversation.messageNodes)
+                attachmentReferences.conversationWritten(safeConversation.id)
+            }
+            messageFtsManager.indexConversation(safeConversation)
         }
-        messageFtsManager.indexConversation(safeConversation)
     }
 
     suspend fun deleteConversation(conversation: Conversation) {
@@ -441,13 +471,20 @@ class ConversationRepository(
         }
         requireWritableHistory(fullConversation)
         messageFtsManager.deleteConversation(conversation.id.toString())
-        database.withTransaction {
-            // message_node 会通过 CASCADE 自动删除
-            conversationDAO.delete(
-                conversationToConversationEntity(conversation)
-            )
+        try {
+            database.withTransaction {
+                // message_node 会通过 CASCADE 自动删除
+                conversationDAO.delete(
+                    conversationToConversationEntity(conversation)
+                )
+                // A lingering open session is no longer a history reference, but its queue is.
+                attachmentReferences.conversationDeleted(conversation.id)
+            }
+        } catch (error: Throwable) {
+            attachmentReferences.conversationWritten(conversation.id)
+            throw error
         }
-        filesManager.deleteChatFiles(fullConversation.files)
+        cleanupChatFiles(fullConversation.files)
     }
 
     suspend fun searchMessages(

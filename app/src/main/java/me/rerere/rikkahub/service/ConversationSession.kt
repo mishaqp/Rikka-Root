@@ -14,6 +14,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import me.rerere.ai.ui.finishReasoning
+import me.rerere.rikkahub.data.files.AttachmentReferenceCoordinator
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.HistoryLoadState
 import me.rerere.rikkahub.data.model.requireCompleteHistory
@@ -29,6 +30,7 @@ class ConversationSession(
     private val scope: CoroutineScope,
     private val onIdle: (Uuid) -> Unit,
     private val onGenerationFinished: (Uuid, Throwable?) -> Unit = { _, _ -> },
+    private val attachmentReferences: AttachmentReferenceCoordinator = AttachmentReferenceCoordinator(),
 ) {
     // 会话状态
     private val _state = MutableStateFlow(initial)
@@ -38,7 +40,7 @@ class ConversationSession(
     @Volatile
     private var initialized = false
     internal val isInitialized: Boolean get() = initialized
-    val messageQueue = MessageQueue()
+    val messageQueue = MessageQueue(attachmentReferences)
 
     // 页面切换和 SSE 重连只加载一次；活跃 session 的内存状态始终优先。
     suspend fun initialize(load: suspend () -> Conversation) {
@@ -59,8 +61,12 @@ class ConversationSession(
             state.value.requireCompleteHistory()
             conversation.requireCompleteHistory()
         }
-        _state.value = conversation
-        initialized = true
+        // Late metadata publications must not make a deleted session's old history live again.
+        val restoreHistory = initialized && state.value.messageNodes != conversation.messageNodes
+        attachmentReferences.publishConversation(id, restoreHistory = restoreHistory) {
+            _state.value = conversation
+            initialized = true
+        }
     }
 
     /** Read and transform the latest state within the same publication boundary. */
@@ -175,7 +181,9 @@ class ConversationSession(
     // 从队列取出到写入会话历史之间，附件仍需作为有效引用保留。
     @Volatile
     var submittingMessage: QueuedMessage? = null
-        internal set
+        internal set(value) {
+            attachmentReferences.withRuntimePublication { field = value }
+        }
 
     // 原子引用计数
     private val refCount = AtomicInteger(0)

@@ -7,6 +7,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.isEmptyInputMessage
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.localFileUrls
+import me.rerere.rikkahub.data.files.AttachmentReferenceCoordinator
 import kotlin.uuid.Uuid
 
 data class QueuedMessage(
@@ -37,9 +38,13 @@ internal fun unreferencedQueuedAttachmentUrls(
 /** Pending input is kept outside conversation history until dispatched. */
 class MessageQueuePausedException : IllegalStateException()
 
-class MessageQueue {
+class MessageQueue(private val attachmentReferences: AttachmentReferenceCoordinator = AttachmentReferenceCoordinator()) {
     private val mutableState = MutableStateFlow(MessageQueueState())
     val state = mutableState.asStateFlow()
+
+    private fun publish(next: MessageQueueState) = attachmentReferences.withRuntimePublication {
+        mutableState.value = next
+    }
 
     @Synchronized
     fun enqueue(parts: List<UIMessagePart>, answer: Boolean = true, reply: CompletableDeferred<String?>? = null) {
@@ -47,29 +52,34 @@ class MessageQueue {
             reply?.complete(null)
             return
         }
-        mutableState.value = state.value.copy(
+        publish(state.value.copy(
             messages = state.value.messages + QueuedMessage(
                 parts = parts.toList(),
                 answer = answer,
                 reply = reply,
             ),
-        )
+        ))
     }
 
     @Synchronized
-    fun takeNext(): QueuedMessage? {
+    fun takeNext(): QueuedMessage? = takeNextForSubmission {}
+
+    @Synchronized
+    internal fun takeNextForSubmission(onTaken: (QueuedMessage) -> Unit): QueuedMessage? {
         val current = state.value
         if (current.paused) return null
         val next = current.messages.firstOrNull()?.takeUnless { it.isEditing } ?: return null
-        mutableState.value = current.copy(messages = current.messages.drop(1))
-        return next
+        return attachmentReferences.withRuntimePublication {
+            publish(current.copy(messages = current.messages.drop(1)))
+            onTaken(next)
+            next
+        }
     }
 
     @Synchronized
     fun remove(id: Uuid): QueuedMessage? {
         val removed = state.value.messages.find { it.id == id } ?: return null
-        mutableState.value =
-            state.value.copy(messages = state.value.messages.filterNot { it.id == id })
+        publish(state.value.copy(messages = state.value.messages.filterNot { it.id == id }))
         removed.reply?.complete(null)
         return removed
     }
@@ -77,9 +87,9 @@ class MessageQueue {
     @Synchronized
     fun beginEdit(id: Uuid): QueuedMessage? {
         val message = state.value.messages.find { it.id == id && !it.isEditing } ?: return null
-        mutableState.value = state.value.copy(
+        publish(state.value.copy(
             messages = state.value.messages.map { if (it.id == id) it.copy(isEditing = true) else it },
-        )
+        ))
         return message
     }
 
@@ -87,21 +97,21 @@ class MessageQueue {
     fun finishEdit(id: Uuid, parts: List<UIMessagePart>? = null): QueuedMessage? {
         if (parts != null && parts.isEmptyInputMessage()) return null
         val previous = state.value.messages.find { it.id == id } ?: return null
-        mutableState.value = state.value.copy(
+        publish(state.value.copy(
             messages = state.value.messages.map {
                 if (it.id == id) it.copy(
                     parts = parts?.toList() ?: it.parts,
                     isEditing = false
                 ) else it
             },
-        )
+        ))
         // 取消编辑只释放占位，不能清理原附件。
         return previous.takeIf { parts != null }
     }
 
     @Synchronized
     fun pause() {
-        mutableState.value = state.value.copy(paused = true)
+        publish(state.value.copy(paused = true))
         state.value.messages.forEach { it.reply?.completeExceptionally(MessageQueuePausedException()) }
     }
 
@@ -113,6 +123,6 @@ class MessageQueue {
 
     @Synchronized
     fun resume() {
-        mutableState.value = state.value.copy(paused = false)
+        publish(state.value.copy(paused = false))
     }
 }

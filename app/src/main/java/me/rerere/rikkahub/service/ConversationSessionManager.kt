@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.files.AttachmentReferenceCoordinator
 import kotlin.uuid.Uuid
 
 /** Owns runtime sessions; loading, persistence and message dispatch belong to ChatService. */
@@ -19,6 +20,7 @@ class ConversationSessionManager(
     private val scope: CoroutineScope,
     private val createInitialConversation: (Uuid) -> Conversation,
     private val onGenerationFinished: (ConversationSession, Throwable?) -> Unit,
+    private val attachmentReferences: AttachmentReferenceCoordinator = AttachmentReferenceCoordinator(),
 ) {
     private val lock = Any()
     private val sessions = MutableStateFlow<Map<Uuid, ConversationSession>>(emptyMap())
@@ -38,9 +40,10 @@ class ConversationSessionManager(
             onGenerationFinished = { id, cause ->
                 if (get(id) === session) onGenerationFinished(session, cause)
             },
+            attachmentReferences = attachmentReferences,
         )
         // Publish the actual registry, so collectors never observe a version before insertion.
-        sessions.value = sessions.value + (conversationId to session)
+        attachmentReferences.withRuntimePublication { sessions.value = sessions.value + (conversationId to session) }
         session
     }
 

@@ -286,6 +286,8 @@ class ChatService(
 ) {
     // workspace 系统提示注入 (依赖 workspaceRepository, 故在类内构造)
     private val workspaceReminderTransformer = WorkspaceReminderTransformer(workspaceRepository)
+    private val attachmentReferences = conversationRepo.attachmentReferences
+    private val pendingAttachmentCleanup = java.util.concurrent.ConcurrentHashMap<Uuid, Set<String>>()
 
     private val sessionManager = ConversationSessionManager(
         scope = appScope,
@@ -294,7 +296,19 @@ class ChatService(
                 .copy(historyLoadState = HistoryLoadState.NOT_LOADED)
         },
         onGenerationFinished = ::onSessionGenerationFinished,
+        attachmentReferences = attachmentReferences,
     )
+
+    init {
+        attachmentReferences.setRuntimeReferences { deletedHistories ->
+            val sessions = sessionManager.snapshot()
+            val historyFiles = sessions.filterNot { it.id in deletedHistories }
+                .flatMap { it.state.value.files }.mapTo(mutableSetOf()) { it.toString() }
+            historyFiles + sessions.flatMap {
+                it.messageQueue.state.value.messages + listOfNotNull(it.submittingMessage)
+            }.flatMap { it.parts }.localFileUrls()
+        }
+    }
 
     // 错误状态
     private val _errors = MutableStateFlow<List<ChatError>>(emptyList())
@@ -472,21 +486,7 @@ class ChatService(
         if (candidates.isEmpty()) return
         appScope.launch {
             try {
-                // 未打开的会话及未选中的分支也可能引用同一附件。
-                val persistedReferences =
-                    candidates.filter { conversationRepo.hasFileReference(it) }.toSet()
-                // 数据库查询挂起期间队列可能已推进，删除前重新读取内存引用。
-                val currentSessions = sessionManager.snapshot()
-                val unusedFiles = unreferencedQueuedAttachmentUrls(
-                    previous = previous,
-                    conversations = currentSessions.map { it.state.value },
-                    pendingMessages = currentSessions.flatMap {
-                        it.messageQueue.state.value.messages + listOfNotNull(it.submittingMessage)
-                    },
-                ) - persistedReferences
-                if (unusedFiles.isNotEmpty()) {
-                    filesManager.deleteChatFiles(unusedFiles.map { it.toUri() })
-                }
+                conversationRepo.cleanupChatFiles(candidates.map { it.toUri() })
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 // 无法确认引用时保留文件，避免误删。
@@ -563,8 +563,8 @@ class ChatService(
             if (session.getJob() != null || session.state.value.currentMessages.any { message ->
                     message.parts.any { it is UIMessagePart.Tool && it.isPending }
                 }) return null
-            val next = session.messageQueue.takeNext() ?: return null
-            session.submittingMessage = next
+            // Queue removal and submitting publication form one reference-preserving handoff.
+            val next = session.messageQueue.takeNextForSubmission { session.submittingMessage = it } ?: return null
             return sendQueuedMessage(session, next)
         }
     }
@@ -1551,18 +1551,11 @@ class ChatService(
     }
 
     private fun checkFilesDelete(newConversation: Conversation, oldConversation: Conversation) {
-        val session = sessionManager.get(newConversation.id)
-        val queuedFiles = (session?.messageQueue?.state?.value?.messages.orEmpty() +
-                listOfNotNull(session?.submittingMessage))
-            .flatMap { it.parts }.localFileUrls().map { it.toUri() }
-        val newFiles = newConversation.files + queuedFiles
-        val oldFiles = oldConversation.files
-        val deletedFiles = oldFiles.filter { file ->
-            newFiles.none { it == file }
-        }
-        if (deletedFiles.isNotEmpty()) {
-            filesManager.deleteChatFiles(deletedFiles)
-            Log.w(TAG, "checkFilesDelete: $deletedFiles")
+        val removed = oldConversation.files.map { it.toString() }.toSet() -
+            newConversation.files.map { it.toString() }.toSet()
+        if (removed.isNotEmpty()) {
+            // Optimistic state changes are not permission to remove bytes before persistence.
+            pendingAttachmentCleanup.compute(newConversation.id) { _, pending -> pending.orEmpty() + removed }
         }
     }
 
@@ -1603,6 +1596,14 @@ class ChatService(
             }
         }
         if (!saved) return
+
+        val candidates = pendingAttachmentCleanup[conversationId].orEmpty()
+        val deleted = conversationRepo.cleanupChatFiles(candidates.map { it.toUri() })
+        if (deleted.isNotEmpty()) {
+            pendingAttachmentCleanup.computeIfPresent(conversationId) { _, pending ->
+                (pending - deleted).takeIf { it.isNotEmpty() }
+            }
+        }
 
         // 删除消息或切换分支也可能解除工具审批阻塞，保存成功后重新检查队列。
         // 调度器仍会检查当前生成任务、待审批工具、暂停状态及编辑占位。
@@ -1738,37 +1739,45 @@ class ChatService(
         conversationId: Uuid,
         messageId: Uuid
     ): Conversation {
-        val currentConversation = requireWritableConversation(conversationId)
-        val targetNodeIndex = currentConversation.messageNodes.indexOfFirst { node ->
-            node.messages.any { it.id == messageId }
-        }
-        if (targetNodeIndex == -1) {
-            throw NotFoundException("Message not found")
-        }
-
-        val copiedNodes = currentConversation.messageNodes
-            .subList(0, targetNodeIndex + 1)
-            .map { node ->
-                node.copy(
-                    id = Uuid.random(),
-                    messages = node.messages.map { message ->
-                        message.copy(
-                            parts = message.parts.map { part ->
-                                part.copyWithForkedFileUrl()
-                            }
-                        )
-                    }
-                )
+        var sourceFiles = emptyList<android.net.Uri>()
+        val fork = attachmentReferences.withPendingFileReservation { reserveSources ->
+            val currentConversation = requireWritableConversation(conversationId)
+            val targetNodeIndex = currentConversation.messageNodes.indexOfFirst { node ->
+                node.messages.any { it.id == messageId }
             }
+            if (targetNodeIndex == -1) {
+                throw NotFoundException("Message not found")
+            }
+            sourceFiles = currentConversation.files
+            reserveSources(sourceFiles.map { it.toString() })
 
-        val existingTitles = conversationRepo
-            .getConversationsOfAssistant(currentConversation.assistantId)
-            .first()
-            .mapTo(mutableSetOf()) { it.title }
-        val forkConversation = createForkConversation(currentConversation, copiedNodes, existingTitles)
+            val copiedNodes = currentConversation.messageNodes
+                .subList(0, targetNodeIndex + 1)
+                .map { node ->
+                    node.copy(
+                        id = Uuid.random(),
+                        messages = node.messages.map { message ->
+                            message.copy(
+                                parts = message.parts.map { part ->
+                                    part.copyWithForkedFileUrl()
+                                }
+                            )
+                        }
+                    )
+                }
 
-        saveConversation(forkConversation.id, forkConversation)
-        return forkConversation
+            val existingTitles = conversationRepo
+                .getConversationsOfAssistant(currentConversation.assistantId)
+                .first()
+                .mapTo(mutableSetOf()) { it.title }
+            val forkConversation = createForkConversation(currentConversation, copiedNodes, existingTitles)
+
+            saveConversation(forkConversation.id, forkConversation)
+            forkConversation
+        }
+        // Release originals retained by a concurrent source deletion after a successful fork.
+        conversationRepo.cleanupChatFiles(sourceFiles)
+        return fork
     }
 
     suspend fun selectMessageNode(
@@ -1872,6 +1881,7 @@ class ChatService(
             is UIMessagePart.Document -> copy(url = copyLocalFileIfNeeded(url))
             is UIMessagePart.Video -> copy(url = copyLocalFileIfNeeded(url))
             is UIMessagePart.Audio -> copy(url = copyLocalFileIfNeeded(url))
+            is UIMessagePart.Tool -> copy(output = output.map { it.copyWithForkedFileUrl() })
             else -> this
         }
     }

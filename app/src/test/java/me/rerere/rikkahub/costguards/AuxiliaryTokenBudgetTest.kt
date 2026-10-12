@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import io.mockk.mockk
 import io.mockk.coEvery
+import io.mockk.every
 import java.io.File
 import java.io.IOException
 import java.util.Locale
@@ -141,6 +142,7 @@ class AuxiliaryTokenBudgetTest {
         val exhausted = store.getLedger(conversationOwner, conversationId, emptyList())
         exhausted.reserve(0, 100).let { it.markSubmitted(); it.observe(TokenUsage(totalTokens = 100)); it.markCompleted(); it.close() }
         val repository = mockk<ConversationRepository>(relaxed = true)
+        every { repository.attachmentReferences } returns me.rerere.rikkahub.data.files.AttachmentReferenceCoordinator()
         coEvery { repository.getConversationById(conversationId) } returns
             Conversation(id = conversationId, assistantId = conversationOwner.id, messageNodes = emptyList())
         val service = ChatService(RuntimeEnvironment.getApplication(), serviceScope, mockk(relaxed = true),
@@ -180,6 +182,7 @@ class AuxiliaryTokenBudgetTest {
         fake.streamUsages = emptyList()
         fake.afterStream = { started.complete(Unit); release.await(); throw CancellationException("translation cancelled") }
         val repository = mockk<ConversationRepository>(relaxed = true)
+        every { repository.attachmentReferences } returns me.rerere.rikkahub.data.files.AttachmentReferenceCoordinator()
         coEvery { repository.getConversationById(conversationId) } returns
             Conversation(id = conversationId, assistantId = owner.id, messageNodes = emptyList())
         val service = ChatService(RuntimeEnvironment.getApplication(), serviceScope, mockk(relaxed = true),
