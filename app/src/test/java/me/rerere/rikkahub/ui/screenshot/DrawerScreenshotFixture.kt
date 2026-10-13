@@ -10,14 +10,20 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.paging.LoadState
+import androidx.paging.LoadStates
 import androidx.paging.PagingData
 import androidx.paging.compose.collectAsLazyPagingItems
 import kotlinx.coroutines.flow.flowOf
+import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.ConversationSortOrder
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Assistant
@@ -29,6 +35,8 @@ import me.rerere.rikkahub.ui.pages.chat.ChatDrawerFolderControls
 import me.rerere.rikkahub.ui.pages.chat.ChatDrawerFrame
 import me.rerere.rikkahub.ui.pages.chat.ChatDrawerHeaderContent
 import me.rerere.rikkahub.ui.pages.chat.ChatDrawerSearchBar
+import me.rerere.rikkahub.ui.pages.chat.ChatDrawerSelectionActionBar
+import me.rerere.rikkahub.ui.pages.chat.ChatDrawerSelectionHeader
 import me.rerere.rikkahub.ui.pages.chat.ChatDrawerTopArea
 import me.rerere.rikkahub.ui.pages.chat.ConversationList
 import me.rerere.rikkahub.ui.pages.chat.ConversationListItem
@@ -46,25 +54,52 @@ internal val drawerFixtureTitles = listOf(
     "Семейный календарь", "Рецепт ужина", "Прогулка по городу", "Идеи для выходных",
 )
 
+internal enum class DrawerScreenshotMode { Normal, Search, MultiSelect }
+
+/** Mutable boundary state; clicks still go through the production drawer controls. */
+internal class DrawerScreenshotState(mode: DrawerScreenshotMode = DrawerScreenshotMode.Normal) {
+    var query by mutableStateOf(if (mode == DrawerScreenshotMode.Search) "настройк" else "")
+    var selectionMode by mutableStateOf(mode == DrawerScreenshotMode.MultiSelect)
+    var selectedIds by mutableStateOf(if (selectionMode) setOf(drawerFixtureId(1), drawerFixtureId(2)) else emptySet())
+    var currentId by mutableStateOf(drawerFixtureId(2))
+    var lastDestination: Screen? = null
+    var newChatCalls = 0
+    var pinCalls = 0
+    var moveCalls = 0
+    var deleteCalls = 0
+    var nicknameCalls = 0
+}
+
+internal fun drawerFixtureId(index: Int) = Uuid.parse("20000000-0000-0000-0000-${index.toString().padStart(12, '0')}")
+
 @Composable
-internal fun DrawerScreenshotFixture() {
+internal fun DrawerScreenshotFixture(state: DrawerScreenshotState = remember { DrawerScreenshotState() }) {
     val assistant = remember { Assistant(id = drawerFixtureAssistantId, name = "Ассистент по умолчанию") }
     val settings = remember { Settings(assistantId = assistant.id, assistants = listOf(assistant)) }
     val chats = remember {
         drawerFixtureTitles.mapIndexed { index, title ->
-            Conversation(id = Uuid.parse("20000000-0000-0000-0000-${(index + 1).toString().padStart(12, '0')}"),
+            Conversation(id = drawerFixtureId(index + 1),
                 assistantId = assistant.id, title = title, messageNodes = emptyList(), isPinned = index == 0,
                 createAt = Instant.parse("2026-01-02T12:00:00Z"), updateAt = Instant.parse("2026-01-02T12:00:00Z"))
         }
     }
-    val items = remember {
+    val visibleChats = remember(chats, state.query) { chats.filter { it.title.contains(state.query, ignoreCase = true) } }
+    val items = remember(visibleChats) {
         buildList {
-            add(ConversationListItem.PinnedHeader)
-            chats.forEachIndexed { index, chat ->
-                if (index == 1) add(ConversationListItem.DateHeader(LocalDate.of(2026, 1, 2), "Сегодня"))
-                if (index == 8) add(ConversationListItem.DateHeader(LocalDate.of(2026, 1, 1), "Вчера"))
-                if (index == 10) add(ConversationListItem.DateHeader(LocalDate.of(2025, 12, 29), "На этой неделе"))
-                if (index == 11) add(ConversationListItem.DateHeader(LocalDate.of(2025, 12, 22), "Раньше"))
+            if (visibleChats.any { it.isPinned }) add(ConversationListItem.PinnedHeader)
+            var previousGroup: String? = null
+            visibleChats.forEach { chat ->
+                val index = chats.indexOf(chat)
+                if (!chat.isPinned) {
+                    val group = when {
+                        index >= 11 -> LocalDate.of(2025, 12, 22) to "Раньше"
+                        index >= 10 -> LocalDate.of(2025, 12, 29) to "На этой неделе"
+                        index >= 8 -> LocalDate.of(2026, 1, 1) to "Вчера"
+                        else -> LocalDate.of(2026, 1, 2) to "Сегодня"
+                    }
+                    if (group.second != previousGroup) add(ConversationListItem.DateHeader(group.first, group.second))
+                    previousGroup = group.second
+                }
                 add(ConversationListItem.Item(chat,
                     previewText = when (index) {
                         2 -> "Запустил команду и проверил результат"
@@ -75,30 +110,59 @@ internal fun DrawerScreenshotFixture() {
             }
         }
     }
-    val paged = remember(items) { flowOf(PagingData.from(items)) }.collectAsLazyPagingItems()
+    val paged = remember(items) {
+        // A completed one-page query must publish its load states as the real
+        // database Pager does. StaticList without states leaves refresh Loading.
+        flowOf(PagingData.from(items, sourceLoadStates = LoadStates(
+            refresh = LoadState.NotLoading(endOfPaginationReached = false),
+            prepend = LoadState.NotLoading(endOfPaginationReached = true),
+            append = LoadState.NotLoading(endOfPaginationReached = true),
+        )))
+    }.collectAsLazyPagingItems()
     val folders = remember { listOf("Работа", "Личное", "Идеи").mapIndexed { index, name ->
         Folder(id = Uuid.parse("30000000-0000-0000-0000-${(index + 1).toString().padStart(12, '0')}"),
             assistantId = assistant.id, name = name)
     } }
     Box(Modifier.fillMaxSize().testTag("drawer_fixture")) {
         ChatDrawerFrame {
-            ConversationList(current = chats[1], conversations = paged, conversationJobs = emptyList(),
-                listState = rememberLazyListState(), modifier = Modifier.fillMaxWidth().weight(1f),
-                headerContent = {
-                    ChatDrawerTopArea {
-                        ChatDrawerHeaderContent(nickname = "Пользователь",
-                            rootChip = null, hasUpdate = false, onEditNickname = {}, onNavigate = {},
-                            greeting = { Text("Добрый вечер", style = MaterialTheme.typography.bodySmall) },
-                            avatar = { FixtureAvatar("П", it) })
-                        ChatDrawerSearchBar(onNavigate = {}, onNewChat = {})
-                        ChatDrawerAssistantCard(settings = settings, onUpdateSettings = {}, onNavigate = {},
-                            avatarContent = { _, _, modifier, _ -> FixtureAvatar("А", modifier) })
-                        ChatDrawerFolderControls(
-                            sort = { ConversationSortButton(DrawerConversationSort.NEWEST, {}, ConversationSortOrder.UPDATE_TIME, {}) },
-                            folders = { FolderBar(folders, null, true, {}, {}, {}, {}, {}, Modifier.fillMaxWidth()) })
-                    }
-                })
-            ChatDrawerBottomBar(assistant.id.toString(), onNavigate = {})
+            ChatDrawerTopArea {
+                if (state.selectionMode) {
+                    ChatDrawerSelectionHeader(state.selectedIds.size,
+                        allSelected = visibleChats.isNotEmpty() && visibleChats.all { it.id in state.selectedIds },
+                        onCancel = { state.selectionMode = false; state.selectedIds = emptySet() },
+                        onToggleSelectAll = {
+                            state.selectedIds = if (visibleChats.all { it.id in state.selectedIds }) emptySet()
+                            else visibleChats.map { it.id }.toSet()
+                        })
+                } else {
+                    ChatDrawerSearchBar(onNavigate = { state.lastDestination = it }, onNewChat = { state.newChatCalls++ },
+                        query = state.query, onQueryChange = { state.query = it })
+                }
+                ChatDrawerAssistantCard(settings = settings, onUpdateSettings = {}, onNavigate = { state.lastDestination = it },
+                    avatarContent = { _, _, modifier, _ -> FixtureAvatar("А", modifier) })
+                ChatDrawerFolderControls(
+                    sort = { ConversationSortButton(DrawerConversationSort.NEWEST, {}, ConversationSortOrder.UPDATE_TIME, {}) },
+                    folders = { FolderBar(folders, null, true, {}, {}, {}, {}, {}, Modifier.fillMaxWidth()) })
+            }
+            ConversationList(current = chats.first { it.id == state.currentId }, conversations = paged, conversationJobs = emptyList(),
+                listState = rememberLazyListState(), modifier = Modifier.fillMaxWidth().weight(1f).testTag("drawer_fixture_list"),
+                selectionMode = state.selectionMode, selectedConversationIds = state.selectedIds,
+                onClick = { state.currentId = it.id },
+                onStartSelection = { state.selectionMode = true; state.selectedIds = setOf(it.id) },
+                onToggleSelection = { chat -> state.selectedIds = if (chat.id in state.selectedIds) state.selectedIds - chat.id else state.selectedIds + chat.id },
+                searchQuery = state.query)
+            if (state.selectionMode) {
+                ChatDrawerSelectionActionBar(state.selectedIds.size,
+                    allSelectedPinned = state.selectedIds.isNotEmpty() && chats.filter { it.id in state.selectedIds }.all { it.isPinned },
+                    onPin = { state.pinCalls++ }, onMove = { state.moveCalls++ }, onDelete = { state.deleteCalls++ })
+            } else {
+                ChatDrawerHeaderContent(nickname = "Пользователь",
+                    rootChip = null, hasUpdate = false, onEditNickname = { state.nicknameCalls++ },
+                    onNavigate = { state.lastDestination = it }, modifier = Modifier.padding(horizontal = 16.dp),
+                    greeting = { Text("Добрый вечер", style = MaterialTheme.typography.bodySmall) },
+                    avatar = { FixtureAvatar("П", it) })
+                ChatDrawerBottomBar(assistant.id.toString(), onNavigate = { state.lastDestination = it })
+            }
         }
     }
 }

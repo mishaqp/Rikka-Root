@@ -7,6 +7,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -56,11 +57,11 @@ class UiScreenshotsTest internal constructor(
         compose.setContent {
             ScreenshotTheme(theme, fontScale) {
                 val colors = MaterialTheme.colorScheme
-                drawerBackground = if (theme.amoled) colors.background else colors.surfaceContainerLow
-                selectedBackground = colors.secondaryContainer
+                drawerBackground = if (theme.amoled) colors.background else colors.surface
+                selectedBackground = colors.primary.copy(alpha = .12f).compositeOver(drawerBackground)
                 foreground = colors.onSurface
                 supportingForeground = colors.onSurfaceVariant
-                selectedForeground = colors.onSecondaryContainer
+                selectedForeground = colors.onSurface
                 Surface(Modifier.requiredSize(411.dp, 891.dp).testTag("screenshot")) {
                     when (screen) {
                         ScreenshotScreen.ChatDrawer -> DrawerScreenshotFixture()
@@ -86,24 +87,23 @@ class UiScreenshotsTest internal constructor(
         }
         if (screen == ScreenshotScreen.ChatDrawer) {
             val drawer = compose.onNodeWithTag("chat_drawer_sheet").fetchSemanticsNode().boundsInRoot
-            assertEquals("411dp phone drawer must be capped at 320dp", 320f, drawer.width, .5f)
+            assertEquals("411dp phone drawer uses Moru's 75% phone width below the 320dp cap", 411f * .75f, drawer.width, .5f)
             val headerBounds = compose.onNodeWithTag("chat_drawer_header").fetchSemanticsNode().boundsInRoot
             assertEquals("Header must start on the shared 16dp grid", drawer.left + 16f, headerBounds.left, .5f)
             val titleBounds = compose.onNodeWithText(drawerFixtureTitles.first(), useUnmergedTree = true)
                 .fetchSemanticsNode().boundsInRoot
-            assertEquals("Chat titles must start on the shared 16dp grid", drawer.left + 16f, titleBounds.left, .5f)
+            assertEquals("Chat titles use the list's 10dp inset plus the row's 14dp inset", drawer.left + 24f, titleBounds.left, .5f)
             val dateBounds = compose.onNodeWithText("Сегодня", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
             assertEquals("Date headings must share the chat-title grid", titleBounds.left, dateBounds.left, .5f)
             if (fontScale == 1f) {
                 val header = compose.onNodeWithTag("chat_drawer_header").fetchSemanticsNode().boundsInRoot
                 assertTrue("Default header exceeds 72dp: ${header.height}", header.height <= 72.5f)
-                val footer = compose.onNodeWithTag("chat_drawer_bottom_bar").fetchSemanticsNode().boundsInRoot
                 val rows = compose.onAllNodes(SemanticsMatcher("conversation row") { node ->
                     node.config.getOrElse(SemanticsProperties.TestTag) { "" }.startsWith("chat_drawer_conversation_")
                 }).fetchSemanticsNodes()
                 val fullyVisible = rows.count { node ->
                     val bounds = node.boundsInRoot
-                    bounds.height >= 55.5f && bounds.top >= 0 && bounds.bottom <= footer.top
+                    bounds.height >= 47.5f && bounds.top >= 0 && bounds.bottom <= headerBounds.top
                 }
                 assertTrue("Only $fullyVisible full chats fit on the phone", fullyVisible >= 8)
             }
@@ -123,8 +123,12 @@ class UiScreenshotsTest internal constructor(
                     drawerBackground.toArgb(), bitmap.getRGB(first.center.x.toInt(), (first.top + 2).toInt()))
                 val selected = compose.onNodeWithTag("chat_drawer_conversation_20000000-0000-0000-0000-000000000002")
                     .fetchSemanticsNode().boundsInRoot
-                assertEquals("Selected row uses the theme's drawer pill",
-                    selectedBackground.toArgb(), bitmap.getRGB(selected.center.x.toInt(), (selected.top + 2).toInt()))
+                val selectedPixel = bitmap.getRGB(selected.center.x.toInt(), (selected.top + 2).toInt())
+                val expectedPixel = selectedBackground.toArgb()
+                for (shift in listOf(0, 8, 16)) {
+                    assertTrue("Selected row uses the theme's translucent primary pill",
+                        kotlin.math.abs((selectedPixel ushr shift and 255) - (expectedPixel ushr shift and 255)) <= 1)
+                }
             }
         }
     }

@@ -288,9 +288,10 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         }
         compose.waitForIdle()
         val list = compose.onNode(SemanticsMatcher("visible main chat LazyColumn") {
+            it.config.getOrElse(SemanticsProperties.TestTag) { "" } == "chat_list_timeline" &&
             it.config.contains(SemanticsActions.ScrollToIndex) &&
                 it.config.contains(SemanticsProperties.VerticalScrollAxisRange) &&
-                it.boundsInRoot.left >= 0 && it.boundsInRoot.top > 0
+                it.boundsInRoot.left >= 0 && it.boundsInRoot.top >= 0
         })
         fixture.viewports.forEach { (name, index) ->
             list.performScrollToIndex(index)
@@ -498,7 +499,12 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
             nativeLongText.layoutInput.density.fontScale, 0.001f)
         assertMessageBounds("chat_message_user_bubble")
         capture("user_long_collapsed")
-        toggle.performClick()
+        // Prepare the real expanded state through its accessibility callback;
+        // this screenshot checks content and geometry, while pointer propagation
+        // retains its dedicated productionChatStage2UserBranchInteraction test.
+        toggle.performSemanticsAction(SemanticsActions.OnClick) { click ->
+            assertTrue("The production user-text expand action must accept its click", click())
+        }
         settleNativeRipple()
         assertNull("Expanding the user text must not edit its parent bubble", fixture.vm.inputState.editingMessage)
         toggle.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Развернуто"))
@@ -720,7 +726,12 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         showStage2(settings, DisplaySetting(), listOf(sources))
         compose.onNodeWithTag("chat_message_sources").assertIsDisplayed()
         capture("sources_summary")
-        compose.onNodeWithTag("chat_message_sources").performClick()
+        // SDK 35's native touch ripple behind the modal can differ between the
+        // artifact and Verify window captures despite settled test clocks. Open
+        // through the same production accessibility callback without a tap ripple.
+        compose.onNodeWithTag("chat_message_sources").performSemanticsAction(SemanticsActions.OnClick) { click ->
+            assertTrue("The production sources action must accept its click", click())
+        }
         settleNativeRipple()
         assertStage2SourcesSheet()
         capture("sources_sheet", includeWindows = true)
@@ -733,7 +744,11 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         assertMessageBounds("chat_message_translation")
         compose.onNodeWithTag("chat_message_translation_content").assertIsDisplayed()
         capture("translation_expanded")
-        compose.onNodeWithTag("chat_message_translation_toggle").performClick()
+        // The collapsed snapshot checks the real callback result; separate native
+        // captures can otherwise sample different SDK 35 patterned tap-ripple frames.
+        compose.onNodeWithTag("chat_message_translation_toggle").performSemanticsAction(SemanticsActions.OnClick) { click ->
+            assertTrue("The production translation toggle must accept its click", click())
+        }
         settleNativeRipple()
         compose.onNodeWithTag("chat_message_translation_content").assertDoesNotExist()
         capture("translation_collapsed")
@@ -1323,9 +1338,10 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
     }
 
     private fun mainChatList() = compose.onNode(SemanticsMatcher("visible main chat LazyColumn") {
+        it.config.getOrElse(SemanticsProperties.TestTag) { "" } == "chat_list_timeline" &&
         it.config.contains(SemanticsActions.ScrollToIndex) &&
             it.config.contains(SemanticsProperties.VerticalScrollAxisRange) &&
-            it.boundsInRoot.left >= 0 && it.boundsInRoot.top > 0
+            it.boundsInRoot.left >= 0 && it.boundsInRoot.top >= 0
     })
 
     private fun assertFlagVisibility(tag: String, visible: Boolean) {
@@ -1335,7 +1351,7 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
 
     private fun assertMessageBounds(tag: String) {
         val bounds = compose.onNodeWithTag(tag).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        val header = compose.onNodeWithTag("chat_header_bar").fetchSemanticsNode().boundsInRoot
+        val header = compose.onNodeWithTag("chat_header_title_line").fetchSemanticsNode().boundsInRoot
         val composer = compose.onNodeWithTag("chat_composer").fetchSemanticsNode().boundsInRoot
         assertTrue("Message must stay inside the chat viewport: $bounds", bounds.left >= 0f && bounds.right <= 411f &&
             bounds.top >= header.bottom && bounds.bottom <= composer.top && bounds.width > 0f && bounds.height > 0f)
@@ -1543,11 +1559,8 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
                 compose.onNodeWithTag("chat_stage1").captureRoboImage(file.absolutePath, roborazziOptions = captureOptions)
             }
         }
-        captureTo(baseline, options)
+        captureRoboFrame(snapshots.artifact(name), baseline, options, ::captureTo)
         assertTrue("Missing committed baseline: $baseline", baseline.isFile && baseline.length() > 0)
-        // Publish the actual settled frame, including allowed native rounding, rather
-        // than copying the expected baseline and labeling it as a current capture.
-        captureTo(snapshots.artifact(name), RoborazziOptions(taskType = RoborazziTaskType.Record))
     }
 
     private fun settleCaptureNavigation() {

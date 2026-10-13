@@ -3,7 +3,7 @@
 `chat-before` contains the 208 preserved audit reference PNGs (26 viewports × four
 themes × font scales 1.0/1.3). These files describe the historical interface. The
 current source cannot render that old header and composer, so the live suite now
-verifies `chat-after-stage4` and publishes reference/current directories in `ui-screenshots`.
+verifies `chat-after-stage5` and publishes reference/current directories in `ui-screenshots`.
 The audit-era `ChatBeforeScreenshotsTest` class name is retained for existing
 targeted Gradle commands; its tests capture the current production `ChatPage`.
 
@@ -58,7 +58,7 @@ input state's editing message unset.
 
 Normal tests always verify the committed AFTER baselines, including Daily Build
 with `-Proborazzi.test.record=true`. Global Roborazzi record does not authorize
-recording any chat baseline set. The live baseline is now `chat-after-stage3`, which
+recording any chat baseline set. Stage 3 used `chat-after-stage3`, which
 retains all stage-2-fixes scenes and adds actual `ChatPage` timeline, approval,
 reasoning, file, and narrow-width scenes.
 
@@ -128,8 +128,8 @@ every crop boundary and offset; differing captures receive diagnostic crops in
 `/tmp/chat-stage1-message-qa`. This proves equality only in the reported crops,
 not in excluded or offscreen message areas. Python Pillow and NumPy are needed.
 
-`chat-after-stage3` is now a preserved 780-PNG archive. The live baseline is
-`chat-after-stage4`; only `-Pchat.stage4.record=true` may write it. Its first
+`chat-after-stage3` is a preserved 780-PNG archive. Stage 4 used
+`chat-after-stage4` with its own `-Pchat.stage4.record=true` flag. Its first
 recording contains the stage-3 corrections checked on the phone: readable tool
 result previews (command stdout/stderr with real line breaks, Russian error
 reasons, short summaries instead of JSON), one-line titles with the call's
@@ -143,3 +143,43 @@ with arrow/timer icons hidden while a reply streams, and continuation
 bubbles under the last answer. The new `actions_tokens_suggestions` scene
 also checks that a tap inserts the suggestion by default and sends it when
 "insert only" is off (15 methods = 120 tests, 796 PNGs).
+
+
+`chat-after-stage4` is now a protected historical archive (796 PNGs). The live
+set is `chat-after-stage5`; only `-Pchat.stage5.record=true` may write it.
+The global CI flag `-Proborazzi.test.record=true` and every older chat record
+flag keep chat tests in Verify mode. Paths inside any historical archive,
+including stage 4 and its children or canonical `../` aliases, are rejected.
+
+Stage 5 preserves all existing live chat scenes and adds real production
+settings pages, drawer search/selection and a scrolled chat with wallpaper
+under the transparent header. New settings/drawer scenes run in light/dark
+with font scales 1.0/1.3. Their test ImageLoader disables service loading and
+shared disk caching, and uses local images and a deterministic offline HTTP
+response. No screenshot downloads a favicon or wallpaper from the network.
+
+Each current artifact and its baseline comparison use the same native frame.
+The fixture discards one warmup draw to initialize resized offscreen text layers,
+then publishes the actual PNG and passes its decoded bitmap to the unchanged
+Roborazzi comparator without another UI capture. The warmup uses the same node
+or window backend, writes only to the guarded artifact directory, reports nothing,
+and removes its temporary PNG in `finally`, including when capture fails.
+The sources-sheet opening, translation collapse and user-text expansion prepare
+their rested screenshot state through the real accessibility click callbacks;
+dedicated pointer interaction tests retain their gestures and callback assertions.
+
+Review candidates in a separate directory and inspect the actual/diff
+before accepting them:
+
+```sh
+./gradlew :app:testDebugUnitTest --tests 'me.rerere.rikkahub.ui.screenshot.ChatBeforeScreenshotsTest' --tests 'me.rerere.rikkahub.ui.screenshot.UiCustomizationScreenshotsTest' -Pchat.stage5.record=true -Pchat.stage5.record.dir=/tmp/chat-stage5-review --no-configuration-cache
+```
+
+After review, record the live set intentionally, then run a separate verification:
+
+```sh
+./gradlew :app:testDebugUnitTest --tests 'me.rerere.rikkahub.ui.screenshot.ChatBeforeScreenshotsTest' --tests 'me.rerere.rikkahub.ui.screenshot.UiCustomizationScreenshotsTest' -Pchat.stage5.record=true --no-configuration-cache
+./gradlew :app:testDebugUnitTest --tests 'me.rerere.rikkahub.ui.screenshot.ChatBeforeScreenshotsTest' --tests 'me.rerere.rikkahub.ui.screenshot.UiCustomizationScreenshotsTest' -Proborazzi.test.verify=true --no-configuration-cache
+```
+
+Historical PNG hashes and modification times must remain unchanged throughout.

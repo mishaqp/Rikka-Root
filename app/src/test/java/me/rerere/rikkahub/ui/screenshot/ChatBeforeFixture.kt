@@ -195,6 +195,10 @@ internal class ChatBeforeFixture(
         every { drawer.selectedFolderId } returns MutableStateFlow(null)
         every { drawer.showAllFolders } returns MutableStateFlow(true)
         every { drawer.presentationSort } returns MutableStateFlow(DrawerConversationSort.NEWEST)
+        // Generic relaxed StateFlow.value returns Object; real production topic state is a String.
+        val drawerTopicQuery = MutableStateFlow("")
+        every { drawer.searchQuery } returns drawerTopicQuery
+        every { drawer.setSearchQuery(any()) } answers { drawerTopicQuery.value = firstArg<String>() }
         val root = mockk<RootShellManager>(relaxed = true)
         every { root.status } returns MutableStateFlow(RootStatus.UNCHECKED)
         val checker = mockk<UpdateChecker>(relaxed = true)
