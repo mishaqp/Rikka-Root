@@ -175,7 +175,7 @@ fun ChatMessage(
             message.translation?.let { translation ->
                 CollapsibleTranslationText(
                     content = translation,
-                    onClickCitation = {}
+                    onClickCitation = rememberSearchCitationHandler(message.parts)
                 )
             }
         }
@@ -300,26 +300,7 @@ private fun MessagePartsBlock(
     val settings = LocalSettings.current
     val partsState by rememberUpdatedState(parts)
 
-    val handleClickCitation: (String) -> Unit = remember {
-        handler@{ citationId ->
-            partsState.forEach { part ->
-                if (part is UIMessagePart.Tool && part.toolName == "search_web" && part.isExecuted) {
-                    val outputText = part.output.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }
-                    val items =
-                        runCatching { JsonInstant.parseToJsonElement(outputText).jsonObject["items"]?.jsonArray }.getOrNull()
-                            ?: return@forEach
-                    items.forEach { item ->
-                        val id = item.jsonObject["id"]?.jsonPrimitive?.content ?: return@forEach
-                        val url = item.jsonObject["url"]?.jsonPrimitive?.content ?: return@forEach
-                        if (citationId == id) {
-                            context.openUrl(url)
-                            return@handler
-                        }
-                    }
-                }
-            }
-        }
-    }
+    val handleClickCitation = rememberSearchCitationHandler(parts)
     LaunchedEffect(settings.displaySetting) {
         snapshotFlow { partsState }
             .debounce(50.milliseconds)
@@ -516,5 +497,31 @@ private fun MessagePartsBlock(
     // Annotations (always rendered at the end)
     if (annotations.isNotEmpty()) {
         ChatMessageCitations(annotations = annotations)
+    }
+}
+
+@Composable
+private fun rememberSearchCitationHandler(parts: List<UIMessagePart>): (String) -> Unit {
+    val context = LocalContext.current
+    val partsState by rememberUpdatedState(parts)
+    return remember(context) {
+        handler@{ citationId ->
+            partsState.forEach { part ->
+                if (part is UIMessagePart.Tool && part.toolName == "search_web" && part.isExecuted) {
+                    val outputText = part.output.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }
+                    val items =
+                        runCatching { JsonInstant.parseToJsonElement(outputText).jsonObject["items"]?.jsonArray }.getOrNull()
+                            ?: return@forEach
+                    items.forEach { item ->
+                        val id = item.jsonObject["id"]?.jsonPrimitive?.content ?: return@forEach
+                        val url = item.jsonObject["url"]?.jsonPrimitive?.content ?: return@forEach
+                        if (citationId == id) {
+                            context.openUrl(url)
+                            return@handler
+                        }
+                    }
+                }
+            }
+        }
     }
 }
