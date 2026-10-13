@@ -1,0 +1,850 @@
+{
+  "base": "f1800f41",
+  "head": "1871e890680e551b3a86a4ffcfe3e407950cf1ac",
+  "reports": [
+    "ai/build/reports/lint-results-debug.xml",
+    "app/build/reports/lint-results-debug.xml",
+    "common/build/reports/lint-results-debug.xml",
+    "document/build/reports/lint-results-debug.xml",
+    "highlight/build/reports/lint-results-debug.xml",
+    "material3/build/reports/lint-results-debug.xml",
+    "mediagen/build/reports/lint-results-debug.xml",
+    "oauth/build/reports/lint-results-debug.xml",
+    "search/build/reports/lint-results-debug.xml",
+    "speech/build/reports/lint-results-debug.xml",
+    "ui/build/reports/lint-results-debug.xml",
+    "web/build/reports/lint-results-debug.xml",
+    "workspace/build/reports/lint-results-debug.xml"
+  ],
+  "error_fatal_count": 45,
+  "source_statuses": {
+    "entire_source_identical": 44,
+    "mapped_line_context_changed": 1
+  },
+  "issues": [
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "NonObservableLocale",
+      "severity": "Error",
+      "message": "Reading locale in a non-observable way in a composable function",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/components/message/ChatMessageTranslation.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/components/message/ChatMessageTranslation.kt",
+          "current_line": "98",
+          "column": "47",
+          "base_sha256": "4fe86155e447024cf588103781fd21ec574665573dfffc673ef4760f7ee95e26",
+          "current_sha256": "4fe86155e447024cf588103781fd21ec574665573dfffc673ef4760f7ee95e26",
+          "status": "entire_source_identical",
+          "base_line": "98"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "NonObservableLocale",
+      "severity": "Error",
+      "message": "Reading locale in a non-observable way in a composable function",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/stats/StatsPage.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/stats/StatsPage.kt",
+          "current_line": "222",
+          "column": "85",
+          "base_sha256": "f932cdfbb65a0e49dc5954413ddc169cafb6e11ec940137e7ca5959b91ca1636",
+          "current_sha256": "f932cdfbb65a0e49dc5954413ddc169cafb6e11ec940137e7ca5959b91ca1636",
+          "status": "entire_source_identical",
+          "base_line": "222"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "NonObservableLocale",
+      "severity": "Error",
+      "message": "Reading locale in a non-observable way in a composable function",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/translator/TranslatorPage.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/translator/TranslatorPage.kt",
+          "current_line": "240",
+          "column": "47",
+          "base_sha256": "c656e1e4de04e6171cc4e8007bb5440728a19e0d805914b9f411d2853b171774",
+          "current_sha256": "c656e1e4de04e6171cc4e8007bb5440728a19e0d805914b9f411d2853b171774",
+          "status": "entire_source_identical",
+          "base_line": "240"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "ContextCastToActivity",
+      "severity": "Error",
+      "message": "LocalContext should not be cast to Activity, use LocalActivity instead",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/chat/ChatList.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/chat/ChatList.kt",
+          "current_line": "230",
+          "column": "20",
+          "base_sha256": "21020a1e57631a29432ac44965b3b68f466f61968cfcc29f70686bea6988761e",
+          "current_sha256": "9425a9e5c2f256b559458122bfe184d8334aa5a392b7d5aaac3c99ce32330db8",
+          "base_line": 230,
+          "status": "mapped_line_context_changed",
+          "context_lines": 9
+        }
+      ],
+      "manual_review": {
+        "status": "inherited offending expression identical at base/current line230",
+        "evidence": "git show f1800f41:.../ChatList.kt line230 and git diff: cast/val activity unchanged; additions below are rememberUpdatedState for stale volume scroll, detector expression unchanged",
+        "base_and_current_expression": "val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity"
+      }
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/assistant/detail/AssistantImporter.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/assistant/detail/AssistantImporter.kt",
+          "current_line": "89",
+          "column": "59",
+          "base_sha256": "4d43762edfe5fd91bdb76c8712d161c4a579bf1792d0e874a65526c76c8e7b4a",
+          "current_sha256": "4d43762edfe5fd91bdb76c8712d161c4a579bf1792d0e874a65526c76c8e7b4a",
+          "status": "entire_source_identical",
+          "base_line": "89"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/assistant/detail/AssistantImporter.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/assistant/detail/AssistantImporter.kt",
+          "current_line": "115",
+          "column": "59",
+          "base_sha256": "4d43762edfe5fd91bdb76c8712d161c4a579bf1792d0e874a65526c76c8e7b4a",
+          "current_sha256": "4d43762edfe5fd91bdb76c8712d161c4a579bf1792d0e874a65526c76c8e7b4a",
+          "status": "entire_source_identical",
+          "base_line": "115"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/imggen/ImgGenPage.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/imggen/ImgGenPage.kt",
+          "current_line": "596",
+          "column": "65",
+          "base_sha256": "73ddd46bbc7dc701f6ae5d90487ff9135c24e86b6fa3615404387be95518c101",
+          "current_sha256": "73ddd46bbc7dc701f6ae5d90487ff9135c24e86b6fa3615404387be95518c101",
+          "status": "entire_source_identical",
+          "base_line": "596"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/imggen/ImgGenPage.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/imggen/ImgGenPage.kt",
+          "current_line": "597",
+          "column": "38",
+          "base_sha256": "73ddd46bbc7dc701f6ae5d90487ff9135c24e86b6fa3615404387be95518c101",
+          "current_sha256": "73ddd46bbc7dc701f6ae5d90487ff9135c24e86b6fa3615404387be95518c101",
+          "status": "entire_source_identical",
+          "base_line": "597"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/imggen/ImgGenPage.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/imggen/ImgGenPage.kt",
+          "current_line": "763",
+          "column": "75",
+          "base_sha256": "73ddd46bbc7dc701f6ae5d90487ff9135c24e86b6fa3615404387be95518c101",
+          "current_sha256": "73ddd46bbc7dc701f6ae5d90487ff9135c24e86b6fa3615404387be95518c101",
+          "status": "entire_source_identical",
+          "base_line": "763"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/imggen/ImgGenPage.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/imggen/ImgGenPage.kt",
+          "current_line": "768",
+          "column": "75",
+          "base_sha256": "73ddd46bbc7dc701f6ae5d90487ff9135c24e86b6fa3615404387be95518c101",
+          "current_sha256": "73ddd46bbc7dc701f6ae5d90487ff9135c24e86b6fa3615404387be95518c101",
+          "status": "entire_source_identical",
+          "base_line": "768"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/ImportExportTab.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/ImportExportTab.kt",
+          "current_line": "85",
+          "column": "25",
+          "base_sha256": "2e0379c7e282f5629af45b71b160384bd7e54189993a9034b982873c526ab798",
+          "current_sha256": "2e0379c7e282f5629af45b71b160384bd7e54189993a9034b982873c526ab798",
+          "status": "entire_source_identical",
+          "base_line": "85"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/ImportExportTab.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/ImportExportTab.kt",
+          "current_line": "91",
+          "column": "25",
+          "base_sha256": "2e0379c7e282f5629af45b71b160384bd7e54189993a9034b982873c526ab798",
+          "current_sha256": "2e0379c7e282f5629af45b71b160384bd7e54189993a9034b982873c526ab798",
+          "status": "entire_source_identical",
+          "base_line": "91"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/ImportExportTab.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/ImportExportTab.kt",
+          "current_line": "165",
+          "column": "25",
+          "base_sha256": "2e0379c7e282f5629af45b71b160384bd7e54189993a9034b982873c526ab798",
+          "current_sha256": "2e0379c7e282f5629af45b71b160384bd7e54189993a9034b982873c526ab798",
+          "status": "entire_source_identical",
+          "base_line": "165"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/ImportExportTab.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/ImportExportTab.kt",
+          "current_line": "172",
+          "column": "25",
+          "base_sha256": "2e0379c7e282f5629af45b71b160384bd7e54189993a9034b982873c526ab798",
+          "current_sha256": "2e0379c7e282f5629af45b71b160384bd7e54189993a9034b982873c526ab798",
+          "status": "entire_source_identical",
+          "base_line": "172"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/mediacreation/MediaCreationRecordItem.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/mediacreation/MediaCreationRecordItem.kt",
+          "current_line": "452",
+          "column": "33",
+          "base_sha256": "963e2302a3bae6b956bd01f5ffbd1df4b67f331c74a80c5595542fbe32469d8c",
+          "current_sha256": "963e2302a3bae6b956bd01f5ffbd1df4b67f331c74a80c5595542fbe32469d8c",
+          "status": "entire_source_identical",
+          "base_line": "452"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/mediacreation/MediaCreationRecordItem.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/mediacreation/MediaCreationRecordItem.kt",
+          "current_line": "458",
+          "column": "47",
+          "base_sha256": "963e2302a3bae6b956bd01f5ffbd1df4b67f331c74a80c5595542fbe32469d8c",
+          "current_sha256": "963e2302a3bae6b956bd01f5ffbd1df4b67f331c74a80c5595542fbe32469d8c",
+          "status": "entire_source_identical",
+          "base_line": "458"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/mediacreation/MediaCreationRecordItem.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/mediacreation/MediaCreationRecordItem.kt",
+          "current_line": "468",
+          "column": "43",
+          "base_sha256": "963e2302a3bae6b956bd01f5ffbd1df4b67f331c74a80c5595542fbe32469d8c",
+          "current_sha256": "963e2302a3bae6b956bd01f5ffbd1df4b67f331c74a80c5595542fbe32469d8c",
+          "status": "entire_source_identical",
+          "base_line": "468"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/mediacreation/MediaCreationRecordItem.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/mediacreation/MediaCreationRecordItem.kt",
+          "current_line": "554",
+          "column": "25",
+          "base_sha256": "963e2302a3bae6b956bd01f5ffbd1df4b67f331c74a80c5595542fbe32469d8c",
+          "current_sha256": "963e2302a3bae6b956bd01f5ffbd1df4b67f331c74a80c5595542fbe32469d8c",
+          "status": "entire_source_identical",
+          "base_line": "554"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/components/richtext/Mermaid.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/components/richtext/Mermaid.kt",
+          "current_line": "74",
+          "column": "25",
+          "base_sha256": "9b4f776a69dce6ca05c738f6b60b557e17681affaa608414d2a9a041e9a2bc47",
+          "current_sha256": "9b4f776a69dce6ca05c738f6b60b557e17681affaa608414d2a9a041e9a2bc47",
+          "status": "entire_source_identical",
+          "base_line": "74"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/components/richtext/Mermaid.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/components/richtext/Mermaid.kt",
+          "current_line": "80",
+          "column": "25",
+          "base_sha256": "9b4f776a69dce6ca05c738f6b60b557e17681affaa608414d2a9a041e9a2bc47",
+          "current_sha256": "9b4f776a69dce6ca05c738f6b60b557e17681affaa608414d2a9a041e9a2bc47",
+          "status": "entire_source_identical",
+          "base_line": "80"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/assistant/detail/PropertyEditor.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/assistant/detail/PropertyEditor.kt",
+          "current_line": "269",
+          "column": "49",
+          "base_sha256": "a616f06b1cb3a5a11b5eea92e2330b5f7d06eff3509d1f3d51a7d8a7a188d054",
+          "current_sha256": "a616f06b1cb3a5a11b5eea92e2330b5f7d06eff3509d1f3d51a7d8a7a188d054",
+          "status": "entire_source_identical",
+          "base_line": "269"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/setting/components/ProviderConnectionTester.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/setting/components/ProviderConnectionTester.kt",
+          "current_line": "199",
+          "column": "41",
+          "base_sha256": "3b54208fd906e583bb4c3ba5ac905334ea0905e60c7090238c109db52bda12b2",
+          "current_sha256": "3b54208fd906e583bb4c3ba5ac905334ea0905e60c7090238c109db52bda12b2",
+          "status": "entire_source_identical",
+          "base_line": "199"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/setting/components/ProviderConnectionTester.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/setting/components/ProviderConnectionTester.kt",
+          "current_line": "208",
+          "column": "41",
+          "base_sha256": "3b54208fd906e583bb4c3ba5ac905334ea0905e60c7090238c109db52bda12b2",
+          "current_sha256": "3b54208fd906e583bb4c3ba5ac905334ea0905e60c7090238c109db52bda12b2",
+          "status": "entire_source_identical",
+          "base_line": "208"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/S3Tab.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/S3Tab.kt",
+          "current_line": "167",
+          "column": "33",
+          "base_sha256": "6e4974e22a559f64b39bceb54d72e660c8bedd4befebe6d1a426f2afc03d38c9",
+          "current_sha256": "6e4974e22a559f64b39bceb54d72e660c8bedd4befebe6d1a426f2afc03d38c9",
+          "status": "entire_source_identical",
+          "base_line": "167"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/S3Tab.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/S3Tab.kt",
+          "current_line": "173",
+          "column": "33",
+          "base_sha256": "6e4974e22a559f64b39bceb54d72e660c8bedd4befebe6d1a426f2afc03d38c9",
+          "current_sha256": "6e4974e22a559f64b39bceb54d72e660c8bedd4befebe6d1a426f2afc03d38c9",
+          "status": "entire_source_identical",
+          "base_line": "173"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/S3Tab.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/S3Tab.kt",
+          "current_line": "202",
+          "column": "33",
+          "base_sha256": "6e4974e22a559f64b39bceb54d72e660c8bedd4befebe6d1a426f2afc03d38c9",
+          "current_sha256": "6e4974e22a559f64b39bceb54d72e660c8bedd4befebe6d1a426f2afc03d38c9",
+          "status": "entire_source_identical",
+          "base_line": "202"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/S3Tab.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/S3Tab.kt",
+          "current_line": "208",
+          "column": "47",
+          "base_sha256": "6e4974e22a559f64b39bceb54d72e660c8bedd4befebe6d1a426f2afc03d38c9",
+          "current_sha256": "6e4974e22a559f64b39bceb54d72e660c8bedd4befebe6d1a426f2afc03d38c9",
+          "status": "entire_source_identical",
+          "base_line": "208"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/S3Tab.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/S3Tab.kt",
+          "current_line": "270",
+          "column": "49",
+          "base_sha256": "6e4974e22a559f64b39bceb54d72e660c8bedd4befebe6d1a426f2afc03d38c9",
+          "current_sha256": "6e4974e22a559f64b39bceb54d72e660c8bedd4befebe6d1a426f2afc03d38c9",
+          "status": "entire_source_identical",
+          "base_line": "270"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/S3Tab.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/S3Tab.kt",
+          "current_line": "277",
+          "column": "49",
+          "base_sha256": "6e4974e22a559f64b39bceb54d72e660c8bedd4befebe6d1a426f2afc03d38c9",
+          "current_sha256": "6e4974e22a559f64b39bceb54d72e660c8bedd4befebe6d1a426f2afc03d38c9",
+          "status": "entire_source_identical",
+          "base_line": "277"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/S3Tab.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/S3Tab.kt",
+          "current_line": "292",
+          "column": "49",
+          "base_sha256": "6e4974e22a559f64b39bceb54d72e660c8bedd4befebe6d1a426f2afc03d38c9",
+          "current_sha256": "6e4974e22a559f64b39bceb54d72e660c8bedd4befebe6d1a426f2afc03d38c9",
+          "status": "entire_source_identical",
+          "base_line": "292"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/S3Tab.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/S3Tab.kt",
+          "current_line": "300",
+          "column": "49",
+          "base_sha256": "6e4974e22a559f64b39bceb54d72e660c8bedd4befebe6d1a426f2afc03d38c9",
+          "current_sha256": "6e4974e22a559f64b39bceb54d72e660c8bedd4befebe6d1a426f2afc03d38c9",
+          "status": "entire_source_identical",
+          "base_line": "300"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingMediaPage.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingMediaPage.kt",
+          "current_line": "485",
+          "column": "37",
+          "base_sha256": "a98ef8b81048f05bea07250f71211b6e101fc7f25bc4f57235e710b1a7132bdc",
+          "current_sha256": "a98ef8b81048f05bea07250f71211b6e101fc7f25bc4f57235e710b1a7132bdc",
+          "status": "entire_source_identical",
+          "base_line": "485"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingMediaPage.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingMediaPage.kt",
+          "current_line": "491",
+          "column": "37",
+          "base_sha256": "a98ef8b81048f05bea07250f71211b6e101fc7f25bc4f57235e710b1a7132bdc",
+          "current_sha256": "a98ef8b81048f05bea07250f71211b6e101fc7f25bc4f57235e710b1a7132bdc",
+          "status": "entire_source_identical",
+          "base_line": "491"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingProviderDetailPage.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingProviderDetailPage.kt",
+          "current_line": "246",
+          "column": "33",
+          "base_sha256": "0b6fe06096d32edcd86e09e94f75fb9660b5f8e3677e38d63fdbe2dca6eb9426",
+          "current_sha256": "0b6fe06096d32edcd86e09e94f75fb9660b5f8e3677e38d63fdbe2dca6eb9426",
+          "status": "entire_source_identical",
+          "base_line": "246"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/components/ui/TextArea.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/components/ui/TextArea.kt",
+          "current_line": "99",
+          "column": "34",
+          "base_sha256": "ae706daa376f5a50b3dd2578eaf7b2f9b4658b751b456b97ab03b68ff9108504",
+          "current_sha256": "ae706daa376f5a50b3dd2578eaf7b2f9b4658b751b456b97ab03b68ff9108504",
+          "status": "entire_source_identical",
+          "base_line": "99"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/components/ui/TextArea.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/components/ui/TextArea.kt",
+          "current_line": "102",
+          "column": "53",
+          "base_sha256": "ae706daa376f5a50b3dd2578eaf7b2f9b4658b751b456b97ab03b68ff9108504",
+          "current_sha256": "ae706daa376f5a50b3dd2578eaf7b2f9b4658b751b456b97ab03b68ff9108504",
+          "status": "entire_source_identical",
+          "base_line": "102"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/components/ui/UpdateCard.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/components/ui/UpdateCard.kt",
+          "current_line": "102",
+          "column": "30",
+          "base_sha256": "4381ab7ff1fa03197d3848ad1ba48c998d76225cc25ad987bb843c88239904ec",
+          "current_sha256": "4381ab7ff1fa03197d3848ad1ba48c998d76225cc25ad987bb843c88239904ec",
+          "status": "entire_source_identical",
+          "base_line": "102"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/WebDavTab.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/WebDavTab.kt",
+          "current_line": "232",
+          "column": "33",
+          "base_sha256": "b233384c64230ec7e1fb520477eb2785a80bff620fb0911a49459c3c192d2405",
+          "current_sha256": "b233384c64230ec7e1fb520477eb2785a80bff620fb0911a49459c3c192d2405",
+          "status": "entire_source_identical",
+          "base_line": "232"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/WebDavTab.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/WebDavTab.kt",
+          "current_line": "238",
+          "column": "33",
+          "base_sha256": "b233384c64230ec7e1fb520477eb2785a80bff620fb0911a49459c3c192d2405",
+          "current_sha256": "b233384c64230ec7e1fb520477eb2785a80bff620fb0911a49459c3c192d2405",
+          "status": "entire_source_identical",
+          "base_line": "238"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/WebDavTab.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/WebDavTab.kt",
+          "current_line": "266",
+          "column": "33",
+          "base_sha256": "b233384c64230ec7e1fb520477eb2785a80bff620fb0911a49459c3c192d2405",
+          "current_sha256": "b233384c64230ec7e1fb520477eb2785a80bff620fb0911a49459c3c192d2405",
+          "status": "entire_source_identical",
+          "base_line": "266"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/WebDavTab.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/WebDavTab.kt",
+          "current_line": "272",
+          "column": "47",
+          "base_sha256": "b233384c64230ec7e1fb520477eb2785a80bff620fb0911a49459c3c192d2405",
+          "current_sha256": "b233384c64230ec7e1fb520477eb2785a80bff620fb0911a49459c3c192d2405",
+          "status": "entire_source_identical",
+          "base_line": "272"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/WebDavTab.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/WebDavTab.kt",
+          "current_line": "334",
+          "column": "49",
+          "base_sha256": "b233384c64230ec7e1fb520477eb2785a80bff620fb0911a49459c3c192d2405",
+          "current_sha256": "b233384c64230ec7e1fb520477eb2785a80bff620fb0911a49459c3c192d2405",
+          "status": "entire_source_identical",
+          "base_line": "334"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/WebDavTab.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/WebDavTab.kt",
+          "current_line": "341",
+          "column": "49",
+          "base_sha256": "b233384c64230ec7e1fb520477eb2785a80bff620fb0911a49459c3c192d2405",
+          "current_sha256": "b233384c64230ec7e1fb520477eb2785a80bff620fb0911a49459c3c192d2405",
+          "status": "entire_source_identical",
+          "base_line": "341"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/WebDavTab.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/WebDavTab.kt",
+          "current_line": "356",
+          "column": "49",
+          "base_sha256": "b233384c64230ec7e1fb520477eb2785a80bff620fb0911a49459c3c192d2405",
+          "current_sha256": "b233384c64230ec7e1fb520477eb2785a80bff620fb0911a49459c3c192d2405",
+          "status": "entire_source_identical",
+          "base_line": "356"
+        }
+      ]
+    },
+    {
+      "report": "app/build/reports/lint-results-debug.xml",
+      "id": "LocalContextGetResourceValueCall",
+      "severity": "Error",
+      "message": "Querying resource values using LocalContext.current is not configuration-aware and may return stale values if the Configuration changes",
+      "locations": [
+        {
+          "reported_file": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/WebDavTab.kt",
+          "path": "app/src/main/java/me/rerere/rikkahub/ui/pages/backup/tabs/WebDavTab.kt",
+          "current_line": "364",
+          "column": "49",
+          "base_sha256": "b233384c64230ec7e1fb520477eb2785a80bff620fb0911a49459c3c192d2405",
+          "current_sha256": "b233384c64230ec7e1fb520477eb2785a80bff620fb0911a49459c3c192d2405",
+          "status": "entire_source_identical",
+          "base_line": "364"
+        }
+      ]
+    }
+  ],
+  "method": "Every current Error/Fatal records id/message/severity and all locations. Source is compared with git show base. Whole-file equality is stronger than unchanged location; changed files require mapped identical context. Baseline diagnostic identities need old XML.",
+  "historical_evidence": "docs/ui-customization-drawer-report.md:220 at f1800f41:45 inherited errors; CI ceiling51 is not an identity baseline.",
+  "comparison_with_first_overnight_lint": {
+    "added": 0,
+    "removed": 0,
+    "identical_diagnostic_count": 45
+  },
+  "limitation": "Old f1800f41 lint XML is unavailable; provenance uses unchanged source and the documented baseline, not a claimed old XML multiset comparison."
+}
