@@ -44,6 +44,7 @@ internal fun SettingsStatePanel(
     rootStatus: SettingsDashboardStatus?,
     update: NightlyUpdateState,
     open: (Screen) -> Unit,
+    buildLabel: String = "${BuildConfig.VERSION_NAME} · ${BuildConfig.GIT_COMMIT_SHORT}",
 ) {
     val scheme = MaterialTheme.colorScheme
     val modelName = SettingsDashboardPanelPresentation.modelName(settings) ?: "Загрузка…"
@@ -71,7 +72,7 @@ internal fun SettingsStatePanel(
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text("Rikka-Root", style = MaterialTheme.typography.titleLarge)
-                    Text("${BuildConfig.VERSION_NAME} · ${BuildConfig.GIT_COMMIT_SHORT}",
+                    Text(buildLabel,
                         style = MaterialTheme.typography.bodySmall)
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {

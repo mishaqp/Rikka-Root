@@ -36,6 +36,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.GlobalSearch
+import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -92,6 +93,7 @@ internal fun SettingPageContent(
     onQueryChange: (String) -> Unit,
     open: (SettingsTarget) -> Unit,
     openScreen: (Screen) -> Unit,
+    buildLabel: String = "${BuildConfig.VERSION_NAME} · ${BuildConfig.GIT_COMMIT_SHORT}",
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val searchResults = remember(query) { SettingsSearchIndex.search(query) }
@@ -109,7 +111,8 @@ internal fun SettingPageContent(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             item("statePanel") {
-                SettingsStatePanel(settings, statuses[SettingsDashboardStatusKey.Root], update, openScreen)
+                SettingsStatePanel(settings, statuses[SettingsDashboardStatusKey.Root], update, openScreen,
+                    buildLabel = buildLabel)
             }
             item("quickTiles") {
                 SettingsQuickTiles(SettingsDashboardPanelPresentation.quickTileValues(
