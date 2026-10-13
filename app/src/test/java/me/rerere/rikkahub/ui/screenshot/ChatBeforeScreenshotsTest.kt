@@ -234,6 +234,9 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
             // its terminal state before the frame that started it settles, on every machine.
             // No auto-registered network fetcher: favicons must never reach the real internet.
             .serviceLoaderEnabled(false)
+            // Coil's default disk cache is process-wide: another test with network access may
+            // already hold the real favicon there, and the offline fetcher would serve it.
+            .diskCache(null)
             .interceptorCoroutineContext(EmptyCoroutineContext)
             .fetcherCoroutineContext(EmptyCoroutineContext)
             .decoderCoroutineContext(EmptyCoroutineContext)
