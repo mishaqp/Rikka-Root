@@ -4,6 +4,7 @@ import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
@@ -113,7 +114,7 @@ internal fun InterfaceSwitchRow(
     val haptics = rememberAppHapticFeedback(HapticAction.SWITCH)
     fun change(value: Boolean) { haptics.performHapticFeedback(HapticFeedbackType.ToggleOn); onChange(value) }
     Row(
-        Modifier.fillMaxWidth().testTag("ui_$tag").clickable(role = Role.Switch) { change(!checked) }
+        Modifier.fillMaxWidth().testTag("ui_$tag").toggleable(value = checked, role = Role.Switch, onValueChange = ::change)
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -124,7 +125,7 @@ internal fun InterfaceSwitchRow(
             description?.let { Text(stringResource(it), style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
-        Switch(checked, ::change)
+        Switch(checked = checked, onCheckedChange = null, modifier = Modifier.minimumInteractiveComponentSize())
     }
 }
 
