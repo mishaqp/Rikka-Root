@@ -15,6 +15,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -23,7 +24,9 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.text.TextLayoutResult
@@ -50,6 +53,9 @@ import me.rerere.rikkahub.ui.pages.setting.GoogleFontEntry
 import me.rerere.rikkahub.ui.pages.setting.GoogleFontsPickerContent
 import me.rerere.rikkahub.ui.pages.setting.InterfaceSettingsContent
 import me.rerere.rikkahub.ui.pages.setting.InterfaceSettingsPageId
+import me.rerere.rikkahub.ui.pages.setting.SettingPageContent
+import me.rerere.rikkahub.ui.pages.setting.SettingsTarget
+import me.rerere.rikkahub.utils.NightlyUpdateState
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -78,21 +84,24 @@ internal data class UiCustomizationScreenshotScene(
 
 /** Every scene mounts production content; only persisted data and external I/O are fixed. */
 @RunWith(ParameterizedRobolectricTestRunner::class)
-@Config(sdk = [35], application = Application::class, qualifiers = "ru-rRU-w411dp-h891dp-mdpi")
+@Config(sdk = [35], application = Application::class, qualifiers = "ru-rRU-w411dp-h891dp-mdpi",
+    shadows = [FixedSeedDynamicColors::class])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @OptIn(ExperimentalRoborazziApi::class)
 class UiCustomizationScreenshotsTest internal constructor(
     private val scene: UiCustomizationScreenshotScene,
     private val theme: ScreenshotThemeMode,
     private val fontScale: Float,
+    private val widthDp: Int,
 ) {
     @get:Rule val compose = createComposeRule()
     private val boundaries = UiCustomizationScreenshotBoundaries()
     private var chat: ChatBeforeFixture? = null
     private var previousFontScale = 1f
-    private val snapshots get() = ChatStage1ScreenshotPaths(theme.fileName, fontScale)
+    private val snapshots get() = ChatStage1ScreenshotPaths(theme.fileName, fontScale, widthDp)
 
     @Before fun installOfflineBoundaries() {
+        RuntimeEnvironment.setQualifiers("ru-rRU-w${widthDp}dp-h891dp-mdpi")
         previousFontScale = RuntimeEnvironment.getFontScale()
         RuntimeEnvironment.setFontScale(fontScale)
         boundaries.install()
@@ -113,6 +122,7 @@ class UiCustomizationScreenshotsTest internal constructor(
         when {
             scene.drawer != null -> captureDrawer(scene.drawer)
             scene.page != null -> captureSettings(scene.page)
+            scene.name == "settings_search" -> captureSettingsSearch()
             else -> captureWallpaperChat()
         }
     }
@@ -121,14 +131,14 @@ class UiCustomizationScreenshotsTest internal constructor(
         val state = DrawerScreenshotState(mode)
         compose.setContent {
             ScreenshotTheme(theme, fontScale) {
-                Surface(Modifier.requiredSize(411.dp, 891.dp).testTag("ui_customization")) {
+                Surface(Modifier.requiredSize(widthDp.dp, 891.dp).testTag("ui_customization")) {
                     DrawerScreenshotFixture(state)
                 }
             }
         }
         compose.waitForIdle()
         val drawer = compose.onNodeWithTag("chat_drawer_sheet").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        assertEquals("Drawer keeps the 75% phone width", 411f * .75f, drawer.width, .5f)
+        assertEquals("Drawer keeps the 75% phone width", widthDp * .75f, drawer.width, .5f)
         assertEquals("Drawer keeps the full viewport height", 891f, drawer.height, .5f)
         when (mode) {
             DrawerScreenshotMode.Normal -> {
@@ -208,7 +218,7 @@ class UiCustomizationScreenshotsTest internal constructor(
             ScreenshotTheme(theme, fontScale) {
                 val toaster = rememberToasterState()
                 CompositionLocalProvider(LocalSettings provides settings.value, LocalToaster provides toaster) {
-                    Surface(Modifier.requiredSize(411.dp, 891.dp).testTag("ui_customization")) {
+                    Surface(Modifier.requiredSize(widthDp.dp, 891.dp).testTag("ui_customization")) {
                         if (page == InterfaceSettingsPageId.GoogleFonts) {
                             GoogleFontsPickerContent(googleFontsCatalog, selected = selectedGoogleFont.value,
                                 onRefresh = { refreshes++ }, onSelect = { selectedGoogleFont.value = it })
@@ -224,7 +234,7 @@ class UiCustomizationScreenshotsTest internal constructor(
         }
         compose.waitForIdle()
         val viewport = compose.onNodeWithTag("ui_settings_page").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        assertEquals("Settings page keeps the phone width", 411f, viewport.width, .5f)
+        assertEquals("Settings page keeps the phone width", widthDp.toFloat(), viewport.width, .5f)
         assertEquals("Settings page keeps the viewport height", 891f, viewport.height, .5f)
         compose.onNodeWithTag("ui_settings_list").assertIsDisplayed()
         val title = RuntimeEnvironment.getApplication().getString(page.titleRes)
@@ -350,6 +360,33 @@ class UiCustomizationScreenshotsTest internal constructor(
         }
     }
 
+    private fun captureSettingsSearch() {
+        val query = mutableStateOf("обои")
+        // Build identity is external fixture data. Keep it fixed across commits,
+        // while the production default continues to show the actual BuildConfig.
+        val buildLabel = "2.5.6-root.2 · 54bf275"
+        var destination: Screen? = null
+        compose.setContent {
+            ScreenshotTheme(theme, fontScale) {
+                Surface(Modifier.requiredSize(widthDp.dp, 891.dp).testTag("ui_customization")) {
+                    SettingPageContent(ScreenshotFixtures.settings, ScreenshotFixtures.statuses, NightlyUpdateState(),
+                        query.value, { query.value = it },
+                        open = { destination = (it as? SettingsTarget.Route)?.screen },
+                        openScreen = { destination = it }, buildLabel = buildLabel)
+                }
+            }
+        }
+        compose.onNodeWithText(buildLabel).assertIsDisplayed()
+        val result = hasContentDescription("Фон чата.", substring = true) and hasClickAction()
+        compose.onNode(SemanticsMatcher("settings search list") {
+            it.config.contains(SemanticsActions.ScrollToIndex)
+        }).performScrollToNode(result)
+        compose.onNode(result).assertIsDisplayed()
+        capture(scene.name)
+        compose.onNode(result).performClick()
+        compose.runOnIdle { assertEquals("Search opens the actual wallpaper page", Screen.SettingInterfaceBackground, destination) }
+    }
+
     private fun settingsFor(page: InterfaceSettingsPageId): Settings {
         val display = ScreenshotFixtures.settings.displaySetting
         return ScreenshotFixtures.settings.copy(displaySetting = when (page) {
@@ -365,7 +402,7 @@ class UiCustomizationScreenshotsTest internal constructor(
     private fun captureWallpaperChat() {
         val fixture = ChatBeforeFixture(boundaries.wallpaper).also { chat = it; it.install() }
         val settings = ScreenshotFixtures.settings.copy(displaySetting = ScreenshotFixtures.settings.displaySetting.copy(
-            chatBackgroundEnabled = true, chatBackgroundImagePath = boundaries.wallpaper.toURI().toString(),
+            chatBackgroundEnabled = scene.name != "chat_header_scrolled", chatBackgroundImagePath = boundaries.wallpaper.toURI().toString(),
             chatBackgroundMaskStrength = 1f, showMessageJumper = false,
         ))
         every { fixture.vm.settings } returns MutableStateFlow(settings)
@@ -382,7 +419,7 @@ class UiCustomizationScreenshotsTest internal constructor(
         compose.setContent {
             ScreenshotTheme(theme, fontScale) {
                 CompositionLocalProvider(LocalSettings provides settings) {
-                    Surface(Modifier.requiredSize(411.dp, 891.dp).testTag("ui_customization")) { fixture.Content() }
+                    Surface(Modifier.requiredSize(widthDp.dp, 891.dp).testTag("ui_customization")) { fixture.Content() }
                 }
             }
         }
@@ -397,8 +434,13 @@ class UiCustomizationScreenshotsTest internal constructor(
         assertEquals("Identity keeps the compact separate 22dp row", 22f, identity.height, .5f)
         assertEquals("Messages scroll beneath header from viewport top", 0f, timeline.top, .5f)
         assertEquals("Messages scroll beneath composer to viewport bottom", 891f, timeline.bottom, .5f)
-        compose.onNodeWithTag("chat_background_wallpaper").assertIsDisplayed()
-        compose.onNodeWithTag("chat_background_mask").assertIsDisplayed()
+        if (settings.displaySetting.chatBackgroundEnabled) {
+            compose.onNodeWithTag("chat_background_wallpaper").assertIsDisplayed()
+            compose.onNodeWithTag("chat_background_mask").assertIsDisplayed()
+        } else {
+            compose.onNodeWithTag("chat_background_wallpaper").assertDoesNotExist()
+            compose.onNodeWithTag("chat_background_mask").assertDoesNotExist()
+        }
         compose.onNodeWithTag("chat_header_model").assertIsDisplayed()
         compose.onNodeWithContentDescription(RuntimeEnvironment.getApplication().getString(R.string.chat_header_browser)).assertIsDisplayed()
         capture(scene.name)
@@ -444,7 +486,7 @@ class UiCustomizationScreenshotsTest internal constructor(
             InterfaceSettingsPageId.Rendering, InterfaceSettingsPageId.Behavior,
             InterfaceSettingsPageId.Background, InterfaceSettingsPageId.MessageStyle, InterfaceSettingsPageId.Themes)
 
-        @JvmStatic @Parameters(name = "{0}_{1}_font{2}") fun cases(): List<Array<Any>> {
+        @JvmStatic @Parameters(name = "{0}_{1}_font{2}_width{3}") fun cases(): List<Array<Any>> {
             fun pageName(page: InterfaceSettingsPageId) =
                 "settings_${page.name.replace(Regex("([a-z])([A-Z])"), "$1_$2").lowercase()}"
             val scenes = DrawerScreenshotMode.entries.map { mode ->
@@ -453,9 +495,12 @@ class UiCustomizationScreenshotsTest internal constructor(
                 UiCustomizationScreenshotScene(pageName(page), page = page)
             } + bottomPages.map { page ->
                 UiCustomizationScreenshotScene("${pageName(page)}_bottom", page = page, bottom = true)
-            } + UiCustomizationScreenshotScene("chat_wallpaper_header_scrolled")
-            return scenes.flatMap { scene -> listOf(ScreenshotThemeMode.Light, ScreenshotThemeMode.Dark).flatMap { theme ->
-                listOf(1f, 1.3f).map { fontScale -> arrayOf(scene, theme, fontScale) }
+            } + listOf(UiCustomizationScreenshotScene("chat_wallpaper_header_scrolled"),
+                UiCustomizationScreenshotScene("chat_header_scrolled"), UiCustomizationScreenshotScene("settings_search"))
+            return scenes.flatMap { scene -> ScreenshotThemeMode.entries.flatMap { theme ->
+                listOf(1f, 1.3f).flatMap { fontScale ->
+                    listOf(411, 320).map { width -> arrayOf(scene, theme, fontScale, width) }
+                }
             } }
         }
     }

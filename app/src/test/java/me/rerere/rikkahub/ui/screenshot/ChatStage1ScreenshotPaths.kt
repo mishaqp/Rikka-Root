@@ -3,8 +3,9 @@ package me.rerere.rikkahub.ui.screenshot
 import java.io.File
 
 /** Legacy helper name retained for CI; only explicit stage-5 recording writes live captures. */
-internal class ChatStage1ScreenshotPaths(theme: String, fontScale: Float) {
-    private val case = "${theme}_font$fontScale"
+internal class ChatStage1ScreenshotPaths(theme: String, fontScale: Float, widthDp: Int = 411) {
+    private val referenceCase = "${theme}_font$fontScale"
+    private val case = referenceCase + if (widthDp == 411) "" else "_width$widthDp"
     private val beforeDirectory = File("src/test/screenshots/chat-before").canonicalFile
     private val preservedDirectories = listOf(
         beforeDirectory,
@@ -34,9 +35,9 @@ internal class ChatStage1ScreenshotPaths(theme: String, fontScale: Float) {
     }
 
     fun publishBeforeReferences() {
-        val references = File(beforeDirectory, case).listFiles { file -> file.extension == "png" }.orEmpty()
-        require(references.size == 26) { "Expected 26 preserved BEFORE references for $case, found ${references.size}" }
-        val artifacts = File(outputDirectory, "chat-before/$case").apply {
+        val references = File(beforeDirectory, referenceCase).listFiles { file -> file.extension == "png" }.orEmpty()
+        require(references.size == 26) { "Expected 26 preserved BEFORE references for $referenceCase, found ${references.size}" }
+        val artifacts = File(outputDirectory, "chat-before/$referenceCase").apply {
             requireLiveDirectory(this)
             mkdirs()
         }

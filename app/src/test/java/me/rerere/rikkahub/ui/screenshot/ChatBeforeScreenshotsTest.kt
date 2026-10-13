@@ -146,7 +146,7 @@ import ru.noties.jlatexmath.JLatexMathAndroid
     shadows = [FixedSeedDynamicColors::class])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @OptIn(ExperimentalRoborazziApi::class)
-class ChatBeforeScreenshotsTest internal constructor(private val theme: ScreenshotThemeMode, private val fontScale: Float) {
+class ChatBeforeScreenshotsTest internal constructor(private val theme: ScreenshotThemeMode, private val fontScale: Float, private val widthDp: Int) {
     @get:Rule val compose = createComposeRule()
     private lateinit var fixture: ChatBeforeFixture
     private lateinit var imageLoader: ImageLoader
@@ -169,10 +169,13 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
             "Waiting for ${activeImageRequests.get()} real Coil requests and ${pendingImagePainters.size} painter results"
     }
     private var previousSystemFontScale: Float? = null
-    private val snapshots get() = ChatStage1ScreenshotPaths(theme.fileName, fontScale)
+    private val snapshots get() = ChatStage1ScreenshotPaths(theme.fileName, fontScale, widthDp)
 
     @OptIn(DelicateCoilApi::class)
     @Before fun installBoundaries() {
+        RuntimeEnvironment.setQualifiers("ru-rRU-w${widthDp}dp-h891dp-mdpi")
+        previousSystemFontScale = RuntimeEnvironment.getFontScale()
+        RuntimeEnvironment.setFontScale(fontScale)
         val context = RuntimeEnvironment.getApplication()
         // Robolectric's plain Application omits this library's startup ContentProvider.
         JLatexMathAndroid.init(context)
@@ -283,7 +286,7 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
     @Test fun productionChatAfterStage1() {
         compose.setContent {
             ScreenshotTheme(theme, fontScale) {
-                Surface(Modifier.requiredSize(411.dp, 891.dp).testTag("chat_stage1")) { fixture.Content() }
+                Surface(Modifier.requiredSize(widthDp.dp, 891.dp).testTag("chat_stage1")) { fixture.Content() }
             }
         }
         compose.waitForIdle()
@@ -337,11 +340,33 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         capture("provider_error")
     }
 
+    @Test fun productionToolDetailsUseRequestedNativeFontScale() {
+        val settings = ScreenshotFixtures.settings.copy(displaySetting = ScreenshotFixtures.settings.displaySetting.copy(autoCollapseToolSteps = false))
+        every { fixture.vm.settings } returns MutableStateFlow(settings)
+        fixture.conversationFlow.value = fixture.conversation.copy(messageNodes = listOf(fixture.conversation.messageNodes[5]))
+        compose.setContent {
+            ScreenshotTheme(theme, fontScale) {
+                Surface(Modifier.requiredSize(widthDp.dp, 891.dp).testTag("chat_stage1")) { fixture.Content() }
+            }
+        }
+        compose.onNodeWithTag("chat_timeline_tool_details:call_termux_run_command").performClick()
+        settleNativeRipple()
+        val sheetText = hasAnyAncestor(hasTestTag("chat_timeline_tool_sheet:call_termux_run_command")) and
+            SemanticsMatcher("native tool sheet text") { it.config.contains(SemanticsActions.GetTextLayoutResult) }
+        val nodes = compose.onAllNodes(sheetText, useUnmergedTree = true)
+        assertTrue("The production tool sheet must render native text", nodes.fetchSemanticsNodes().isNotEmpty())
+        val layouts = mutableListOf<TextLayoutResult>()
+        nodes.onFirst().performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertEquals("Separate tool window uses the requested actual system font scale", fontScale,
+            layouts.single().layoutInput.density.fontScale, .001f)
+        capture("tool_native_font_scale", includeWindows = true)
+    }
+
     @Test fun productionStage1States() {
         // A modal dialog owns a separate density, so the outer CompositionLocal
         // override alone cannot test its system font scale. Legacy viewports keep
         // their historical fixture; only these new stage-1 states update resources.
-        previousSystemFontScale = RuntimeEnvironment.getFontScale()
+        previousSystemFontScale = previousSystemFontScale ?: RuntimeEnvironment.getFontScale()
         RuntimeEnvironment.setFontScale(fontScale)
         // Replace only mutable VM boundaries; every capture still mounts the real ChatPage.
         val input = ChatInputState()
@@ -363,7 +388,7 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         fixture.conversationFlow.value = empty
         compose.setContent {
             ScreenshotTheme(theme, fontScale) {
-                Surface(Modifier.requiredSize(411.dp, 891.dp).testTag("chat_stage1")) { fixture.Content() }
+                Surface(Modifier.requiredSize(widthDp.dp, 891.dp).testTag("chat_stage1")) { fixture.Content() }
             }
         }
         compose.waitForIdle()
@@ -492,7 +517,10 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         compose.onNodeWithText(longText, useUnmergedTree = true)
             .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(longLayouts) }
         val nativeLongText = longLayouts.single()
-        assertEquals("The real Markdown paragraph retains all thirteen lines", 13, nativeLongText.lineCount)
+        val expectedLines = if (widthDp == 320 && fontScale == 1.3f) 26 else 13
+        assertEquals("The real Markdown paragraph retains every explicit and wrapped line", expectedLines, nativeLongText.lineCount)
+        assertEquals("Wrapping must retain the final character", longText.length,
+            nativeLongText.getLineEnd(nativeLongText.lineCount - 1))
         assertEquals("Collapsed user content uses nine actual scaled text lines", nativeLongText.getLineBottom(0) * 9f,
             collapsed.height, 1f)
         assertEquals("User message text uses the requested native font scale", fontScale,
@@ -510,7 +538,14 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         toggle.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Развернуто"))
         val expanded = compose.onNodeWithTag("chat_message_user_collapse", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         assertTrue("Expanding a thirteen-line user message must reveal its remaining lines", expanded.height > collapsed.height)
-        assertMessageBounds("chat_message_user_bubble")
+        if (expectedLines == 13) assertMessageBounds("chat_message_user_bubble")
+        else {
+            // Twenty-six scaled lines exceed one viewport: the latest message's
+            // actions still have to be reachable above the measured composer.
+            mainChatList().performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 100_000f) }
+            compose.waitForIdle()
+            assertMessageBounds("chat_message_user_actions")
+        }
         capture("user_long_expanded")
         toggle.performClick()
         settleNativeRipple()
@@ -539,10 +574,10 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
                     messageJumperOnLeft = onLeft, showUserAvatar = avatar), listOf(shortUser, longUser, tool))
                 val list = mainChatList().fetchSemanticsNode().boundsInRoot
                 assertEquals("The production list starts at the viewport edge", 0f, list.left, 1f)
-                assertEquals("The production list ends at the viewport edge", 411f, list.right, 1f)
+                assertEquals("The production list ends at the viewport edge", widthDp.toFloat(), list.right, 1f)
                 compose.onAllNodesWithTag("chat_message_row").fetchSemanticsNodes().forEach { row ->
                     assertEquals("Every message starts 16dp from the left", 16f, row.boundsInRoot.left, 1f)
-                    assertEquals("Every message ends 16dp from the right", 395f, row.boundsInRoot.right, 1f)
+                    assertEquals("Every message ends 16dp from the right", widthDp - 16f, row.boundsInRoot.right, 1f)
                 }
             }
         }
@@ -605,7 +640,7 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
     private fun assertActualMessagePartsInside16dp(user: Boolean = false, tool: Boolean = false) {
         val row = compose.onNodeWithTag("chat_message_row").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         assertEquals(16f, row.left, 1f)
-        assertEquals(395f, row.right, 1f)
+        assertEquals(widthDp - 16f, row.right, 1f)
         listOf("chat_message_user_bubble", "chat_message_assistant_bubble",
             "chat_message_user_header", "chat_message_assistant_header",
             "chat_message_user_actions", "chat_message_assistant_actions",
@@ -613,10 +648,10 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
             compose.onAllNodesWithTag(tag).fetchSemanticsNodes().forEach { part ->
                 val bounds = part.boundsInRoot
                 assertTrue("$tag must begin inside the message inset: $bounds", bounds.left >= 15f)
-                assertTrue("$tag must end inside the message inset: $bounds", bounds.right <= 396f)
+                assertTrue("$tag must end inside the message inset: $bounds", bounds.right <= widthDp - 15f)
                 if (tag == "chat_message_user_bubble" || tag == "chat_message_user_header" ||
                     tag == "chat_message_user_actions") {
-                    assertEquals("Right-aligned $tag ends at the message inset", 395f, bounds.right, 1f)
+                    assertEquals("Right-aligned $tag ends at the message inset", widthDp - 16f, bounds.right, 1f)
                 }
             }
         }
@@ -624,7 +659,7 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         if (tool) {
             val card = compose.onNodeWithTag("chat_message_tool_card").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
             assertEquals("Full-width tool card starts at the message inset", 16f, card.left, 1f)
-            assertEquals("Full-width tool card ends at the message inset", 395f, card.right, 1f)
+            assertEquals("Full-width tool card ends at the message inset", widthDp - 16f, card.right, 1f)
         }
     }
 
@@ -1054,7 +1089,7 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         val fixedClock = object : Clock { override fun now(): Instant = created + kotlin.time.Duration.parse("7s") }
         val reasoningText = (1..18).joinToString("\n") { "Шаг размышления $it: проверяю данные." }
         val active = stage3Message(86, UIMessagePart.Reasoning(reasoningText, created, null))
-        previousSystemFontScale = RuntimeEnvironment.getFontScale()
+        previousSystemFontScale = previousSystemFontScale ?: RuntimeEnvironment.getFontScale()
         RuntimeEnvironment.setFontScale(fontScale)
         every { fixture.vm.settings } returns settings
         every { fixture.vm.conversationJob } returns job
@@ -1065,7 +1100,7 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
                 val currentSettings by settings.collectAsState()
                 CompositionLocalProvider(LocalSettings provides currentSettings,
                     LocalChatTimelineClock provides fixedClock) {
-                    Surface(Modifier.requiredSize(411.dp, 891.dp).testTag("chat_stage1")) { fixture.Content() }
+                    Surface(Modifier.requiredSize(widthDp.dp, 891.dp).testTag("chat_stage1")) { fixture.Content() }
                 }
             }
         }
@@ -1179,7 +1214,7 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
             stage3Tool("narrow_pending", "root_exec", """{"command":"ls /sdcard/Download"}""",
                 output = null, approval = ToolApprovalState.Pending),
         )
-        previousSystemFontScale = RuntimeEnvironment.getFontScale()
+        previousSystemFontScale = previousSystemFontScale ?: RuntimeEnvironment.getFontScale()
         RuntimeEnvironment.setFontScale(fontScale)
         val workspaceId = Uuid.parse("60000000-0000-0000-0000-000000000002")
         settings.value = settings.value.copy(assistants = listOf(ScreenshotFixtures.assistant.copy(workspaceId = workspaceId)))
@@ -1310,7 +1345,7 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
     private fun mountStage2(settings: MutableStateFlow<Settings>, job: MutableStateFlow<Job?>, nodes: List<MessageNode>) {
         // Dialog windows inherit the platform resource density rather than the
         // outer Compose override. Exercise the requested font in both render paths.
-        previousSystemFontScale = RuntimeEnvironment.getFontScale()
+        previousSystemFontScale = previousSystemFontScale ?: RuntimeEnvironment.getFontScale()
         RuntimeEnvironment.setFontScale(fontScale)
         every { fixture.vm.settings } returns settings
         every { fixture.vm.conversationJob } returns job
@@ -1319,7 +1354,7 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
             ScreenshotTheme(theme, fontScale) {
                 val currentSettings by settings.collectAsState()
                 CompositionLocalProvider(LocalSettings provides currentSettings) {
-                    Surface(Modifier.requiredSize(411.dp, 891.dp).testTag("chat_stage1")) { fixture.Content() }
+                    Surface(Modifier.requiredSize(widthDp.dp, 891.dp).testTag("chat_stage1")) { fixture.Content() }
                 }
             }
         }
@@ -1353,7 +1388,7 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         val bounds = compose.onNodeWithTag(tag).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val header = compose.onNodeWithTag("chat_header_title_line").fetchSemanticsNode().boundsInRoot
         val composer = compose.onNodeWithTag("chat_composer").fetchSemanticsNode().boundsInRoot
-        assertTrue("Message must stay inside the chat viewport: $bounds", bounds.left >= 0f && bounds.right <= 411f &&
+        assertTrue("Message must stay inside the chat viewport: $bounds", bounds.left >= 0f && bounds.right <= widthDp.toFloat() &&
             bounds.top >= header.bottom && bounds.bottom <= composer.top && bounds.width > 0f && bounds.height > 0f)
     }
 
@@ -1410,7 +1445,7 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
 
     private fun assertStage2SourcesSheet() {
         val sheet = compose.onNodeWithTag("chat_message_sources_sheet").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        assertTrue("Sources must remain inside the real dialog window", sheet.left >= 0f && sheet.right <= 411f &&
+        assertTrue("Sources must remain inside the real dialog window", sheet.left >= 0f && sheet.right <= widthDp.toFloat() &&
             sheet.top >= 0f && sheet.bottom <= 891f && sheet.height > 0f)
         val title = compose.onNodeWithTag("chat_message_sources_title", useUnmergedTree = true)
         val layouts = mutableListOf<TextLayoutResult>()
@@ -1587,8 +1622,10 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
     }
 
     companion object {
-        @JvmStatic @Parameters(name = "{0}_font{1}") fun cases(): List<Array<Any>> =
-            ScreenshotThemeMode.entries.flatMap { theme -> listOf(1f, 1.3f).map { arrayOf(theme, it) } }
+        @JvmStatic @Parameters(name = "{0}_font{1}_width{2}") fun cases(): List<Array<Any>> =
+            ScreenshotThemeMode.entries.flatMap { theme -> listOf(1f, 1.3f).flatMap { font ->
+                listOf(411, 320).map { width -> arrayOf(theme, font, width) }
+            } }
     }
 }
 

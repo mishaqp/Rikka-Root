@@ -9,6 +9,13 @@ import org.junit.Test
 import java.io.File
 
 class ChatStage1ScreenshotPathsTest {
+    @Test fun narrowScreensHaveSeparateBaselinesWithoutMoving411dpReferences() {
+        assertEquals(File("src/test/screenshots/chat-after-stage5/light_font1.3_width320/overview.png"),
+            ChatStage1ScreenshotPaths("light", 1.3f, 320).baseline("overview"))
+        assertEquals(File("src/test/screenshots/chat-after-stage5/light_font1.3/overview.png"),
+            ChatStage1ScreenshotPaths("light", 1.3f, 411).baseline("overview"))
+    }
+
     private val properties = listOf(
         "roborazzi.test.record", "chat.stage1.record", "chat.stage1.record.dir",
         "chat.stage2.record", "chat.stage2.record.dir",
