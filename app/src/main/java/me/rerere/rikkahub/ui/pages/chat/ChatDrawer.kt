@@ -209,7 +209,17 @@ fun ChatDrawerContent(
     var showBatchDeleteDialog by remember(settings.assistantId) { mutableStateOf(false) }
     var showBatchMoveSheet by remember(settings.assistantId) { mutableStateOf(false) }
     var batchMoving by remember(settings.assistantId) { mutableStateOf(emptyList<Conversation>()) }
-    fun exitSelection() { selectionMode = false; selectedConversations = emptyMap() }
+    fun exitSelection() {
+        selectionMode = false
+        selectedConversations = emptyMap()
+        showBatchDeleteDialog = false
+        showBatchMoveSheet = false
+        if (batchMoving.isNotEmpty()) {
+            showMoveToFolderSheet = false
+            showMoveToAssistantSheet = false
+            batchMoving = emptyList()
+        }
+    }
     fun navigateChat(id: Uuid? = null, keepOpen: Boolean = false) {
         if (keepOpen && id == current.id) return
         if (keepOpen) drawerVm.requestOpenOnNextChat(current.id) else {
