@@ -8,6 +8,10 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.tools.local.LocalFileAccess
 import me.rerere.rikkahub.data.ai.tools.local.listZipContentsTool
+import me.rerere.rikkahub.data.ai.tools.local.fileJsonTool
+import me.rerere.rikkahub.data.ai.tools.local.fileSchema
+import me.rerere.rikkahub.data.ai.tools.local.zipFilesTool
+import me.rerere.rikkahub.data.ai.tools.local.SafFileOperationException
 import me.rerere.rikkahub.utils.JsonInstant
 import org.junit.Assert.*
 import org.junit.Test
@@ -80,6 +84,10 @@ class BugReportBuilderTest {
             entry.name to zip.getInputStream(entry).bufferedReader().use { it.readText() }
         }
     }
+    private fun fileDiagnostics(report: Map<String, String>): String {
+        assertTrue("ZIP must contain the last file-operation diagnostic", "file-operations.txt" in report)
+        return report.getValue("file-operations.txt")
+    }
     private fun builder(context: Context, logs: String = "ReportMarker: diagnostic line", errors: List<Throwable> = emptyList()) =
         BugReportBuilder(context) { errors }.apply { logcatProcess = { LogcatProcess(logs) } }
     private fun access(context: Context, workspace: File) = LocalFileAccess(context,
@@ -96,7 +104,7 @@ class BugReportBuilderTest {
                 addSuppressed(IllegalArgumentException("suppressed details"))
             }
             val report = entries(builder(ReportContext(root), logs, listOf(error)).build())
-            assertEquals(setOf("meta.txt", "logcat.txt", "errors.txt", "browser-lifecycle.txt", "README.txt"), report.keys)
+            assertEquals(setOf("meta.txt", "logcat.txt", "errors.txt", "browser-lifecycle.txt", "file-operations.txt", "README.txt"), report.keys)
             assertTrue(report.getValue("logcat.txt").contains("ReportMarker: network failure"))
             val diagnostics = report.getValue("errors.txt")
             assertTrue(diagnostics.contains("java.lang.IllegalStateException"))
@@ -110,6 +118,81 @@ class BugReportBuilderTest {
             assertTrue(report.getValue("README.txt").contains("browser-lifecycle.txt"))
             assertTrue(report.getValue("browser-lifecycle.txt").contains("Браузер"))
             assertTrue(report.getValue("README.txt").contains("фрагменты"))
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun lastFailedFileOperationInZipStoresOnlyOperationAndExceptionClass() = runBlocking {
+        val root = Files.createTempDirectory("report-file-failure").toFile()
+        try {
+            val copy = fileJsonTool("copy_file", "test", fileSchema()) {
+                throw IllegalStateException("/sdcard/Download/private-first.txt secret-first")
+            }
+            copy.execute(buildJsonObject {})
+            val write = fileJsonTool("write_text_file", "test", fileSchema()) {
+                throw FileNotFoundException("/sdcard/Download/Личный-документ.txt secret-last")
+            }
+            write.execute(buildJsonObject {})
+            fileJsonTool("read_file", "test", fileSchema()) { buildJsonObject { put("success", true) } }
+                .execute(buildJsonObject {})
+            val diagnostics = fileDiagnostics(entries(builder(ReportContext(root)).build()))
+            assertTrue(diagnostics.contains("WRITE"))
+            assertTrue(diagnostics.contains("java.io.FileNotFoundException"))
+            assertFalse(diagnostics.contains("java.lang.IllegalStateException"))
+            for (private in listOf("/sdcard", "Download", "Личный", "secret-first", "secret-last"))
+                assertFalse("File diagnostic must exclude private paths/messages", diagnostics.contains(private))
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun cancelledFileOperationDoesNotReplaceLastFailureInZip() = runBlocking {
+        val root = Files.createTempDirectory("report-file-cancel").toFile()
+        try {
+            fileJsonTool("copy_file", "test", fileSchema()) { throw IOException("private original") }
+                .execute(buildJsonObject {})
+            val cancelled = CancellationException("private cancellation")
+            try {
+                fileJsonTool("move_file", "test", fileSchema()) { throw cancelled }.execute(buildJsonObject {})
+                fail("Cancellation must propagate")
+            } catch (actual: CancellationException) {
+                assertTrue(actual === cancelled || actual.cause === cancelled)
+            }
+            val diagnostics = fileDiagnostics(entries(builder(ReportContext(root)).build()))
+            assertTrue(diagnostics.contains("COPY"))
+            assertTrue(diagnostics.contains("java.io.IOException"))
+            assertFalse(diagnostics.contains("CancellationException"))
+            assertFalse(diagnostics.contains("private"))
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun realArchiveToolFailureAlsoAppearsAsLastFileOperation() = runBlocking {
+        val root = Files.createTempDirectory("report-archive-failure").toFile()
+        try {
+            val context = ReportContext(root)
+            val access = LocalFileAccess(File(root, "scratch"), File(root, "upload"))
+            val parts = zipFilesTool(context, access).execute(buildJsonObject {
+                put("sources", buildJsonArray { add("/scratch/not-present-private.txt") })
+                put("destination", "/scratch/new-private.zip")
+            })
+            assertTrue((parts.single() as UIMessagePart.Text).text.contains("Один из исходных файлов"))
+            val diagnostics = fileDiagnostics(entries(builder(context).build()))
+            assertTrue(diagnostics.contains("ZIP"))
+            assertTrue(diagnostics.contains("ArchiveSafetyException"))
+            assertFalse(diagnostics.contains("not-present-private"))
+            assertFalse(diagnostics.contains("new-private"))
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun safDiagnosticStoresOriginalProviderClassRatherThanWrapperOrMessage() = runBlocking {
+        val root = Files.createTempDirectory("report-saf-failure").toFile()
+        try {
+            fileJsonTool("copy_file", "test", fileSchema()) {
+                throw SafFileOperationException(SecurityException("/sdcard/Download/Секрет.txt private-denial"))
+            }.execute(buildJsonObject {})
+            val diagnostics = fileDiagnostics(entries(builder(ReportContext(root)).build()))
+            assertTrue(diagnostics.contains("COPY"))
+            assertTrue(diagnostics.contains("java.lang.SecurityException"))
+            assertFalse(diagnostics.contains("SafFileOperationException"))
+            assertFalse(diagnostics.contains("Секрет"))
+            assertFalse(diagnostics.contains("private-denial"))
         } finally { root.deleteRecursively() }
     }
 

@@ -2,6 +2,7 @@
 package me.rerere.rikkahub.data.ai.tools.local
 
 import android.content.Context
+import android.database.Cursor
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -15,6 +16,8 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.io.File
+import java.io.FilterInputStream
+import java.io.FilterOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.URI
@@ -192,17 +195,20 @@ class LocalFileAccess internal constructor(
             currentCoroutineContext().ensureActive()
             return target to result
         } catch (failure: Exception) {
-            owned?.let { created ->
-                val cleaned = withContext(NonCancellable) {
-                    runCatching { !exists(created) || delete(created) }.getOrDefault(false)
-                }
-                if (!cleaned) {
-                    val cleanup = FileCreationCleanupFailedException(created, failure)
-                    if (failure is CancellationException) { failure.addSuppressed(cleanup); throw failure }
-                    throw cleanup
-                }
-            }
+            owned?.let { cleanupOwnedTarget(it, failure) }
             throw failure
+        }
+    }
+
+    /** Failed provider cleanup must remain visible, including when the operation was cancelled. */
+    internal suspend fun cleanupOwnedTarget(created: LocalFileSource, failure: Exception, recursive: Boolean = false) {
+        val cleaned = withContext(NonCancellable) {
+            runCatching { !exists(created) || delete(created, recursive) }.getOrDefault(false)
+        }
+        if (!cleaned) {
+            val cleanup = FileCreationCleanupFailedException(created, failure)
+            if (failure is CancellationException) { failure.addSuppressed(cleanup); throw failure }
+            throw cleanup
         }
     }
 
@@ -221,6 +227,15 @@ class LocalFileAccess internal constructor(
         val plan = planWritePath(reference)
         require(plan.existing != null || !isDirectory(from)) { "Для копирования папки сначала создайте папку назначения." }
         return withWriteTarget(plan) { target, created -> copy(from, target, overwrite || created, ownedDestination = created) }
+    }
+
+    internal suspend fun movePath(from: LocalFileSource, reference: String, overwrite: Boolean = false): Pair<LocalFileSource, Long> {
+        validateMoveSource(from)
+        val copied = copyPath(from, reference, overwrite)
+        // Ownership/creation rollback is finished before deleting the source. A failed
+        // deletion or cancellation after deletion must never remove the committed copy.
+        deleteMovedSource(from)
+        return copied
     }
 
     fun checkFile(file: File, write: Boolean = false): File {
@@ -262,7 +277,7 @@ class LocalFileAccess internal constructor(
         if (rootId == targetId) return true
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
-                val contained = DocumentsContract.isChildDocument(androidContext.contentResolver, parentDocument, targetDocument)
+                val contained = safProviderCall { DocumentsContract.isChildDocument(androidContext.contentResolver, parentDocument, targetDocument) }
                 currentCoroutineContext().ensureActive()
                 return contained
             } catch (cancelled: CancellationException) { throw cancelled }
@@ -272,15 +287,15 @@ class LocalFileAccess internal constructor(
             val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(parent, id)
             val projection = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_MIME_TYPE)
             val found = mutableListOf<DocumentChild>()
-            androidContext.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
-                val idColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-                val mimeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
-                while (cursor.moveToNext()) {
+            safProviderCall { androidContext.contentResolver.query(childrenUri, projection, null, null, null) }?.let(::SafCursor)?.use { cursor ->
+                val idColumn = safProviderCall { cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID) }
+                val mimeColumn = safProviderCall { cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE) }
+                while (safProviderCall { cursor.moveToNext() }) {
                     currentCoroutineContext().ensureActive()
                     check(found.size < remaining) { "Слишком много документов для подтверждения границ папки SAF." }
-                    val childId = cursor.getString(idColumn)
+                    val childId = safProviderCall { cursor.getString(idColumn) }
                     check(!childId.isNullOrBlank() && childId.length <= 8192) { "Провайдер SAF вернул некорректный идентификатор." }
-                    val mime = cursor.getString(mimeColumn)
+                    val mime = safProviderCall { cursor.getString(mimeColumn) }
                     check(!mime.isNullOrBlank()) { "Провайдер SAF не подтвердил тип дочернего документа." }
                     found += DocumentChild(childId, mime == DocumentsContract.Document.MIME_TYPE_DIR)
                 }
@@ -304,7 +319,10 @@ class LocalFileAccess internal constructor(
         currentCoroutineContext().ensureActive()
         when (source) {
             is LocalFileSource.Local -> checkFile(source.file).inputStream()
-            is LocalFileSource.Content -> { checkGrant(source, false); requireNotNull(androidContext.contentResolver.openInputStream(source.uri)) { "Не удалось открыть файл." } }
+            is LocalFileSource.Content -> {
+                checkGrant(source, false)
+                SafInputStream(requireNotNull(safProviderCall { androidContext.contentResolver.openInputStream(source.uri) }) { "Не удалось открыть файл." })
+            }
         }
     }
 
@@ -312,29 +330,48 @@ class LocalFileAccess internal constructor(
         currentCoroutineContext().ensureActive()
         when (source) {
             is LocalFileSource.Local -> java.io.FileOutputStream(checkFile(source.file, true).also { it.parentFile?.mkdirs() }, append)
-            is LocalFileSource.Content -> { checkGrant(source, true); require(!append) { "Добавление к SAF-файлу не поддерживается." }; requireNotNull(androidContext.contentResolver.openOutputStream(source.uri, "wt")) { "Не удалось открыть файл для записи." } }
+            is LocalFileSource.Content -> {
+                checkGrant(source, true)
+                require(!append) { "Добавление к SAF-файлу не поддерживается." }
+                SafOutputStream(requireNotNull(safProviderCall { androidContext.contentResolver.openOutputStream(source.uri, "wt") }) { "Не удалось открыть файл для записи." })
+            }
         }
     }
 
     suspend fun exists(source: LocalFileSource): Boolean = withContext(Dispatchers.IO) { when (source) {
         is LocalFileSource.Local -> checkFile(source.file).exists()
-        is LocalFileSource.Content -> document(source).exists()
+        is LocalFileSource.Content -> {
+            val metadata = document(source)
+            safProviderCall { metadata.exists() }
+        }
     } }
     suspend fun isDirectory(source: LocalFileSource): Boolean = withContext(Dispatchers.IO) { when (source) {
         is LocalFileSource.Local -> checkFile(source.file).isDirectory
-        is LocalFileSource.Content -> document(source).isDirectory
+        is LocalFileSource.Content -> {
+            val metadata = document(source)
+            safProviderCall { metadata.isDirectory }
+        }
     } }
     suspend fun name(source: LocalFileSource): String = withContext(Dispatchers.IO) { when (source) {
         is LocalFileSource.Local -> checkFile(source.file).name
-        is LocalFileSource.Content -> document(source).name ?: "file"
+        is LocalFileSource.Content -> {
+            val metadata = document(source)
+            safProviderCall { metadata.name } ?: "file"
+        }
     } }
     suspend fun size(source: LocalFileSource): Long = withContext(Dispatchers.IO) { when (source) {
         is LocalFileSource.Local -> checkFile(source.file).length()
-        is LocalFileSource.Content -> document(source).length()
+        is LocalFileSource.Content -> {
+            val metadata = document(source)
+            safProviderCall { metadata.length() }
+        }
     } }
     suspend fun modified(source: LocalFileSource): Long = withContext(Dispatchers.IO) { when (source) {
         is LocalFileSource.Local -> checkFile(source.file).lastModified()
-        is LocalFileSource.Content -> document(source).lastModified()
+        is LocalFileSource.Content -> {
+            val metadata = document(source)
+            safProviderCall { metadata.lastModified() }
+        }
     } }
 
     suspend fun list(source: LocalFileSource): List<LocalFileSource> = withContext(Dispatchers.IO) {
@@ -359,11 +396,11 @@ class LocalFileAccess internal constructor(
                 val id = if (DocumentsContract.isDocumentUri(androidContext, source.uri)) DocumentsContract.getDocumentId(source.uri) else DocumentsContract.getTreeDocumentId(source.uri)
                 val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(source.uri, id)
                 val found = mutableListOf<LocalFileSource>()
-                androidContext.contentResolver.query(childrenUri, arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID), null, null, null)?.use { cursor ->
-                    while (cursor.moveToNext()) {
+                safProviderCall { androidContext.contentResolver.query(childrenUri, arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID), null, null, null) }?.let(::SafCursor)?.use { cursor ->
+                    while (safProviderCall { cursor.moveToNext() }) {
                         currentCoroutineContext().ensureActive()
                         require(found.size < MAX_ENTRIES) { "В папке слишком много файлов." }
-                        val child = LocalFileSource.Content(DocumentsContract.buildDocumentUriUsingTree(source.uri, cursor.getString(0)))
+                        val child = LocalFileSource.Content(DocumentsContract.buildDocumentUriUsingTree(source.uri, safProviderCall { cursor.getString(0) }))
                         checkGrant(child, false); found += child
                     }
                 } ?: error("Не удалось прочитать папку SAF.")
@@ -426,8 +463,8 @@ class LocalFileAccess internal constructor(
 
     private suspend fun createContentChild(parent: LocalFileSource.Content, name: String, directory: Boolean): LocalFileSource.Content {
         checkGrant(parent, true)
-        val uri = requireNotNull(DocumentsContract.createDocument(androidContext.contentResolver,
-            documentUri(parent.uri), if (directory) DocumentsContract.Document.MIME_TYPE_DIR else "application/octet-stream", name)) { "Не удалось создать документ." }
+        val uri = requireNotNull(safProviderCall { DocumentsContract.createDocument(androidContext.contentResolver,
+            documentUri(parent.uri), if (directory) DocumentsContract.Document.MIME_TYPE_DIR else "application/octet-stream", name) }) { "Не удалось создать документ." }
         val created = LocalFileSource.Content(uri)
         try {
             require(uri.authority == parent.uri.authority) { "Провайдер вернул документ другого хранилища." }
@@ -480,7 +517,10 @@ class LocalFileAccess internal constructor(
             currentCoroutineContext().ensureActive()
             val deleted = when (entry) {
                 is LocalFileSource.Local -> checkFile(entry.file, true).delete()
-                is LocalFileSource.Content -> DocumentsContract.deleteDocument(androidContext.contentResolver, document(entry, true).uri)
+                is LocalFileSource.Content -> {
+                    val uri = document(entry, true).uri
+                    safProviderCall { DocumentsContract.deleteDocument(androidContext.contentResolver, uri) }
+                }
             }
             require(deleted) { "Не удалось удалить файл." }
         }
@@ -528,10 +568,11 @@ class LocalFileAccess internal constructor(
                     }
                     try {
                         currentCoroutineContext().ensureActive()
+                        if (owned != null) require(name(target) == entryName) { "Провайдер SAF изменил имя создаваемого файла." }
                         if (directory) copyDirectory(entry, target, depth + 1)
-                        else total += copy(entry, target, overwrite || owned != null)
+                        else total += copy(entry, target, overwrite || owned != null, ownedDestination = owned != null)
                     } catch (failure: Exception) {
-                        owned?.let { created -> withContext(NonCancellable) { runCatching { delete(created, recursive = true) } } }
+                        owned?.let { cleanupOwnedTarget(it, failure, recursive = true) }
                         throw failure
                     }
                     require(total <= MAX_COPY_BYTES) { "Копирование превышает 512 МиБ." }
@@ -547,12 +588,14 @@ class LocalFileAccess internal constructor(
         }
     }
 
-    suspend fun move(from: LocalFileSource, to: LocalFileSource, overwrite: Boolean = false): Long {
+    private suspend fun validateMoveSource(from: LocalFileSource) {
         when (from) {
             is LocalFileSource.Local -> checkFile(from.file, true)
             is LocalFileSource.Content -> { checkGrant(from, true); require(!isTreeRoot(from)) { "Перемещение корня SAF запрещено." } }
         }
-        val bytes = copy(from, to, overwrite)
+    }
+
+    private suspend fun deleteMovedSource(from: LocalFileSource) {
         try {
             require(delete(from, recursive = true)) { "Источник не удалён." }
         } catch (failure: Exception) {
@@ -560,6 +603,12 @@ class LocalFileAccess internal constructor(
             if (failure is CancellationException) { failure.addSuppressed(preserved); throw failure }
             throw preserved
         }
+    }
+
+    suspend fun move(from: LocalFileSource, to: LocalFileSource, overwrite: Boolean = false, ownedDestination: Boolean = false): Long {
+        validateMoveSource(from)
+        val bytes = copy(from, to, overwrite, ownedDestination)
+        deleteMovedSource(from)
         return bytes
     }
 
@@ -634,6 +683,39 @@ class LocalFileAccess internal constructor(
         const val MAX_WRITE_BYTES = 16 * 1024 * 1024
         const val MAX_COPY_BYTES = 512L * 1024 * 1024
     }
+}
+
+/** Preserve the provider exception class without carrying its message into tool results. */
+private inline fun <T> safProviderCall(action: () -> T): T = try {
+    action()
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (failure: SafFileOperationException) {
+    throw failure
+} catch (failure: Exception) {
+    throw SafFileOperationException(failure)
+}
+
+private class SafCursor(private val cursor: Cursor) : Cursor by cursor {
+    override fun close() = safProviderCall { cursor.close() }
+}
+
+private class SafInputStream(input: InputStream) : FilterInputStream(input) {
+    override fun read(): Int = safProviderCall { `in`.read() }
+    override fun read(buffer: ByteArray): Int = safProviderCall { `in`.read(buffer) }
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int = safProviderCall { `in`.read(buffer, offset, length) }
+    override fun skip(count: Long): Long = safProviderCall { `in`.skip(count) }
+    override fun available(): Int = safProviderCall { `in`.available() }
+    override fun reset() = safProviderCall { `in`.reset() }
+    override fun close() = safProviderCall { `in`.close() }
+}
+
+private class SafOutputStream(output: OutputStream) : FilterOutputStream(output) {
+    override fun write(value: Int) = safProviderCall { out.write(value) }
+    override fun write(buffer: ByteArray) = safProviderCall { out.write(buffer) }
+    override fun write(buffer: ByteArray, offset: Int, length: Int) = safProviderCall { out.write(buffer, offset, length) }
+    override fun flush() = safProviderCall { out.flush() }
+    override fun close() = safProviderCall { out.close() }
 }
 
 /** Compare tree/document IDs after component decoding; prefix collisions never grant access. */

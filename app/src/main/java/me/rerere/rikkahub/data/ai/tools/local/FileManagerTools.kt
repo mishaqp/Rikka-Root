@@ -45,21 +45,30 @@ internal fun fileInteger(obj: JsonObject, name: String, default: Int, range: Int
 
 internal fun fileJsonTool(name: String, description: String, schema: InputSchema.Obj,
     execute: suspend (JsonObject) -> JsonObject): Tool = Tool(name, description,
-    parameters = { schema }, needsApproval = { true }, execute = { input -> deviceToolResult {
+    parameters = { schema }, needsApproval = { true }, execute = { input -> deviceToolResult(fileToolOperation(name)) {
         withContext(Dispatchers.IO) {
             try { execute(requireNotNull(input as? JsonObject) { "Параметры должны быть объектом." }) }
-            catch (cleanup: FileCreationCleanupFailedException) { buildJsonObject {
-                put("error", "creation_cleanup_failed"); put("created_path", cleanup.created.reference)
-                put("detail", "Android не разрешил убрать созданный документ. Проверьте его в выбранной папке.")
-            } }
-            catch (_: FileMoveSourceDeleteException) { buildJsonObject {
-                put("error", "source_delete_failed"); put("detail", "Копия сохранена, но источник не удалось полностью удалить. Назначение сохранено для восстановления.")
-            } }
-            catch (recovery: FileRestoreFailedException) { buildJsonObject {
-                put("error", "restore_failed")
-                put("detail", "Android не смог восстановить предыдущий файл. Резервная копия сохранена в scratch.")
-                put("backup_path", "/scratch/${recovery.backup.name}")
-            } }
+            catch (cleanup: FileCreationCleanupFailedException) {
+                fileToolOperation(name)?.let { FileOperationDiagnostics.record(it, cleanup) }
+                buildJsonObject {
+                    put("error", "creation_cleanup_failed"); put("created_path", cleanup.created.reference)
+                    put("detail", "Android не разрешил убрать созданный документ. Проверьте его в выбранной папке.")
+                }
+            }
+            catch (failure: FileMoveSourceDeleteException) {
+                fileToolOperation(name)?.let { FileOperationDiagnostics.record(it, failure) }
+                buildJsonObject {
+                    put("error", "source_delete_failed"); put("detail", "Копия сохранена, но источник не удалось полностью удалить. Назначение сохранено для восстановления.")
+                }
+            }
+            catch (recovery: FileRestoreFailedException) {
+                fileToolOperation(name)?.let { FileOperationDiagnostics.record(it, recovery) }
+                buildJsonObject {
+                    put("error", "restore_failed")
+                    put("detail", "Android не смог восстановить предыдущий файл. Резервная копия сохранена в scratch.")
+                    put("backup_path", "/scratch/${recovery.backup.name}")
+                }
+            }
         }
     } })
 
@@ -119,21 +128,29 @@ fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCan
                     }
                     try {
                         currentCoroutineContext().ensureActive()
-                        if (operation == "copy") access.copy(from, to, overwrite || previous == null)
-                        else access.move(from, to, overwrite || previous == null)
+                        if (owned != null) require(access.name(to) == name) { "Провайдер SAF изменил имя создаваемого файла." }
+                        if (operation == "copy") access.copy(from, to, overwrite || previous == null, ownedDestination = owned != null)
+                        else access.move(from, to, overwrite || previous == null, ownedDestination = owned != null)
                     } catch (error: Exception) {
-                        if (owned != null && !isMoveCopyPreserved(error)) withContext(kotlinx.coroutines.NonCancellable) { runCatching { access.delete(to, recursive = true) } }
+                        if (owned != null && !isMoveCopyPreserved(error)) access.cleanupOwnedTarget(to, error, recursive = true)
                         throw error
                     }
                 }
                 succeeded++
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { failures += buildJsonObject {
-                put("path", path)
-                put("error", if (isMoveCopyPreserved(error)) "Копия сохранена, но источник не удалось полностью удалить." else "Не удалось выполнить операцию. Проверьте путь, доступ и существующее назначение.")
-                if (error is FileRestoreFailedException) put("backup_path", "/scratch/${error.backup.name}")
-                if (error is FileCreationCleanupFailedException) put("created_path", error.created.reference)
-            } }
+            catch (error: Exception) {
+                (safFileCause(error) as? CancellationException)?.let { throw it }
+                val fileOperation = fileToolOperation("batch_$operation")
+                fileOperation?.let { FileOperationDiagnostics.record(it, error) }
+                failures += buildJsonObject {
+                    put("path", path)
+                    put("error", if (isMoveCopyPreserved(error)) "Копия сохранена, но источник не удалось полностью удалить."
+                        else if (safFileCause(error) != null) deviceToolFailureReason(error, fileOperation)
+                        else "Не удалось выполнить операцию. Проверьте путь, доступ и существующее назначение.")
+                    if (error is FileRestoreFailedException) put("backup_path", "/scratch/${error.backup.name}")
+                    if (error is FileCreationCleanupFailedException) put("created_path", error.created.reference)
+                }
+            }
         }
         return buildJsonObject { put("success", succeeded); put("failed", JsonArray(failures)) }
     }
@@ -183,7 +200,7 @@ fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCan
         fileSchema(listOf("src", "dst"), "src" to "string", "dst" to "string", "overwrite" to "boolean")) { obj ->
         val from = source(obj, "src", operation == "move")
         val (destination, bytes) = if (operation == "copy") access.copyPath(from, fileArgument(obj, "dst"), fileBoolean(obj, "overwrite"))
-        else source(obj, "dst", true).let { it to access.move(from, it, fileBoolean(obj, "overwrite")) }
+        else access.movePath(from, fileArgument(obj, "dst"), fileBoolean(obj, "overwrite"))
         buildJsonObject { put("success", true); put("from", from.reference); put("to", destination.reference); put("bytes_copied", bytes) }
     }
     tools += fileJsonTool("create_directory", "Create a local directory with parents. For SAF, path is an existing parent tree/document and name is the new direct directory name." + scope,
@@ -242,7 +259,7 @@ internal fun fileGlobRegex(pattern: String): Regex {
 
 private fun showImageFileTool(access: LocalFileAccess, modelCanReadImages: Boolean): Tool = Tool(
     "show_image", "Show an image with bounded16MiB input. A text-only model receives metadata with visible_to_you=false; use open_file for the Android viewer.",
-    parameters = { fileSchema(listOf("path"), "path" to "string") }, needsApproval = { true }, execute = { input -> deviceToolParts { withContext(Dispatchers.IO) {
+    parameters = { fileSchema(listOf("path"), "path" to "string") }, needsApproval = { true }, execute = { input -> deviceToolParts(FileToolOperation.SHOW_IMAGE) { withContext(Dispatchers.IO) {
         val obj = requireNotNull(input as? JsonObject)
         val from = access.resolve(fileArgument(obj, "path"))
         val bytes = access.openInput(from).use { readFileBytes(it, LocalFileAccess.MAX_WRITE_BYTES + 1) }

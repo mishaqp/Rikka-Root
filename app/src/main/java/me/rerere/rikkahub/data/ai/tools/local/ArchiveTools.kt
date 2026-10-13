@@ -172,13 +172,21 @@ internal suspend fun writeZipArchive(
 
 private fun archiveParts(value: JsonObject) = listOf(UIMessagePart.Text(value.toString()))
 private fun archiveError(message: String) = archiveParts(buildJsonObject { put("error", message) })
-private suspend fun archiveOperation(action: suspend () -> JsonObject): List<UIMessagePart> = withContext(Dispatchers.IO) {
+private suspend fun archiveOperation(operation: FileToolOperation, action: suspend () -> JsonObject): List<UIMessagePart> = withContext(Dispatchers.IO) {
     try {
         val result = withTimeoutOrNull(180_000) { action() }
         if (result == null) archiveError("Время операции с архивом истекло. Повторите запрос с меньшим архивом.") else archiveParts(result)
     } catch (cancelled: CancellationException) { throw cancelled }
-    catch (unsafe: ArchiveSafetyException) { archiveError(unsafe.message ?: "Архив не прошёл проверку безопасности.") }
-    catch (_: Exception) { archiveError("Не удалось выполнить операцию с архивом. Проверьте ZIP-файл, свободное место и доступ к выбранным папкам.") }
+    catch (unsafe: ArchiveSafetyException) {
+        FileOperationDiagnostics.record(operation, unsafe)
+        archiveError(unsafe.message ?: "Архив не прошёл проверку безопасности.")
+    }
+    catch (error: Exception) {
+        (safFileCause(error) as? CancellationException)?.let { throw it }
+        FileOperationDiagnostics.record(operation, error)
+        archiveError(if (safFileCause(error) != null) deviceToolFailureReason(error, operation)
+        else "Не удалось выполнить операцию с архивом. Проверьте ZIP-файл, свободное место и доступ к выбранным папкам.")
+    }
 }
 private fun JsonObject.archivePath(key: String): String = this[key]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() && it.length <= 4096 }
     ?: throw ArchiveSafetyException("Укажите корректный путь в параметре $key.")
@@ -327,7 +335,7 @@ fun zipFilesTool(context: Context, access: LocalFileAccess = LocalFileAccess(con
         put("compression_level", buildJsonObject { put("type", "integer"); put("minimum", 0); put("maximum", 9) })
     }, listOf("sources", "destination")) },
     needsApproval = { true },
-    execute = { input -> archiveOperation {
+    execute = { input -> archiveOperation(FileToolOperation.ZIP) {
         val obj = input.jsonObject
         val references = obj["sources"]?.jsonArray?.map { it.jsonPrimitive.contentOrNull ?: throw ArchiveSafetyException("sources должен содержать пути к файлам.") }
             ?: throw ArchiveSafetyException("Укажите sources.")
@@ -399,7 +407,7 @@ fun unzipFileTool(context: Context, access: LocalFileAccess = LocalFileAccess(co
         put("overwrite", buildJsonObject { put("type", "boolean") })
     }, listOf("source", "destination_dir")) },
     needsApproval = { true },
-    execute = { input -> archiveOperation {
+    execute = { input -> archiveOperation(FileToolOperation.UNZIP) {
         val obj = input.jsonObject
         val source = access.resolve(obj.archivePath("source"))
         val destinationReference = obj.archivePath("destination_dir")
@@ -493,7 +501,7 @@ fun listZipContentsTool(context: Context, access: LocalFileAccess = LocalFileAcc
     description = "Показать записи ZIP без распаковки в пользовательскую папку. Предпочитайте этот встроенный инструмент вместо workspace_exec для просмотра ZIP: он не требует установки zip/unzip через apt или другой менеджер пакетов. source поддерживает /workspace/..., относительные пути от текущей папки рабочего пространства (без рабочего пространства — от /scratch), /scratch/..., file:// и content:// явно выданных SAF-папок. Чтение ограничено 10 000 записями, 2 ГиБ распакованных данных и 512 МиБ ZIP.",
     parameters = { InputSchema.Obj(buildJsonObject { put("source", buildJsonObject { put("type", "string") }) }, listOf("source")) },
     needsApproval = { true },
-    execute = { input -> archiveOperation {
+    execute = { input -> archiveOperation(FileToolOperation.LIST_ZIP) {
         val source = access.resolve(input.jsonObject.archivePath("source"))
         val entries = ArrayList<ZipEntry>()
         readZipArchive(access.openInput(source)) { entry, _, _ -> entries.add(entry) }
