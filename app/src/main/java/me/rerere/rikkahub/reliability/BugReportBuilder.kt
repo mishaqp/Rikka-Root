@@ -13,6 +13,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import me.rerere.rikkahub.BuildConfig
+import me.rerere.rikkahub.browser.BrowserLaunchDiagnostics
 import java.io.BufferedReader
 import java.io.File
 import java.io.FileOutputStream
@@ -34,6 +35,7 @@ private const val LOGCAT_TIMEOUT_MILLIS = 5_000L
  *   - meta.txt — version, device model, Android version, locale, timezone
  *   - logcat.txt — last 5000 logcat lines from this process, redacted by [SecretRedactor]
  *   - errors.txt — complete ChatService exceptions through the same redactor
+ *   - browser-lifecycle.txt — bounded browser launch stages, without page/intent/exception text
  *
  * NOT included (deliberate):
  *   - Conversation dumps (logs and exception messages can still include fragments)
@@ -65,6 +67,7 @@ class BugReportBuilder(
                 zip.putEntry("errors.txt", SecretRedactor.redact(errorsLoader().joinToString("\n\n") {
                     it.stackTraceToString()
                 }.ifEmpty { "Ошибок ChatService нет." }))
+                zip.putEntry("browser-lifecycle.txt", BrowserLaunchDiagnostics.report())
                 zip.putEntry("README.txt", buildReadme())
             }
             completed = true
@@ -114,6 +117,8 @@ class BugReportBuilder(
           * meta.txt   — версию приложения, устройство и сведения об Android
           * logcat.txt — последние до 5000 строк журнала нашего процесса;
                           известные формы секретов скрыты редактором
+          * browser-lifecycle.txt — этапы запуска и жизненного цикла браузера в этом процессе;
+                                    без адресов, страниц и сообщений исключений
           * errors.txt — полные тексты ошибок ChatService: тип, сообщение и стек;
                          известные формы секретов скрыты тем же редактором
 

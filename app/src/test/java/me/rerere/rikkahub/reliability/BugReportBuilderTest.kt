@@ -96,7 +96,7 @@ class BugReportBuilderTest {
                 addSuppressed(IllegalArgumentException("suppressed details"))
             }
             val report = entries(builder(ReportContext(root), logs, listOf(error)).build())
-            assertEquals(setOf("meta.txt", "logcat.txt", "errors.txt", "README.txt"), report.keys)
+            assertEquals(setOf("meta.txt", "logcat.txt", "errors.txt", "browser-lifecycle.txt", "README.txt"), report.keys)
             assertTrue(report.getValue("logcat.txt").contains("ReportMarker: network failure"))
             val diagnostics = report.getValue("errors.txt")
             assertTrue(diagnostics.contains("java.lang.IllegalStateException"))
@@ -107,6 +107,8 @@ class BugReportBuilderTest {
             val text = report.values.joinToString("\n")
             for (secret in listOf("sk-synthetic-secret", "synthetic.jwt.secret", "synthetic-password")) assertFalse(text.contains(secret))
             assertTrue(report.getValue("README.txt").contains("5000"))
+            assertTrue(report.getValue("README.txt").contains("browser-lifecycle.txt"))
+            assertTrue(report.getValue("browser-lifecycle.txt").contains("Браузер"))
             assertTrue(report.getValue("README.txt").contains("фрагменты"))
         } finally { root.deleteRecursively() }
     }

@@ -47,117 +47,168 @@ class BrowserActivity : ComponentActivity() {
     private var conversationId: Uuid? = null
     private var skillScope: BrowserSkillScope? = null
     private var skillRoot: File? = null
+    private var diagnosticLaunchId: Long = 0
+
+    private fun recordLifecycle(event: BrowserLaunchEvent, error: Throwable? = null) {
+        BrowserLaunchDiagnostics.journal.record(diagnosticLaunchId, event,
+            finishing = isFinishing, changingConfigurations = isChangingConfigurations,
+            windowFocus = window?.peekDecorView()?.hasWindowFocus(),
+            activityInstanceId = System.identityHashCode(this), error = error)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
-        super.onCreate(savedInstanceState)
+        diagnosticLaunchId = intent?.getLongExtra(EXTRA_DIAGNOSTIC_LAUNCH_ID, 0L)
+            ?.takeIf { it > 0 && BrowserLaunchDiagnostics.journal.snapshot(it).containsKey("attempt_id") }
+            ?: BrowserLaunchDiagnostics.journal.begin(BrowserLaunchOrigin.MANUAL)
+        recordLifecycle(BrowserLaunchEvent.ON_CREATE_ENTER)
+        try {
+            enableEdgeToEdge()
+            super.onCreate(savedInstanceState)
 
-        // Optional companion conversation. browser_open passes the calling chat's id so the
-        // mini-chat overlay can drive the same chat — user watches the AI work and can
-        // queue follow-up prompts without leaving the activity.
-        conversationId = intent?.getStringExtra(EXTRA_CONVERSATION_ID)
-            ?.let { runCatching { Uuid.parse(it) }.getOrNull() }
+            // Optional companion conversation. browser_open passes the calling chat's id so the
+            // mini-chat overlay can drive the same chat — user watches the AI work and can
+            // queue follow-up prompts without leaving the activity.
+            conversationId = intent?.getStringExtra(EXTRA_CONVERSATION_ID)
+                ?.let { runCatching { Uuid.parse(it) }.getOrNull() }
 
-        val requestedUrl = intent?.getStringExtra(EXTRA_INITIAL_URL) ?: "about:blank"
-        val skillName = intent?.getStringExtra(EXTRA_SKILL_NAME)
-        if (skillName != null) {
-            val requestedRoot = intent?.getStringExtra(EXTRA_SKILL_ROOT)?.let(::File)
-            val registeredRoot = runCatching {
-                GlobalContext.get().get<SkillManager>().getSkillDir(skillName)?.canonicalFile
-            }.getOrNull()
-            val canonicalRequestedRoot = runCatching { requestedRoot?.canonicalFile }.getOrNull()
-            if (registeredRoot == null || canonicalRequestedRoot != registeredRoot) {
-                Toast.makeText(this, "Навык не найден или каталог навыка недопустим.", Toast.LENGTH_LONG).show()
-                finish()
-                return
-            }
-            val viewer = BrowserSkillScope.resolveViewer(this, registeredRoot, requestedUrl)
-            if (viewer == null) {
-                Toast.makeText(this, "Страница навыка отсутствует или находится вне его каталога.", Toast.LENGTH_LONG).show()
-                finish()
-                return
-            }
-            skillScope = viewer.scope
-            skillRoot = registeredRoot
-        }
-
-        // Best-effort profile dir creation. The WebView falls back to its default location if
-        // creation fails — never a crash-on-launch risk. Pass 3's "Clear browsing data" will
-        // also wipe + recreate this dir.
-        val profileDir = File(filesDir, "browser-profile")
-        if (!profileDir.exists()) {
-            profileDir.mkdirs()
-        }
-
-        // Global cookie store config — applies to every WebView in the process. Spec calls
-        // for third-party cookies on so the AI can navigate sites that auth across domains.
-        CookieManager.getInstance().setAcceptCookie(true)
-
-        // Hardware back: prefer WebView history, fall back to finishing the Activity.
-        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() {
-                val wv = webView
-                if (wv != null && wv.canGoBack()) {
-                    wv.goBack()
-                } else {
+            val requestedUrl = intent?.getStringExtra(EXTRA_INITIAL_URL) ?: "about:blank"
+            val skillName = intent?.getStringExtra(EXTRA_SKILL_NAME)
+            if (skillName != null) {
+                val requestedRoot = intent?.getStringExtra(EXTRA_SKILL_ROOT)?.let(::File)
+                val registeredRoot = runCatching {
+                    GlobalContext.get().get<SkillManager>().getSkillDir(skillName)?.canonicalFile
+                }.getOrNull()
+                val canonicalRequestedRoot = runCatching { requestedRoot?.canonicalFile }.getOrNull()
+                if (registeredRoot == null || canonicalRequestedRoot != registeredRoot) {
+                    Toast.makeText(this, "Навык не найден или каталог навыка недопустим.", Toast.LENGTH_LONG).show()
                     finish()
+                    return
+                }
+                val viewer = BrowserSkillScope.resolveViewer(this, registeredRoot, requestedUrl)
+                if (viewer == null) {
+                    Toast.makeText(this, "Страница навыка отсутствует или находится вне его каталога.", Toast.LENGTH_LONG).show()
+                    finish()
+                    return
+                }
+                skillScope = viewer.scope
+                skillRoot = registeredRoot
+            }
+
+            // Best-effort profile dir creation. The WebView falls back to its default location if
+            // creation fails — never a crash-on-launch risk. Pass 3's "Clear browsing data" will
+            // also wipe + recreate this dir.
+            val profileDir = File(filesDir, "browser-profile")
+            if (!profileDir.exists()) {
+                profileDir.mkdirs()
+            }
+
+            // Global cookie store config — applies to every WebView in the process. Spec calls
+            // for third-party cookies on so the AI can navigate sites that auth across domains.
+            CookieManager.getInstance().setAcceptCookie(true)
+
+            // Hardware back: prefer WebView history, fall back to finishing the Activity.
+            onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    val wv = webView
+                    if (wv != null && wv.canGoBack()) {
+                        wv.goBack()
+                    } else {
+                        finish()
+                    }
+                }
+            })
+
+            setContent {
+                RikkahubTheme {
+                    BrowserView(
+                        onWebViewCreating = { recordLifecycle(BrowserLaunchEvent.WEBVIEW_CREATE_ENTER) },
+                        onWebViewCreationFailed = { error -> recordLifecycle(BrowserLaunchEvent.WEBVIEW_CREATION_FAILED, error) },
+                        onWebViewReady = { wv ->
+                            recordLifecycle(BrowserLaunchEvent.WEBVIEW_READY)
+                            // The Activity itself owns the WebView; stash it for back-press
+                            // handling and bind into the global controller for tool dispatch.
+                            webView = wv
+                            if (skillRoot == null) {
+                                BrowserController.bind(wv, conversationId?.toString())
+                                recordLifecycle(BrowserLaunchEvent.CONTROLLER_BOUND)
+                            }
+                            // Third-party cookies must be enabled per-WebView, not on the
+                            // CookieManager singleton — the API split is a holdover from Lollipop.
+                            if (skillRoot == null) {
+                                CookieManager.getInstance().setAcceptThirdPartyCookies(wv, true)
+                            }
+                        },
+                        onUrlChange = { currentUrl.value = it },
+                        onTitleChange = { currentTitle.value = it },
+                        onLoadProgress = { loadProgress.value = it },
+                        onCanGoBackChange = { canGoBack.value = it },
+                        onCanGoForwardChange = { canGoForward.value = it },
+                        canGoBackState = canGoBack,
+                        canGoForwardState = canGoForward,
+                        currentUrlState = currentUrl,
+                        currentTitleState = currentTitle,
+                        loadProgressState = loadProgress,
+                        onClose = { finish() },
+                        onBackTap = { webView?.takeIf { it.canGoBack() }?.goBack() },
+                        onForwardTap = { webView?.takeIf { it.canGoForward() }?.goForward() },
+                        onRefreshTap = { webView?.reload() },
+                        onStopAi = { if (skillRoot == null) BrowserController.stopCurrentTask() },
+                        onNavigate = { raw ->
+                            val url = normalizeBrowserQuery(raw)
+                            if (skillRoot == null || (allowedBrowserUrl(url) && skillScope?.isForeignSkillOrigin(Uri.parse(url)) != true)) {
+                                webView?.loadUrl(url)
+                            } else {
+                                Toast.makeText(this, "Этот адрес недоступен в текущем браузере.", Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        initialUrl = skillScope?.initialUrl ?: requestedUrl,
+                        skillScope = skillScope,
+                        skillRoot = skillRoot,
+                        onSkillProfileUnavailable = {
+                            Toast.makeText(this, "Просмотрщик навыка недоступен: установленный Android System WebView не поддерживает изолированные профили. Обновите WebView. Обычный браузер продолжает работать.", Toast.LENGTH_LONG).show()
+                            finish()
+                        },
+                        conversationId = conversationId,
+                    )
                 }
             }
-        })
-
-        setContent {
-            RikkahubTheme {
-                BrowserView(
-                    onWebViewReady = { wv ->
-                        // The Activity itself owns the WebView; stash it for back-press
-                        // handling and bind into the global controller for tool dispatch.
-                        webView = wv
-                        if (skillRoot == null) {
-                            BrowserController.bind(wv, conversationId?.toString())
-                        }
-                        // Third-party cookies must be enabled per-WebView, not on the
-                        // CookieManager singleton — the API split is a holdover from Lollipop.
-                        if (skillRoot == null) {
-                            CookieManager.getInstance().setAcceptThirdPartyCookies(wv, true)
-                        }
-                    },
-                    onUrlChange = { currentUrl.value = it },
-                    onTitleChange = { currentTitle.value = it },
-                    onLoadProgress = { loadProgress.value = it },
-                    onCanGoBackChange = { canGoBack.value = it },
-                    onCanGoForwardChange = { canGoForward.value = it },
-                    canGoBackState = canGoBack,
-                    canGoForwardState = canGoForward,
-                    currentUrlState = currentUrl,
-                    currentTitleState = currentTitle,
-                    loadProgressState = loadProgress,
-                    onClose = { finish() },
-                    onBackTap = { webView?.takeIf { it.canGoBack() }?.goBack() },
-                    onForwardTap = { webView?.takeIf { it.canGoForward() }?.goForward() },
-                    onRefreshTap = { webView?.reload() },
-                    onStopAi = { if (skillRoot == null) BrowserController.stopCurrentTask() },
-                    onNavigate = { raw ->
-                        val url = normalizeBrowserQuery(raw)
-                        if (skillRoot == null || (allowedBrowserUrl(url) && skillScope?.isForeignSkillOrigin(Uri.parse(url)) != true)) {
-                            webView?.loadUrl(url)
-                        } else {
-                            Toast.makeText(this, "Этот адрес недоступен в текущем браузере.", Toast.LENGTH_LONG).show()
-                        }
-                    },
-                    initialUrl = skillScope?.initialUrl ?: requestedUrl,
-                    skillScope = skillScope,
-                    skillRoot = skillRoot,
-                    onSkillProfileUnavailable = {
-                        Toast.makeText(this, "Просмотрщик навыка недоступен: установленный Android System WebView не поддерживает изолированные профили. Обновите WebView. Обычный браузер продолжает работать.", Toast.LENGTH_LONG).show()
-                        finish()
-                    },
-                    conversationId = conversationId,
-                )
-            }
+            recordLifecycle(BrowserLaunchEvent.SET_CONTENT_RETURNED)
+            recordLifecycle(BrowserLaunchEvent.ON_CREATE_RETURNED)
+        } catch (error: Throwable) {
+            recordLifecycle(BrowserLaunchEvent.ON_CREATE_FAILED, error)
+            throw error
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        recordLifecycle(BrowserLaunchEvent.ON_START)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        recordLifecycle(BrowserLaunchEvent.ON_RESUME)
+    }
+
+    override fun onPause() {
+        recordLifecycle(BrowserLaunchEvent.ON_PAUSE)
+        super.onPause()
+    }
+
+    override fun onStop() {
+        recordLifecycle(BrowserLaunchEvent.ON_STOP)
+        super.onStop()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        BrowserLaunchDiagnostics.journal.record(diagnosticLaunchId, BrowserLaunchEvent.WINDOW_FOCUS_CHANGED,
+            windowFocus = hasFocus, finishing = isFinishing, changingConfigurations = isChangingConfigurations,
+            activityInstanceId = System.identityHashCode(this))
+    }
+
     override fun onDestroy() {
+        recordLifecycle(BrowserLaunchEvent.ON_DESTROY_ENTER)
         // Tear down the WebView the Activity created — not doing so leaks the entire view
         // hierarchy plus a JS engine on every Activity finish. Order matters: clear from the
         // controller first so an in-flight tool dispatch can fail-fast on browser_not_open
@@ -171,11 +222,13 @@ class BrowserActivity : ComponentActivity() {
         }
         webView = null
         super.onDestroy()
+        recordLifecycle(BrowserLaunchEvent.ON_DESTROY_RETURNED)
     }
 
     companion object {
         /** Optional extra: initial URL to navigate to on launch. Defaults to about:blank. */
         const val EXTRA_INITIAL_URL = "me.rerere.rikkahub.browser.EXTRA_INITIAL_URL"
+        const val EXTRA_DIAGNOSTIC_LAUNCH_ID = "me.rerere.rikkahub.browser.EXTRA_DIAGNOSTIC_LAUNCH_ID"
         const val EXTRA_SKILL_NAME = "me.rerere.rikkahub.browser.EXTRA_SKILL_NAME"
         const val EXTRA_SKILL_ROOT = "me.rerere.rikkahub.browser.EXTRA_SKILL_ROOT"
 

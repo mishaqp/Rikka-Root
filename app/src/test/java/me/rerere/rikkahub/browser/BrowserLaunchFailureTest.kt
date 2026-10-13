@@ -11,6 +11,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import kotlinx.serialization.json.put
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.tools.local.browserCurrentUrlTool
@@ -46,6 +47,16 @@ class BrowserLaunchFailureTest {
         assertEquals("browser_launch_failed", output["error"]?.jsonPrimitive?.content)
         val recovery = output["recovery"]!!.jsonPrimitive.content
         assertTrue(recovery.contains("5 секунд"))
+        assertTrue("Missing Activity evidence must be explained", recovery.contains("onCreate"))
+        assertTrue("Cause on the phone must remain unknown", recovery.contains("не установлена"))
+        val diagnostics = output["diagnostics"]!!.jsonObject
+        assertEquals("activity_not_observed", diagnostics["stage"]?.jsonPrimitive?.content)
+        assertEquals(launched.single().getLongExtra(BrowserActivity.EXTRA_DIAGNOSTIC_LAUNCH_ID, 0L),
+            diagnostics["attempt_id"]!!.jsonPrimitive.long)
+        assertTrue(BrowserLaunchDiagnostics.report().contains(diagnostics.toString()))
+        assertTrue(diagnostics.toString().contains("START_ACTIVITY_RETURNED"))
+        assertTrue(diagnostics.toString().contains("BIND_TIMEOUT"))
+        assertFalse(diagnostics.toString().contains("example.com"))
         assertTrue(recovery.contains("Браузер"))
         assertFalse(recovery.contains("overlay", ignoreCase = true))
         assertFalse(recovery.contains("разрешен", ignoreCase = true))
@@ -81,6 +92,9 @@ class BrowserLaunchFailureTest {
             assertEquals("browser_launch_failed", output["error"]?.jsonPrimitive?.content)
             assertTrue(output["recovery"]!!.jsonPrimitive.content.startsWith(reason))
             assertFalse(output.toString().contains("private-token-and-file-path"))
+            val diagnostics = output["diagnostics"]!!.jsonObject
+            assertEquals("start_activity_failed", diagnostics["stage"]!!.jsonPrimitive.content)
+            assertFalse(diagnostics.toString().contains(failure.message.orEmpty()))
             assertFalse(BrowserController.isBound())
         }
         assertEquals(0L, testScheduler.currentTime)

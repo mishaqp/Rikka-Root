@@ -1,6 +1,11 @@
 package me.rerere.rikkahub.data.ai.tools.local
 
 import android.content.Context
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ProcessLifecycleOwner
+import me.rerere.rikkahub.browser.BrowserLaunchDiagnostics
+import me.rerere.rikkahub.browser.BrowserLaunchEvent
+import me.rerere.rikkahub.browser.BrowserLaunchOrigin
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import kotlinx.coroutines.CancellationException
@@ -237,30 +242,49 @@ fun browserOpenTool(context: Context, invocationContext: ToolInvocationContext? 
                     // browser_not_open is the LLM's signal to call this first.
                     val wasAlreadyBound = BrowserController.isBound()
                     if (!wasAlreadyBound) {
+                        val journal = BrowserLaunchDiagnostics.journal
+                        val launchId = journal.begin(BrowserLaunchOrigin.TOOL, appResumed =
+                            runCatching { ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) }.getOrNull())
                         try {
                             context.startActivity(
                                 me.rerere.rikkahub.browser.BrowserActivity.intent(
                                     context,
                                     url,
                                     conversationId = callerConvId,
-                                )
+                                ).putExtra(me.rerere.rikkahub.browser.BrowserActivity.EXTRA_DIAGNOSTIC_LAUNCH_ID, launchId)
                             )
+                            journal.record(launchId, BrowserLaunchEvent.START_ACTIVITY_RETURNED)
                         } catch (cancelled: CancellationException) {
+                            journal.record(launchId, BrowserLaunchEvent.LAUNCH_CANCELLED)
                             throw cancelled
                         } catch (error: Exception) {
+                            journal.record(launchId, BrowserLaunchEvent.START_ACTIVITY_FAILED, error = error)
                             return@withTimeoutOrNull buildJsonObject {
                                 put("error", "browser_launch_failed")
+                                put("diagnostics", journal.snapshot(launchId))
                                 put("recovery", deviceToolFailureReason(error) +
                                     " Откройте приложение на экране, нажмите «Браузер» в шапке чата и повторите browser_open.")
                             }
                         }
-                        if (!BrowserController.awaitBind(5_000L)) {
+                        journal.record(launchId, BrowserLaunchEvent.BIND_WAIT_STARTED)
+                        val bound = try {
+                            BrowserController.awaitBind(5_000L)
+                        } catch (cancelled: CancellationException) {
+                            journal.record(launchId, BrowserLaunchEvent.BIND_WAIT_CANCELLED)
+                            throw cancelled
+                        }
+                        if (!bound) {
+                            journal.record(launchId, BrowserLaunchEvent.BIND_TIMEOUT)
+                            val diagnostics = journal.snapshot(launchId)
                             return@withTimeoutOrNull buildJsonObject {
                                 put("error", "browser_launch_failed")
+                                put("diagnostics", diagnostics)
                                 put("recovery", "Не удалось подключиться к окну браузера за 5 секунд. " +
+                                    diagnostics.getValue("reason").jsonPrimitive.content + " " +
                                     "Откройте приложение на экране, нажмите «Браузер» в шапке чата и повторите browser_open.")
                             }
                         }
+                        journal.record(launchId, BrowserLaunchEvent.BIND_WAIT_SUCCEEDED)
                     }
                     // (Re)start the 5-minute task window on every browser_open.
                     BrowserController.startTaskWindow()

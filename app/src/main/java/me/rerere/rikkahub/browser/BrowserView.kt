@@ -68,6 +68,8 @@ fun BrowserView(
     skillScope: BrowserSkillScope? = null,
     skillRoot: File? = null,
     onSkillProfileUnavailable: () -> Unit = {},
+    onWebViewCreating: () -> Unit = {},
+    onWebViewCreationFailed: (Throwable) -> Unit = {},
 ) {
     Scaffold(
         topBar = {
@@ -109,6 +111,8 @@ fun BrowserView(
                     skillRoot = skillRoot,
                     onSkillProfileUnavailable = onSkillProfileUnavailable,
                     onWebViewReady = onWebViewReady,
+                    onWebViewCreating = onWebViewCreating,
+                    onWebViewCreationFailed = onWebViewCreationFailed,
                     onUrlChange = onUrlChange,
                     onTitleChange = onTitleChange,
                     onLoadProgress = onLoadProgress,
@@ -137,6 +141,8 @@ private fun WebViewHost(
     skillRoot: File?,
     onSkillProfileUnavailable: () -> Unit,
     onWebViewReady: (WebView) -> Unit,
+    onWebViewCreating: () -> Unit,
+    onWebViewCreationFailed: (Throwable) -> Unit,
     onUrlChange: (String) -> Unit,
     onTitleChange: (String) -> Unit,
     onLoadProgress: (Int) -> Unit,
@@ -148,126 +154,132 @@ private fun WebViewHost(
     // configuration changes (the Activity declares `configChanges` so the system never
     // recreates us). Recreating per-recomp would reset history, scroll, and JS state.
     val webView = remember {
-        // Enable Chrome DevTools attachment ONLY in debug builds. In release, leaving
-        // this on lets anyone with adb (lent phone, ADB-over-WiFi attacker) attach
-        // chrome://inspect and read the WebView's cookies / localStorage / authenticated
-        // session bodies. Gate behind BuildConfig.DEBUG — turning Chrome inspection on
-        // in release is a privacy posture choice the user never consented to.
-        if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
-        WebView(ctx).apply {
-            // A skill viewer must never inherit native website credentials from the default browser.
-            // Bind the profile before settings, cookies, loading or bridge APIs touch this WebView.
-            if (skillRoot != null && !SkillWebViewProfile.configure(this, skillRoot)) {
-                destroy()
-                onSkillProfileUnavailable()
-                return@remember null
-            }
-            // WebView derives its CSS viewport height (100vh/100dvh/percentage heights)
-            // from its LayoutParams, not from its actual measured/laid-out size. Without
-            // this, the default WRAP_CONTENT makes vh/% heights resolve to 0 even though
-            // Compose's AndroidView correctly sizes the view on screen (measured on
-            // device: innerHeight=774 but 100vh=0). HeadlessBrowserSession already sets
-            // its own fixed-size LayoutParams for the same reason; MATCH_PARENT here lets
-            // the real Compose-driven size flow through instead.
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
-            )
+        onWebViewCreating()
+        try {
+            // Enable Chrome DevTools attachment ONLY in debug builds. In release, leaving
+            // this on lets anyone with adb (lent phone, ADB-over-WiFi attacker) attach
+            // chrome://inspect and read the WebView's cookies / localStorage / authenticated
+            // session bodies. Gate behind BuildConfig.DEBUG — turning Chrome inspection on
+            // in release is a privacy posture choice the user never consented to.
+            if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
+            WebView(ctx).apply {
+                // A skill viewer must never inherit native website credentials from the default browser.
+                // Bind the profile before settings, cookies, loading or bridge APIs touch this WebView.
+                if (skillRoot != null && !SkillWebViewProfile.configure(this, skillRoot)) {
+                    destroy()
+                    onSkillProfileUnavailable()
+                    return@remember null
+                }
+                // WebView derives its CSS viewport height (100vh/100dvh/percentage heights)
+                // from its LayoutParams, not from its actual measured/laid-out size. Without
+                // this, the default WRAP_CONTENT makes vh/% heights resolve to 0 even though
+                // Compose's AndroidView correctly sizes the view on screen (measured on
+                // device: innerHeight=774 but 100vh=0). HeadlessBrowserSession already sets
+                // its own fixed-size LayoutParams for the same reason; MATCH_PARENT here lets
+                // the real Compose-driven size flow through instead.
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                )
 
-            // Shared with HeadlessBrowserSession — every render-related setting
-            // (mixedContentMode, hardware layer, autoplay, UA strip, file:// access)
-            // lives in configureWebViewForRikka so foreground + headless behave
-            // identically. See BrowserWebViewConfig.kt for the why.
-            configureWebViewForRikka(this)
-            if (skillRoot != null) {
-                settings.allowFileAccess = false
-                @Suppress("DEPRECATION")
-                settings.allowFileAccessFromFileURLs = false
-                @Suppress("DEPRECATION")
-                settings.allowUniversalAccessFromFileURLs = false
-                settings.allowContentAccess = false
-            }
-
-            // Profile dir is informational — the global WebView databases live where the
-            // WebView wants. We create the dir ourselves in BrowserActivity.onCreate so
-            // Pass 3's "Clear browsing data" has a stable target to wipe.
-            File(ctx.filesDir, "browser-profile").apply { if (!exists()) mkdirs() }
-
-            val assetLoader = skillScope?.assetLoader(ctx)
-            webViewClient = object : WebViewClient() {
-                override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
-                    val uri = request?.url ?: return null
-                    if (skillRoot != null && (uri.scheme.equals("file", true) || uri.scheme.equals("content", true) ||
-                        skillScope?.isForeignSkillOrigin(uri) == true)) return BrowserSkillScope.deniedResponse()
-                    return assetLoader?.shouldInterceptRequest(uri)
-                        ?: if (uri.host.equals(skillScope?.originHost, true) && skillScope != null)
-                            BrowserSkillScope.deniedResponse() else null
+                // Shared with HeadlessBrowserSession — every render-related setting
+                // (mixedContentMode, hardware layer, autoplay, UA strip, file:// access)
+                // lives in configureWebViewForRikka so foreground + headless behave
+                // identically. See BrowserWebViewConfig.kt for the why.
+                configureWebViewForRikka(this)
+                if (skillRoot != null) {
+                    settings.allowFileAccess = false
+                    @Suppress("DEPRECATION")
+                    settings.allowFileAccessFromFileURLs = false
+                    @Suppress("DEPRECATION")
+                    settings.allowUniversalAccessFromFileURLs = false
+                    settings.allowContentAccess = false
                 }
 
-                override fun shouldOverrideUrlLoading(
-                    view: WebView?,
-                    request: WebResourceRequest?,
-                ): Boolean {
-                    val uri = request?.url ?: return false
-                    return skillRoot != null && (uri.scheme.equals("file", true) || uri.scheme.equals("content", true) ||
-                        skillScope?.isForeignSkillOrigin(uri) == true)
-                }
+                // Profile dir is informational — the global WebView databases live where the
+                // WebView wants. We create the dir ourselves in BrowserActivity.onCreate so
+                // Pass 3's "Clear browsing data" has a stable target to wipe.
+                File(ctx.filesDir, "browser-profile").apply { if (!exists()) mkdirs() }
 
-                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                    super.onPageStarted(view, url, favicon)
-                    if (url != null) onUrlChange(url)
-                }
-                override fun onPageFinished(view: WebView?, url: String?) {
-                    super.onPageFinished(view, url)
-                    if (url != null) onUrlChange(url)
-                    onCanGoBackChange(view?.canGoBack() == true)
-                    onCanGoForwardChange(view?.canGoForward() == true)
-                    // Browser content and URL queries must never enter diagnostic reports.
-                    Log.d("RikkaWebView", "onPageFinished")
-                }
+                val assetLoader = skillScope?.assetLoader(ctx)
+                webViewClient = object : WebViewClient() {
+                    override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                        val uri = request?.url ?: return null
+                        if (skillRoot != null && (uri.scheme.equals("file", true) || uri.scheme.equals("content", true) ||
+                            skillScope?.isForeignSkillOrigin(uri) == true)) return BrowserSkillScope.deniedResponse()
+                        return assetLoader?.shouldInterceptRequest(uri)
+                            ?: if (uri.host.equals(skillScope?.originHost, true) && skillScope != null)
+                                BrowserSkillScope.deniedResponse() else null
+                    }
 
-                override fun onReceivedError(
-                    view: WebView?,
-                    request: WebResourceRequest?,
-                    error: WebResourceError?,
-                ) {
-                    super.onReceivedError(view, request, error)
-                    val isMainFrame = request?.isForMainFrame == true
-                    Log.w(
-                        "RikkaWebView",
-                        "onReceivedError mainFrame=$isMainFrame code=${error?.errorCode}",
-                    )
-                }
-            }
-            webChromeClient = object : WebChromeClient() {
-                override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                    onLoadProgress(newProgress)
-                }
-                override fun onReceivedTitle(view: WebView?, title: String?) {
-                    if (title != null) onTitleChange(title)
-                }
-                override fun onConsoleMessage(message: ConsoleMessage?): Boolean {
-                    // Surface page-side console.log / console.error to logcat so the user
-                    // can debug white pages from a terminal without DevTools.
-                    if (message != null) {
-                        val priority = when (message.messageLevel()) {
-                            ConsoleMessage.MessageLevel.ERROR -> Log.ERROR
-                            ConsoleMessage.MessageLevel.WARNING -> Log.WARN
-                            ConsoleMessage.MessageLevel.DEBUG -> Log.DEBUG
-                            else -> Log.INFO
-                        }
-                        Log.println(
-                            priority,
-                            "RikkaWebViewConsole",
-                            "level=${message.messageLevel()} line=${message.lineNumber()} chars=${message.message().length}",
+                    override fun shouldOverrideUrlLoading(
+                        view: WebView?,
+                        request: WebResourceRequest?,
+                    ): Boolean {
+                        val uri = request?.url ?: return false
+                        return skillRoot != null && (uri.scheme.equals("file", true) || uri.scheme.equals("content", true) ||
+                            skillScope?.isForeignSkillOrigin(uri) == true)
+                    }
+
+                    override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                        super.onPageStarted(view, url, favicon)
+                        if (url != null) onUrlChange(url)
+                    }
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        super.onPageFinished(view, url)
+                        if (url != null) onUrlChange(url)
+                        onCanGoBackChange(view?.canGoBack() == true)
+                        onCanGoForwardChange(view?.canGoForward() == true)
+                        // Browser content and URL queries must never enter diagnostic reports.
+                        Log.d("RikkaWebView", "onPageFinished")
+                    }
+
+                    override fun onReceivedError(
+                        view: WebView?,
+                        request: WebResourceRequest?,
+                        error: WebResourceError?,
+                    ) {
+                        super.onReceivedError(view, request, error)
+                        val isMainFrame = request?.isForMainFrame == true
+                        Log.w(
+                            "RikkaWebView",
+                            "onReceivedError mainFrame=$isMainFrame code=${error?.errorCode}",
                         )
                     }
-                    return true
                 }
-            }
+                webChromeClient = object : WebChromeClient() {
+                    override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                        onLoadProgress(newProgress)
+                    }
+                    override fun onReceivedTitle(view: WebView?, title: String?) {
+                        if (title != null) onTitleChange(title)
+                    }
+                    override fun onConsoleMessage(message: ConsoleMessage?): Boolean {
+                        // Surface page-side console.log / console.error to logcat so the user
+                        // can debug white pages from a terminal without DevTools.
+                        if (message != null) {
+                            val priority = when (message.messageLevel()) {
+                                ConsoleMessage.MessageLevel.ERROR -> Log.ERROR
+                                ConsoleMessage.MessageLevel.WARNING -> Log.WARN
+                                ConsoleMessage.MessageLevel.DEBUG -> Log.DEBUG
+                                else -> Log.INFO
+                            }
+                            Log.println(
+                                priority,
+                                "RikkaWebViewConsole",
+                                "level=${message.messageLevel()} line=${message.lineNumber()} chars=${message.message().length}",
+                            )
+                        }
+                        return true
+                    }
+                }
 
-            loadUrl(initialUrl)
-            onWebViewReady(this)
+                loadUrl(initialUrl)
+                onWebViewReady(this)
+            }
+        } catch (error: Throwable) {
+            onWebViewCreationFailed(error)
+            throw error
         }
     }
 
