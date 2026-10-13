@@ -7,7 +7,8 @@
 | Важность | Файл и причина | Сценарий | Действие и проверка |
 |---|---|---|---|
 | P2, доступность | `InterfaceSettingsWidgets.kt::InterfaceSwitchRow`: `clickable(role=Switch)` у строки без `ToggleableState`; отдельный интерактивный дочерний `Switch` | TalkBack фокусирует подпись и переключатель отдельно, состояние подписанной строки не озвучивается | Регрессионный Compose-тест сначала проверяет `assertIsOn` у строки, затем единственную цель Switch, один update при семантическом клике и при касании правой части; RED: `assertIsOn` отклоняет строку без ToggleableState; GREEN: 1/1, state/единственная цель/click/thumb/external update |
-| Требует визуальной проверки | В исходных stage5 `settings_rendering.png` font1.0 несколько включённых переключателей не нарисованы | Два первых переключателя формул и Markdown ассистента; font1.3 отличается | Проверяется текущий warmed native кадр без записи эталонов; результат ниже |
+| Не подтверждено текущими кадрами | Первоначальное подозрение на отсутствующие Switch в `settings_rendering.png` | Проверены individual/native и contact кадры light/dark/AMOLED/dynamic, fonts 1/1.3, widths 320/411 | Все переключатели видны; Rendering/RenderingBottom 32 файла проверены, missing-switch fix не делался |
+| P2, читаемость | `InterfaceNavigationRow`: trailing selected value занимает ширину label на 320dp | Hub тема на font1.3 — 10 строк по 1–2 буквы; font label — 3 строки | Native RED 2/2 в `/tmp/settings-navigation-confirmed-red.log`; minimal responsive layout, GREEN/re-review ниже |
 
 ## Карта хранения и потребителей
 
@@ -189,3 +190,15 @@
 ## Остатки и телефон
 
 Реальный TalkBack, native font import через document picker, большие/невалидные файлы, Google Fonts download/license, platform app locale/recreation, вибрация и производительность стекла требуют устройства. Область проверки JVM — настоящие Compose callbacks, сериализация, backup с реальными bytes и palette resolution; результатом не заявляется GPU/OEM поведение.
+
+## Дополнительный визуальный проход всей матрицы
+
+В `/tmp/overnight-stage5-review` просмотрены **448 исходных current PNG**: 28 settings-сцен × light/dark/AMOLED/dynamic × fontScale 1/1.3 × width 320/411dp. Контактные листы составлены из исходных кадров **без масштабирования** и просмотрены через `view_image(original)`. Отдельные подозрительные кадры дополнительно открывались индивидуально (Hub light 320/1.3 и MessageStyle AMOLED 411/1.3). Побайтовые SHA-256 дубликаты RenderingBottom подтверждены тем же просмотренным Rendering-кадром. Список путей, SHA-256, размеров, способов просмотра и вердиктов — `/tmp/overnight-settings-visual.json`; 448 записей, все SHA совпадали с source после первоначального прохода.
+
+Найден один blocker: trailing value в Hub сжимает title. Before всех 80 кадров пяти возможных затронутых сцен сохранены в `/tmp/overnight-settings-layout-before` с `manifest.json`: Hub, HubBottom, Background, BackgroundBottom, Language × 16. На странице 320dp отступы Scaffold оставляют 288dp для строки. Реальный Native-тест воспроизвёл 10 строк «Настройки темы» и 3 строки «Шрифт сообщений». Первоначальная обвязка без Native Graphics давала ложный положительный результат; она исправлена **до** production fix, эти запуски не названы RED. Один запуск также был заблокирован временно неконсистентной чужой ChatBefore fixture; её исправил root.
+
+Минимальная правка `InterfaceNavigationRow`: когда доступная ширина меньше 360dp и есть detail/detailContent, выбранное значение отображается под подписью в той же Column. Иконка, chevron и исходный navigation/haptic callback сохранены; в остальных строках используется прежнее размещение. На широких кадрах helper имеет 379dp (viewport411 минус32dp); compact branch не применяется. GREEN: `/tmp/settings-navigation-green.log`, exit 0, 23 с, **10/10** без ошибок и пропусков: Native `InterfaceNavigationRowLayoutTest` 2, `InterfaceSwitchAccessibilityTest` 1, `SettingsSearchIndexTest` 7. Проверены <=2 строки подписи, containment, отсутствие overlap label/value и реальный navigation callback ровно один раз. XML сохранены в `/tmp/settings-navigation-green-xml`. After кадры и SHA будут добавлены после повторной записи current пяти сцен root.
+
+Косметические P3: на 320dp/font1.3 длинное «экспериментально» в ThemeAdvanced и длинные названия палитр переносятся посимвольно; «Пользователь» в MessageStyle segmented button заканчивается отдельной «ь». Полный текст присутствует, элементы не перекрывают действия. Общее правило переноса и эти сцены не менялись.
+
+Границы: просмотрены неподвижные Native JVM-кадры, а не GPU/OEM или реальные IME. Длинные страницы сняты сверху/снизу; все промежуточные scroll positions не охвачены. Google Fonts использует фиксированный offline catalog; download/progress/license/apply диалоги не представлены в этой PNG-матрице. Системная тема AMOLED в fixture не меняет SharedPreferences выбора режима в Theme page: переключатель AMOLED на снимке показывает fixture preference, а не отсутствие чёрного background. Ни один stage5/архивный PNG этим агентом не записывался.

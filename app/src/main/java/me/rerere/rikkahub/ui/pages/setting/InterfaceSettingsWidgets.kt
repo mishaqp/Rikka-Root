@@ -81,24 +81,35 @@ internal fun InterfaceNavigationRow(
     onClick: () -> Unit,
 ) {
     val haptics = rememberAppHapticFeedback(HapticAction.LIST_ITEM)
-    Row(
-        Modifier.fillMaxWidth().clickable(role = Role.Button) {
-            haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
-            onClick()
-        }.padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        icon?.let { Icon(it, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(stringResource(title), style = MaterialTheme.typography.bodyLarge)
-            description?.let { Text(stringResource(it), style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        // On compact pages the selection follows the label, leaving readable text width.
+        val stackDetail = maxWidth < 360.dp && (detail != null || detailContent != null)
+        Row(
+            Modifier.fillMaxWidth().clickable(role = Role.Button) {
+                haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                onClick()
+            }.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            icon?.let { Icon(it, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(stringResource(title), style = MaterialTheme.typography.bodyLarge)
+                description?.let { Text(stringResource(it), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                if (stackDetail) {
+                    detailContent?.invoke()
+                    detail?.let { Text(it, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                }
+            }
+            if (!stackDetail) {
+                detailContent?.invoke()
+                detail?.let { Text(it, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.widthIn(max = 130.dp)) }
+            }
+            Icon(HugeIcons.ArrowRight01, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        detailContent?.invoke()
-        detail?.let { Text(it, style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.widthIn(max = 130.dp)) }
-        Icon(HugeIcons.ArrowRight01, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
