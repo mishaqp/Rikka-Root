@@ -4,6 +4,7 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.isEmptyUIMessage
 import me.rerere.rikkahub.data.datastore.ChatFontFamily
+import me.rerere.rikkahub.data.datastore.ChatMessageBackgroundStyle
 import me.rerere.rikkahub.data.datastore.DisplaySetting
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.ui.components.richtext.MarkdownDisplayOptions
@@ -24,9 +25,12 @@ data class MessageDisplayPresentation(
     val showBranchSelector: Boolean,
     val streamText: Boolean,
     val showWaitingDots: Boolean,
+    val enableMarkdown: Boolean = true,
+    val assistantFitContent: Boolean = false,
+    val assistantSplitParagraphs: Boolean = false,
 ) {
     val showHeader: Boolean get() = header.showUserIdentity || header.showAssistantIcon ||
-        header.showAssistantName || header.showTimestamp
+        header.showAssistantName || header.showTimestamp || header.showUserAvatar || header.showProvider
 }
 
 enum class MessageTextSurface { NONE, USER, ASSISTANT }
@@ -38,6 +42,8 @@ data class MessageHeaderOptions(
     val showTimestamp: Boolean,
     val userAvatar: Avatar,
     val userNickname: String,
+    val showUserAvatar: Boolean = showUserIdentity,
+    val showProvider: Boolean = false,
 )
 
 data class MessageTypographyOptions(
@@ -46,7 +52,7 @@ data class MessageTypographyOptions(
     val customFontPath: String,
 )
 
-data class UserTextDisplayOptions(val enabled: Boolean, val visibleLines: Int)
+data class UserTextDisplayOptions(val enabled: Boolean, val visibleLines: Int, val collapseChars: Int? = null)
 
 /** Independent stored preferences for the tool timeline and reasoning display. */
 data class ToolDisplayOptions(
@@ -55,6 +61,9 @@ data class ToolDisplayOptions(
     val autoCollapseSteps: Boolean,
     val showThinkingContent: Boolean,
     val autoCloseThinking: Boolean,
+    val showToolCards: Boolean = true,
+    val collapseThinkingSteps: Boolean? = null,
+    val showThinkingCards: Boolean = true,
 )
 
 fun presentMessageDisplay(
@@ -78,17 +87,23 @@ fun presentMessageDisplay(
         textSurface = when {
             !regular -> MessageTextSurface.NONE
             user -> MessageTextSurface.USER
-            settings.showAssistantBubble -> MessageTextSurface.ASSISTANT
+            settings.showAssistantBubble || settings.chatMessageBackgroundStyle != ChatMessageBackgroundStyle.DEFAULT -> MessageTextSurface.ASSISTANT
             else -> MessageTextSurface.NONE
         },
         bubbleOpacity = settings.bubbleOpacity.coerceIn(0f, 1f),
         header = MessageHeaderOptions(
-            showUserIdentity = showRoleHeader && user && settings.showUserAvatar,
+            showUserIdentity = showRoleHeader && user && (settings.showUserName ?: settings.showUserAvatar),
             showAssistantIcon = showRoleHeader && assistant && hasAssistantIdentity && settings.showModelIcon,
             showAssistantName = showRoleHeader && assistant && hasAssistantIdentity && settings.showModelName,
-            showTimestamp = showRoleHeader && (user || assistant) && settings.showDateTimeInMessage,
+            showTimestamp = showRoleHeader && when {
+                user -> settings.showUserTimestamp ?: settings.showDateTimeInMessage
+                assistant -> settings.showAssistantTimestamp ?: settings.showDateTimeInMessage
+                else -> false
+            },
             userAvatar = settings.userAvatar,
             userNickname = settings.userNickname,
+            showUserAvatar = showRoleHeader && user && settings.showUserAvatar,
+            showProvider = showRoleHeader && assistant && settings.showProviderInChatMessage,
         ),
         typography = MessageTypographyOptions(settings.fontSizeRatio, settings.chatFontFamily, settings.chatCustomFontPath),
         markdownOptions = MarkdownDisplayOptions(
@@ -97,17 +112,27 @@ fun presentMessageDisplay(
             codeBlockAutoCollapse = settings.codeBlockAutoCollapse,
             showLineNumbers = settings.showLineNumbers,
             fontSizeRatio = settings.fontSizeRatio,
+            enableDollarLatex = settings.enableDollarLatex,
+            codeBlockCollapseLines = settings.codeBlockCollapseLines,
         ),
         userText = UserTextDisplayOptions(regular && user && settings.collapseLongUserMessages,
-            settings.userMessageCollapseLines.coerceAtLeast(1)),
+            settings.userMessageCollapseLines.coerceAtLeast(1), settings.userMessageCollapseChars),
         tools = ToolDisplayOptions(settings.showToolSummary, settings.hideToolResultImages, settings.autoCollapseToolSteps,
-            settings.showThinkingContent, settings.autoCloseThinking),
+            settings.showThinkingContent, settings.autoCloseThinking, settings.showToolCards, settings.collapseThinkingSteps,
+            settings.showThinkingCards),
         showActions = showActions,
         // Moru hides the token line while the reply is still streaming.
         showTokenUsage = regular && settings.showTokenUsage && !(assistant && loading),
         showBranchSelector = capability.showActions && user && !showActions && hasBranches,
         streamText = regular && assistant && loading,
         showWaitingDots = regular && assistant && loading && !hasContent,
+        enableMarkdown = when {
+            user -> settings.enableUserMarkdown
+            assistant -> settings.enableAssistantMarkdown
+            else -> true
+        },
+        assistantFitContent = assistant && settings.assistantBubbleFitContent,
+        assistantSplitParagraphs = assistant && settings.assistantBubbleSplitParagraphs,
     )
 }
 

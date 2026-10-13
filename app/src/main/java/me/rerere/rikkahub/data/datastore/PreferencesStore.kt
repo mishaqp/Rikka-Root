@@ -705,6 +705,46 @@ enum class ConversationSortOrder {
 }
 
 @Serializable
+enum class MessageNavButtonsMode {
+    @SerialName("always") ALWAYS,
+    @SerialName("scroll") SCROLL,
+    @SerialName("never") NEVER,
+}
+
+@Serializable
+enum class ChatMessageBackgroundStyle {
+    @SerialName("default") DEFAULT,
+    @SerialName("frosted") FROSTED,
+    @SerialName("solid") SOLID,
+}
+
+/** Null overrides follow the active theme, including independently in light and dark mode. */
+@Serializable
+data class ChatBubbleStyleOverrides(
+    val backgroundArgbLight: Long? = null,
+    val backgroundArgbDark: Long? = null,
+    val borderArgbLight: Long? = null,
+    val borderArgbDark: Long? = null,
+    val textArgbLight: Long? = null,
+    val textArgbDark: Long? = null,
+    val borderWidth: Float? = null,
+    val borderOpacity: Float? = null,
+    val cornerRadius: Float? = null,
+    val blurSigma: Float? = null,
+    val frostedOpacity: Float? = null,
+    val solidOpacity: Float? = null,
+)
+
+@Serializable
+data class MessageStyleBackup(
+    val style: ChatMessageBackgroundStyle = ChatMessageBackgroundStyle.DEFAULT,
+    val user: ChatBubbleStyleOverrides = ChatBubbleStyleOverrides(),
+    val assistant: ChatBubbleStyleOverrides = ChatBubbleStyleOverrides(),
+    val assistantBubbleFitContent: Boolean = true,
+    val assistantBubbleSplitParagraphs: Boolean = false,
+)
+
+@Serializable
 data class DisplaySetting(
     val userAvatar: Avatar = Avatar.Dummy,
     val userNickname: String = "",
@@ -757,6 +797,63 @@ data class DisplaySetting(
     val enableVolumeKeyScroll: Boolean = false,
     val volumeKeyScrollRatio: Float = 1.0f,
     val conversationSortOrder: ConversationSortOrder = ConversationSortOrder.UPDATE_TIME,
+    // Nullable identity/time choices inherit the old combined controls until explicitly edited.
+    val showUserName: Boolean? = null,
+    val showUserTimestamp: Boolean? = null,
+    val showAssistantTimestamp: Boolean? = null,
+    val showProviderInChatMessage: Boolean = false,
+    val useAssistantAvatarInHeader: Boolean? = null,
+    val showToolCards: Boolean = true,
+    val showThinkingCards: Boolean = true,
+    val collapseThinkingSteps: Boolean? = null,
+    val userMessageCollapseChars: Int? = null,
+    val codeBlockCollapseLines: Int = 10,
+    val enableDollarLatex: Boolean = true,
+    val enableUserMarkdown: Boolean = true,
+    val enableReasoningMarkdown: Boolean = true,
+    val enableAssistantMarkdown: Boolean = true,
+    val regenerateDeleteTrailingMessages: Boolean = false,
+    val forkKeepMessageVersions: Boolean = true,
+    val keepThinkingAndToolCardsWhenEditingAssistant: Boolean = true,
+    val showAppUpdates: Boolean = true,
+    val keepScreenOnDuringGeneration: Boolean = true,
+    val messageNavButtonsMode: MessageNavButtonsMode = MessageNavButtonsMode.SCROLL,
+    val showChatListDate: Boolean = true,
+    val keepSidebarOpenOnAssistantTap: Boolean = false,
+    val keepSidebarOpenOnTopicTap: Boolean = false,
+    val keepAssistantListExpandedOnSidebarClose: Boolean = false,
+    val newChatOnAssistantSwitch: Boolean? = null,
+    val newChatAfterDelete: Boolean = true,
+    val newChatOnLaunch: Boolean? = null,
+    val autoScrollIdleSeconds: Int = 0,
+    val hapticsEnabled: Boolean = true,
+    val hapticsOnSwitch: Boolean = false,
+    val hapticsOnDrawer: Boolean = false,
+    val hapticsOnListItemTap: Boolean = false,
+    val hapticsOnCardTap: Boolean = false,
+    val chatMessageBackgroundStyle: ChatMessageBackgroundStyle = ChatMessageBackgroundStyle.DEFAULT,
+    val userChatBubbleStyleOverrides: ChatBubbleStyleOverrides = ChatBubbleStyleOverrides(),
+    val assistantChatBubbleStyleOverrides: ChatBubbleStyleOverrides = ChatBubbleStyleOverrides(),
+    val assistantBubbleFitContent: Boolean = true,
+    val assistantBubbleSplitParagraphs: Boolean = false,
+    val chatBackgroundMaskStrength: Float = 1f,
+    val chatBackgroundEnabled: Boolean = false,
+    val chatBackgroundImagePath: String = "",
+    val chatInputBackgroundOpacityLight: Float = 1f,
+    val chatInputBackgroundOpacityDark: Float = 1f,
+    val usePureBackground: Boolean = false,
+    val useLayeredSurfaces: Boolean = false,
+    val useLayeredSheetTiles: Boolean = false,
+    val glassTheme: Boolean = false,
+    val glassEconomy: Boolean = false,
+    val glassPreviousMessageStyle: MessageStyleBackup? = null,
+    val appFontFamily: ChatFontFamily = ChatFontFamily.DEFAULT,
+    val appCustomFontPath: String = "",
+    val appCustomFontName: String = "",
+    val codeFontFamily: ChatFontFamily = ChatFontFamily.DEFAULT,
+    val codeCustomFontPath: String = "",
+    val codeCustomFontName: String = "",
+    val appLanguageTag: String? = null,
 )
 
 @Serializable

@@ -38,9 +38,11 @@ internal fun ChatToolTimeline(
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String, scope: ApprovalScope, toolName: String) -> Job)?,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)?,
 ) {
-    val presentation = remember(block, options, loading, messageKey, blockOrdinal, activeToolCallId) {
-        presentTimeline(block.steps, options, loading, messageKey, blockOrdinal, activeToolCallId)
+    val pendingIds = pendingTools.mapTo(mutableSetOf()) { it.tool.toolCallId }
+    val presentation = remember(block, options, loading, messageKey, blockOrdinal, activeToolCallId, pendingIds) {
+        presentTimeline(block.steps, options, loading, messageKey, blockOrdinal, activeToolCallId, pendingIds)
     }
+    if (presentation.steps.isEmpty()) return
     val summary = if (presentation.canFoldToSummary) {
         val duration = presentation.duration
         if (duration == null) pluralStringResource(R.plurals.chat_timeline_processed_steps,
@@ -62,7 +64,7 @@ internal fun ChatToolTimeline(
         fontSizeRatio = fontSizeRatio,
         collapsedVisibleIndices = presentation.collapsedVisibleIndices,
         summaryLabel = summary,
-        autoCollapseSummary = options.autoCollapseSteps,
+        autoCollapseSummary = options.collapseThinkingSteps ?: options.autoCollapseSteps,
         collapsedAdaptiveWidth = block.steps.all { it is ThinkingStep.ReasoningStep },
         cardColors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
     ) { item ->

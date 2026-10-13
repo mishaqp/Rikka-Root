@@ -41,6 +41,7 @@ internal fun presentTimeline(
     messageKey: String,
     blockOrdinal: Int,
     activeToolCallId: String? = null,
+    pendingToolCallIds: Set<String> = emptySet(),
 ): TimelinePresentation {
     val activeIdIsUnique = activeToolCallId != null && steps.count {
         it is ThinkingStep.ToolStep && it.tool.toolCallId == activeToolCallId
@@ -66,7 +67,8 @@ internal fun presentTimeline(
             key = "$messageKey:$blockOrdinal:$index:$id",
             status = status,
             mustStayVisible = when (step) {
-                is ThinkingStep.ToolStep -> (step.tool.toolName == "ask_user" && status == TimelineStatus.AwaitingAnswer) ||
+                is ThinkingStep.ToolStep -> step.tool.toolCallId in pendingToolCallIds ||
+                    (step.tool.toolName == "ask_user" && status == TimelineStatus.AwaitingAnswer) ||
                     status in setOf(TimelineStatus.AwaitingApproval, TimelineStatus.Denied,
                         TimelineStatus.Failed, TimelineStatus.Blocked, TimelineStatus.Indeterminate,
                         TimelineStatus.Waiting, TimelineStatus.Running)
@@ -74,22 +76,26 @@ internal fun presentTimeline(
                 is ThinkingStep.ServerToolStep -> status in setOf(TimelineStatus.Running, TimelineStatus.Failed)
             },
         )
+    }.filter { item ->
+        if (item.step is ThinkingStep.ReasoningStep) options.showThinkingCards
+        else options.showToolCards || item.mustStayVisible
     }
-    val visible = if (options.autoCollapseSteps && steps.size > 2) {
-        projected.indices.filter { index -> projected[index].mustStayVisible || index >= steps.size - 2 }
+    val collapseSteps = options.collapseThinkingSteps ?: options.autoCollapseSteps
+    val visible = if (collapseSteps && projected.size > 2) {
+        projected.indices.filter { index -> projected[index].mustStayVisible || index >= projected.size - 2 }
     } else projected.indices.toList()
     val safeToFold = projected.all { item ->
         item.status in setOf(TimelineStatus.ResultReceived, TimelineStatus.Succeeded, TimelineStatus.Answered) &&
             !item.mustStayVisible
     }
-    val reasoningCanClose = options.autoCloseThinking || steps.none { it is ThinkingStep.ReasoningStep }
+    val reasoningCanClose = options.autoCloseThinking || projected.none { it.step is ThinkingStep.ReasoningStep }
     return TimelinePresentation(
         steps = projected,
         collapsedVisibleIndices = visible,
-        hiddenCount = steps.size - visible.size,
-        canFoldToSummary = options.showSummary && !loading &&
-            safeToFold && reasoningCanClose && steps.isNotEmpty(),
-        duration = actualTimelineDuration(steps),
+        hiddenCount = projected.size - visible.size,
+        canFoldToSummary = (options.collapseThinkingSteps ?: options.showSummary) && !loading &&
+            safeToFold && reasoningCanClose && projected.isNotEmpty(),
+        duration = actualTimelineDuration(projected.map { it.step }),
     )
 }
 

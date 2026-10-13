@@ -105,49 +105,8 @@ private val parser by lazy {
     MarkdownParser(flavour)
 }
 
-private val INLINE_LATEX_REGEX = Regex("\\\\\\((.+?)\\\\\\)")
-private val BLOCK_LATEX_REGEX = Regex("\\\\\\[(.+?)\\\\\\]", RegexOption.DOT_MATCHES_ALL)
 val THINKING_REGEX = Regex("<think>([\\s\\S]*?)(?:</think>|$)", RegexOption.DOT_MATCHES_ALL)
-private val CODE_BLOCK_REGEX = Regex("```[\\s\\S]*?```|`[^`\n]*`", RegexOption.DOT_MATCHES_ALL)
 private val BREAK_LINE_REGEX = Regex("(?i)<br\\s*/?>")
-private val LATEX_BLOCK_LINE_BREAK_REGEX = Regex("""[ \t]*\r?\n[ \t]*""")
-
-// 预处理markdown内容
-private fun preProcess(content: String): String {
-    // 先找出所有代码块的位置
-    val codeBlocks = mutableListOf<IntRange>()
-    CODE_BLOCK_REGEX.findAll(content).forEach { match ->
-        codeBlocks.add(match.range)
-    }
-
-    // 检查位置是否在代码块内
-    fun isInCodeBlock(position: Int): Boolean {
-        return codeBlocks.any { range -> position in range }
-    }
-
-    // 替换行内公式 \( ... \) 到 $ ... $，但跳过代码块内的内容
-    var result = INLINE_LATEX_REGEX.replace(content) { matchResult ->
-        if (isInCodeBlock(matchResult.range.first)) {
-            matchResult.value // 保持原样
-        } else {
-            "$" + matchResult.groupValues[1] + "$"
-        }
-    }
-
-    // 替换块级公式 \[ ... \] 到 $$ ... $$，但跳过代码块内的内容
-    result = BLOCK_LATEX_REGEX.replace(result) { matchResult ->
-        if (isInCodeBlock(matchResult.range.first)) {
-            matchResult.value // 保持原样
-        } else {
-            val formula = matchResult.groupValues[1]
-                .trim()
-                .replace(LATEX_BLOCK_LINE_BREAK_REGEX, " ")
-            "$$" + formula + "$$"
-        }
-    }
-
-    return result
-}
 
 @Preview(showBackground = true)
 @Composable
@@ -209,10 +168,10 @@ private fun ASTNode.containsHtml(): Boolean {
     return children.any { it.containsHtml() }
 }
 
-private fun parseMarkdown(content: String): MarkdownParseResult {
-    val preprocessed = preProcess(content)
-    val astTree = parser.buildMarkdownTreeFromString(preprocessed)
-    return MarkdownParseResult(preprocessed, astTree, astTree.containsHtml())
+private fun parseMarkdown(content: String, enableDollarLatex: Boolean): MarkdownParseResult {
+    val source = prepareMarkdownMath(content, enableDollarLatex, deferTableMath = true)
+    val astTree = parser.buildMarkdownTreeFromString(source.parserSource)
+    return MarkdownParseResult(source.restoreLiteralDollars(), astTree, astTree.containsHtml())
 }
 
 @Composable
@@ -237,15 +196,18 @@ private fun MarkdownBlockContent(
     onClickCitation: (String) -> Unit,
     horizontalPadding: Dp,
 ) {
-    var (data, setData) = remember { mutableStateOf(parseMarkdown(content)) }
+    val enableDollarLatex = currentMarkdownDisplayOptions().enableDollarLatex
+    var (data, setData) = remember(enableDollarLatex) {
+        mutableStateOf(parseMarkdown(content, enableDollarLatex))
+    }
 
     // 监听内容变化，重新解析AST树
     // 这里在后台线程解析AST树, 防止频繁更新的时候掉帧
     val updatedContent by rememberUpdatedState(content)
-    LaunchedEffect(Unit) {
+    LaunchedEffect(enableDollarLatex) {
         snapshotFlow { updatedContent }
             .distinctUntilChanged()
-            .mapLatest { parseMarkdown(it) }
+            .mapLatest { parseMarkdown(it, enableDollarLatex) }
             .catch { exception -> exception.printStackTrace() }
             .flowOn(Dispatchers.Default)
             .collect { setData(it) }
@@ -505,7 +467,7 @@ private fun MarkdownNode(
         }
 
         GFMElementTypes.TABLE -> {
-            TableNode(node = node, content = content, modifier = modifier)
+            TableNode(node = node, content = content, modifier = modifier, onClickCitation = onClickCitation)
         }
 
         MarkdownTokenTypes.HORIZONTAL_RULE -> {
@@ -582,7 +544,7 @@ private fun MarkdownNode(
                     append(code)
                     pop()
                 },
-                style = LocalTextStyle.current.copy(fontFamily = JetbrainsMono, fontSize = 13.sp * currentMarkdownDisplayOptions().fontSizeRatio, fontFeatureSettings = "'calt' 0, 'liga' 0, 'clig' 0"),
+                style = LocalTextStyle.current.copy(fontFamily = currentMarkdownCodeFont(), fontSize = 13.sp * currentMarkdownDisplayOptions().fontSizeRatio, fontFeatureSettings = "'calt' 0, 'liga' 0, 'clig' 0"),
                 modifier = modifier,
             )
         }
@@ -793,6 +755,7 @@ private fun Paragraph(
     }
     val enableLatexRendering = currentMarkdownDisplayOptions().enableLatexRendering
     val inlineCodeFontSize = 13.sp * currentMarkdownDisplayOptions().fontSizeRatio
+    val inlineCodeFontFamily = currentMarkdownCodeFont()
 
     val textStyle = LocalTextStyle.current
     val density = LocalDensity.current
@@ -803,7 +766,9 @@ private fun Paragraph(
             else Modifier
         )
     ) {
-        val annotatedString = remember(content, enableLatexRendering, latexColorArgb, textStyle, inlineCodeFontSize) {
+        // Dollar masking restores the same visible source for different math ASTs.
+        // The annotated text must therefore follow the parsed node as well as the source.
+        val annotatedString = remember(node, content, enableLatexRendering, latexColorArgb, textStyle, inlineCodeFontSize, inlineCodeFontFamily) {
             buildAnnotatedString {
                 node.children.fastForEach { child ->
                     appendMarkdownNodeContent(
@@ -814,6 +779,7 @@ private fun Paragraph(
                         onClickCitation = onClickCitation,
                         style = textStyle,
                         inlineCodeFontSize = inlineCodeFontSize,
+                        inlineCodeFontFamily = inlineCodeFontFamily,
                         density = density,
                         trim = trim,
                         enableLatexRendering = enableLatexRendering,
@@ -836,7 +802,7 @@ private fun Paragraph(
 }
 
 @Composable
-private fun TableNode(node: ASTNode, content: String, modifier: Modifier = Modifier) {
+private fun TableNode(node: ASTNode, content: String, modifier: Modifier = Modifier, onClickCitation: (String) -> Unit) {
     // 提取表格的标题行和数据行
     val headerNode = node.children.find { it.type == GFMElementTypes.HEADER }
     val rowNodes = node.children.filter { it.type == GFMElementTypes.ROW }
@@ -863,6 +829,7 @@ private fun TableNode(node: ASTNode, content: String, modifier: Modifier = Modif
             MarkdownBlock(
                 content = if (columnIndex < headerCells.size) headerCells[columnIndex] else "",
                 horizontalPadding = 0.dp,
+                onClickCitation = onClickCitation,
             )
         }
     }
@@ -874,6 +841,7 @@ private fun TableNode(node: ASTNode, content: String, modifier: Modifier = Modif
                 MarkdownBlock(
                     content = if (columnIndex < rowData.size) rowData[columnIndex] else "",
                     horizontalPadding = 0.dp,
+                    onClickCitation = onClickCitation,
                 )
             }
         }
@@ -898,6 +866,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
     density: Density,
     style: TextStyle,
     inlineCodeFontSize: TextUnit = 13.sp,
+    inlineCodeFontFamily: FontFamily = JetbrainsMono,
     enableLatexRendering: Boolean = true,
     latexColorArgb: Int = 0,
     onClickCitation: (String) -> Unit = {},
@@ -938,6 +907,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         density = density,
                         style = style,
                         inlineCodeFontSize = inlineCodeFontSize,
+                        inlineCodeFontFamily = inlineCodeFontFamily,
                         enableLatexRendering = enableLatexRendering,
                         latexColorArgb = latexColorArgb,
                         onClickCitation = onClickCitation
@@ -957,6 +927,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         density = density,
                         style = style,
                         inlineCodeFontSize = inlineCodeFontSize,
+                        inlineCodeFontFamily = inlineCodeFontFamily,
                         enableLatexRendering = enableLatexRendering,
                         latexColorArgb = latexColorArgb,
                         onClickCitation = onClickCitation
@@ -976,6 +947,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         density = density,
                         style = style,
                         inlineCodeFontSize = inlineCodeFontSize,
+                        inlineCodeFontFamily = inlineCodeFontFamily,
                         enableLatexRendering = enableLatexRendering,
                         latexColorArgb = latexColorArgb,
                         onClickCitation = onClickCitation
@@ -1054,7 +1026,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
             val code = node.getTextInNode(content).trim('`')
             withStyle(
                 SpanStyle(
-                    fontFamily = JetbrainsMono,
+                    fontFamily = inlineCodeFontFamily,
                     fontFeatureSettings = "'calt' 0, 'liga' 0, 'clig' 0",
                     fontSize = inlineCodeFontSize,
                 )
@@ -1143,6 +1115,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                     density = density,
                     style = style,
                     inlineCodeFontSize = inlineCodeFontSize,
+                    inlineCodeFontFamily = inlineCodeFontFamily,
                     enableLatexRendering = enableLatexRendering,
                     latexColorArgb = latexColorArgb,
                     onClickCitation = onClickCitation

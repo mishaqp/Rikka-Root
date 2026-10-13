@@ -9,6 +9,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -40,6 +42,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
@@ -59,6 +62,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.ColorUtils
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -74,6 +78,8 @@ import me.rerere.hugeicons.stroke.PlusSign
 import me.rerere.hugeicons.stroke.Share03
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.Screen
+import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.ItemAction
 import me.rerere.rikkahub.ui.components.ui.ItemActionMenu
@@ -93,11 +99,12 @@ private val themeJson = Json {
     prettyPrint = true
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun SettingThemePage(vm: SettingVM = koinViewModel()) {
-    val settings by vm.settings.collectAsStateWithLifecycle()
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+fun SettingThemePage(state: InterfacePageState = rememberInterfacePageState(), showLargeHeading: Boolean = true) {
+    val settings = state.settings
+    val scrollBehavior = if (showLargeHeading) TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+        else TopAppBarDefaults.pinnedScrollBehavior()
     val clipboardManager = LocalClipboard.current
     val toaster = LocalToaster.current
     val scope = rememberCoroutineScope()
@@ -111,21 +118,30 @@ fun SettingThemePage(vm: SettingVM = koinViewModel()) {
 
     Scaffold(
         topBar = {
-            LargeFlexibleTopAppBar(
-                title = { Text(stringResource(R.string.setting_page_theme_setting)) },
-                navigationIcon = { BackButton() },
-                scrollBehavior = scrollBehavior,
-                colors = CustomColors.topBarColors
-            )
+            if (showLargeHeading) {
+                LargeFlexibleTopAppBar(
+                    title = { Text(stringResource(R.string.ui_display_settings_page_theme_settings_title)) },
+                    actions = { IconButton(onClick = { state.navigate(Screen.SettingInterfaceThemeAdvanced) }) { Icon(HugeIcons.Settings03, stringResource(R.string.ui_theme_advanced)) } },
+                    navigationIcon = { BackButton() }, scrollBehavior = scrollBehavior, colors = CustomColors.topBarColors
+                )
+            } else {
+                TopAppBar(
+                    title = { Text(stringResource(R.string.ui_display_settings_page_theme_settings_title),
+                        style = MaterialTheme.typography.titleMedium, maxLines = 2) },
+                    actions = { IconButton(onClick = { state.navigate(Screen.SettingInterfaceThemeAdvanced) }) { Icon(HugeIcons.Settings03, stringResource(R.string.ui_theme_advanced)) } },
+                    navigationIcon = { BackButton() }, scrollBehavior = scrollBehavior, colors = CustomColors.topBarColors
+                )
+            }
         },
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection).testTag("ui_settings_page"),
         containerColor = CustomColors.topBarColors.containerColor
     ) { innerPadding ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().testTag("ui_settings_list"),
             contentPadding = innerPadding + PaddingValues(8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            item("themeMainControls") { InterfaceThemeMainControls(state) }
             if (settings.dynamicColor) {
                 item("dynamicColorHint") {
                     Box(
@@ -143,7 +159,7 @@ fun SettingThemePage(vm: SettingVM = koinViewModel()) {
                 }
             }
 
-            if (!settings.dynamicColor) {
+            run {
                 item("presetThemes") {
                     Column(
                         modifier = Modifier.padding(horizontal = 8.dp),
@@ -164,7 +180,7 @@ fun SettingThemePage(vm: SettingVM = koinViewModel()) {
                                 themeId = settings.themeId,
                                 modifier = Modifier.fillMaxWidth(),
                                 onChangeTheme = {
-                                    vm.updateSettings { current -> current.copy(themeId = it) }
+                                    state.updateSettings { current -> current.copy(themeId = it, dynamicColor = false) }
                                 }
                             )
                         }
@@ -172,35 +188,40 @@ fun SettingThemePage(vm: SettingVM = koinViewModel()) {
                 }
 
                 item("customThemesHeader") {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Text(
                             text = stringResource(R.string.setting_theme_page_custom_themes),
                             style = MaterialTheme.typography.titleSmall,
                             color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.fillMaxWidth(),
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             FilledTonalButton(
-                                onClick = { showImportDialog = true }
+                                onClick = { showImportDialog = true },
+                                modifier = Modifier.testTag("ui_theme_import")
                             ) {
                                 Icon(HugeIcons.FileImport, null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text(stringResource(R.string.setting_theme_page_import_theme))
+                                Text(stringResource(R.string.setting_theme_page_import_theme),
+                                    Modifier.testTag("ui_theme_import_label"), maxLines = 1)
                             }
                             FilledTonalButton(
                                 onClick = {
                                     editingTheme = null
                                     showEditSheet = true
-                                }
+                                },
+                                modifier = Modifier.testTag("ui_theme_create")
                             ) {
                                 Icon(HugeIcons.PlusSign, null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(4.dp))
-                                Text(stringResource(R.string.setting_theme_page_add_theme))
+                                Text(stringResource(R.string.setting_theme_page_add_theme),
+                                    Modifier.testTag("ui_theme_create_label"), maxLines = 1)
                             }
                         }
                     }
@@ -228,7 +249,7 @@ fun SettingThemePage(vm: SettingVM = koinViewModel()) {
                         theme = theme,
                         isSelected = settings.themeId == theme.id,
                         onSelect = {
-                            vm.updateSettings { current -> current.copy(themeId = theme.id) }
+                            state.updateSettings { current -> current.copy(themeId = theme.id, dynamicColor = false) }
                         },
                         onExport = {
                             val json = themeJson.encodeToString(theme)
@@ -258,7 +279,7 @@ fun SettingThemePage(vm: SettingVM = koinViewModel()) {
             onDismiss = { showEditSheet = false },
             onSave = { theme ->
                 val baseline = editingTheme
-                vm.updateSettings { current -> current.copy(
+                state.updateSettings { current -> current.copy(
                     customThemes = if (baseline != null) current.customThemes.map { row ->
                         if (row.id == baseline.id) applyThemeDraft(row, baseline, theme) else row
                     } else (current.customThemes + theme).distinctBy { it.id },
@@ -274,7 +295,7 @@ fun SettingThemePage(vm: SettingVM = koinViewModel()) {
             onDismiss = { showImportDialog = false },
             onImport = { theme ->
                 val importedTheme = theme.copy(id = Uuid.random().toString())
-                vm.updateSettings { current -> current.copy(
+                state.updateSettings { current -> current.copy(
                         customThemes = current.customThemes + importedTheme,
                         themeId = importedTheme.id
                     ) }
@@ -291,7 +312,7 @@ fun SettingThemePage(vm: SettingVM = koinViewModel()) {
         dismissText = stringResource(android.R.string.cancel),
         onConfirm = {
             deletingTheme?.let { theme ->
-                vm.updateSettings { current -> current.copy(
+                state.updateSettings { current -> current.copy(
                     customThemes = current.customThemes.filterNot { it.id == theme.id },
                     themeId = if (current.themeId == theme.id) "sakura" else current.themeId
                 ) }

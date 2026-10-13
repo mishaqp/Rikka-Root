@@ -62,7 +62,10 @@ import java.io.File
 import kotlin.math.roundToInt
 
 @Composable
-fun SettingPreferencesUIPage(vm: SettingVM = koinViewModel()) {
+fun SettingPreferencesUIPage() = SettingInterfacePage()
+
+@Composable
+fun SettingPreferencesUILegacyPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     var displaySetting by remember(settings) { mutableStateOf(settings.displaySetting) }
     val context = LocalContext.current

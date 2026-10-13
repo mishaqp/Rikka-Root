@@ -83,26 +83,6 @@ import org.jsoup.nodes.Element
 import org.jsoup.nodes.Node
 import org.jsoup.nodes.TextNode
 
-// ---- Preprocessing (mirrors Markdown.kt logic) ----
-
-private val INLINE_LATEX_REGEX = Regex("\\\\\\((.+?)\\\\\\)")
-private val BLOCK_LATEX_REGEX = Regex("\\\\\\[(.+?)\\\\\\]", RegexOption.DOT_MATCHES_ALL)
-private val CODE_BLOCK_REGEX = Regex("```[\\s\\S]*?```|`[^`\n]*`", RegexOption.DOT_MATCHES_ALL)
-
-private fun preProcess(content: String): String {
-    val codeBlocks = mutableListOf<IntRange>()
-    CODE_BLOCK_REGEX.findAll(content).forEach { codeBlocks.add(it.range) }
-    fun isInCodeBlock(pos: Int) = codeBlocks.any { pos in it }
-
-    var result = INLINE_LATEX_REGEX.replace(content) { m ->
-        if (isInCodeBlock(m.range.first)) m.value else "$" + m.groupValues[1] + "$"
-    }
-    result = BLOCK_LATEX_REGEX.replace(result) { m ->
-        if (isInCodeBlock(m.range.first)) m.value else "$$" + m.groupValues[1] + "$$"
-    }
-    return result
-}
-
 // ---- HTML generation ----
 
 private val flavour by lazy {
@@ -111,10 +91,12 @@ private val flavour by lazy {
 
 private val parser by lazy { MarkdownParser(flavour) }
 
-private fun generateMarkdownHtml(content: String): String {
-    val preprocessed = preProcess(content)
-    val tree = parser.buildMarkdownTreeFromString(preprocessed)
-    return HtmlGenerator(preprocessed, tree, flavour).generateHtml()
+internal fun generateMarkdownHtml(content: String, enableDollarLatex: Boolean = true): String {
+    val source = prepareMarkdownMath(content, enableDollarLatex)
+    val protected = protectMarkdownHtmlCode(source.parserSource)
+    val tree = parser.buildMarkdownTreeFromString(protected.parserSource)
+    val html = HtmlGenerator(protected.parserSource, tree, flavour).generateHtml()
+    return source.restoreLiteralDollars(protected.restoreCodeBodies(html))
 }
 
 // ---- Main composable ----
@@ -127,17 +109,18 @@ fun MarkdownNew(
     onClickCitation: (String) -> Unit = {},
     horizontalPadding: Dp = 4.dp,
 ) {
-    var html by remember {
+    val enableDollarLatex = currentMarkdownDisplayOptions().enableDollarLatex
+    var html by remember(enableDollarLatex) {
         mutableStateOf(
-            value = generateMarkdownHtml(content),
+            value = generateMarkdownHtml(content, enableDollarLatex),
         )
     }
 
     val updatedContent by rememberUpdatedState(content)
-    LaunchedEffect(Unit) {
+    LaunchedEffect(enableDollarLatex) {
         snapshotFlow { updatedContent }
             .distinctUntilChanged()
-            .mapLatest { generateMarkdownHtml(it) }
+            .mapLatest { generateMarkdownHtml(it, enableDollarLatex) }
             .catch { it.printStackTrace() }
             .flowOn(Dispatchers.Default)
             .collect { html = it }
@@ -343,6 +326,7 @@ private fun HtmlParagraphContent(
 
     val enableLatexRendering = currentMarkdownDisplayOptions().enableLatexRendering
     val inlineCodeFontSize = 13.sp * currentMarkdownDisplayOptions().fontSizeRatio
+    val inlineCodeFontFamily = currentMarkdownCodeFont()
     val hasInlineMath = element.select("span.math").any { it.attr("inline") == "true" }
     val colorScheme = MaterialTheme.colorScheme
     val textStyle = LocalTextStyle.current
@@ -354,6 +338,7 @@ private fun HtmlParagraphContent(
         density,
         textStyle,
         inlineCodeFontSize,
+        inlineCodeFontFamily,
         onClickCitation,
     ) {
         val contents = mutableMapOf<String, InlineTextContent>()
@@ -366,6 +351,7 @@ private fun HtmlParagraphContent(
                     density = density,
                     style = textStyle,
                     inlineCodeFontSize = inlineCodeFontSize,
+                    inlineCodeFontFamily = inlineCodeFontFamily,
                     enableLatexRendering = enableLatexRendering,
                     onClickCitation = onClickCitation,
                 )
@@ -699,6 +685,7 @@ private fun HtmlProgress(element: Element) {
 private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit) {
     val enableLatexRendering = currentMarkdownDisplayOptions().enableLatexRendering
     val inlineCodeFontSize = 13.sp * currentMarkdownDisplayOptions().fontSizeRatio
+    val inlineCodeFontFamily = currentMarkdownCodeFont()
     val colorScheme = MaterialTheme.colorScheme
     val textStyle = LocalTextStyle.current
     val density = LocalDensity.current
@@ -711,6 +698,7 @@ private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit
         density,
         textStyle,
         inlineCodeFontSize,
+        inlineCodeFontFamily,
         onClickCitation,
     ) {
         val contents = mutableMapOf<String, InlineTextContent>()
@@ -723,6 +711,7 @@ private fun HtmlInlineGroup(nodes: List<Node>, onClickCitation: (String) -> Unit
                     density = density,
                     style = textStyle,
                     inlineCodeFontSize = inlineCodeFontSize,
+                    inlineCodeFontFamily = inlineCodeFontFamily,
                     enableLatexRendering = enableLatexRendering,
                     onClickCitation = onClickCitation,
                 )
@@ -783,6 +772,7 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                     val density = LocalDensity.current
                     val enableLatexRendering = currentMarkdownDisplayOptions().enableLatexRendering
                     val inlineCodeFontSize = 13.sp * currentMarkdownDisplayOptions().fontSizeRatio
+                    val inlineCodeFontFamily = currentMarkdownCodeFont()
                     val (annotated, inlineContents) = remember(
                         node.outerHtml(),
                         enableLatexRendering,
@@ -790,6 +780,7 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                         density,
                         textStyle,
                         inlineCodeFontSize,
+                        inlineCodeFontFamily,
                         onClickCitation,
                     ) {
                         val contents = mutableMapOf<String, InlineTextContent>()
@@ -801,6 +792,7 @@ private fun HtmlInlineAsComposable(node: Node, onClickCitation: (String) -> Unit
                                 density = density,
                                 style = textStyle,
                                 inlineCodeFontSize = inlineCodeFontSize,
+                                inlineCodeFontFamily = inlineCodeFontFamily,
                                 enableLatexRendering = enableLatexRendering,
                                 onClickCitation = onClickCitation,
                             )
@@ -823,6 +815,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineNode(
     density: Density,
     style: TextStyle,
     inlineCodeFontSize: TextUnit,
+    inlineCodeFontFamily: FontFamily,
     enableLatexRendering: Boolean,
     onClickCitation: (String) -> Unit,
 ) {
@@ -835,6 +828,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineNode(
             density = density,
             style = style,
             inlineCodeFontSize = inlineCodeFontSize,
+            inlineCodeFontFamily = inlineCodeFontFamily,
             enableLatexRendering = enableLatexRendering,
             onClickCitation = onClickCitation,
         )
@@ -848,6 +842,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
     density: Density,
     style: TextStyle,
     inlineCodeFontSize: TextUnit,
+    inlineCodeFontFamily: FontFamily,
     enableLatexRendering: Boolean,
     onClickCitation: (String) -> Unit,
 ) {
@@ -867,6 +862,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
             density = density,
             style = inheritedStyle,
             inlineCodeFontSize = inlineCodeFontSize,
+            inlineCodeFontFamily = inlineCodeFontFamily,
             enableLatexRendering = enableLatexRendering,
             onClickCitation = onClickCitation,
         )
@@ -896,7 +892,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
 
         "code" -> withStyle(
             SpanStyle(
-                fontFamily = JetbrainsMono,
+                fontFamily = inlineCodeFontFamily,
                 fontFeatureSettings = "'calt' 0, 'liga' 0, 'clig' 0",
                 fontSize = inlineCodeFontSize,
             ).merge(cssStyle ?: SpanStyle())

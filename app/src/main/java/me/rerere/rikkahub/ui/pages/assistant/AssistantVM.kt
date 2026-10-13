@@ -10,6 +10,7 @@ import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.data.files.localFileUrls
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.repository.ConversationRepository
@@ -58,9 +59,7 @@ class AssistantVM(
             assistant.background?.let { add(it.toUri()) }
         }
 
-        val referenced = retained.assistants.flatMap { row ->
-            listOfNotNull((row.avatar as? Avatar.Image)?.url, row.background)
-        } + listOfNotNull((retained.displaySetting.userAvatar as? Avatar.Image)?.url)
+        val referenced = retained.localFileUrls()
         val unused = uris.filterNot { it.toString() in referenced }
         if (unused.isNotEmpty()) filesManager.deleteChatFiles(unused)
     }

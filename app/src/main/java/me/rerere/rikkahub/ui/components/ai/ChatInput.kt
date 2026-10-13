@@ -76,7 +76,6 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -114,6 +113,11 @@ import me.rerere.hugeicons.stroke.Fullscreen
 import me.rerere.hugeicons.stroke.Stop
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.ui.theme.LocalDarkMode
+import me.rerere.rikkahub.ui.modifier.chatBackdropBlur
+import me.rerere.rikkahub.ui.modifier.chatBackdropGlass
+import me.rerere.rikkahub.ui.hooks.HapticAction
+import me.rerere.rikkahub.ui.hooks.rememberAppHapticFeedback
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
@@ -175,6 +179,7 @@ fun ChatInput(
     val focusManager = LocalFocusManager.current
 
     val containerShape = RoundedCornerShape(20.dp)
+    val surface = presentComposerSurface(settings.displaySetting, LocalDarkMode.current, loading)
     val modelListState = rememberModelListState(
         modelId = chatModel?.id,
         providers = settings.providers,
@@ -195,7 +200,7 @@ fun ChatInput(
 
     val asr = LocalASRState.current
     val asrState by asr.state.collectAsState()
-    val hapticFeedback = LocalHapticFeedback.current
+    val hapticFeedback = rememberAppHapticFeedback(HapticAction.GENERAL)
     val soundEffectPlayer: SoundEffectPlayer = koinInject()
     LaunchedEffect(Unit) {
         soundEffectPlayer.preload(R.raw.asr_start, R.raw.asr_stop)
@@ -225,7 +230,7 @@ fun ChatInput(
     }
 
     Surface(
-        color = MaterialTheme.colorScheme.background,
+        color = Color.Transparent,
     ) {
         Column(
             modifier = modifier
@@ -245,11 +250,13 @@ fun ChatInput(
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("chat_composer")
-                    .clip(containerShape),
+                    .clip(containerShape)
+                    .chatBackdropBlur(hazeState, surface.blur)
+                    .chatBackdropGlass(hazeState, surface.glass),
                 shape = containerShape,
                 tonalElevation = 0.dp,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = surface.opacity),
             ) {
                 Column(
                     verticalArrangement = Arrangement.spacedBy(0.dp)
@@ -376,7 +383,7 @@ fun ChatInput(
                                 Spacer(Modifier.width(8.dp))
                             }
 
-                            if (loading) {
+                            if (surface.keepScreenOn) {
                                 KeepScreenOn()
                             }
 

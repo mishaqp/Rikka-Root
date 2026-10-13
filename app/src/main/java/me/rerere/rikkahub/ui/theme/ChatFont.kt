@@ -37,6 +37,33 @@ fun rememberChatFontFamily(displaySetting: DisplaySetting): FontFamily {
     }
 }
 
+@Composable
+fun rememberAppFontFamily(displaySetting: DisplaySetting): FontFamily = rememberManagedFontFamily(
+    displaySetting.appFontFamily, displaySetting.appCustomFontPath, FontFamily.Default,
+)
+
+@Composable
+fun rememberCodeFontFamily(displaySetting: DisplaySetting): FontFamily = rememberManagedFontFamily(
+    displaySetting.codeFontFamily, displaySetting.codeCustomFontPath, JetbrainsMono,
+)
+
+@Composable
+private fun rememberManagedFontFamily(
+    family: ChatFontFamily,
+    path: String,
+    default: FontFamily,
+): FontFamily {
+    val context = LocalContext.current
+    return remember(context, family, path, default) {
+        when (family) {
+            ChatFontFamily.DEFAULT -> default
+            ChatFontFamily.SERIF -> FontFamily.Serif
+            ChatFontFamily.MONOSPACE -> FontFamily.Monospace
+            ChatFontFamily.CUSTOM -> loadCustomFontFamily(context, path) ?: default
+        }
+    }
+}
+
 fun DisplaySetting.resolveChatFontFamily(context: Context): FontFamily = when (chatFontFamily) {
     ChatFontFamily.DEFAULT -> FontFamily.Default
     ChatFontFamily.SERIF -> FontFamily.Serif

@@ -18,6 +18,7 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.android.Logging
 import me.rerere.rikkahub.AppScope
+import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.entity.ManagedFileEntity
 import me.rerere.rikkahub.data.repository.FilesRepository
 import me.rerere.rikkahub.utils.exportImage
@@ -30,6 +31,7 @@ class FilesManager(
     private val context: Context,
     private val repository: FilesRepository,
     private val appScope: AppScope,
+    private val settingsStore: SettingsStore? = null,
 ) {
     companion object {
         private const val TAG = "FilesManager"
@@ -216,8 +218,9 @@ class FilesManager(
         }
 
     fun deleteChatFiles(uris: List<Uri>) {
+        val retained = settingsFileReferences() ?: return
         val relativePaths = mutableSetOf<String>()
-        uris.filter { it.toString().startsWith("file:") }.forEach { uri ->
+        uris.filter { it.toString().startsWith("file:") && it.toString() !in retained }.forEach { uri ->
             val file = uri.toFile()
             getRelativePathInFilesDir(file)?.let { relativePaths.add(it) }
             if (file.exists()) {
@@ -392,6 +395,7 @@ class FilesManager(
     }
 
     suspend fun deleteAll(folder: String = FileFolders.UPLOAD): Boolean = withContext(Dispatchers.IO) {
+        val retained = settingsFileReferences() ?: return@withContext false
         val dir = File(context.filesDir, folder)
         val entries = dir.listFiles()
         if (dir.exists() && entries == null) {
@@ -399,13 +403,17 @@ class FilesManager(
         }
 
         var allDeletedFromDisk = true
-        entries.orEmpty().forEach { entry ->
+        val protected = entries.orEmpty().filter { entry ->
+            val url = entry.toUri().toString()
+            retained.any { it == url || it.startsWith(url.trimEnd('/') + '/') }
+        }.toSet()
+        entries.orEmpty().filterNot { it in protected }.forEach { entry ->
             if (!runCatching { entry.deleteRecursively() }.getOrDefault(false)) {
                 allDeletedFromDisk = false
             }
         }
 
-        if (allDeletedFromDisk) {
+        if (allDeletedFromDisk && protected.isEmpty()) {
             repository.deleteByFolder(folder)
             return@withContext true
         }
@@ -415,16 +423,17 @@ class FilesManager(
                 repository.deleteById(entity.id)
             }
         }
-        false
+        allDeletedFromDisk
     }
 
     suspend fun deleteOlderThan(
         folder: String = FileFolders.UPLOAD,
         cutoffMillis: Long,
     ): Boolean = withContext(Dispatchers.IO) {
+        val retained = settingsFileReferences() ?: return@withContext false
         var allDeleted = true
         repository.listByFolder(folder).first()
-            .filter { it.createdAt < cutoffMillis }
+            .filter { it.createdAt < cutoffMillis && getFile(it).toUri().toString() !in retained }
             .forEach { entity ->
                 val file = getFile(entity)
                 val deletedFromDisk = !file.exists() || runCatching {
@@ -440,6 +449,11 @@ class FilesManager(
                 }
             }
         allDeleted
+    }
+
+    private fun settingsFileReferences(): Set<String>? {
+        val settings = settingsStore?.settingsFlow?.value ?: return emptySet()
+        return if (settings.init) null else settings.localFileUrls(context.filesDir)
     }
 
     private fun createTargetFile(folder: String, displayName: String, mimeType: String?): File {

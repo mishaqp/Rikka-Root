@@ -95,6 +95,49 @@ class SharedAttachmentFilesTest {
         assertEquals(copied, rig.repo.getConversationById(fork.id)!!.messageNodes.single().messages.first().parts.localFileUrls())
     }
 
+    @Test fun selectedVersionOnlyForkCopiesItsFilesAndLeavesOriginalVersionsIntact() = runBlocking {
+        val inactiveFile = rig.file("inactive.png")
+        val selectedFile = rig.file("selected.png")
+        val inactive = rig.image(inactiveFile)
+        val selected = rig.image(selectedFile)
+        val source = rig.conversation(listOf(MessageNode(messages = listOf(inactive, selected), selectIndex = 1)))
+        rig.repo.insertConversation(source)
+        rig.settingsFlow.value = rig.settings.copy(displaySetting = rig.settings.displaySetting.copy(forkKeepMessageVersions = false))
+
+        val fork = rig.service.forkConversationAtMessage(source.id, selected.id)
+        val forkNode = fork.messageNodes.single()
+        assertEquals(listOf(selected.id), forkNode.messages.map { it.id })
+        assertEquals(0, forkNode.selectIndex)
+        val copiedFile = forkNode.currentMessage.parts.localFileUrls().single().toUri().toFile()
+        assertNotEquals(selectedFile, copiedFile)
+        assertEquals(selectedFile.readText(), copiedFile.readText())
+        assertEquals(source.config, fork.config)
+        val original = rig.repo.getConversationById(source.id)!!
+        assertEquals(listOf(inactive.id, selected.id), original.messageNodes.single().messages.map { it.id })
+        assertTrue(inactiveFile.exists())
+        rig.repo.deleteConversation(source)
+        assertTrue(copiedFile.exists())
+    }
+
+    @Test fun assistantRegenerationTrimsLaterNodesOnlyWhenSettingIsEnabled() = runBlocking {
+        val question = MessageNode.of(UIMessage.user("Вопрос"))
+        val answer = MessageNode(messages = listOf(UIMessage.assistant("Вариант 1"), UIMessage.assistant("Вариант 2")), selectIndex = 1)
+        val later = MessageNode.of(UIMessage.user("Следующий вопрос"))
+        for (trim in listOf(false, true)) {
+            val source = rig.conversation(listOf(question, answer, later))
+            rig.repo.insertConversation(source)
+            // No configured model: exercise the real mutation without any provider/network call.
+            rig.settingsFlow.value = rig.settings.copy(providers = emptyList(),
+                displaySetting = rig.settings.displaySetting.copy(regenerateDeleteTrailingMessages = trim))
+            rig.service.initializeConversation(source.id)
+            rig.service.regenerateAtMessage(source.id, answer.currentMessage)
+            rig.service.getGenerationJobStateFlow(source.id).first()?.join()
+            val saved = rig.repo.getConversationById(source.id)!!
+            assertEquals(if (trim) listOf(question, answer) else listOf(question, answer, later), saved.messageNodes)
+            assertEquals(source.config, saved.config)
+        }
+    }
+
     @Test fun ordinaryDeletePreservesPersistedNestedInactiveReferenceThenCleansLastReference() = runBlocking {
         val file = rig.file("shared.png")
         val source = rig.conversation(listOf(rig.image(file).toMessageNode()))

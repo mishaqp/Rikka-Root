@@ -39,7 +39,10 @@ import org.koin.androidx.compose.koinViewModel
 import kotlin.math.roundToInt
 
 @Composable
-fun SettingPreferencesGeneralPage(vm: SettingVM = koinViewModel()) {
+fun SettingPreferencesGeneralPage() = SettingInterfaceBehaviorPage()
+
+@Composable
+fun SettingPreferencesGeneralLegacyPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     var displaySetting by remember(settings) { mutableStateOf(settings.displaySetting) }
     var ttsPlaybackSpeed by remember(settings.defaultTTSPlaybackSpeed) {

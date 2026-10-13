@@ -1,6 +1,10 @@
 package me.rerere.rikkahub.ui.pages.setting
 
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.annotation.StringRes
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import me.rerere.rikkahub.R
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.AiMagic
 import me.rerere.hugeicons.stroke.Book01
@@ -54,9 +58,14 @@ data class SettingsCatalogItem(
     val section: SettingsSection,
     val target: SettingsTarget,
     val keywords: String = "",
+    @StringRes val titleRes: Int? = null,
+    @StringRes val descriptionRes: Int? = null,
 ) {
     /** Route convenience; external actions retain their own target. */
     val route: Screen? get() = (target as? SettingsTarget.Route)?.screen
+
+    @Composable fun displayTitle(): String = titleRes?.let { stringResource(it) } ?: title
+    @Composable fun displayDescription(): String = descriptionRes?.let { stringResource(it) } ?: description
 }
 
 sealed interface SettingsQuickTileTarget {
@@ -90,9 +99,10 @@ object SettingsCatalog {
             "theme colors цвета оформление amoled динамические палитра",
         ),
         SettingsCatalogItem(
-            "appearance", "Внешний вид и поведение", "Интерфейс, уведомления и общие настройки",
+            "appearance", "Интерфейс", "Темы, шрифты, сообщения и поведение чата",
             HugeIcons.Settings03, SettingsSection.General, SettingsTarget.Route(Screen.SettingPreferences),
             "appearance preferences настройки оформление",
+            titleRes = R.string.ui_interface, descriptionRes = R.string.ui_interface_description,
         ),
         SettingsCatalogItem(
             "assistants", "Ассистенты", "Модель, инструкции, контекст и автоматическое сжатие",

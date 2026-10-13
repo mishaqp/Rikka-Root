@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -37,7 +38,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastAll
@@ -63,14 +63,16 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.replaceRegexes
-import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.richtext.buildMarkdownPreviewHtml
+import me.rerere.rikkahub.ui.components.richtext.splitAssistantParagraphs
 import me.rerere.rikkahub.ui.components.ui.ChainOfThought
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.ui.pages.chat.ChatPendingToolPresentation
 import me.rerere.rikkahub.ui.context.LocalSettings
+import me.rerere.rikkahub.ui.hooks.HapticAction
+import me.rerere.rikkahub.ui.hooks.rememberAppHapticFeedback
 import me.rerere.rikkahub.ui.theme.LocalChatFontFamily
 import me.rerere.rikkahub.ui.theme.rememberChatFontFamily
 import me.rerere.rikkahub.utils.JsonInstant
@@ -252,7 +254,8 @@ fun ChatMessage(
                     val htmlContent = buildMarkdownPreviewHtml(
                         context = context,
                         markdown = textContent,
-                        colorScheme = colorScheme
+                        colorScheme = colorScheme,
+                        displayOptions = display.markdownOptions,
                     )
                     val contentId = WebViewContentCache.store(context.cacheDir, htmlContent)
                     navController.navigate(Screen.WebView(contentId = contentId))
@@ -293,7 +296,7 @@ private fun MessagePartsBlock(
 ) {
     val context = LocalContext.current
     // 消息输出HapticFeedback
-    val hapticFeedback = LocalHapticFeedback.current
+    val hapticFeedback = rememberAppHapticFeedback(HapticAction.GENERATION)
     val settings = LocalSettings.current
     val partsState by rememberUpdatedState(parts)
 
@@ -369,12 +372,9 @@ private fun MessagePartsBlock(
                                     scope = if (role == MessageRole.USER) AssistantAffectScope.USER else AssistantAffectScope.ASSISTANT,
                                     visual = true,
                                 )
-                                val markdown = @Composable {
-                                    MarkdownBlock(
-                                        content = visualText,
-                                        onClickCitation = handleClickCitation,
-                                        displayOptions = display.markdownOptions,
-                                    )
+                                val renderText = @Composable { text: String ->
+                                    MessageTextContent(text = text, markdown = display.enableMarkdown,
+                                        onClickCitation = handleClickCitation, displayOptions = display.markdownOptions)
                                 }
                                 if (role == MessageRole.USER) {
                                     BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopEnd) {
@@ -384,19 +384,38 @@ private fun MessagePartsBlock(
                                             modifier = Modifier.widthIn(max = maxWidth * .75f),
                                             onClick = onUserMessageClick,
                                         ) {
-                                            CollapsibleUserMessageText(
-                                                messageKey = "$messageKey:${block.index}",
-                                                options = display.userText,
-                                            ) { markdown() }
+                                            if (display.userText.collapseChars != null) {
+                                                CharacterCollapsibleUserMessageText(
+                                                    messageKey = "$messageKey:${block.index}",
+                                                    options = display.userText,
+                                                    text = visualText,
+                                                    content = renderText,
+                                                )
+                                            } else {
+                                                CollapsibleUserMessageText(
+                                                    messageKey = "$messageKey:${block.index}",
+                                                    options = display.userText,
+                                                ) { renderText(visualText) }
+                                            }
                                         }
                                     }
                                 } else {
-                                    ChatMessageSurface(
-                                        surface = display.textSurface,
-                                        opacity = display.bubbleOpacity,
-                                    ) {
-                                        ChatStreamingText(enabled = display.streamText) {
-                                            markdown()
+                                    val texts = if (display.assistantSplitParagraphs)
+                                        splitAssistantParagraphs(visualText) else listOf(visualText)
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        texts.forEachIndexed { paragraphIndex, paragraph ->
+                                            key(block.index, paragraphIndex) {
+                                                ChatMessageSurface(
+                                                    surface = display.textSurface,
+                                                    opacity = display.bubbleOpacity,
+                                                    modifier = if (role != MessageRole.ASSISTANT || display.assistantFitContent)
+                                                        Modifier.wrapContentWidth(Alignment.Start) else Modifier.fillMaxWidth(),
+                                                ) {
+                                                    ChatStreamingText(enabled = display.streamText) {
+                                                        renderText(paragraph)
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }

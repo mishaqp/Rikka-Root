@@ -42,7 +42,10 @@ import org.koin.androidx.compose.koinViewModel
 import me.rerere.ui.components.Select
 
 @Composable
-fun SettingPreferencesThemePage(vm: SettingVM = koinViewModel()) {
+fun SettingPreferencesThemePage() = SettingThemePage()
+
+@Composable
+fun SettingPreferencesThemeLegacyPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     var amoledDarkMode by rememberAmoledDarkMode()
     var colorMode by rememberColorMode()

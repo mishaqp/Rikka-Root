@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="moru_drawer_search_topics" translatable="false">Поиск по чатам</string>
+    <string name="moru_drawer_search_messages" translatable="false">Поиск по сообщениям</string>
+    <string name="moru_drawer_search_hint" translatable="false">Название чата</string>
+    <string name="moru_drawer_clear_search" translatable="false">Очистить поиск</string>
+    <string name="moru_drawer_select" translatable="false">Выбрать</string>
+    <string name="moru_drawer_selected_count" translatable="false">Выбрано: %1$d</string>
+    <string name="moru_drawer_select_all" translatable="false">Все</string>
+    <string name="moru_drawer_deselect_all" translatable="false">Снять</string>
+    <string name="moru_drawer_exit_selection" translatable="false">Завершить выбор</string>
+    <string name="moru_drawer_toggle_selection" translatable="false">Выбрать чат</string>
+    <string name="moru_drawer_move_selected" translatable="false">Перенести</string>
+    <string name="moru_drawer_delete_selected_title" translatable="false">Удалить выбранные чаты?</string>
+    <string name="moru_drawer_delete_selected_message" translatable="false">Будут удалены чаты: %1$d. Это действие нельзя отменить.</string>
+    <string name="moru_drawer_move_selected_title" translatable="false">Перенести выбранные чаты</string>
+    <string name="moru_drawer_move_selected_folder" translatable="false">В папку</string>
+    <string name="moru_drawer_move_selected_assistant" translatable="false">К ассистенту</string>
+    <string name="moru_drawer_batch_failed" translatable="false">Не удалось завершить действие. Попробуйте ещё раз.</string>
+    <string name="moru_drawer_no_search_results" translatable="false">Чаты не найдены</string>
+    <string name="moru_drawer_try_another_query" translatable="false">Попробуйте другое название</string>
+    <string name="moru_drawer_translator" translatable="false">Переводчик</string>
+    <string name="moru_drawer_assistant_settings" translatable="false">Настройки ассистента</string>
+    <string name="moru_drawer_pin" translatable="false">Закрепить</string>
+    <string name="moru_drawer_unpin" translatable="false">Открепить</string>
+</resources>

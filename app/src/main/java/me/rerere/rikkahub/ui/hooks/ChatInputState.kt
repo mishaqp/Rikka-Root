@@ -47,7 +47,11 @@ class ChatInputState {
         editingAttachmentUrls = contents.mapNotNull { it.attachmentUrlOrNull() }.toSet()
     }
 
-    fun getContents(): List<UIMessagePart> {
+    fun getContents(keepThinkingAndToolCardsWhenEditing: Boolean = true): List<UIMessagePart> {
+        fun finishEdit(parts: List<UIMessagePart>): List<UIMessagePart> =
+            if (!keepThinkingAndToolCardsWhenEditing) parts.filterNot {
+                it is UIMessagePart.Reasoning || it is UIMessagePart.Tool || it is UIMessagePart.ServerTool
+            } else parts
         val text = textContent.text.toString()
         if (isEditing()) {
             val originalParts = editingParts
@@ -83,9 +87,9 @@ class ChatInputState {
                 }
                 // Newly added attachments are appended in insertion order.
                 merged.addAll(remainingAttachments)
-                return merged
+                return finishEdit(merged)
             }
-            return if (text.isBlank()) messageContent else listOf(UIMessagePart.Text(text)) + messageContent
+            return finishEdit(if (text.isBlank()) messageContent else listOf(UIMessagePart.Text(text)) + messageContent)
         }
         return if (text.isBlank()) messageContent else listOf(UIMessagePart.Text(text)) + messageContent
     }

@@ -1,0 +1,253 @@
+<resources>
+    <string name="ui_additional" translatable="false">Дополнительные настройки Rikka-Root</string>
+    <string name="ui_additional_description" translatable="false">Прежние параметры пузырей, шрифтов и управления</string>
+    <string name="ui_apply" translatable="false">Применить</string>
+    <string name="ui_auto_retry_description" translatable="false">Повторять запрос после временной сетевой ошибки</string>
+    <string name="ui_auto_retry_title" translatable="false">Автоповтор запросов</string>
+    <string name="ui_auto_titles" translatable="false">Автоматические названия чатов</string>
+    <string name="ui_background" translatable="false">Фон чата</string>
+    <string name="ui_background_choose" translatable="false">Выбрать изображение</string>
+    <string name="ui_background_current_assistant" translatable="false">Фон текущего ассистента</string>
+    <string name="ui_background_description" translatable="false">Фон ассистента имеет приоритет над общим фоном</string>
+    <string name="ui_background_enabled" translatable="false">Общий фон чата</string>
+    <string name="ui_background_gradient" translatable="false">Градиент поверх фона</string>
+    <string name="ui_background_import_error" translatable="false">Не удалось открыть изображение</string>
+    <string name="ui_background_no_image" translatable="false">Изображение не выбрано</string>
+    <string name="ui_background_opacity" translatable="false">Непрозрачность изображения</string>
+    <string name="ui_background_remove" translatable="false">Удалить фон</string>
+    <string name="ui_background_settings_title" translatable="false">Фоновые задачи</string>
+    <string name="ui_behavior_collapsed_chars_hint" translatable="false">Новый порог в символах применяется после изменения; прежние сообщения сохраняют порог в строках.</string>
+    <string name="ui_behavior_legacy_launch" translatable="false">Как в прежней настройке запуска</string>
+    <string name="ui_cancel" translatable="false">Отмена</string>
+    <string name="ui_chat_font_size_range" translatable="false">Размер шрифта чата: от 50 до 200 процентов</string>
+    <string name="ui_color" translatable="false">Цвет ARGB</string>
+    <string name="ui_color_hint" translatable="false">Например: FFAA55CC</string>
+    <string name="ui_color_invalid" translatable="false">Введите 6 или 8 шестнадцатеричных цифр</string>
+    <string name="ui_confirm_style_reset" translatable="false">Сбросить параметры стиля сообщений?</string>
+    <string name="ui_custom_theme_delete_confirm" translatable="false">Удалить эту тему?</string>
+    <string name="ui_custom_theme_import_theme" translatable="false">Импортировать тему</string>
+    <string name="ui_custom_theme_new_theme" translatable="false">Новая тема</string>
+    <string name="ui_desktop_font_family_monospace_default" translatable="false">Моноширинный</string>
+    <string name="ui_desktop_font_family_system_default" translatable="false">Системный по умолчанию</string>
+    <string name="ui_disabled" translatable="false">Выключено</string>
+    <string name="ui_display_settings_page_app_font_title" translatable="false">Шрифт приложения</string>
+    <string name="ui_display_settings_page_auto_collapse_code_block_lines_title" translatable="false">Порог автосворачивания</string>
+    <string name="ui_display_settings_page_auto_collapse_code_block_lines_unit" translatable="false">строк</string>
+    <string name="ui_display_settings_page_auto_collapse_code_block_title" translatable="false">Автоматически сворачивать блоки кода</string>
+    <string name="ui_display_settings_page_auto_collapse_thinking_title" translatable="false">Автоматически сворачивать рассуждения</string>
+    <string name="ui_display_settings_page_auto_scroll_disabled_label" translatable="false">Выкл.</string>
+    <string name="ui_display_settings_page_auto_scroll_enable_title" translatable="false">Автопрокрутка вниз</string>
+    <string name="ui_display_settings_page_auto_scroll_idle_subtitle" translatable="false">Время ожидания после ручной прокрутки перед переходом вниз</string>
+    <string name="ui_display_settings_page_auto_scroll_idle_title" translatable="false">Задержка возврата автопрокрутки</string>
+    <string name="ui_display_settings_page_behavior_startup_title" translatable="false">Поведение и запуск</string>
+    <string name="ui_display_settings_page_chat_background_mask_title" translatable="false">Непрозрачность затемнения фона чата</string>
+    <string name="ui_display_settings_page_chat_font_sample_text" translatable="false">Это пример текста в чате</string>
+    <string name="ui_display_settings_page_chat_font_size_title" translatable="false">Размер шрифта чата</string>
+    <string name="ui_display_settings_page_chat_input_background_opacity_title" translatable="false">Непрозрачность фона поля ввода</string>
+    <string name="ui_display_settings_page_chat_item_display_title" translatable="false">Отображение сообщений</string>
+    <string name="ui_display_settings_page_chat_message_background_default" translatable="false">По умолчанию</string>
+    <string name="ui_display_settings_page_chat_message_background_frosted" translatable="false">Матовое стекло</string>
+    <string name="ui_display_settings_page_chat_message_background_solid" translatable="false">Сплошной цвет</string>
+    <string name="ui_display_settings_page_chat_model_icon_title" translatable="false">Значок модели в чате</string>
+    <string name="ui_display_settings_page_code_font_title" translatable="false">Шрифт кода</string>
+    <string name="ui_display_settings_page_collapse_long_user_messages_chars_title" translatable="false">Порог сворачивания</string>
+    <string name="ui_display_settings_page_collapse_long_user_messages_chars_unit" translatable="false">симв.</string>
+    <string name="ui_display_settings_page_collapse_long_user_messages_subtitle" translatable="false">Скрывать часть длинных сообщений пользователя под кнопкой раскрытия</string>
+    <string name="ui_display_settings_page_collapse_long_user_messages_title" translatable="false">Сворачивать длинные сообщения</string>
+    <string name="ui_display_settings_page_collapse_thinking_steps_title" translatable="false">Сворачивать этапы рассуждений</string>
+    <string name="ui_display_settings_page_edit_assistant_keep_thinking_tool_cards_subtitle" translatable="false">Если отключено, в изменённой версии останется только текст ассистента. Предыдущие рассуждения и карточки инструментов доступны при возврате к старой версии.</string>
+    <string name="ui_display_settings_page_edit_assistant_keep_thinking_tool_cards_title" translatable="false">Сохранять рассуждения и инструменты при редактировании ответа</string>
+    <string name="ui_display_settings_page_enable_assistant_markdown_title" translatable="false">Markdown в сообщениях ассистента</string>
+    <string name="ui_display_settings_page_enable_dollar_latex_title" translatable="false">Формулы внутри $...$</string>
+    <string name="ui_display_settings_page_enable_math_title" translatable="false">Отображение формул</string>
+    <string name="ui_display_settings_page_enable_reasoning_markdown_title" translatable="false">Markdown в рассуждениях</string>
+    <string name="ui_display_settings_page_enable_user_markdown_title" translatable="false">Markdown в сообщениях пользователя</string>
+    <string name="ui_display_settings_page_enter_to_send_title" translatable="false">Отправлять по Enter</string>
+    <string name="ui_display_settings_page_font_local_file_label" translatable="false">Локальный файл</string>
+    <string name="ui_display_settings_page_font_reset_label" translatable="false">Сбросить настройки шрифтов</string>
+    <string name="ui_display_settings_page_fork_keep_message_versions_title" translatable="false">Сохранять версии сообщений при создании ветки</string>
+    <string name="ui_display_settings_page_haptics_global_title" translatable="false">Общий виброотклик</string>
+    <string name="ui_display_settings_page_haptics_ios_switch_title" translatable="false">Виброотклик переключателей</string>
+    <string name="ui_display_settings_page_haptics_on_card_tap_title" translatable="false">Виброотклик карточек</string>
+    <string name="ui_display_settings_page_haptics_on_generate_title" translatable="false">Виброотклик при генерации</string>
+    <string name="ui_display_settings_page_haptics_on_list_item_tap_title" translatable="false">Виброотклик элементов списка</string>
+    <string name="ui_display_settings_page_haptics_on_sidebar_title" translatable="false">Виброотклик боковой панели</string>
+    <string name="ui_display_settings_page_haptics_settings_title" translatable="false">Виброотклик</string>
+    <string name="ui_display_settings_page_hide_tool_result_images_title" translatable="false">Скрывать изображения в результатах инструментов</string>
+    <string name="ui_display_settings_page_insert_suggestion_only_title" translatable="false">Вставлять подсказки без отправки</string>
+    <string name="ui_display_settings_page_keep_assistant_list_expanded_on_sidebar_close_title" translatable="false">Не сворачивать список ассистентов при закрытии панели</string>
+    <string name="ui_display_settings_page_keep_screen_on_during_generation_subtitle" translatable="false">Предотвращает прерывание генерации блокировкой экрана. Увеличивает расход батареи.</string>
+    <string name="ui_display_settings_page_keep_screen_on_during_generation_title" translatable="false">Не выключать экран во время генерации</string>
+    <string name="ui_display_settings_page_keep_sidebar_open_on_assistant_tap_title" translatable="false">Не закрывать боковую панель при выборе ассистента</string>
+    <string name="ui_display_settings_page_keep_sidebar_open_on_topic_tap_title" translatable="false">Не закрывать боковую панель при выборе темы</string>
+    <string name="ui_display_settings_page_language_chinese_label" translatable="false">Китайский (упрощённый)</string>
+    <string name="ui_display_settings_page_language_english_label" translatable="false">Английский</string>
+    <string name="ui_display_settings_page_language_title" translatable="false">Язык приложения</string>
+    <string name="ui_display_settings_page_long_paste_as_file_threshold_title" translatable="false">Порог преобразования</string>
+    <string name="ui_display_settings_page_long_paste_as_file_threshold_unit" translatable="false">символов</string>
+    <string name="ui_display_settings_page_long_paste_as_file_title" translatable="false">Вставлять длинный текст как файл</string>
+    <string name="ui_display_settings_page_message_nav_buttons_mode_always" translatable="false">Всегда</string>
+    <string name="ui_display_settings_page_message_nav_buttons_mode_never" translatable="false">Никогда не показывать</string>
+    <string name="ui_display_settings_page_message_nav_buttons_mode_scroll" translatable="false">При прокрутке</string>
+    <string name="ui_display_settings_page_message_nav_buttons_title" translatable="false">Кнопки навигации по сообщениям</string>
+    <string name="ui_display_settings_page_mobile_code_block_wrap_title" translatable="false">Перенос строк в блоках кода на телефоне</string>
+    <string name="ui_display_settings_page_new_chat_after_delete_title" translatable="false">Новый чат после удаления темы</string>
+    <string name="ui_display_settings_page_new_chat_on_assistant_switch_title" translatable="false">Новый чат при смене ассистента</string>
+    <string name="ui_display_settings_page_new_chat_on_launch_title" translatable="false">Новый чат при запуске</string>
+    <string name="ui_display_settings_page_regenerate_delete_trailing_messages_title" translatable="false">Удалять сообщения ниже при повторной генерации</string>
+    <string name="ui_display_settings_page_rendering_settings_title" translatable="false">Настройки отображения содержимого</string>
+    <string name="ui_display_settings_page_show_chat_list_date_title" translatable="false">Показывать даты в списке чатов</string>
+    <string name="ui_display_settings_page_show_model_name_title" translatable="false">Показывать название модели</string>
+    <string name="ui_display_settings_page_show_model_timestamp_title" translatable="false">Показывать время ответов модели</string>
+    <string name="ui_display_settings_page_show_produced_files_subtitle" translatable="false">Показывать под ответами файлы, созданные или изменённые инструментами, и сводку правок, открывающую все изменения.</string>
+    <string name="ui_display_settings_page_show_produced_files_title" translatable="false">Показывать файлы под ответами</string>
+    <string name="ui_display_settings_page_show_provider_in_chat_message_title" translatable="false">Провайдер после названия модели</string>
+    <string name="ui_display_settings_page_show_regenerate_confirm_dialog_title" translatable="false">Подтверждать повторную генерацию</string>
+    <string name="ui_display_settings_page_show_thinking_cards_subtitle" translatable="false">Если отключено, карточки рассуждений скрыты в чате.</string>
+    <string name="ui_display_settings_page_show_thinking_cards_title" translatable="false">Показывать карточки рассуждений</string>
+    <string name="ui_display_settings_page_show_token_stats_title" translatable="false">Статистика токенов и контекста</string>
+    <string name="ui_display_settings_page_show_tool_cards_subtitle" translatable="false">Если отключено, карточки вызовов инструментов скрыты в чате.</string>
+    <string name="ui_display_settings_page_show_tool_cards_title" translatable="false">Показывать карточки инструментов</string>
+    <string name="ui_display_settings_page_show_tool_result_summary_title" translatable="false">Показывать сводку результатов инструментов</string>
+    <string name="ui_display_settings_page_show_updates_title" translatable="false">Показывать обновления</string>
+    <string name="ui_display_settings_page_show_user_avatar_title" translatable="false">Показывать аватар пользователя</string>
+    <string name="ui_display_settings_page_show_user_message_actions_title" translatable="false">Действия под сообщениями пользователя</string>
+    <string name="ui_display_settings_page_show_user_name_title" translatable="false">Показывать имя пользователя</string>
+    <string name="ui_display_settings_page_show_user_timestamp_title" translatable="false">Показывать время сообщений пользователя</string>
+    <string name="ui_display_settings_page_theme_settings_title" translatable="false">Настройки темы</string>
+    <string name="ui_display_settings_page_use_new_assistant_avatar_ux_title" translatable="false">Аватар ассистента в заголовке чата</string>
+    <string name="ui_enabled" translatable="false">Включено</string>
+    <string name="ui_font_code_sample" translatable="false">fun greet(name: String) = \&quot;Привет, $name!\&quot;</string>
+    <string name="ui_font_custom" translatable="false">Локальный файл</string>
+    <string name="ui_font_default" translatable="false">Системный по умолчанию</string>
+    <string name="ui_font_import_error" translatable="false">Не удалось импортировать шрифт</string>
+    <string name="ui_font_import_success" translatable="false">Шрифт импортирован</string>
+    <string name="ui_font_monospace" translatable="false">Моноширинный</string>
+    <string name="ui_font_picker_choose_local_file" translatable="false">Выбрать локальный файл</string>
+    <string name="ui_font_sample" translatable="false">Это пример текста: Съешь ещё этих мягких французских булок.</string>
+    <string name="ui_font_serif" translatable="false">С засечками</string>
+    <string name="ui_fonts_chat" translatable="false">Шрифт сообщений</string>
+    <string name="ui_glass_economy_detail" translatable="false">Без живого размытия, только прозрачность. Для слабых телефонов.</string>
+    <string name="ui_glass_economy_title" translatable="false">Экономный режим</string>
+    <string name="ui_glass_theme_enable" translatable="false">Тема «Стекло»</string>
+    <string name="ui_glass_theme_enable_detail" translatable="false">Матовая шапка и сообщения поверх цветного фона. При включении стиль сообщений становится стеклянным, при выключении возвращается прежний.</string>
+    <string name="ui_glass_theme_footer" translatable="false">Пузыри и размытие настраиваются в «Стиле сообщений», фон — в «Фоне чата» у ассистента. Чтобы ответ был одной карточкой, выключите «Разделять абзацы на пузыри».</string>
+    <string name="ui_glass_theme_off" translatable="false">Выкл.</string>
+    <string name="ui_glass_theme_on" translatable="false">Вкл.</string>
+    <string name="ui_glass_theme_title" translatable="false">Стекло</string>
+    <string name="ui_google_fonts_title" translatable="false">Google Fonts</string>
+    <string name="ui_image_crop" translatable="false">Обрезать изображение перед отправкой</string>
+    <string name="ui_image_crop_description" translatable="false">Открывать редактор обрезки для выбранных изображений</string>
+    <string name="ui_image_settings_page_title" translatable="false">Обработка изображений</string>
+    <string name="ui_interface" translatable="false">Интерфейс</string>
+    <string name="ui_interface_description" translatable="false">Темы, шрифты, сообщения и поведение чата</string>
+    <string name="ui_language_display_traditional_chinese" translatable="false">Китайский (традиционный)</string>
+    <string name="ui_legacy_lines" translatable="false">Порог сворачивания прежних сообщений (строк)</string>
+    <string name="ui_line_numbers" translatable="false">Номера строк в блоках кода</string>
+    <string name="ui_loading_icon" translatable="false">Индикатор генерации со значком приложения</string>
+    <string name="ui_local_font" translatable="false">Выбрать локальный файл TTF или OTF</string>
+    <string name="ui_message_legacy_bubble" translatable="false">Пузырь ответа ассистента</string>
+    <string name="ui_message_legacy_opacity" translatable="false">Общая непрозрачность пузырей</string>
+    <string name="ui_message_style_settings_page_assistant_fit_content" translatable="false">Подгонять пузырь ассистента под содержимое</string>
+    <string name="ui_message_style_settings_page_assistant_fit_content_subtitle" translatable="false">Пузырь ответа занимает ширину текста, а не всю строку</string>
+    <string name="ui_message_style_settings_page_assistant_split_paragraphs" translatable="false">Разделять абзацы на пузыри</string>
+    <string name="ui_message_style_settings_page_assistant_split_paragraphs_subtitle" translatable="false">Пустые строки разделяют ответ ассистента на отдельные пузыри по абзацам</string>
+    <string name="ui_message_style_settings_page_background_color" translatable="false">Фон</string>
+    <string name="ui_message_style_settings_page_background_opacity" translatable="false">Непрозрачность фона</string>
+    <string name="ui_message_style_settings_page_blur" translatable="false">Размытие</string>
+    <string name="ui_message_style_settings_page_blur_hint" translatable="false">Размывается содержимое за пузырём. Без фонового изображения чата эффект почти незаметен.</string>
+    <string name="ui_message_style_settings_page_border_color" translatable="false">Рамка</string>
+    <string name="ui_message_style_settings_page_border_opacity" translatable="false">Непрозрачность рамки</string>
+    <string name="ui_message_style_settings_page_border_width" translatable="false">Толщина рамки</string>
+    <string name="ui_message_style_settings_page_cancel" translatable="false">Отмена</string>
+    <string name="ui_message_style_settings_page_corner_radius" translatable="false">Радиус скругления</string>
+    <string name="ui_message_style_settings_page_dark" translatable="false">Тёмная</string>
+    <string name="ui_message_style_settings_page_default_hint" translatable="false">Стиль по умолчанию соответствует текущей теме и не имеет дополнительных настроек.</string>
+    <string name="ui_message_style_settings_page_light" translatable="false">Светлая</string>
+    <string name="ui_message_style_settings_page_preview_assistant" translatable="false">Это ответ ассистента.</string>
+    <string name="ui_message_style_settings_page_preview_thinking" translatable="false">Размышление</string>
+    <string name="ui_message_style_settings_page_preview_user" translatable="false">Это сообщение пользователя</string>
+    <string name="ui_message_style_settings_page_reset" translatable="false">Сбросить</string>
+    <string name="ui_message_style_settings_page_reset_confirm" translatable="false">Сбросить все настройки стиля сообщений?</string>
+    <string name="ui_message_style_settings_page_role_assistant" translatable="false">Ассистент</string>
+    <string name="ui_message_style_settings_page_role_assistant_hint" translatable="false">Настройки ассистента также применяются к карточкам рассуждений, вызовов инструментов и перевода.</string>
+    <string name="ui_message_style_settings_page_role_user" translatable="false">Пользователь</string>
+    <string name="ui_message_style_settings_page_style_default_subtitle" translatable="false">Соответствует теме; не настраивается</string>
+    <string name="ui_message_style_settings_page_style_frosted_subtitle" translatable="false">Полупрозрачное матовое стекло</string>
+    <string name="ui_message_style_settings_page_style_solid_subtitle" translatable="false">Непрозрачная заливка</string>
+    <string name="ui_message_style_settings_page_text_color" translatable="false">Текст</string>
+    <string name="ui_message_style_settings_page_title" translatable="false">Стиль сообщений</string>
+    <string name="ui_moru_language_russian" translatable="false">Русский</string>
+    <string name="ui_nav_left" translatable="false">Кнопки навигации слева</string>
+    <string name="ui_network" translatable="false">Сеть</string>
+    <string name="ui_notifications" translatable="false">Уведомления об ответах</string>
+    <string name="ui_number_unit" translatable="false">%1$d %2$s</string>
+    <string name="ui_palette_name" translatable="false">Палитра</string>
+    <string name="ui_percent" translatable="false">%1$d%%</string>
+    <string name="ui_reset" translatable="false">Сбросить</string>
+    <string name="ui_retained_options" translatable="false">Дополнительные параметры</string>
+    <string name="ui_seconds" translatable="false">%1$d с</string>
+    <string name="ui_settings_page_auto_retry" translatable="false">Автоповтор запросов</string>
+    <string name="ui_settings_page_back_button" translatable="false">Назад</string>
+    <string name="ui_settings_page_dark_mode" translatable="false">Тёмная</string>
+    <string name="ui_settings_page_display" translatable="false">Внешний вид и поведение</string>
+    <string name="ui_settings_page_light_mode" translatable="false">Светлая</string>
+    <string name="ui_settings_page_system_mode" translatable="false">Системная</string>
+    <string name="ui_theme_advanced" translatable="false">Дополнительные настройки темы</string>
+    <string name="ui_theme_advanced_settings_page_title" translatable="false">Дополнительные настройки темы</string>
+    <string name="ui_theme_advanced_settings_page_use_layered_sheet_tiles_subtitle" translatable="false">По умолчанию элементы совпадают с фоном панели.</string>
+    <string name="ui_theme_advanced_settings_page_use_layered_sheet_tiles_title" translatable="false">Многослойные элементы панелей</string>
+    <string name="ui_theme_advanced_settings_page_use_layered_surfaces_subtitle" translatable="false">Более тёмная страница и светлые карточки с оттенком темы. Отключите, чтобы вернуть прежний вид.</string>
+    <string name="ui_theme_advanced_settings_page_use_layered_surfaces_title" translatable="false">Многослойные поверхности (экспериментально)</string>
+    <string name="ui_theme_amoled" translatable="false">Чёрный фон AMOLED</string>
+    <string name="ui_theme_color_mode" translatable="false">Цветовая схема</string>
+    <string name="ui_theme_custom" translatable="false">Свои темы</string>
+    <string name="ui_theme_palettes" translatable="false">Цветовые палитры</string>
+    <string name="ui_theme_pure" translatable="false">Чистый фон</string>
+    <string name="ui_theme_pure_description" translatable="false">Белый фон в светлой теме и чёрный в тёмной</string>
+    <string name="ui_theme_settings_page_color_palettes_section" translatable="false">Цветовые палитры</string>
+    <string name="ui_theme_settings_page_custom_palette_name" translatable="false">Свой вариант</string>
+    <string name="ui_theme_settings_page_custom_themes_section" translatable="false">Свои темы</string>
+    <string name="ui_theme_settings_page_dynamic_color_section" translatable="false">Динамические цвета</string>
+    <string name="ui_theme_settings_page_use_dynamic_color_subtitle" translatable="false">Использовать системную палитру (Android 12+)</string>
+    <string name="ui_theme_settings_page_use_dynamic_color_title" translatable="false">Системные динамические цвета</string>
+    <string name="ui_theme_settings_page_use_pure_background_subtitle" translatable="false">Пузыри сообщений и акценты соответствуют теме.</string>
+    <string name="ui_theme_settings_page_use_pure_background_title" translatable="false">Чистый фон</string>
+    <string name="ui_volume_scroll" translatable="false">Прокрутка кнопками громкости</string>
+    <string name="ui_volume_scroll_speed" translatable="false">Шаг прокрутки кнопками громкости</string>
+    <string name="ui_tts_speed" translatable="false">Скорость озвучивания</string>
+    <string name="ui_tts_quotes" translatable="false">Озвучивать только текст в кавычках</string>
+    <string name="ui_tts_outside_brackets" translatable="false">Озвучивать только текст вне скобок</string>
+    <string name="ui_tts_auto" translatable="false">Озвучивать после генерации</string>
+    <string name="ui_profile_name" translatable="false">Имя пользователя</string>
+    <string name="ui_profile_avatar" translatable="false">Аватар пользователя</string>
+    <string name="ui_profile_avatar_choose" translatable="false">Выбрать изображение аватара</string>
+    <string name="ui_profile_avatar_emoji" translatable="false">Эмодзи аватара</string>
+    <string name="ui_blur_effect_title" translatable="false">Размытие поля ввода</string>
+    <string name="ui_blur_kind_blur" translatable="false">Размытие</string>
+    <string name="ui_blur_kind_glass" translatable="false">Стекло</string>
+    <string name="ui_code_font_name" translatable="false">Шрифт кода</string>
+    <string name="ui_google_fonts_hint" translatable="false">Шрифты Google Fonts загружаются из публичного каталога. Лицензия сохраняется вместе со шрифтом.</string>
+    <string name="ui_google_fonts_search" translatable="false">Найти шрифт или набор символов</string>
+    <string name="ui_google_fonts_failed" translatable="false">Не удалось загрузить шрифты. Проверьте подключение и попробуйте ещё раз.</string>
+    <string name="ui_google_fonts_refresh" translatable="false">Обновить каталог</string>
+    <string name="ui_google_fonts_license" translatable="false">Лицензия</string>
+    <string name="ui_google_fonts_downloading" translatable="false">Загрузка шрифта…</string>
+    <string name="ui_google_fonts_no_results" translatable="false">Шрифты не найдены</string>
+    <string name="ui_font_system" translatable="false">Системные шрифты</string>
+    <string name="ui_language_system" translatable="false">Как в системе</string>
+    <string name="ui_language_english" translatable="false">Английский</string>
+    <string name="ui_language_chinese" translatable="false">Китайский (упрощённый)</string>
+    <string name="ui_language_chinese_traditional" translatable="false">Китайский (традиционный)</string>
+    <string name="ui_language_system_settings" translatable="false">Язык приложения в настройках Android</string>
+    <string name="ui_show_thinking_content" translatable="false">Показывать содержимое рассуждений по умолчанию</string>
+    <string name="ui_auto_collapse_tool_steps" translatable="false">Автоматически сворачивать завершённые шаги инструментов</string>
+    <string name="ui_tts_multiplier" translatable="false">%1$.1f×</string>
+    <string name="ui_integer_value" translatable="false">%1$d</string>
+    <string name="ui_decimal_value" translatable="false">%1$.1f</string>
+    <string name="ui_conversation_order" translatable="false">Порядок чатов</string>
+    <string name="ui_conversation_order_updated" translatable="false">По времени изменения</string>
+    <string name="ui_conversation_order_created" translatable="false">По времени создания</string>
+    <string name="ui_collapse_current_lines_hint" translatable="false">Сейчас лимит — %1$d строк. Введите число символов, чтобы изменить его.</string>
+    <string name="ui_collapse_use_lines" translatable="false">Использовать лимит строк</string>
+</resources>

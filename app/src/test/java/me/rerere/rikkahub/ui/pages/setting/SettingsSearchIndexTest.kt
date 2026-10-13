@@ -66,4 +66,27 @@ class SettingsSearchIndexTest {
         )))
         assertEquals(SettingsSearchIndex.entries.size, SettingsSearchIndex.entries.map { it.id }.distinct().size)
     }
+
+    @Test fun `customization searches open the page that owns the actual preference`() {
+        val expected = mapOf(
+            "Markdown пользователя" to Screen.SettingInterfaceRendering,
+            "имя пользователя" to Screen.SettingInterfaceMessages,
+            "вибрация переключателей" to Screen.SettingInterfaceHaptics,
+            "размытие" to Screen.SettingInterfaceMessageStyle,
+            "порог символы" to Screen.SettingInterfaceBehavior,
+            "Шрифт кода" to Screen.SettingInterfaceFonts("code"),
+            "Google Fonts" to Screen.SettingInterfaceGoogleFonts("app"),
+            "фон чата обои" to Screen.SettingInterfaceBackground,
+            "язык приложения" to Screen.SettingInterfaceLanguage,
+            "непрозрачность поля ввода" to Screen.SettingInterfaceInputOpacity,
+            "сворачивать завершённые шаги" to Screen.SettingInterfaceBehavior,
+        )
+        expected.forEach { (query, destination) ->
+            assertTrue(query, SettingsSearchIndex.search(query).any { it.route == destination })
+        }
+        val newEntries = SettingsSearchIndex.entries.filter { it.id.startsWith("ui_") }
+        assertTrue(newEntries.isNotEmpty())
+        assertTrue(newEntries.all { it.titleRes != null && it.descriptionRes != null })
+        assertFalse(SettingsSearchIndex.search("системное плавающее окно").any { it.id.startsWith("ui_") })
+    }
 }

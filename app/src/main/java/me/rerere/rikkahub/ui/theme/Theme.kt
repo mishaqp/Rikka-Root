@@ -25,6 +25,8 @@ import me.rerere.rikkahub.ui.hooks.rememberAmoledDarkMode
 import me.rerere.rikkahub.ui.hooks.rememberCurrentColorMode
 import me.rerere.rikkahub.ui.hooks.rememberUserSettingsState
 import me.rerere.rikkahub.utils.getActivity
+import me.rerere.rikkahub.data.datastore.DisplaySetting
+import me.rerere.rikkahub.ui.hooks.ProvideAppHaptics
 
 private val ExtendLightColors = lightExtendColors()
 private val ExtendDarkColors = darkExtendColors()
@@ -56,17 +58,7 @@ fun RikkahubTheme(
     }
     val amoledDarkMode by rememberAmoledDarkMode()
 
-    val colorScheme = when {
-        settings.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-        else -> {
-            val theme = findThemeById(settings.themeId, settings.customThemes)
-                ?: findPresetTheme(settings.themeId)
-            theme.getColorScheme(dark = darkTheme)
-        }
-    }
+    val colorScheme = settingsBaseColorScheme(LocalContext.current, settings, darkTheme)
     // 更新状态栏图标颜色
     val view = LocalView.current
     val activity = view.context.getActivity()
@@ -89,7 +81,12 @@ fun RikkahubTheme(
         }
     }
 
-    RikkahubThemeContent(colorScheme, darkTheme, amoledDarkMode, content)
+    val appFont = rememberAppFontFamily(settings.displaySetting)
+    val typography = remember(appFont) { Typography.withFontFamily(appFont) }
+    ProvideAppHaptics(settings.displaySetting) {
+        RikkahubThemeContent(colorScheme, darkTheme, amoledDarkMode, content = content,
+            displaySetting = settings.displaySetting, typography = typography)
+    }
 }
 
 /** Shared production theme rendering; its host resolves preferences and platform colors. */
@@ -99,13 +96,12 @@ internal fun RikkahubThemeContent(
     darkTheme: Boolean,
     amoledDarkMode: Boolean = false,
     content: @Composable () -> Unit,
+    displaySetting: DisplaySetting = DisplaySetting(),
+    typography: androidx.compose.material3.Typography = Typography,
 ) {
-    val colorSchemeConverted = remember(darkTheme, amoledDarkMode, colorScheme) {
-        if (darkTheme && amoledDarkMode) {
-            colorScheme.copy(background = AMOLED_DARK_BACKGROUND, surface = AMOLED_DARK_BACKGROUND)
-        } else {
-            colorScheme
-        }
+    val colorSchemeConverted = remember(darkTheme, amoledDarkMode, colorScheme, displaySetting.usePureBackground,
+        displaySetting.useLayeredSurfaces, displaySetting.useLayeredSheetTiles) {
+        effectiveDisplayColorScheme(colorScheme, darkTheme, amoledDarkMode, displaySetting)
     }
     val extendColors = if (darkTheme) ExtendDarkColors else ExtendLightColors
     CompositionLocalProvider(
@@ -116,7 +112,7 @@ internal fun RikkahubThemeContent(
     ) {
         MaterialExpressiveTheme(
             colorScheme = colorSchemeConverted,
-            typography = Typography,
+            typography = typography,
             content = content,
             motionScheme = MotionScheme.expressive()
         )

@@ -39,7 +39,48 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.constrainHeight
 import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.ui.hooks.HapticAction
+import me.rerere.rikkahub.ui.hooks.rememberAppHapticFeedback
+
+internal data class UserCharacterPreview(val text: String, val overflowing: Boolean)
+
+internal fun presentUserCharacterPreview(text: String, options: UserTextDisplayOptions, expanded: Boolean): UserCharacterPreview {
+    val limit = options.collapseChars?.coerceIn(50, 100000) ?: return UserCharacterPreview(text, false)
+    val overflow = options.enabled && text.length > limit
+    if (!overflow || expanded) return UserCharacterPreview(text, overflow)
+    val end = if (limit < text.length && text[limit - 1].isHighSurrogate() && text[limit].isLowSurrogate()) limit - 1 else limit
+    return UserCharacterPreview(text.take(end).trimEnd() + "…", true)
+}
+
+/** An explicit character limit uses Moru's text preview; legacy settings retain the rendered viewport. */
+@Composable
+internal fun CharacterCollapsibleUserMessageText(
+    messageKey: String,
+    options: UserTextDisplayOptions,
+    text: String,
+    content: @Composable (String) -> Unit,
+) {
+    var expanded by rememberSaveable(messageKey) { mutableStateOf(false) }
+    val preview = presentUserCharacterPreview(text, options, expanded)
+    val haptic = rememberAppHapticFeedback(HapticAction.CARD)
+    val description = stringResource(if (expanded) R.string.chat_message_expanded else R.string.chat_message_collapsed)
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.testTag("chat_message_user_collapse")) {
+        content(preview.text)
+        if (preview.overflowing) {
+            Text(text = stringResource(if (expanded) R.string.chat_message_collapse else R.string.chat_message_expand),
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.testTag("chat_message_user_collapse_toggle")
+                    .semantics { stateDescription = description }
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(role = Role.Button) {
+                        haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
+                        expanded = !expanded
+                    }.padding(4.dp))
+        }
+    }
+}
 
 /** A stable Markdown subtree, measured at its real width and clipped to a scaled line viewport. */
 @Composable

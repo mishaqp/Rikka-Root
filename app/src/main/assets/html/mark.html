@@ -208,7 +208,9 @@
         // Add plugins
         // 传入已加载 mhchem 扩展的 katex 实例, 否则插件会使用其内部自带的另一个 katex 实例,
         // 导致 \ce 等 mhchem 语法无法识别 (Undefined control sequence: \ce)
-        md.use(vscodemarkdownItKatex, { katex });
+        const enableLatex = {{ENABLE_LATEX}};
+        const dollarMaskCode = {{DOLLAR_MASK_CODE}};
+        if (enableLatex) md.use(vscodemarkdownItKatex, { katex });
 
         md.use(markdownItTaskLists, {
             enabled: true,
@@ -244,19 +246,19 @@
         // The markdown content to render (base64 encoded)
         const markdownBase64 = `{{MARKDOWN_BASE64}}`;
         let markdownContent = Base64.decode(markdownBase64);
-
-        // Convert \[ ... \] to $$ ... $$ for LaTeX block math
-        markdownContent = markdownContent.replace(/\\\[([\s\S]*?)\\\]/g, (match, content) => {
-            return '\n$$\n' + content.trim() + '\n$$\n';
-        });
-        // Convert \( ... \) to $ ... $ for LaTeX inline math
-        markdownContent = markdownContent.replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
+        const htmlCodeBodies = JSON.parse(Base64.decode('{{HTML_CODE_BODIES_BASE64}}'));
 
         // Render markdown with markdown-it
         async function renderMarkdown() {
             try {
                 // Process with markdown-it
-                const html = md.render(markdownContent);
+                let html = md.render(markdownContent);
+                Object.entries(htmlCodeBodies).forEach(([token, body]) => {
+                    html = html.replaceAll(token, body);
+                });
+                if (dollarMaskCode >= 0) {
+                    html = html.replaceAll(String.fromCharCode(dollarMaskCode), '$');
+                }
                 document.getElementById('content').innerHTML = html;
 
                 // Render mermaid diagrams
@@ -268,7 +270,7 @@
                 }
 
                 // Render KaTeX math
-                document.querySelectorAll('.math.inline').forEach(el => {
+                if (enableLatex) document.querySelectorAll('.math.inline').forEach(el => {
                     try {
                         katex.render(el.textContent, el, {
                             throwOnError: false,
@@ -280,7 +282,7 @@
                     }
                 });
 
-                document.querySelectorAll('.math.block').forEach(el => {
+                if (enableLatex) document.querySelectorAll('.math.block').forEach(el => {
                     try {
                         katex.render(el.textContent, el, {
                             displayMode: true,

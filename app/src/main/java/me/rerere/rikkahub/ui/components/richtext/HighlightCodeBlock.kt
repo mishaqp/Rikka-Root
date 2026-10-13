@@ -80,14 +80,12 @@ import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.modifier.onClick
 import me.rerere.rikkahub.ui.theme.AtomOneDarkPalette
 import me.rerere.rikkahub.ui.theme.AtomOneLightPalette
-import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import me.rerere.ui.webview.WebView
 import me.rerere.ui.webview.WebViewContentCache
 import me.rerere.ui.webview.rememberWebViewState
 import kotlin.time.Clock
 
-private const val COLLAPSE_LINES = 10
 private val PREVIEWABLE_LANGUAGES = setOf("html", "svg")
 
 @Composable
@@ -115,10 +113,11 @@ fun HighlightCodeBlock(
     var previewMode by remember(canInlinePreview, code, normalizedLanguage) {
         mutableStateOf(false)
     }
-    val canCollapse = codeLines.size > COLLAPSE_LINES &&
+    val collapseLines = displayOptions.codeBlockCollapseLines.coerceAtLeast(1)
+    val canCollapse = codeLines.size > collapseLines &&
         !(completeCodeBlock && normalizedLanguage == "mermaid") && !previewMode
 
-    var isExpanded by remember(displayOptions.codeBlockAutoCollapse) {
+    var isExpanded by remember(displayOptions.codeBlockAutoCollapse, collapseLines) {
         mutableStateOf(!displayOptions.codeBlockAutoCollapse)
     }
     val autoWrap = displayOptions.codeBlockAutoWrap
@@ -210,8 +209,8 @@ fun HighlightCodeBlock(
                     )
                 }
                 else -> {
-                    val textStyle = LocalTextStyle.current.merge(style)
-                    val collapsedCode = remember(codeLines) { codeLines.take(COLLAPSE_LINES).joinToString("\n") }
+                    val textStyle = LocalTextStyle.current.merge(style).copy(fontFamily = displayOptions.codeFontFamily)
+                    val collapsedCode = remember(codeLines, collapseLines) { codeLines.take(collapseLines).joinToString("\n") }
                     val displayCode = if (isExpanded) code else collapsedCode
                     val displayLines = remember(displayCode) { displayCode.lines() }
 
@@ -267,7 +266,7 @@ private fun CodeBlockWithLineNumbersWrapped(
                             text = (index + 1).toString().padStart(lineNumberWidth, ' '),
                             fontSize = textStyle.fontSize,
                             lineHeight = textStyle.lineHeight,
-                            fontFamily = JetbrainsMono,
+                            fontFamily = textStyle.fontFamily ?: currentMarkdownCodeFont(),
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                             softWrap = false,
                             modifier = Modifier.padding(end = 8.dp)
@@ -281,7 +280,7 @@ private fun CodeBlockWithLineNumbersWrapped(
                         colors = colorPalette,
                         overflow = TextOverflow.Visible,
                         softWrap = true,
-                        fontFamily = JetbrainsMono,
+                        fontFamily = textStyle.fontFamily ?: currentMarkdownCodeFont(),
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -323,7 +322,7 @@ private fun CodeBlockDefault(
                         text = (index + 1).toString().padStart(lineNumberWidth, ' '),
                         fontSize = textStyle.fontSize,
                         lineHeight = textStyle.lineHeight,
-                        fontFamily = JetbrainsMono,
+                        fontFamily = textStyle.fontFamily ?: currentMarkdownCodeFont(),
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                         softWrap = false,
                     )
@@ -342,7 +341,7 @@ private fun CodeBlockDefault(
                 colors = colorPalette,
                 overflow = TextOverflow.Visible,
                 softWrap = autoWrap,
-                fontFamily = JetbrainsMono
+                fontFamily = textStyle.fontFamily ?: currentMarkdownCodeFont()
             )
         }
     }

@@ -126,7 +126,7 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(
                     testTag = "chat_timeline_server_preview:${tool.toolCallId}",
                     fontSizeRatio = fontSizeRatio,
                 )
-                if (status !in quietSuccessStatuses || preview == null) Text(
+                if (status !in quietSuccessStatuses) Text(
                     text = when (status) {
                         TimelineStatus.Running -> stringResource(R.string.chat_timeline_status_running)
                         TimelineStatus.Failed -> stringResource(R.string.chat_timeline_status_failed)

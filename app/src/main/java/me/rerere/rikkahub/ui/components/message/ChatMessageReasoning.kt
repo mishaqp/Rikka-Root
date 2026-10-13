@@ -44,7 +44,6 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.replaceRegexes
-import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.ui.ChainOfThoughtScope
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.modifier.shimmer
@@ -196,15 +195,14 @@ private fun ReasoningContent(
             }
     ) {
         val reasoningContent = @Composable {
-            MarkdownBlock(
-                content = reasoning.reasoning.replaceRegexes(
+            val text = reasoning.reasoning.replaceRegexes(
                     assistant = assistant,
                     scope = AssistantAffectScope.ASSISTANT,
                     visual = true,
-                ),
-                style = reasoningTextStyle,
-                modifier = Modifier.fillMaxSize(),
             )
+            MessageTextContent(text = text,
+                markdown = LocalSettings.current.displaySetting.enableReasoningMarkdown,
+                style = reasoningTextStyle, modifier = Modifier.fillMaxSize())
         }
         // 流式生成期间不启用 SelectionContainer，避免 selectable 列表并发修改导致的
         // ConcurrentModificationException（详见 ChatMessage.kt 文本块同样处理）。

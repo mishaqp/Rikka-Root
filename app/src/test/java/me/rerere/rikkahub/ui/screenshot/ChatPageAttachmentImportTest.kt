@@ -15,6 +15,7 @@ import androidx.core.net.toFile
 import androidx.core.net.toUri
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
+import coil3.serviceLoaderEnabled
 import coil3.annotation.DelicateCoilApi
 import coil3.decode.BitmapFactoryDecoder
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
@@ -86,7 +87,7 @@ class ChatPageAttachmentImportTest {
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
                 .code(404).message("Import fixture: offline").body(ByteArray(0).toResponseBody()).build()
         }.build()
-        imageLoader = ImageLoader.Builder(context).components {
+        imageLoader = ImageLoader.Builder(context).serviceLoaderEnabled(false).diskCache(null).components {
             add(BitmapFactoryDecoder.Factory())
             add(OkHttpNetworkFetcherFactory(callFactory = { offlineClient }))
         }.build()

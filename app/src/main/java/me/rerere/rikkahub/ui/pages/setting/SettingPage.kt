@@ -141,7 +141,7 @@ internal fun SettingPageContent(
                 }
                 items(searchResults, key = { "search_${it.id}" }) { item ->
                     Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
-                        SettingsItem(item.title, item.description, item.icon, item.section.tone,
+                        SettingsItem(item.displayTitle(), item.displayDescription(), item.icon, item.section.tone,
                             onClick = { open(item.target) }, status = settingsStatusOf(item.id, statuses), query = query)
                     }
                 }
@@ -155,7 +155,7 @@ internal fun SettingPageContent(
                                 Column {
                                     val entries = SettingsCatalog.items.filter { it.section == section }
                                     entries.forEachIndexed { index, item ->
-                                        SettingsItem(item.title, item.description, item.icon, section.tone,
+                                        SettingsItem(item.displayTitle(), item.displayDescription(), item.icon, section.tone,
                                             onClick = { open(item.target) }, status = settingsStatusOf(item.id, statuses))
                                         if (index < entries.lastIndex) HorizontalDivider(
                                             Modifier.padding(start = 68.dp, end = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .45f))

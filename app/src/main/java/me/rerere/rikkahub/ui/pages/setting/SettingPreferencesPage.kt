@@ -30,7 +30,10 @@ import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
 
 @Composable
-fun SettingPreferencesPage() {
+fun SettingPreferencesPage() = SettingInterfacePage()
+
+@Composable
+fun SettingPreferencesLegacyPage() {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val navController = LocalNavController.current
 

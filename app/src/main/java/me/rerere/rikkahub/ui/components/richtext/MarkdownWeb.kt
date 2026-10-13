@@ -2,6 +2,8 @@ package me.rerere.rikkahub.ui.components.richtext
 
 import android.content.Context
 import androidx.compose.material3.ColorScheme
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import me.rerere.rikkahub.utils.base64Encode
 import me.rerere.rikkahub.utils.toCssHex
 
@@ -12,11 +14,26 @@ import me.rerere.rikkahub.utils.toCssHex
  * - Mermaid diagrams
  * - Syntax highlighting via highlight.js
  */
-fun buildMarkdownPreviewHtml(context: Context, markdown: String, colorScheme: ColorScheme): String {
+fun buildMarkdownPreviewHtml(
+    context: Context,
+    markdown: String,
+    colorScheme: ColorScheme,
+    displayOptions: MarkdownDisplayOptions? = null,
+): String {
     val htmlTemplate = context.assets.open("html/mark.html").bufferedReader().use { it.readText() }
+    val enableLatex = displayOptions?.enableLatexRendering ?: true
+    val source = if (enableLatex) {
+        prepareMarkdownMath(markdown, displayOptions?.enableDollarLatex ?: true)
+    } else {
+        MarkdownMathSource(markdown, null)
+    }
+    val protected = protectMarkdownHtmlCode(source.parserSource)
 
     return htmlTemplate
-        .replace("{{MARKDOWN_BASE64}}", markdown.base64Encode())
+        .replace("{{MARKDOWN_BASE64}}", protected.parserSource.base64Encode())
+        .replace("{{HTML_CODE_BODIES_BASE64}}", Json.encodeToString(protected.codeBodies).base64Encode())
+        .replace("{{ENABLE_LATEX}}", enableLatex.toString())
+        .replace("{{DOLLAR_MASK_CODE}}", (source.dollarMask?.code ?: -1).toString())
         .replace("{{BACKGROUND_COLOR}}", colorScheme.background.toCssHex())
         .replace("{{ON_BACKGROUND_COLOR}}", colorScheme.onBackground.toCssHex())
         .replace("{{SURFACE_COLOR}}", colorScheme.surface.toCssHex())

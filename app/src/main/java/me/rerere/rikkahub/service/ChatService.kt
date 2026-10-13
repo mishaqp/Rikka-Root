@@ -87,6 +87,7 @@ import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.data.files.localFileUrls
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.HistoryLoadState
 import me.rerere.rikkahub.data.model.HistoryNotWritableException
@@ -304,7 +305,7 @@ class ChatService(
             val sessions = sessionManager.snapshot()
             val historyFiles = sessions.filterNot { it.id in deletedHistories }
                 .flatMap { it.state.value.files }.mapTo(mutableSetOf()) { it.toString() }
-            historyFiles + sessions.flatMap {
+            historyFiles + settingsStore.settingsFlow.value.localFileUrls(context.filesDir) + sessions.flatMap {
                 it.messageQueue.state.value.messages + listOfNotNull(it.submittingMessage)
             }.flatMap { it.parts }.localFileUrls()
         }
@@ -683,8 +684,16 @@ class ChatService(
                     handleMessageComplete(conversationId)
                 } else {
                     if (regenerateAssistantMsg) {
-                        val node = conversation.getMessageNodeByMessage(message)
-                        val nodeIndex = conversation.messageNodes.indexOf(node)
+                        val regenerationConversation = conversationForAssistantRegeneration(
+                            conversation,
+                            message.id,
+                            settingsStore.settingsFlow.value.displaySetting.regenerateDeleteTrailingMessages,
+                        )
+                        if (regenerationConversation !== conversation) {
+                            saveConversation(conversationId, regenerationConversation)
+                        }
+                        val node = regenerationConversation.getMessageNodeByMessage(message)
+                        val nodeIndex = regenerationConversation.messageNodes.indexOf(node)
                         handleMessageComplete(conversationId, messageRange = 0..<nodeIndex)
                     } else {
                         saveConversation(conversationId, conversation)
@@ -1751,8 +1760,11 @@ class ChatService(
             sourceFiles = currentConversation.files
             reserveSources(sourceFiles.map { it.toString() })
 
-            val copiedNodes = currentConversation.messageNodes
-                .subList(0, targetNodeIndex + 1)
+            val copiedNodes = messageNodesForFork(
+                currentConversation.messageNodes,
+                targetNodeIndex,
+                settingsStore.settingsFlow.value.displaySetting.forkKeepMessageVersions,
+            )
                 .map { node ->
                     node.copy(
                         id = Uuid.random(),

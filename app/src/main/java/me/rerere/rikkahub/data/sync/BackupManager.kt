@@ -166,8 +166,13 @@ class BackupManager(
                     if (settingsFile.exists()) {
                         val settings = json.decodeFromString<Settings>(SettingsJsonMigrator.migrate(settingsFile.readText()))
                         require(!settings.init) { "Backup contains uninitialized settings" }
-                        // Persist the migrated value once, including generated IDs, for restart/retry consistency.
-                        PendingRestore.writeDurably(settingsFile, json.encodeToString(settings))
+                        val stagedFiles = File(payload, "files")
+                        val restoredPaths = stagedFiles.walkTopDown().filter { it.isFile }.map {
+                            it.relativeTo(stagedFiles).invariantSeparatorsPath
+                        }.toSet()
+                        // Persist migrated IDs and restored image paths once for restart/retry consistency.
+                        PendingRestore.writeDurably(settingsFile, json.encodeToString(
+                            settings.remapRestoredFileUrls(context.filesDir, restoredPaths)))
                     }
                     currentCoroutineContext().ensureActive()
                     restore.publish(staging)

@@ -42,6 +42,7 @@ import org.junit.runner.RunWith
 import org.robolectric.ParameterizedRobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import ru.noties.jlatexmath.JLatexMathAndroid
 
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [35], qualifiers = "ru-rRU-w411dp-h891dp-mdpi")
@@ -204,6 +205,94 @@ class MarkdownRichRuntimeTest(private val width: Int, private val fontScale: Flo
         compose.runOnIdle { options.value = options.value.copy(showLineNumbers = false) }
         compose.onNodeWithText("1").assertDoesNotExist()
         assertTrue(textLayout().lineCount > 1)
+    }
+
+    @Test fun codeCollapseThresholdAndFontAreReactive() {
+        val code = (1..8).joinToString("\n") { "val item$it = $it" }
+        val options = mutableStateOf(defaultOptions.copy(codeBlockCollapseLines = 3, codeFontFamily = FontFamily.Serif))
+        compose.setContent {
+            ScreenshotTheme(fontScale = fontScale) {
+                Surface(Modifier.width(width.dp)) {
+                    CompositionLocalProvider(LocalMarkdownDisplayOptions provides options.value) {
+                        HighlightCodeBlock(code, "kotlin")
+                    }
+                }
+            }
+        }
+        val firstThree = code.lines().take(3).joinToString("\n")
+        val firstSix = code.lines().take(6).joinToString("\n")
+        compose.onNodeWithText(firstThree).assertExists()
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithText(firstThree).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertEquals(FontFamily.Serif, layouts.single().layoutInput.style.fontFamily)
+        compose.runOnIdle { options.value = options.value.copy(codeBlockCollapseLines = 6) }
+        compose.onNodeWithText(firstSix).assertExists()
+        compose.onNodeWithTag("markdown_code_header_toggle").performClick()
+        compose.onNodeWithText(code).assertExists()
+    }
+
+    @Test fun dollarOptionUpdatesNativeHtmlAndTableParsingWithoutChangingExplicitMath() {
+        // The plain Application fixture omits the production math ContentProvider.
+        JLatexMathAndroid.init(ApplicationProvider.getApplicationContext<Context>())
+        val dollar = "${'$'}x${'$'}"
+        val native = "$dollar and \\(z\\)"
+        val html = "$native<br>tail"
+        val table = "| Value |\n| --- |\n| $native |"
+        val content = mutableStateOf(native)
+        val options = mutableStateOf(defaultOptions.copy(enableLatexRendering = true, enableDollarLatex = false))
+        compose.setContent {
+            ScreenshotTheme(fontScale = fontScale) {
+                Surface(Modifier.width(width.dp)) { MarkdownBlock(content.value, displayOptions = options.value) }
+            }
+        }
+        fun mathLayouts(): List<TextLayoutResult> {
+            val nodes = compose.onAllNodesWithText("and", substring = true)
+            val layouts = mutableListOf<TextLayoutResult>()
+            nodes.fetchSemanticsNodes().indices.forEach { index ->
+                nodes[index].performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            }
+            return layouts
+        }
+        fun awaitMathPlaceholders(expected: Int, source: String) {
+            try {
+                compose.waitUntil(5_000) {
+                    val layouts = mathLayouts()
+                    layouts.isNotEmpty() && layouts.all { it.placeholderRects.size == expected }
+                }
+            } catch (failure: Throwable) {
+                val actual = mathLayouts().joinToString { layout ->
+                    "text=${layout.layoutInput.text.text}, placeholders=${layout.placeholderRects}, " +
+                        "inline=${layout.layoutInput.text.getStringAnnotations(0, layout.layoutInput.text.length)}"
+                }
+                throw AssertionError("Expected $expected math placeholders for $source; actual: $actual", failure)
+            }
+            val layouts = mathLayouts()
+            assertTrue(layouts.isNotEmpty())
+            layouts.forEach { layout ->
+                assertEquals(expected, layout.placeholderRects.size)
+                layout.placeholderRects.forEach { rect ->
+                    assertTrue("Math must occupy real rendered bounds: $rect", rect != null && rect.width > 0f && rect.height > 0f)
+                }
+            }
+        }
+        listOf(native, html, table).forEach { text ->
+            compose.runOnIdle {
+                content.value = text
+                options.value = options.value.copy(enableDollarLatex = false)
+            }
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText(dollar, substring = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            awaitMathPlaceholders(1, text) // Explicit z remains math while dollar x is literal.
+            compose.runOnIdle { options.value = options.value.copy(enableDollarLatex = true) }
+            awaitMathPlaceholders(2, text) // Dollar x and explicit z both render as native math.
+        }
+        // The independent math-rendering switch still keeps parsed formulas as source text.
+        compose.runOnIdle { options.value = options.value.copy(enableLatexRendering = false) }
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText(dollar, substring = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        awaitMathPlaceholders(0, table)
     }
 
     @Test fun nativeAndHtmlTablesKeepCopyAndCsvControls() {

@@ -22,6 +22,8 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.datastore.findProvider
+import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.utils.toMessageTimeString
@@ -38,6 +40,9 @@ internal fun ChatMessageHeader(
     if (!display.showHeader) return
     val user = message.role == MessageRole.USER
     val options = display.header
+    val providerName = if (options.showProvider) model?.findProvider(LocalSettings.current.providers)?.name.orEmpty() else ""
+    if (!options.showUserIdentity && !options.showUserAvatar && !options.showAssistantIcon &&
+        !options.showAssistantName && !options.showTimestamp && providerName.isBlank()) return
     val prefix = if (user) "chat_message_user" else "chat_message_assistant"
     val colors = MaterialTheme.colorScheme
     val nameStyle = MaterialTheme.typography.labelMedium.copy(
@@ -84,8 +89,15 @@ internal fun ChatMessageHeader(
                 Text(text = message.createdAt.toJavaLocalDateTime().toMessageTimeString(),
                     style = timeStyle, maxLines = 1, modifier = Modifier.testTag("${prefix}_time"))
             }
+            if (options.showProvider) {
+                if (providerName.isNotBlank()) {
+                    Text(text = providerName, style = timeStyle, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.testTag("${prefix}_provider"))
+                }
+            }
         }
-        if (options.showUserIdentity) {
+        if (options.showUserAvatar) {
             UIAvatar(name = options.userNickname, value = options.userAvatar, loading = false,
                 modifier = Modifier.size(32.dp).testTag("${prefix}_icon"))
         }

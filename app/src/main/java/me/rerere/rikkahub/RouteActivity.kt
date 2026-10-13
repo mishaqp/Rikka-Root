@@ -2,6 +2,7 @@ package me.rerere.rikkahub
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -39,6 +40,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.testTag
 import androidx.core.content.IntentCompat
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -78,6 +80,8 @@ import me.rerere.rikkahub.ui.context.LocalSharedTransitionScope
 import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.context.Navigator
+import me.rerere.rikkahub.ui.locale.attachInterfaceLanguageContext
+import me.rerere.rikkahub.ui.locale.syncInterfaceAppLanguage
 import me.rerere.rikkahub.ui.hooks.readBooleanPreference
 import me.rerere.rikkahub.ui.hooks.readStringPreference
 import me.rerere.rikkahub.ui.hooks.rememberCustomAsrState
@@ -118,6 +122,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesNotificationPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesGeneralPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesNetworkPage
 import me.rerere.rikkahub.ui.pages.setting.SettingPreferencesUIPage
+import me.rerere.rikkahub.ui.pages.setting.*
 import me.rerere.rikkahub.ui.pages.setting.SettingThemePage
 import me.rerere.rikkahub.ui.pages.setting.SettingDonatePage
 import me.rerere.rikkahub.ui.pages.setting.SettingFilesPage
@@ -159,6 +164,10 @@ class RouteActivity : ComponentActivity() {
     private val mediaCreationRepository by inject<MediaCreationRepository>()
     private var navStack: MutableList<NavKey>? = null
     private val pendingIntents = ArrayDeque<Intent>()
+
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(attachInterfaceLanguageContext(newBase))
+    }
 
     // Volume key listener registry — last registered handler wins
     internal val volumeKeyListeners = mutableListOf<(isVolumeUp: Boolean) -> Boolean>()
@@ -295,8 +304,19 @@ class RouteActivity : ComponentActivity() {
     @OptIn(ExperimentalComposeUiApi::class)
     @Composable
     fun AppRoutes() {
-        val toastState = rememberToasterState()
         val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
+        // Navigation must use loaded DataStore choices, not Settings.dummy() defaults.
+        // Intents stay in pendingIntents until the first real stack is ready below.
+        if (settings.init) {
+            Box(Modifier.fillMaxSize().testTag("app_routes_loading"), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+            return
+        }
+        val toastState = rememberToasterState()
+        LaunchedEffect(settings.init, settings.displaySetting.appLanguageTag) {
+            if (!settings.init) syncInterfaceAppLanguage(this@RouteActivity, settings.displaySetting.appLanguageTag)
+        }
         val tts = rememberCustomTtsState()
         val asr = rememberCustomAsrState()
         val eventBus = koinInject<AppEventBus>()
@@ -313,7 +333,8 @@ class RouteActivity : ComponentActivity() {
         val migrationState by DatabaseMigrationTracker.state.collectAsStateWithLifecycle()
 
         val startScreen = Screen.Chat(
-            id = if (readBooleanPreference("create_new_conversation_on_start", true)) {
+            id = if (settings.displaySetting.newChatOnLaunch
+                ?: readBooleanPreference("create_new_conversation_on_start", true)) {
                 Uuid.random().toString()
             } else {
                 readStringPreference(
@@ -478,7 +499,7 @@ class RouteActivity : ComponentActivity() {
                             }
 
                             entry<Screen.SettingTheme> {
-                                SettingThemePage()
+                                SettingThemePage(showLargeHeading = false)
                             }
 
                             entry<Screen.SettingPreferences> {
@@ -500,6 +521,23 @@ class RouteActivity : ComponentActivity() {
                             entry<Screen.SettingPreferencesUI> {
                                 SettingPreferencesUIPage()
                             }
+                            entry<Screen.SettingInterfaceMessages> { SettingInterfaceMessagesPage() }
+                            entry<Screen.SettingInterfaceRendering> { SettingInterfaceRenderingPage() }
+                            entry<Screen.SettingInterfaceBehavior> { SettingInterfaceBehaviorPage() }
+                            entry<Screen.SettingInterfaceHaptics> { SettingInterfaceHapticsPage() }
+                            entry<Screen.SettingInterfaceImages> { SettingInterfaceImagesPage() }
+                            entry<Screen.SettingInterfaceAutoRetry> { SettingInterfaceAutoRetryPage() }
+                            entry<Screen.SettingInterfaceFontSize> { SettingInterfaceFontSizePage() }
+                            entry<Screen.SettingInterfaceScroll> { SettingInterfaceScrollPage() }
+                            entry<Screen.SettingInterfaceInputOpacity> { SettingInterfaceInputOpacityPage() }
+                            entry<Screen.SettingInterfaceBackground> { SettingInterfaceBackgroundPage() }
+                            entry<Screen.SettingInterfaceMessageStyle> { SettingInterfaceMessageStylePage() }
+                            entry<Screen.SettingInterfaceGlass> { SettingInterfaceGlassPage() }
+                            entry<Screen.SettingInterfaceLanguage> { SettingInterfaceLanguagePage() }
+                            entry<Screen.SettingInterfaceThemeAdvanced> { SettingInterfaceThemeAdvancedPage() }
+                            entry<Screen.SettingPreferencesUILegacy> { SettingPreferencesUILegacyPage() }
+                            entry<Screen.SettingInterfaceFonts> { SettingInterfaceFontsPage(it.target) }
+                            entry<Screen.SettingInterfaceGoogleFonts> { SettingInterfaceGoogleFontsPage(it.target) }
 
                             entry<Screen.SettingPreferencesNetwork> {
                                 SettingPreferencesNetworkPage()
@@ -778,6 +816,57 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingPreferencesUI : Screen
+
+    @Serializable
+    data object SettingInterfaceMessages : Screen
+
+    @Serializable
+    data object SettingInterfaceRendering : Screen
+
+    @Serializable
+    data object SettingInterfaceBehavior : Screen
+
+    @Serializable
+    data object SettingInterfaceHaptics : Screen
+
+    @Serializable
+    data object SettingInterfaceImages : Screen
+
+    @Serializable
+    data object SettingInterfaceAutoRetry : Screen
+
+    @Serializable
+    data object SettingInterfaceFontSize : Screen
+
+    @Serializable
+    data object SettingInterfaceScroll : Screen
+
+    @Serializable
+    data object SettingInterfaceInputOpacity : Screen
+
+    @Serializable
+    data object SettingInterfaceBackground : Screen
+
+    @Serializable
+    data object SettingInterfaceMessageStyle : Screen
+
+    @Serializable
+    data object SettingInterfaceGlass : Screen
+
+    @Serializable
+    data object SettingInterfaceLanguage : Screen
+
+    @Serializable
+    data object SettingInterfaceThemeAdvanced : Screen
+
+    @Serializable
+    data object SettingPreferencesUILegacy : Screen
+
+    @Serializable
+    data class SettingInterfaceFonts(val target: String) : Screen
+
+    @Serializable
+    data class SettingInterfaceGoogleFonts(val target: String) : Screen
 
     @Serializable
     data object SettingPreferencesNetwork : Screen

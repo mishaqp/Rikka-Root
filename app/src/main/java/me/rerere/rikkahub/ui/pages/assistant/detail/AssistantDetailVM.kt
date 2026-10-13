@@ -17,6 +17,7 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.data.files.localFileUrls
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.files.SkillMetadata
 import me.rerere.rikkahub.data.model.Assistant
@@ -142,11 +143,11 @@ class AssistantDetailVM(
         }
         changed?.let { (old, new) ->
             val avatarUrl = (old.avatar as? Avatar.Image)?.url
-            val userAvatarUrl = (committed.displaySetting.userAvatar as? Avatar.Image)?.url
-            if (avatarUrl != userAvatarUrl && committed.assistants.none { (it.avatar as? Avatar.Image)?.url == avatarUrl || it.background == avatarUrl }) {
+            val referenced = committed.localFileUrls()
+            if (avatarUrl !in referenced) {
                 checkAvatarDelete(old, new)
             }
-            if (old.background != userAvatarUrl && committed.assistants.none { it.background == old.background || (it.avatar as? Avatar.Image)?.url == old.background }) {
+            if (old.background !in referenced) {
                 checkBackgroundDelete(old, new)
             }
         }

@@ -1,0 +1,33 @@
+package me.rerere.rikkahub.data.sync
+
+import androidx.core.net.toUri
+import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.files.FileFolders
+import me.rerere.rikkahub.data.model.Avatar
+import java.io.File
+
+/** Rebase only app images whose bytes were selected and staged from this archive. */
+internal fun Settings.remapRestoredFileUrls(filesDir: File, restoredPaths: Set<String>): Settings {
+    if (restoredPaths.isEmpty()) return this
+    fun remap(url: String): String {
+        val uri = runCatching { url.toUri() }.getOrNull() ?: return url
+        if (uri.scheme != "file" || !uri.authority.isNullOrEmpty()) return url
+        val path = uri.path ?: return url
+        val relative = path.substringAfterLast("/files/", "")
+        if (!relative.startsWith("${FileFolders.UPLOAD}/") ||
+            '/' in relative.substringAfter('/') || relative !in restoredPaths
+        ) return url
+        return PendingRestore.resolveInside(filesDir, relative).toUri().toString()
+    }
+    fun remapAvatar(avatar: Avatar): Avatar = if (avatar is Avatar.Image) avatar.copy(url = remap(avatar.url)) else avatar
+
+    return copy(
+        displaySetting = displaySetting.copy(
+            userAvatar = remapAvatar(displaySetting.userAvatar),
+            chatBackgroundImagePath = remap(displaySetting.chatBackgroundImagePath),
+        ),
+        assistants = assistants.map { assistant -> assistant.copy(
+            avatar = remapAvatar(assistant.avatar), background = assistant.background?.let(::remap),
+        ) },
+    )
+}

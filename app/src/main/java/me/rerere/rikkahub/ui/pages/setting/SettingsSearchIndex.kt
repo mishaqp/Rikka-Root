@@ -19,7 +19,7 @@ typealias SettingsSearchEntry = SettingsCatalogItem
 object SettingsSearchIndex {
     // Main rows are the catalog items themselves, so labels, icons and navigation stay aligned.
     // Additional pages have a stable entry only when they can open without a user-specific ID.
-    val entries: List<SettingsSearchEntry> = SettingsCatalog.items + listOf(
+    val entries: List<SettingsSearchEntry> = SettingsCatalog.items + InterfaceSearchEntries.entries + listOf(
         SettingsSearchEntry(
             "theme_palettes", "Темы и палитры", "Палитры цветов и оформление приложения",
             HugeIcons.Sun01, SettingsSection.General, SettingsTarget.Route(Screen.SettingTheme),
@@ -36,7 +36,7 @@ object SettingsSearchIndex {
             "general preferences взаимодействие",
         ),
         SettingsSearchEntry(
-            "interface_preferences", "Интерфейс", "Отображение чата, шрифтов и элементов управления",
+            "interface_preferences", "Отображение и оформление", "Отображение чата, шрифтов и элементов управления",
             HugeIcons.PaintBoard, SettingsSection.General, SettingsTarget.Route(Screen.SettingPreferencesUI),
             "ui display блоки кода",
         ),
