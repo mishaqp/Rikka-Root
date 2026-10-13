@@ -2,6 +2,8 @@ package me.rerere.rikkahub.ui.pages.chat
 
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
+import me.rerere.rikkahub.data.datastore.MessageNavButtonsMode
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -73,4 +75,41 @@ internal fun rememberChatScrollNavigationVisibility(state: LazyListState): ChatS
         )
     }
     return visibility
+}
+
+
+internal fun chatMessageNavigationVisible(mode: MessageNavButtonsMode, scrollingVisible: Boolean): Boolean = when (mode) {
+    MessageNavButtonsMode.ALWAYS -> true
+    MessageNavButtonsMode.SCROLL -> scrollingVisible
+    MessageNavButtonsMode.NEVER -> false
+}
+
+/** An explicit user scroll pauses following; zero retains the legacy immediate resume. */
+internal suspend fun observeChatAutoFollowReady(
+    scrolling: Flow<Boolean>,
+    idleSeconds: Int,
+    onReady: (Boolean) -> Unit,
+) {
+    var hasScrolled = false
+    scrolling.collectLatest { active ->
+        if (active) {
+            hasScrolled = true
+            onReady(false)
+        } else {
+            if (hasScrolled) {
+                onReady(false)
+                delay(idleSeconds.coerceIn(0, 64) * 1_000L)
+            }
+            onReady(true)
+        }
+    }
+}
+
+@Composable
+internal fun rememberChatAutoFollowReady(state: LazyListState, idleSeconds: Int): State<Boolean> {
+    val ready = remember(state) { mutableStateOf(true) }
+    LaunchedEffect(state, idleSeconds) {
+        observeChatAutoFollowReady(snapshotFlow { state.isScrollInProgress }, idleSeconds) { ready.value = it }
+    }
+    return ready
 }

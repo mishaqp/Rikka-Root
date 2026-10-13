@@ -38,6 +38,7 @@ import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,6 +63,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.Screen
@@ -81,6 +83,10 @@ import me.rerere.rikkahub.ui.components.ai.ChatRunningToolStrip
 import me.rerere.rikkahub.ui.components.ai.rememberRunningToolObservation
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.ui.components.ai.ChatInput
+import me.rerere.rikkahub.ui.components.ai.ModelListSheet
+import me.rerere.rikkahub.ui.components.ai.rememberModelListState
+import me.rerere.rikkahub.ui.components.message.LocalChatMessageHazeState
+import me.rerere.rikkahub.ui.modifier.chatBackdropBlur
 import me.rerere.rikkahub.ui.components.ai.FilesPicker
 import me.rerere.rikkahub.ui.components.ai.SearchMode
 import me.rerere.rikkahub.ui.components.ai.completion.WorkspaceCompletionProvider
@@ -89,6 +95,8 @@ import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.hooks.ChatInputState
+import me.rerere.rikkahub.ui.hooks.HapticAction
+import me.rerere.rikkahub.ui.hooks.isHapticActionEnabled
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.utils.base64Decode
@@ -237,6 +245,8 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                         vm = vm,
                         settings = setting,
                         isOpen = drawerState.isOpen,
+                        onRequestOpen = { scope.launch { drawerState.open() } },
+                        onRequestClose = { scope.launch { drawerState.close() } },
                     )
                 }
             ) {
@@ -258,9 +268,6 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     onDismissError = { vm.dismissError(it) },
                     onClearAllErrors = { vm.clearAllErrors() },
                 )
-            }
-            BackHandler(drawerState.isOpen) {
-                scope.launch { drawerState.close() }
             }
         }
     }
@@ -291,6 +298,7 @@ private fun ChatPageContent(
     val workspaceRepository: WorkspaceRepository = koinInject()
     var previewMode by rememberSaveable { mutableStateOf(false) }
     val hazeState = rememberHazeState()
+    val messageBackgroundHazeState = rememberHazeState()
     var showFilesSheet by remember { mutableStateOf(false) }
     val attachmentPickerActions = rememberChatAttachmentPickerActions(
         inputState = inputState,
@@ -319,13 +327,20 @@ private fun ChatPageContent(
         color = MaterialTheme.colorScheme.background,
         modifier = Modifier.fillMaxSize()
     ) {
-        AssistantBackground(setting = setting, modifier = Modifier.hazeSource(hazeState))
+        AssistantBackground(
+            setting = setting, assistant = assistant, bigScreen = bigScreen,
+            modifier = Modifier.hazeSource(messageBackgroundHazeState).hazeSource(hazeState),
+        )
         Scaffold(
             topBar = {
                 Column {
                     TopBar(
                         assistant = assistant,
                         conversation = conversation,
+                        currentChatModel = currentChatModel,
+                        setting = setting,
+                        onUpdateChatModel = vm::setChatModel,
+                        modifier = Modifier.chatBackdropBlur(hazeState, setting.displaySetting.glassTheme && !setting.displaySetting.glassEconomy),
                         bigScreen = bigScreen,
                         drawerState = drawerState,
                         previewMode = previewMode,
@@ -392,7 +407,12 @@ private fun ChatPageContent(
                             }
                             if (inputState.isEditing()) {
                                 vm.handleMessageEdit(
-                                    parts = inputState.getContents(),
+                                    parts = inputState.getContents(
+                                        keepThinkingAndToolCardsWhenEditing =
+                                            conversation.messageNodes.asSequence().flatMap { it.messages.asSequence() }
+                                                .firstOrNull { it.id == inputState.editingMessage }?.role != MessageRole.ASSISTANT ||
+                                                setting.displaySetting.keepThinkingAndToolCardsWhenEditingAssistant,
+                                    ),
                                     messageId = inputState.editingMessage!!,
                                 )
                             } else {
@@ -407,7 +427,12 @@ private fun ChatPageContent(
                         onLongSendClick = {
                             if (inputState.isEditing()) {
                                 vm.handleMessageEdit(
-                                    parts = inputState.getContents(),
+                                    parts = inputState.getContents(
+                                        keepThinkingAndToolCardsWhenEditing =
+                                            conversation.messageNodes.asSequence().flatMap { it.messages.asSequence() }
+                                                .firstOrNull { it.id == inputState.editingMessage }?.role != MessageRole.ASSISTANT ||
+                                                setting.displaySetting.keepThinkingAndToolCardsWhenEditingAssistant,
+                                    ),
                                     messageId = inputState.editingMessage!!,
                                 )
                             } else {
@@ -431,6 +456,7 @@ private fun ChatPageContent(
             },
             containerColor = Color.Transparent,
         ) { innerPadding ->
+            CompositionLocalProvider(LocalChatMessageHazeState provides messageBackgroundHazeState) {
             ChatList(
                 innerPadding = innerPadding,
                 conversation = conversation,
@@ -520,6 +546,7 @@ private fun ChatPageContent(
                     vm.saveConversationAsync()
                 },
             )
+            }
         }
 
         if (showFilesSheet) {
@@ -619,6 +646,10 @@ private fun ChatFilesPickerSheet(
 private fun TopBar(
     assistant: Assistant,
     conversation: Conversation,
+    currentChatModel: Model?,
+    setting: Settings,
+    onUpdateChatModel: (Model) -> Unit,
+    modifier: Modifier = Modifier,
     drawerState: DrawerState,
     bigScreen: Boolean,
     previewMode: Boolean,
@@ -639,16 +670,24 @@ private fun TopBar(
     val workspaceId = workspaces.firstOrNull { it.id == assistant.workspaceId?.toString() }?.id
     val editTitleWarning = stringResource(R.string.chat_page_edit_title_warning)
     val title = conversation.title.ifBlank { stringResource(R.string.chat_page_new_chat) }
+    val modelListState = rememberModelListState(currentChatModel?.id, setting.providers, ModelType.CHAT)
     ChatHeader(
         title = title,
         bigScreen = bigScreen,
         previewMode = previewMode,
         canRename = conversation.historyLoadState == HistoryLoadState.COMPLETE,
         showWorkspace = workspaceId != null,
+        modelName = currentChatModel?.displayName?.takeIf { it.isNotBlank() }
+            ?: currentChatModel?.modelId?.takeIf { it.isNotBlank() }
+            ?: stringResource(R.string.model_list_select_model),
+        onSelectModel = modelListState::open,
+        showAvatar = setting.displaySetting.useAssistantAvatarInHeader ?: true,
+        modifier = modifier,
         avatar = {
-            UIAvatar(name = assistant.name, value = assistant.avatar, modifier = Modifier.size(16.dp),
-                onClick = { scope.launch { drawerState.open() } })
+            UIAvatar(name = assistant.name, value = assistant.avatar, modifier = Modifier.size(16.dp))
         },
+        onLongClickAvatar = { navController.navigate(Screen.AssistantDetail(assistant.id.toString())) },
+        avatarHapticFeedbackEnabled = isHapticActionEnabled(setting.displaySetting, HapticAction.DRAWER),
         onOpenDrawer = { scope.launch { drawerState.open() } },
         onClickTitle = {
             if (conversation.messageNodes.isNotEmpty()) {
@@ -663,6 +702,7 @@ private fun TopBar(
         onTerminal = { workspaceId?.let { navController.navigate(Screen.WorkspaceTerminal(it)) } },
         onBrowser = { context.startActivity(BrowserActivity.intent(context, conversationId = conversation.id.toString())) },
     )
+    ModelListSheet(state = modelListState, onSelect = onUpdateChatModel)
     titleState.EditStateContent { title, onUpdate ->
         AlertDialog(
             onDismissRequest = {

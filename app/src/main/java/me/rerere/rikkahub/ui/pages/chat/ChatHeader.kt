@@ -7,7 +7,8 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -38,9 +39,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -57,7 +61,7 @@ import me.rerere.hugeicons.stroke.MessageAdd01
 import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.rikkahub.R
 
-/** Moru-style transparent header: workspace capsule in the bar, chat name centred or underneath. */
+/** Moru's transparent, permanent switcher and a separate conversation/model identity line. */
 @Composable
 internal fun ChatHeader(
     title: String,
@@ -73,52 +77,26 @@ internal fun ChatHeader(
     onFiles: () -> Unit,
     onTerminal: () -> Unit,
     onBrowser: () -> Unit,
+    modelName: String? = null,
+    onSelectModel: () -> Unit = {},
+    showAvatar: Boolean = true,
+    modifier: Modifier = Modifier,
+    onClickAvatar: () -> Unit = onOpenDrawer,
+    onLongClickAvatar: (() -> Unit)? = null,
+    avatarHapticFeedbackEnabled: Boolean = true,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val colors = MaterialTheme.colorScheme
-    // Moru: a transparent bar over the chat background (wallpaper included). With a workspace
-    // the files/terminal/browser capsule takes the centre and the chat name moves to a quiet
-    // line underneath; without one the name stays centred in the single row.
-    val identity: @Composable (Boolean) -> Unit = { secondary ->
-        Row(
-            Modifier.testTag("chat_header_identity"),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(Modifier.size(16.dp).testTag("chat_header_avatar"), contentAlignment = Alignment.Center) {
-                avatar()
-            }
-            Text(" · ", color = colors.onSurfaceVariant, fontSize = 12.sp)
-            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
-                Surface(
-                    onClick = onClickTitle,
-                    enabled = canRename,
-                    color = Color.Transparent,
-                    shape = RoundedCornerShape(6.dp),
-                    modifier = Modifier.weight(1f, fill = false).testTag("chat_header_title")
-                        .semantics { contentDescription = title },
-                ) {
-                    Box(Modifier.height(if (secondary) 28.dp else 48.dp), contentAlignment = Alignment.CenterStart) {
-                        HeaderText(
-                            title,
-                            MaterialTheme.typography.bodySmall.copy(
-                                fontSize = if (secondary) 12.5.sp else 13.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = if (secondary) colors.onSurfaceVariant else colors.onSurface,
-                            ),
-                        )
-                    }
-                }
-            }
-        }
-    }
-    Column(Modifier.fillMaxWidth().statusBarsPadding()) {
-        Row(
+    val avatarDescription = stringResource(R.string.chat_moru_assistant_avatar)
+    val openDrawerLabel = stringResource(R.string.chat_header_open_drawer)
+    val assistantSettingsLabel = stringResource(R.string.chat_moru_assistant_settings)
+    Column(modifier.fillMaxWidth().statusBarsPadding()) {
+        Box(
             Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 4.dp)
                 .testTag("chat_header_bar"),
-            verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
-                Modifier.fillMaxHeight().testTag("chat_header_leading"),
+                Modifier.fillMaxHeight().align(Alignment.CenterStart).testTag("chat_header_leading"),
                 contentAlignment = Alignment.Center,
             ) {
                 if (!bigScreen) {
@@ -127,14 +105,10 @@ internal fun ChatHeader(
                     }
                 } else Spacer(Modifier.width(12.dp))
             }
-            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                if (showWorkspace) {
-                    WorkspaceCapsule(onFiles, onTerminal, onBrowser)
-                } else {
-                    identity(false)
-                }
+            Box(Modifier.align(Alignment.Center), contentAlignment = Alignment.Center) {
+                WorkspaceCapsule(showWorkspace, onFiles, onTerminal, onBrowser)
             }
-            Row(Modifier.testTag("chat_header_actions"), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.align(Alignment.CenterEnd).testTag("chat_header_actions"), verticalAlignment = Alignment.CenterVertically) {
                 Box {
                     IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
                         Icon(HugeIcons.MoreVertical, stringResource(R.string.chat_header_menu), Modifier.size(20.dp))
@@ -152,32 +126,97 @@ internal fun ChatHeader(
                 }
             }
         }
-        if (showWorkspace) {
-            Box(
-                Modifier.fillMaxWidth().padding(horizontal = 56.dp).padding(bottom = 2.dp),
-                contentAlignment = Alignment.Center,
-            ) { identity(true) }
+        Box(
+            Modifier.fillMaxWidth().height(22.dp).testTag("chat_header_title_line")
+                .padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+                Row(Modifier.testTag("chat_header_identity"), verticalAlignment = Alignment.CenterVertically) {
+                    if (showAvatar) {
+                        Box(Modifier.size(16.dp), contentAlignment = Alignment.Center) {
+                            // UIAvatar has its own clickable Surface. A single transparent target
+                            // above it owns both gestures without changing the shared avatar API.
+                            Box(Modifier.clearAndSetSemantics {}) { avatar() }
+                            Box(
+                                Modifier.matchParentSize().clip(CircleShape).testTag("chat_header_avatar")
+                                    .semantics { contentDescription = avatarDescription }
+                                    .combinedClickable(
+                                        role = Role.Button,
+                                        onClickLabel = openDrawerLabel,
+                                        onClick = onClickAvatar,
+                                        onLongClickLabel = assistantSettingsLabel,
+                                        onLongClick = onLongClickAvatar,
+                                        hapticFeedbackEnabled = avatarHapticFeedbackEnabled,
+                                    ),
+                            )
+                        }
+                        Spacer(Modifier.width(6.dp))
+                    }
+                    Surface(
+                        onClick = onClickTitle,
+                        enabled = canRename,
+                        color = Color.Transparent,
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.weight(1f, fill = false).testTag("chat_header_title")
+                            .semantics { contentDescription = title },
+                    ) {
+                        HeaderText(
+                            title,
+                            MaterialTheme.typography.bodySmall.copy(
+                                fontSize = 13.sp, lineHeight = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = colors.onSurface.copy(alpha = 0.85f),
+                            ),
+                        )
+                    }
+                    if (!modelName.isNullOrBlank()) {
+                        Text("  ·  ", color = colors.onSurface.copy(alpha = 0.55f), fontSize = 12.sp, lineHeight = 12.sp)
+                        val modelDescription = stringResource(R.string.chat_composer_model, modelName)
+                        Surface(
+                            onClick = onSelectModel,
+                            color = Color.Transparent,
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.weight(1f, fill = false).testTag("chat_header_model")
+                                .semantics { contentDescription = modelDescription },
+                        ) {
+                            HeaderText(
+                                modelName,
+                                MaterialTheme.typography.bodySmall.copy(
+                                    fontSize = 12.sp, lineHeight = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = colors.onSurface.copy(alpha = 0.55f),
+                                ),
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun WorkspaceCapsule(onFiles: () -> Unit, onTerminal: () -> Unit, onBrowser: () -> Unit) {
+private fun WorkspaceCapsule(showWorkspace: Boolean, onFiles: () -> Unit, onTerminal: () -> Unit, onBrowser: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.9f),
+        color = Color.Transparent,
+        border = BorderStroke(1.dp, colors.onSurface.copy(alpha = 0.08f)),
         shape = CircleShape,
-        modifier = Modifier.height(40.dp).testTag("chat_header_workspace"),
+        modifier = Modifier.height(40.dp).testTag("chat_header_switcher"),
     ) {
         CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
-            Row(Modifier.padding(2.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onFiles, modifier = Modifier.size(48.dp, 34.dp)) {
-                    Icon(HugeIcons.Folder01, stringResource(R.string.chat_header_files), Modifier.size(19.dp))
-                }
-                IconButton(onClick = onTerminal, modifier = Modifier.size(48.dp, 34.dp)) {
-                    Icon(HugeIcons.ComputerTerminal01, stringResource(R.string.chat_header_terminal), Modifier.size(19.dp))
+            Row(Modifier.padding(2.dp).then(if (showWorkspace) Modifier.testTag("chat_header_workspace") else Modifier), verticalAlignment = Alignment.CenterVertically) {
+                if (showWorkspace) {
+                    IconButton(onClick = onFiles, modifier = Modifier.size(48.dp, 34.dp)) {
+                        Icon(HugeIcons.Folder01, stringResource(R.string.chat_header_files), Modifier.size(19.dp), tint = colors.onSurface.copy(alpha = 0.75f))
+                    }
+                    IconButton(onClick = onTerminal, modifier = Modifier.size(48.dp, 34.dp)) {
+                        Icon(HugeIcons.ComputerTerminal01, stringResource(R.string.chat_header_terminal), Modifier.size(19.dp), tint = colors.onSurface.copy(alpha = 0.75f))
+                    }
                 }
                 IconButton(onClick = onBrowser, modifier = Modifier.size(48.dp, 34.dp)) {
-                    Icon(HugeIcons.Globe02, stringResource(R.string.chat_header_browser), Modifier.size(19.dp))
+                    Icon(HugeIcons.Globe02, stringResource(R.string.chat_header_browser), Modifier.size(19.dp), tint = colors.onSurface.copy(alpha = 0.75f))
                 }
             }
         }

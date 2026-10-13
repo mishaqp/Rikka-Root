@@ -92,6 +92,7 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.datastore.MessageNavButtonsMode
 import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
@@ -222,6 +223,7 @@ private fun ChatListNormal(
 ) {
     val scope = rememberCoroutineScope()
     val loadingState by rememberUpdatedState(loading)
+    val autoFollowReady = rememberChatAutoFollowReady(state, settings.displaySetting.autoScrollIdleSeconds)
     val scrollNavigation = rememberChatScrollNavigationVisibility(state)
     val conversationUpdated by rememberUpdatedState(conversation)
     val density = LocalDensity.current
@@ -309,9 +311,9 @@ private fun ChatListNormal(
         // 自动滚动到底部
         if (settings.displaySetting.enableAutoScroll) {
             LaunchedEffect(state) {
-                snapshotFlow { state.layoutInfo.visibleItemsInfo }.collect { visibleItemsInfo ->
+                snapshotFlow { state.layoutInfo.visibleItemsInfo to autoFollowReady.value }.collect { (visibleItemsInfo, ready) ->
                     // println("is bottom = ${visibleItemsInfo.isAtBottom()}, scroll = ${state.isScrollInProgress}, can_scroll = ${state.canScrollForward}, loading = $loading")
-                    if (!state.isScrollInProgress && loadingState) {
+                    if (!state.isScrollInProgress && loadingState && ready) {
                         if (visibleItemsInfo.isAtBottom()) {
                             state.requestScrollToItem(conversationUpdated.messageNodes.lastIndex + 10)
                             // Log.i(TAG, "ChatList: scroll to ${conversationUpdated.messageNodes.lastIndex}")
@@ -324,13 +326,18 @@ private fun ChatListNormal(
         ChatFontProvider(displaySetting = settings.displaySetting) {
             LazyColumn(
                 state = state,
-                contentPadding = PaddingValues(16.dp) + PaddingValues(bottom = 32.dp + innerPadding.calculateBottomPadding()),
+                contentPadding = PaddingValues(
+                    start = 16.dp, end = 16.dp,
+                    top = 16.dp + innerPadding.calculateTopPadding(),
+                    bottom = 32.dp + innerPadding.calculateBottomPadding(),
+                ),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier
                     .fillMaxSize()
-                    .hazeSource(state = hazeState)
-                    .padding(top = innerPadding.calculateTopPadding()),
+                    .testTag("chat_list_timeline")
+                    .chatListEdgeFade(innerPadding.calculateTopPadding(), innerPadding.calculateBottomPadding())
+                    .hazeSource(state = hazeState),
             ) {
             itemsIndexed(
                 items = presentation.items.filterIsInstance<ChatListItemPresentation.Message>(),
@@ -555,7 +562,7 @@ private fun ChatListNormal(
 
             // 消息快速跳转
             MessageJumper(
-                show = scrollNavigation.visible && settings.displaySetting.showMessageJumper && !captureProgress,
+                show = chatMessageNavigationVisible(settings.displaySetting.messageNavButtonsMode, scrollNavigation.visible) && settings.displaySetting.showMessageJumper && !captureProgress,
                 onLeft = settings.displaySetting.messageJumperOnLeft,
                 scope = scope,
                 state = state,
@@ -775,7 +782,7 @@ internal fun BoxScope.MessageJumper(
         ) {
             MessageJumperButton(
                 icon = HugeIcons.ArrowUp01,
-                contentDescription = "К началу чата",
+                contentDescription = stringResource(R.string.chat_moru_scroll_to_top),
                 onClick = {
                     onInteraction()
                     scope.launch {

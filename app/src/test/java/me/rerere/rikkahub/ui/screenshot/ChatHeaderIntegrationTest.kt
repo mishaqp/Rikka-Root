@@ -20,6 +20,9 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
@@ -80,7 +83,13 @@ class ChatHeaderIntegrationTest {
             }
         }
     }
-    @Test fun composerModelOpensExistingPickerAndSelectionReachesViewModel() {
+    @Test fun headerModelOpensExistingPickerAndSelectionReachesViewModel() {
+        render()
+        compose.onNodeWithTag("chat_header_model").assertIsDisplayed().assertHasClickAction().performClick()
+        compose.onNode(hasText("GPT-4.1") and SemanticsMatcher.keyIsDefined(SemanticsActions.OnLongClick)).performClick()
+        verify(exactly = 1) { fixture.vm.setChatModel(ScreenshotFixtures.model) }
+    }
+    @Test fun composerModelStillOpensExistingPickerAndSelectionReachesViewModel() {
         render()
         compose.onNodeWithTag("chat_composer_model").assertIsDisplayed().assertHasClickAction().performClick()
         compose.onNode(hasText("GPT-4.1") and SemanticsMatcher.keyIsDefined(SemanticsActions.OnLongClick)).performClick()
@@ -154,9 +163,31 @@ class ChatHeaderIntegrationTest {
         compose.runOnIdle { org.junit.Assert.assertEquals("Допосле", input.textContent.text.toString()) }
         compose.onNodeWithText("Камера").assertDoesNotExist()
     }
+    @Test fun actualAvatarPointerTapOpensDrawerWithoutNavigatingAwayFromConversation() {
+        render()
+        compose.onNodeWithTag("chat_header_avatar").assertIsDisplayed().performTouchInput { click() }
+        compose.onNodeWithTag("chat_drawer_sheet").assertIsDisplayed()
+        org.junit.Assert.assertTrue("Opening the drawer keeps the current conversation route", navigation.isEmpty())
+    }
+
+    @Test fun actualAvatarLongPressRoutesToConversationAssistantSettings() {
+        val current = ScreenshotFixtures.assistant.copy(id = Uuid.parse("60000000-0000-0000-0000-000000000001"))
+        every { fixture.vm.assistant } returns MutableStateFlow(current)
+        render()
+        compose.onNodeWithTag("chat_header_avatar").assertIsDisplayed().performTouchInput { longClick() }
+        org.junit.Assert.assertEquals(listOf(Screen.AssistantDetail(current.id.toString())), navigation)
+        // The fixture's LocalSettings.currentAssistantId still points at the original assistant;
+        // the destination must come from the conversation-view assistant supplied by ChatVM.
+        org.junit.Assert.assertTrue(current.id != ScreenshotFixtures.assistant.id)
+    }
+
     @Test fun unboundChatDoesNotShowWorkspaceSwitcher() {
         render()
         compose.onNodeWithTag("chat_header_workspace").assertDoesNotExist()
+        compose.onNodeWithTag("chat_header_switcher").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Браузер").assertIsDisplayed().assertHasClickAction()
+        compose.onNodeWithContentDescription("Файлы").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Терминал").assertDoesNotExist()
         compose.onNodeWithTag("chat_header_new_chat").assertHasClickAction()
     }
 }

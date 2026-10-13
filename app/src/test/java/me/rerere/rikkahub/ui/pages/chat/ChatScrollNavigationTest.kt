@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.pages.chat
 
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import me.rerere.rikkahub.data.datastore.MessageNavButtonsMode
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -77,6 +78,84 @@ class ChatScrollNavigationTest {
         advanceTimeBy(2_000)
         runCurrent()
         assertFalse(visible)
+    }
+
+    @Test fun `navigation modes retain scrolling behavior and honor explicit always and never`() {
+        assertFalse(chatMessageNavigationVisible(MessageNavButtonsMode.SCROLL, false))
+        assertTrue(chatMessageNavigationVisible(MessageNavButtonsMode.SCROLL, true))
+        assertTrue(chatMessageNavigationVisible(MessageNavButtonsMode.ALWAYS, false))
+        assertTrue(chatMessageNavigationVisible(MessageNavButtonsMode.ALWAYS, true))
+        assertFalse(chatMessageNavigationVisible(MessageNavButtonsMode.NEVER, false))
+        assertFalse(chatMessageNavigationVisible(MessageNavButtonsMode.NEVER, true))
+    }
+
+    @Test fun `idle delay pauses following and a new scroll cancels pending resume`() = runTest {
+        val scrolling = MutableStateFlow(false)
+        var ready = false
+        backgroundScope.launch { observeChatAutoFollowReady(scrolling, 2) { ready = it } }
+        runCurrent()
+        assertTrue("Opening a chat must not delay following before any user scroll", ready)
+        scrolling.value = true
+        runCurrent()
+        assertFalse(ready)
+        advanceTimeBy(4_000)
+        runCurrent()
+        assertFalse(ready)
+        scrolling.value = false
+        runCurrent()
+        advanceTimeBy(1_500)
+        scrolling.value = true
+        runCurrent()
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertFalse(ready)
+        scrolling.value = false
+        runCurrent()
+        advanceTimeBy(1_999)
+        runCurrent()
+        assertFalse(ready)
+        advanceTimeBy(1)
+        runCurrent()
+        assertTrue(ready)
+    }
+
+    @Test fun `zero idle delay preserves immediate legacy following after scrolling`() = runTest {
+        val scrolling = MutableStateFlow(false)
+        var ready = false
+        backgroundScope.launch { observeChatAutoFollowReady(scrolling, 0) { ready = it } }
+        runCurrent()
+        assertTrue(ready)
+        scrolling.value = true
+        runCurrent()
+        assertFalse(ready)
+        scrolling.value = false
+        runCurrent()
+        assertTrue(ready)
+    }
+
+    @Test fun `long idle choices wait for the exact selected duration beyond thirty seconds`() = runTest {
+        listOf(32, 64).forEach { seconds ->
+            val scrolling = MutableStateFlow(false)
+            var ready = false
+            val observer = backgroundScope.launch { observeChatAutoFollowReady(scrolling, seconds) { ready = it } }
+            runCurrent()
+            assertTrue(ready)
+            scrolling.value = true
+            runCurrent()
+            assertFalse(ready)
+            scrolling.value = false
+            runCurrent()
+            advanceTimeBy(31_000)
+            runCurrent()
+            assertFalse("A $seconds-second choice must still pause after 31 seconds", ready)
+            advanceTimeBy(seconds * 1_000L - 31_001)
+            runCurrent()
+            assertFalse("Following stays paused until the final millisecond", ready)
+            advanceTimeBy(1)
+            runCurrent()
+            assertTrue("Following resumes after exactly $seconds seconds", ready)
+            observer.cancel()
+        }
     }
 
 }
