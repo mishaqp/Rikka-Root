@@ -557,7 +557,8 @@ object BrowserController {
 
     fun notOpenEnvelope(): JsonObject = buildJsonObject {
         put("error", "browser_not_open")
-        put("recovery", "Call browser_open with a URL to launch the browser before invoking this tool.")
+        put("recovery", "Браузер ещё не открыт. Сначала вызовите browser_open с адресом страницы. " +
+            "Если окно не появляется, откройте «Браузер» в шапке чата и повторите вызов.")
     }
 
     /** Returned when the 5-min single-task window has elapsed without a browser_done call. */

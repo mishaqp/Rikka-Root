@@ -125,7 +125,7 @@ internal fun externalStorageMediaScanPath(documentId: String, volumeRoots: Map<S
 }
 
 /** Uses actual Android volumes; API 26–29 fallback interpolates only the narrow FAT UUID shape. */
-private fun scannerVolumeRoots(context: Context): Map<String, File> {
+internal fun scannerVolumeRoots(context: Context): Map<String, File> {
     val manager = context.getSystemService(StorageManager::class.java)
         ?: throw IllegalStateException("Список накопителей недоступен.")
     val roots = linkedMapOf<String, File>()

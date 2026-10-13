@@ -4,6 +4,7 @@ package me.rerere.rikkahub.data.ai.tools.local
 import android.content.Context
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
@@ -35,6 +36,7 @@ class LocalFileAccess internal constructor(
     private val chatImages: List<String> = emptyList(),
     private val resolveWorkspacePath: (suspend (String) -> File)? = null,
     private val context: Context? = null,
+    private val primaryStorageAliases: List<File> = listOf(File("/sdcard"), File("/mnt/sdcard"), File("/storage/self/primary")),
 ) {
     constructor(context: Context, workspaceCwd: String? = null, chatImages: List<String> = emptyList(),
         resolveWorkspacePath: (suspend (String) -> File)? = null) : this(
@@ -94,7 +96,54 @@ class LocalFileAccess internal constructor(
                 File(path)
             }
         }
+        // Virtual paths and files already owned by the local scopes retain their original
+        // resolver and symlink checks without any dependency on Android SAF services.
+        val physical = file.absoluteFile.toPath().normalize()
+        val localScope = listOfNotNull(scratchRoot, uploadRoot, workspaceRoot).any { physical.startsWith(it.toPath()) }
+        val virtual = path == "/scratch" || path.startsWith("/scratch/") ||
+            path == "/upload" || path.startsWith("/upload/") ||
+            path == "/workspace" || path.startsWith("/workspace/")
+        if (File(path).isAbsolute && !virtual && !localScope) {
+            @Suppress("DEPRECATION")
+            val primary = runCatching { Environment.getExternalStorageDirectory() }.getOrNull()
+            if (sharedStoragePathCandidate(path, primary, primaryStorageAliases)) {
+                resolveGrantedStoragePath(path, write)?.let { return@withContext it }
+            }
+        }
         LocalFileSource.Local(checkFile(file, write))
+    }
+
+    /** A pathname is only an address for an already-held SAF tree; it never enables raw external File I/O. */
+    private suspend fun resolveGrantedStoragePath(path: String, write: Boolean): LocalFileSource.Content? {
+        val android = context ?: return null
+        val roots = try { scannerVolumeRoots(android) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { return null }
+        if (!knownSharedStorageAddress(path, roots, primaryStorageAliases)) return null
+        val grants = android.contentResolver.persistedUriPermissions.filter {
+            (if (write) it.isWritePermission else it.isReadPermission) && DocumentsContract.isTreeUri(it.uri)
+        }
+        if (grants.isEmpty()) return null
+        for (grant in grants) {
+            currentCoroutineContext().ensureActive()
+            val plan = grantedStoragePathPlan(path, grant.uri.toString(), roots, primaryStorageAliases) ?: continue
+            var source = LocalFileSource.Content(grant.uri)
+            checkGrant(source, write)
+            if (plan.documentId != null) {
+                source = LocalFileSource.Content(DocumentsContract.buildDocumentUriUsingTree(grant.uri, plan.documentId))
+            } else {
+                // Downloads exposes opaque child IDs: only the provider may resolve the actual names.
+                checkGrant(source, false)
+                for (name in plan.relativeNames) {
+                    currentCoroutineContext().ensureActive()
+                    source = findChild(source, name) as? LocalFileSource.Content
+                        ?: throw IllegalArgumentException("Файл или папка не найдены в выбранной папке SAF.")
+                }
+            }
+            checkGrant(source, write) // Includes permission revocation during provider traversal.
+            return source
+        }
+        return null
     }
 
     fun checkFile(file: File, write: Boolean = false): File {

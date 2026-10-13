@@ -237,17 +237,28 @@ fun browserOpenTool(context: Context, invocationContext: ToolInvocationContext? 
                     // browser_not_open is the LLM's signal to call this first.
                     val wasAlreadyBound = BrowserController.isBound()
                     if (!wasAlreadyBound) {
-                        context.startActivity(
-                            me.rerere.rikkahub.browser.BrowserActivity.intent(
-                                context,
-                                url,
-                                conversationId = callerConvId,
+                        try {
+                            context.startActivity(
+                                me.rerere.rikkahub.browser.BrowserActivity.intent(
+                                    context,
+                                    url,
+                                    conversationId = callerConvId,
+                                )
                             )
-                        )
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (error: Exception) {
+                            return@withTimeoutOrNull buildJsonObject {
+                                put("error", "browser_launch_failed")
+                                put("recovery", deviceToolFailureReason(error) +
+                                    " Откройте приложение на экране, нажмите «Браузер» в шапке чата и повторите browser_open.")
+                            }
+                        }
                         if (!BrowserController.awaitBind(5_000L)) {
                             return@withTimeoutOrNull buildJsonObject {
                                 put("error", "browser_launch_failed")
-                                put("recovery", "Activity did not bind within 5s; retry browser_open or check that the app has overlay permission.")
+                                put("recovery", "Не удалось подключиться к окну браузера за 5 секунд. " +
+                                    "Откройте приложение на экране, нажмите «Браузер» в шапке чата и повторите browser_open.")
                             }
                         }
                     }

@@ -65,7 +65,7 @@ internal fun fileJsonTool(name: String, description: String, schema: InputSchema
 
 /** Every tool uses this immutable conversation-scoped resolver; no operation invokes a shell. */
 fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCanReadImages: Boolean = false): List<Tool> {
-    val scope = " Paths: ${access.defaultPath}, /scratch, /upload, attachment:N for reads, and content:// under a persisted SAF tree. System paths and app settings are blocked."
+    val scope = " Paths: ${access.defaultPath}, /scratch, /upload, attachment:N for reads, and content:// under a persisted SAF tree. Absolute shared-storage paths inside that granted tree also use SAF. System paths and app settings are blocked."
     suspend fun source(obj: JsonObject, key: String = "path", write: Boolean = false) = access.resolve(fileArgument(obj, key), write)
     suspend fun entry(source: LocalFileSource): JsonObject {
         val name = access.name(source)
