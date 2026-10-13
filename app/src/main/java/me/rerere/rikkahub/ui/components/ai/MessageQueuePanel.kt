@@ -1,8 +1,10 @@
 package me.rerere.rikkahub.ui.components.ai
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -24,6 +26,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,7 +56,7 @@ internal fun MessageQueuePanel(
                 .testTag("chat_message_queue"),
         ) {
             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                AdaptiveQueueRow(content = { modifier ->
                     Text(
                         text = stringResource(
                             if (state.paused) R.string.chat_page_queue_paused_count
@@ -62,10 +65,9 @@ internal fun MessageQueuePanel(
                         ),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(vertical = 8.dp),
+                        modifier = modifier.padding(vertical = 8.dp),
                     )
+                }) {
                     if (state.paused) {
                         TextButton(onClick = onResume) { Text(stringResource(R.string.chat_page_queue_resume)) }
                     }
@@ -74,10 +76,7 @@ internal fun MessageQueuePanel(
                     itemsIndexed(
                         state.messages,
                         key = { _, message -> message.id }) { index, message ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
+                        AdaptiveQueueRow(content = { modifier ->
                             val attachmentLabels = listOf(
                                 stringResource(R.string.chat_page_queue_image),
                                 stringResource(R.string.chat_page_queue_file),
@@ -95,11 +94,12 @@ internal fun MessageQueuePanel(
                                         else -> ""
                                     }
                                 },
-                                modifier = Modifier.weight(1f),
+                                modifier = modifier,
                                 style = MaterialTheme.typography.bodySmall,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                             )
+                        }) {
                             TextButton(
                                 enabled = !message.isEditing,
                                 onClick = { editing = onBeginEdit(message.id) },
@@ -158,5 +158,35 @@ internal fun MessageQueuePanel(
                 TextButton(onClick = { editing = null }) { Text(stringResource(R.string.cancel)) }
             },
         )
+    }
+}
+
+/** Give queue status and message previews their own line when scaled labels crowd the actions. */
+@Composable
+private fun AdaptiveQueueRow(
+    content: @Composable (Modifier) -> Unit,
+    actions: @Composable RowScope.() -> Unit,
+) {
+    val fontScale = LocalDensity.current.fontScale
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        if (maxWidth < 360.dp * fontScale) {
+            Column {
+                content(Modifier.fillMaxWidth())
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End),
+                    content = actions,
+                )
+            }
+        } else {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                content(Modifier.weight(1f))
+                actions()
+            }
+        }
     }
 }

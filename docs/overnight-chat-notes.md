@@ -60,3 +60,15 @@ RED означает ожидаемый runtime assertion на production пут
 - Отдельная часть — очистка только уходящего edit при вставке suggestion, сохранение обычных draft attachments, актуализация source inventory; новый scroll runtime без изменения поведения приложения.
 
 Переноса из Agent/Moru в этой части нет: исправлены собственные Kotlin UI callbacks форка; Moru служит сравнением поведения. Архитектура хранения, токенов, разрешений и транспорта сохранена.
+
+## Дополнение: native визуальный аудит и очередь
+
+Просмотрены все 648 message/composer/richtext PNG выбранной матрицы: 4 темы × fontScale 1.0/1.3 × ширины 320/411 dp, через 162 contact sheets исходного масштаба (`view_image`, original). После успешной повторной native записи root SHA всех 648 исходников совпали с просмотренными. Путь/SHA и полное описание сохранены в `/tmp/overnight-chat-visual.json` и `/tmp/overnight-chat-visual.md`. PNG, эталоны и fixture владельца снимков не изменялись.
+
+Новый P2: `queued_draft`, 320 dp, реальный platform fontScale 1.3, все темы. `Row` с текстовыми кнопками отнимал ширину у `weight(1f)` status/summary: статус распадался на 5 строк внутри слов, preview показывал номер и многоточие, поэтому нельзя было распознать сообщение очереди. При 320/font1.0 и 411/font1.3 статус также распадался на 3 строки. Воспроизведение: приостановить очередь, добавить текстовое сообщение, открыть чат на узком экране с увеличенным системным шрифтом.
+
+Root поручил исправление. `MessageQueuePanel` теперь отдаёт тексту отдельную полную строку, если доступная ширина меньше 360 dp × fontScale; resume/edit/remove помещаются ниже. На широком экране сохраняется inline раскладка. Части queued message, callbacks, enabled/isEditing и edit dialog не менялись.
+
+`MessageQueuePanelLayoutTest` использует production панель, русские строки, native rendering и `RuntimeEnvironment.setFontScale`; 320/411/600 dp × 1.0/1.3. RED: `/tmp/chat-queue-layout-native-red.log` и `.xml` — 3/6 expected assertions (3/5/3 строки status), wide варианты проходят. GREEN: `/tmp/chat-queue-layout-final-green.log` — **146/146**, 30 с, 0 failures/errors/skips (6 layout, 21 composer, 13 service queue, 106 checklist); точные XML сохранены под Gradle-lock в `/tmp/chat-queue-final-xml`. Проверены полная читаемость summary без ellipsis, status ≤2 строки, inline на широкой геометрии и настоящие resume/edit/remove callback IDs.
+
+Остаток: root отдельно перезаписывает/просматривает 16 `queued_draft` кадров после фикса; старые 648 SHA описывают просмотренное состояние до этого изменения. На телефоне проверить очередь с несколькими вложенными сообщениями, увеличенным шрифтом и открытой клавиатурой. Остальные просмотренные сцены не дали новых P1/P2.
