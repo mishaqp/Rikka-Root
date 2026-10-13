@@ -3,6 +3,7 @@ package me.rerere.rikkahub.ui.pages.setting
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,6 +20,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import coil3.compose.AsyncImage
@@ -181,8 +183,10 @@ internal fun MessageStylePreview(
 @Composable
 private fun StyleSegmentedToggle(left: Int, right: Int, rightSelected: Boolean, onChange: (Boolean) -> Unit) {
     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-        SegmentedButton(selected = !rightSelected, onClick = { onChange(false) }, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text(stringResource(left)) }
-        SegmentedButton(selected = rightSelected, onClick = { onChange(true) }, shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text(stringResource(right)) }
+        SegmentedButton(selected = !rightSelected, onClick = { onChange(false) }, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text(stringResource(left), maxLines = 1,
+            autoSize = TextAutoSize.StepBased(minFontSize = 10.sp, maxFontSize = LocalTextStyle.current.fontSize)) }
+        SegmentedButton(selected = rightSelected, onClick = { onChange(true) }, shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text(stringResource(right), maxLines = 1,
+            autoSize = TextAutoSize.StepBased(minFontSize = 10.sp, maxFontSize = LocalTextStyle.current.fontSize)) }
     }
 }
 
