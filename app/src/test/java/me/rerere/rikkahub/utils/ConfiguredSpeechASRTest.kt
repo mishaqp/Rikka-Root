@@ -2,6 +2,9 @@ package me.rerere.rikkahub.utils
 
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import me.rerere.asr.ASRController
 import me.rerere.asr.ASRState
 import me.rerere.asr.ASRStatus
@@ -94,14 +97,33 @@ class ConfiguredSpeechASRTest {
         assertEquals(SpeechCaptureOutcome.Transcript("Резервный результат"), result)
     }
 
-    @Test fun finalHttpTranscriptIsReadBeforeDisposalEvenAfterTransientRecorderError() = runBlocking {
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun finalHttpTranscriptIsReadBeforeDisposalEvenAfterTransientRecorderError() = runTest {
         val controller = TestController(this) {
             state.value = state.value.copy(status = ASRStatus.Error, errorMessage = "cancelled read")
             delay(20)
             state.value = ASRState(status = ASRStatus.Idle, transcript = "Окончательный текст", isAvailable = true)
         }
-        val result = captureConfiguredAsr(controller, "ASR чата — MiMo", 200, awaitIdleAfterStop = true)
-        assertEquals(SpeechCaptureOutcome.Transcript("Окончательный текст"), result)
+        val capture = async { captureConfiguredAsr(controller, "ASR чата — MiMo", 200, awaitIdleAfterStop = true) }
+        runCurrent()
+        assertEquals(ASRStatus.Listening, controller.state.value.status)
+        assertEquals(0, controller.stopCount)
+        assertFalse(capture.isCompleted)
+        assertFalse(controller.disposed)
+
+        advanceTimeBy(100)
+        runCurrent()
+        assertEquals(ASRStatus.Error, controller.state.value.status)
+        assertEquals("cancelled read", controller.state.value.errorMessage)
+        assertEquals(1, controller.stopCount)
+        assertFalse(capture.isCompleted)
+        assertFalse(controller.disposed)
+
+        advanceTimeBy(20)
+        runCurrent()
+        assertEquals(120L, testScheduler.currentTime)
+        assertTrue(capture.isCompleted)
+        assertEquals(SpeechCaptureOutcome.Transcript("Окончательный текст"), capture.await())
         assertEquals(1, controller.stopCount)
         assertTrue(controller.disposed)
     }
