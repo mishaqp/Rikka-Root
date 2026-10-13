@@ -232,6 +232,34 @@ class SafAbsolutePathRoutingTest {
         assertFalse(File(primary, "Download/new.txt").exists())
     }
 
+    private suspend fun assertDirectoryCopyIntoGrantedRoot(providerTree: Uri, rootId: String) { withNewFileFixture(providerTree) { _, access, provider, path ->
+        assertTrue(access.createDirectory(access.resolve("/scratch/source", write = true)))
+        val bytes = "Копия папки".toByteArray()
+        access.write(access.resolve("/scratch/source/a.txt", write = true), bytes)
+        val destination = File(path("a.txt")).parent!!
+        val copy = fileManagerTools(access).single { it.name == "copy_file" }
+        denied { access.resolve(File(destination).parent!!, write = true) }
+        assertNotNull(body(copy.execute(buildJsonObject { put("src", "/scratch/source"); put("dst", destination) }))["error"])
+        assertTrue("Default refusal must not create children", provider.createdNames.isEmpty())
+        val result = body(copy.execute(buildJsonObject { put("src", "/scratch/source"); put("dst", destination); put("overwrite", true) }))
+        assertEquals("Granted root directory copy failed: $result", "true", result["success"]?.jsonPrimitive?.content)
+        assertEquals(rootId, DocumentsContract.getDocumentId(Uri.parse(result["to"]!!.jsonPrimitive.content)))
+        assertArrayEquals(bytes, provider.bytes("a.txt"))
+        assertEquals(listOf("a.txt"), provider.createdNames)
+        assertEquals("Источник", provider.bytes("source.txt").toString(Charsets.UTF_8))
+        assertTrue(access.exists(access.resolve("/scratch/source/a.txt")))
+        assertFalse(File(destination, "a.txt").exists())
+    } }
+
+    @Test fun copiesDirectoryIntoGrantedRootWithoutGrantOnItsParent(): Unit = runBlocking {
+        assertDirectoryCopyIntoGrantedRoot(tree, "primary:Download")
+    }
+
+    @Test fun copiesDirectoryIntoGrantedDownloadsRootWithOpaqueChildren(): Unit = runBlocking {
+        val downloads = DocumentsContract.buildTreeDocumentUri("com.android.providers.downloads.documents", "downloads")
+        assertDirectoryCopyIntoGrantedRoot(downloads, "downloads")
+    }
+
     @Test fun createsNewTextDocumentAtAbsoluteSafPath(): Unit = runBlocking { withNewFileFixture { _, access, provider, path ->
         val result = body(writeTextFileTool(access).execute(buildJsonObject { put("path", path("new.txt")); put("content", "Новый") }))
         assertEquals("Text creation failed: $result", "true", result["success"]?.jsonPrimitive?.content)

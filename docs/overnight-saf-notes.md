@@ -65,3 +65,16 @@
 2. Создать новый binary и копию по полному пути, собрать ZIP в отсутствующий `Download/overnight.zip`, проверить его содержимое и извлечение в уже существующую выбранную папку.
 3. Для настоящего фото через external-storage SAF вызвать `scan_media` и проверить `indexed`; для opaque Downloads/облачного provider сохраняется понятный отказ без угадывания физического пути.
 4. Отменить большой copy/write и проверить отсутствие частичного нового файла; существующий файл должен восстанавливаться. После отзыва SAF grant инструменты должны отказать без запроса спецдоступа.
+
+## Дополнительная регрессия из независимого review
+
+**P2:** новый `planWritePath` из `00e2901a` пытался разрешить родителя до проверки существующего назначения. Поэтому `copy_file(src="/scratch/source", dst="/sdcard/Download", overwrite=true)` отказывал при единственном grant `primary:Download`: родитель `/sdcard` не входит в него. Та же ошибка затрагивала корень Downloads provider.
+
+Существующее назначение теперь сначала проходит прежний `resolve(fullPath, write=true)` и возвращается с его собственным grant. План через родителя используется для отсутствующего документа. Отсутствие opaque-ребёнка отличается отдельным `SafStoragePathNotFoundException`; ошибки разрешений, проверки границ и `CancellationException` не перехватываются этим fallback. Grants и проверки симлинков не расширены.
+
+- `/tmp/saf-root-copy-red.log`: до тестов остановился общий test compile незавершённой соседней правки screenshot harness; это не RED.
+- `/tmp/saf-root-copy-red-2.log`: настоящий RED — четыре ошибки для external-storage и opaque Downloads roots на API 28/35.
+- `/tmp/saf-root-copy-green.log`: GREEN всех восьми связанных классов; JUnit результаты успела заменить следующая общая screenshot-проверка.
+- `/tmp/saf-root-copy-green-final.log`: финальный GREEN — **85/85**, восемь классов, failures/errors/skipped 0; `SafAbsolutePathRoutingTest` — **38/38** на API 28/35. JUnit сохранены внутри общего lock в `/tmp/saf-root-copy-green-results`, сводка — `/tmp/saf-root-copy-green-summary.json`.
+
+Регрессия проверяет настоящий `copy_file`: копирование локальной папки с одним документом в разрешённый корень, доступ к детям только через провайдер, отсутствие raw-файла в Download, сохранение источника и соседнего документа. Родитель по-прежнему запрещён. Вызов без `overwrite` отказывает и не создаёт детей. Новое создание, фактическая отмена, cleanup и старый rollback входят в тот же повторный набор тестов.

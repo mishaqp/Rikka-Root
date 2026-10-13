@@ -137,7 +137,7 @@ class LocalFileAccess internal constructor(
                 for (name in plan.relativeNames) {
                     currentCoroutineContext().ensureActive()
                     source = findChild(source, name) as? LocalFileSource.Content
-                        ?: throw IllegalArgumentException("Файл или папка не найдены в выбранной папке SAF.")
+                        ?: throw SafStoragePathNotFoundException()
                 }
             }
             checkGrant(source, write) // Includes permission revocation during provider traversal.
@@ -149,6 +149,11 @@ class LocalFileAccess internal constructor(
     /** Missing absolute SAF files are planned without creating provider documents. */
     internal suspend fun planWritePath(reference: String): FileWritePlan {
         require(reference.isNotBlank() && reference.length <= 8192 && reference.none(Char::isISOControl)) { "Некорректный путь." }
+        // Existing targets (including a held tree root) need only their own grant.
+        // Only provider-confirmed absence can fall through to planning a new child.
+        val existing = try { resolve(reference, write = true) }
+        catch (_: SafStoragePathNotFoundException) { null }
+        if (existing != null && (existing !is LocalFileSource.Content || exists(existing))) return FileWritePlan(existing)
         val path = if (reference.startsWith("file:")) File(URI(reference)).path else reference
         @Suppress("DEPRECATION")
         val primary = if (File(path).isAbsolute) runCatching { Environment.getExternalStorageDirectory() }.getOrNull() else null
@@ -723,6 +728,8 @@ internal suspend fun boundedDocumentReachable(
     }
     return false // Complete traversal proves that the target is unrelated.
 }
+
+private class SafStoragePathNotFoundException : IllegalArgumentException("Файл или папка не найдены в выбранной папке SAF.")
 
 internal data class FileWritePlan(val existing: LocalFileSource?, val parent: LocalFileSource.Content? = null, val name: String = "")
 
