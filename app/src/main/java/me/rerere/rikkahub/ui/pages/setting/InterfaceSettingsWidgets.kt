@@ -16,6 +16,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -170,6 +172,8 @@ internal fun InterfaceNumberRow(
     emptyUntilEdited: Boolean = false,
     onChange: (Int) -> Unit,
 ) {
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     var draft by remember { mutableStateOf(if (emptyUntilEdited) "" else value.toString()) }
     var focused by remember { mutableStateOf(false) }
     LaunchedEffect(value, focused, emptyUntilEdited) { if (!focused) draft = if (emptyUntilEdited) "" else value.toString() }
@@ -185,7 +189,8 @@ internal fun InterfaceNumberRow(
         OutlinedTextField(value = draft, onValueChange = { text ->
             draft = text.filter(Char::isDigit).take(7)
         }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { commit() }), singleLine = true,
+            // Losing focus commits once through the existing callback below.
+            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus(); keyboard?.hide() }), singleLine = true,
             modifier = Modifier.width(88.dp).onFocusChanged { state ->
                 if (focused && !state.isFocused) commit()
                 focused = state.isFocused

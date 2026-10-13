@@ -283,7 +283,7 @@ fun SettingThemePage(state: InterfacePageState = rememberInterfacePageState(), s
                     customThemes = if (baseline != null) current.customThemes.map { row ->
                         if (row.id == baseline.id) applyThemeDraft(row, baseline, theme) else row
                     } else (current.customThemes + theme).distinctBy { it.id },
-                    themeId = theme.id
+                    themeId = theme.id, dynamicColor = false
                 ) }
                 showEditSheet = false
             }
@@ -297,7 +297,7 @@ fun SettingThemePage(state: InterfacePageState = rememberInterfacePageState(), s
                 val importedTheme = theme.copy(id = Uuid.random().toString())
                 state.updateSettings { current -> current.copy(
                         customThemes = current.customThemes + importedTheme,
-                        themeId = importedTheme.id
+                        themeId = importedTheme.id, dynamicColor = false
                     ) }
                 showImportDialog = false
                 toaster.show(importSuccessMsg, type = ToastType.Success)
