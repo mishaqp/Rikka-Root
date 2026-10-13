@@ -126,7 +126,7 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(
                     testTag = "chat_timeline_server_preview:${tool.toolCallId}",
                     fontSizeRatio = fontSizeRatio,
                 )
-                Text(
+                if (status !in quietSuccessStatuses || preview == null) Text(
                     text = when (status) {
                         TimelineStatus.Running -> stringResource(R.string.chat_timeline_status_running)
                         TimelineStatus.Failed -> stringResource(R.string.chat_timeline_status_failed)
@@ -242,7 +242,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     // 摘要由注册的渲染器决定; 图片输出与拒绝原因为所有工具通用
     val hasExtraContent = renderer.hasSummary(context) || isDenied || images.isNotEmpty() ||
         webviewParts.isNotEmpty() || resultText != null || pendingPreview != null ||
-        status != TimelineStatus.ResultReceived
+        status !in quietSuccessStatuses
 
     ControlledChainOfThoughtStep(
         expanded = expanded,
@@ -333,7 +333,8 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         content = if (hasExtraContent) {
             {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
+                    // As in Moru, a successful step shows only its result; other states keep their label.
+                    if (status !in quietSuccessStatuses) Text(
                         text = timelineStatusText(status),
                         style = MaterialTheme.typography.labelSmall,
                         color = if (status == TimelineStatus.Failed || status == TimelineStatus.Denied ||
@@ -452,6 +453,8 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         )
     }
 }
+
+private val quietSuccessStatuses = setOf(TimelineStatus.ResultReceived, TimelineStatus.Succeeded)
 
 @Composable
 private fun TimelineStepTitle(text: String, loading: Boolean, fontSizeRatio: Float) {

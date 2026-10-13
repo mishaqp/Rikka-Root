@@ -61,6 +61,20 @@ class ChatToolStepPresentationTest {
         assertFalse("Summary must not be raw JSON", summary.contains("{"))
     }
 
+    @Test fun termuxSessionsShowTheNewestScreenLines() {
+        val screen = """{"success":true,"screen":"~ $ echo сессия\nсессия\n~ $ ls\na  b\n~ $ \n\n"}"""
+        assertEquals(ToolResultPreview.Command("сессия\n~ $ ls\na  b\n~ $", "", null), preview("termux_session_send", screen))
+        assertEquals(ToolResultPreview.Summary("Экран пуст"), preview("termux_session_read", """{"success":true,"screen":"  \n"}"""))
+        assertEquals(ToolResultPreview.Summary("Сессия закрыта"), preview("termux_session_kill", """{"success":true,"killed":"s1"}"""))
+    }
+
+    @Test fun tokenUsageIsReadableInsteadOfAStatusCode() {
+        assertEquals(ToolResultPreview.Summary("Использовано 18.4k токенов · лимит не задан"),
+            preview("check_token_usage", """{"total_tokens":18400,"budget_enabled":true,"status":"NO_BUDGET"}"""))
+        assertEquals(ToolResultPreview.Summary("Использовано 900 токенов · лимит 1k · близко к лимиту"),
+            preview("check_token_usage", """{"total_tokens":900,"hard_cap":1000,"status":"WARN"}"""))
+    }
+
     @Test fun headlinesCarryTheCallEssence() {
         assertEquals("Root: ls /sdcard", presentToolHeadline("root_exec", json("""{"command":"ls   /sdcard"}""")))
         assertEquals("Termux: echo hi", presentToolHeadline("termux_run_command", json("""{"command":"echo hi"}""")))

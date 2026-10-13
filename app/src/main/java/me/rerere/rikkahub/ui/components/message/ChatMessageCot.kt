@@ -57,7 +57,10 @@ fun List<UIMessagePart>.groupMessageParts(): List<MessagePartBlock> {
     this.fastForEachIndexed { index, part ->
         when (part) {
             is UIMessagePart.Reasoning -> {
-                currentThinkingSteps.add(ThinkingStep.ReasoningStep(part))
+                // A finished reasoning part without text has nothing to show ("Глубокое мышление 0,0 с").
+                if (part.reasoning.isNotBlank() || part.finishedAt == null) {
+                    currentThinkingSteps.add(ThinkingStep.ReasoningStep(part))
+                }
             }
 
             is UIMessagePart.Tool -> {

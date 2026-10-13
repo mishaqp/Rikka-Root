@@ -76,7 +76,7 @@ internal sealed interface ToolResultPreview {
 
 internal val COMMAND_OUTPUT_TOOL_NAMES = setOf(
     "root_exec", "termux_run_command", "ssh_exec", "ssh_exec_saved", "workspace_shell",
-    "workspace_background_output",
+    "workspace_background_output", "termux_session_start", "termux_session_send", "termux_session_read",
 )
 
 private const val TITLE_MAX_CHARS = 200
@@ -237,6 +237,7 @@ internal fun presentToolResult(toolName: String, outputText: String?, outputJson
     if (obj != null) {
         toolErrorMessage(toolName, obj)?.let { return ToolResultPreview.Error(it) }
         if (toolName in COMMAND_OUTPUT_TOOL_NAMES) commandPreview(obj)?.let { return it }
+        specialSummary(toolName, obj)?.let { return ToolResultPreview.Summary(it) }
         return ToolResultPreview.Summary(genericSummary(obj))
     }
     return when (outputJson) {
@@ -248,6 +249,12 @@ internal fun presentToolResult(toolName: String, outputText: String?, outputJson
 
 private fun commandPreview(obj: JsonObject): ToolResultPreview? {
     if (obj.string("mode") == "interactive") return ToolResultPreview.Summary(obj.string("note") ?: "Открыта сессия Termux")
+    // Termux sessions return the terminal screen; its newest lines are at the bottom.
+    obj.string("screen")?.let { screen ->
+        val lines = screen.lines().map { it.trimEnd() }.dropLastWhile { it.isBlank() }
+        return if (lines.all { it.isBlank() }) ToolResultPreview.Summary(obj.string("note") ?: "Экран пуст")
+        else ToolResultPreview.Command(lines.takeLast(4).joinToString("\n"), "", null)
+    }
     val stdout = obj.string("stdout")
     val stderr = obj.string("stderr")
     val exit = (obj["exit_code"] ?: obj["exitCode"])?.let { (it as? JsonPrimitive)?.intOrNull }
@@ -323,6 +330,24 @@ private val knownErrors = mapOf(
     "host_key_changed" to "SSH: ключ сервера изменился",
     "dispatch_failed" to "Не удалось запустить команду",
 )
+
+private fun specialSummary(toolName: String, obj: JsonObject): String? = when (toolName) {
+    "check_token_usage" -> (obj["total_tokens"] as? JsonPrimitive)?.longOrNull?.let { total ->
+        val cap = (obj["hard_cap"] as? JsonPrimitive)?.longOrNull ?: (obj["soft_cap"] as? JsonPrimitive)?.longOrNull
+        val status = when (obj.string("status")) {
+            "UNDER_SOFT" -> "в пределах лимита"
+            "WARN" -> "близко к лимиту"
+            "OVER_HARD" -> "лимит превышен"
+            "NO_BUDGET" -> "лимит не задан"
+            else -> null
+        }
+        listOfNotNull("Использовано ${compactTokenCount(total.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())} токенов",
+            cap?.let { "лимит ${compactTokenCount(it.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())}" }, status)
+            .joinToString(" · ")
+    }
+    "termux_session_kill" -> "Сессия закрыта"
+    else -> null
+}
 
 private fun genericSummary(obj: JsonObject): String {
     val pieces = mutableListOf<String>()

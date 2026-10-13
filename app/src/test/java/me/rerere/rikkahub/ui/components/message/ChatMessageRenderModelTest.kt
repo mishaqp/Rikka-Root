@@ -90,6 +90,15 @@ class ChatMessageRenderModelTest {
         assertEquals(listOf(MessagePartBlock.ContentBlock(blank, 0)), listOf(blank).groupMessageParts())
     }
 
+    @Test fun finishedReasoningWithoutTextIsNotATimelineStep() {
+        val empty = UIMessagePart.Reasoning("  ")
+        val streaming = UIMessagePart.Reasoning("", finishedAt = null)
+        assertEquals(listOf(MessagePartBlock.ThinkingBlock(listOf(ThinkingStep.ToolStep(tool)))),
+            listOf(empty, tool).groupMessageParts())
+        assertEquals(listOf(MessagePartBlock.ThinkingBlock(listOf(ThinkingStep.ReasoningStep(streaming)))),
+            listOf(streaming).groupMessageParts())
+    }
+
     @Test fun actualVisibilityPredicateRecognizesContentAndToolsForActionAvailability() {
         assertTrue(emptyList<UIMessagePart>().isEmptyUIMessage())
         val blankParts = listOf(
