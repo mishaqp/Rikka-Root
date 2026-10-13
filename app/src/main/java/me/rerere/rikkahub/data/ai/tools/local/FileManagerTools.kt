@@ -169,8 +169,7 @@ fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCan
         fileSchema(listOf("path", "base64_content"), "path" to "string", "base64_content" to "string", "overwrite" to "boolean")) { obj ->
         val encoded = fileArgument(obj, "base64_content")
         require(encoded.length <= (LocalFileAccess.MAX_WRITE_BYTES * 4L / 3L + 8)) { "Данные слишком велики." }
-        val destination = source(obj, write = true)
-        val bytes = access.write(destination, Base64.getDecoder().decode(encoded), fileBoolean(obj, "overwrite"))
+        val (destination, bytes) = access.writePath(fileArgument(obj, "path"), Base64.getDecoder().decode(encoded), fileBoolean(obj, "overwrite"))
         buildJsonObject { put("success", true); put("path", destination.reference); put("bytes_written", bytes) }
     }
     tools += fileJsonTool("delete_file", "Delete a file or directory; recursive=true required for nonempty folders. Roots cannot be deleted." + scope,
@@ -183,8 +182,8 @@ fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCan
     for (operation in listOf("copy", "move")) tools += fileJsonTool("${operation}_file", "${operation.replaceFirstChar(Char::uppercase)} a file or directory from src to dst. overwrite=false. Copies are limited to512MiB." + scope,
         fileSchema(listOf("src", "dst"), "src" to "string", "dst" to "string", "overwrite" to "boolean")) { obj ->
         val from = source(obj, "src", operation == "move")
-        val destination = source(obj, "dst", true)
-        val bytes = if (operation == "copy") access.copy(from, destination, fileBoolean(obj, "overwrite")) else access.move(from, destination, fileBoolean(obj, "overwrite"))
+        val (destination, bytes) = if (operation == "copy") access.copyPath(from, fileArgument(obj, "dst"), fileBoolean(obj, "overwrite"))
+        else source(obj, "dst", true).let { it to access.move(from, it, fileBoolean(obj, "overwrite")) }
         buildJsonObject { put("success", true); put("from", from.reference); put("to", destination.reference); put("bytes_copied", bytes) }
     }
     tools += fileJsonTool("create_directory", "Create a local directory with parents. For SAF, path is an existing parent tree/document and name is the new direct directory name." + scope,

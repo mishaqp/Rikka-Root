@@ -19,7 +19,7 @@ import android.os.Process
 import android.os.storage.StorageManager
 import android.provider.DocumentsContract
 import android.provider.DocumentsProvider
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.*
 import kotlinx.serialization.json.*
 import me.rerere.ai.ui.UIMessagePart
 import org.junit.Assert.*
@@ -203,10 +203,9 @@ class SafAbsolutePathRoutingTest {
         assertEquals(setOf("text.txt", "binary.bin", "copy.txt"), provider.openedOutputs.toSet())
         assertFalse(File(primary, "Download/text.txt").exists())
         assertFalse(File(primary, "Download/copy.txt").exists())
-        // Existing transactional SAF writes need a readable original target; pathname routing
-        // must not silently create a document or weaken backup/rollback for a missing target.
-        assertNotNull(body(copy.execute(buildJsonObject { put("src", physical("source.txt")); put("dst", aliased("missing.txt")) }))["error"])
-        assertFalse(provider.contains("missing.txt"))
+        // New absolute-path documents use provider creation; existing ones retain rollback.
+        assertTrue(body(copy.execute(buildJsonObject { put("src", physical("source.txt")); put("dst", aliased("missing.txt")) }))["success"]!!.jsonPrimitive.boolean)
+        assertArrayEquals(provider.bytes("source.txt"), provider.bytes("missing.txt"))
         val created = access.createFile(access.resolve(File(alias, "Download").path), "created.txt")
         assertTrue(created is LocalFileSource.Content)
         assertTrue(body(text.execute(buildJsonObject { put("path", physical("created.txt")); put("content", "Создан SAF"); put("overwrite", true) }))["success"]!!.jsonPrimitive.boolean)
@@ -217,6 +216,152 @@ class SafAbsolutePathRoutingTest {
         assertNotNull(body(copy.execute(buildJsonObject { put("src", physical("source.txt")); put("dst", physical("text.txt")); put("overwrite", true) }))["error"])
         assertArrayEquals(preserved, provider.bytes("text.txt"))
     }
+
+    private suspend fun withNewFileFixture(providerTree: Uri = tree, action: suspend (Context, LocalFileAccess, MemoryStorageProvider, (String) -> String) -> Unit) {
+        val context = RuntimeEnvironment.getApplication()
+        val primary = primary(context)
+        val provider = MemoryStorageProvider(context, providerTree, mapOf("source.txt" to "Источник".toByteArray()),
+            opaqueIds = providerTree.authority == "com.android.providers.downloads.documents")
+        attachProvider(context, providerTree.authority!!, provider)
+        context.contentResolver.takePersistableUriPermission(providerTree, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        val alias = File(temporary.root, "sdcard")
+        Files.createSymbolicLink(alias.toPath(), primary.toPath())
+        val access = LocalFileAccess(temporary.newFolder("scratch"), temporary.newFolder("upload"),
+            context = context, primaryStorageAliases = listOf(alias))
+        action(context, access, provider) { File(alias, "Download/$it").path }
+        assertFalse(File(primary, "Download/new.txt").exists())
+    }
+
+    @Test fun createsNewTextDocumentAtAbsoluteSafPath(): Unit = runBlocking { withNewFileFixture { _, access, provider, path ->
+        val result = body(writeTextFileTool(access).execute(buildJsonObject { put("path", path("new.txt")); put("content", "Новый") }))
+        assertEquals("Text creation failed: $result", "true", result["success"]?.jsonPrimitive?.content)
+        assertEquals("Новый", provider.bytes("new.txt").toString(Charsets.UTF_8))
+    } }
+
+    @Test fun createsNewBinaryDocumentAtAbsoluteSafPath(): Unit = runBlocking { withNewFileFixture { _, access, provider, path ->
+        val result = body(fileManagerTools(access).single { it.name == "write_binary_file" }.execute(buildJsonObject {
+            put("path", path("new.bin")); put("base64_content", "AAEC/w==")
+        }))
+        assertEquals("Binary creation failed: $result", "true", result["success"]?.jsonPrimitive?.content)
+        assertArrayEquals(byteArrayOf(0, 1, 2, -1), provider.bytes("new.bin"))
+    } }
+
+    @Test fun createsNewCopyDocumentAtAbsoluteSafPath(): Unit = runBlocking { withNewFileFixture { _, access, provider, path ->
+        val result = body(fileManagerTools(access).single { it.name == "copy_file" }.execute(buildJsonObject { put("src", path("source.txt")); put("dst", path("copy-new.txt")) }))
+        assertEquals("Copy creation failed: $result", "true", result["success"]?.jsonPrimitive?.content)
+        assertArrayEquals(provider.bytes("source.txt"), provider.bytes("copy-new.txt"))
+    } }
+
+    @Test fun createsNewZipDocumentAtAbsoluteSafPath(): Unit = runBlocking { withNewFileFixture { context, access, provider, path ->
+        val result = body(zipFilesTool(context, access).execute(buildJsonObject {
+            put("sources", buildJsonArray { add(path("source.txt")) }); put("destination", path("new.zip"))
+        }))
+        assertEquals("Zip creation failed: $result", "true", result["success"]?.jsonPrimitive?.content)
+        java.util.zip.ZipInputStream(ByteArrayInputStream(provider.bytes("new.zip"))).use {
+            assertEquals("source.txt", it.nextEntry.name)
+            assertArrayEquals(provider.bytes("source.txt"), it.readBytes())
+        }
+    } }
+
+    @Test fun createsNewDownloadsProviderChildUsingProviderLookup(): Unit = runBlocking {
+        val downloads = DocumentsContract.buildTreeDocumentUri("com.android.providers.downloads.documents", "downloads")
+        withNewFileFixture(downloads) { _, access, provider, path ->
+            val result = body(writeTextFileTool(access).execute(buildJsonObject { put("path", path("new.txt")); put("content", "Downloads") }))
+            assertEquals("Downloads creation failed: $result", "true", result["success"]?.jsonPrimitive?.content)
+            assertEquals("Downloads", provider.bytes("new.txt").toString(Charsets.UTF_8))
+            val createdUri = Uri.parse(result["path"]!!.jsonPrimitive.content)
+            assertEquals("downloads", DocumentsContract.getTreeDocumentId(createdUri))
+            assertTrue("New Downloads IDs must come from the provider", DocumentsContract.getDocumentId(createdUri).startsWith("msf:"))
+        }
+    }
+
+    @Test fun newDocumentPreflightPreservesBoundsFlagsAndExistingFiles(): Unit = runBlocking { withNewFileFixture { context, access, provider, path ->
+        val tool = writeTextFileTool(access)
+        suspend fun refused(reference: String, append: Boolean = false) {
+            assertNotNull(body(tool.execute(buildJsonObject { put("path", reference); put("content", "blocked"); put("append", append) }))["error"])
+        }
+        refused(path("source.txt"))
+        refused(path("new.txt"), append = true)
+        refused(path("missing-parent/new.txt"))
+        refused(path("../Pictures/new.txt"))
+        refused(path("new.txt").replace("/Download/", "/Download2/"))
+        val primary = File(path("new.txt")).parentFile!!.canonicalFile
+        Files.createSymbolicLink(File(primary, "linked.txt").toPath(), File(temporary.root, "unrelated.txt").toPath())
+        refused(path("linked.txt"))
+        context.contentResolver.releasePersistableUriPermission(tree, Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        refused(path("new.txt"))
+        assertTrue("Rejected preflight must not create any document", provider.createdNames.isEmpty())
+        assertTrue(provider.deletedNames.isEmpty())
+        assertEquals("Источник", provider.bytes("source.txt").toString(Charsets.UTF_8))
+    } }
+
+    @Test fun refusesProviderAutoRenameAndDeletesOnlyTheRenamedNewDocument(): Unit = runBlocking { withNewFileFixture { _, access, provider, path ->
+        provider.createdNameOverride = "new (1).txt"
+        val result = body(writeTextFileTool(access).execute(buildJsonObject { put("path", path("new.txt")); put("content", "new") }))
+        assertNotNull(result["error"])
+        assertEquals(listOf("new (1).txt"), provider.createdNames)
+        assertFalse(provider.contains("new (1).txt"))
+        assertFalse(provider.contains("new.txt"))
+        assertEquals(listOf("new (1).txt"), provider.deletedNames)
+        assertEquals("Источник", provider.bytes("source.txt").toString(Charsets.UTF_8))
+    } }
+
+    @Test fun failedNewDocumentCommitDeletesOnlyItsOwnedDocument(): Unit = runBlocking { withNewFileFixture { _, access, provider, path ->
+        provider.afterOutputClose = { if (it == "failed.txt") throw java.io.IOException("provider commit failed") }
+        val result = body(writeTextFileTool(access).execute(buildJsonObject { put("path", path("failed.txt")); put("content", "partial") }))
+        assertNotNull(result["error"])
+        assertTrue("Must reach the new-document commit", provider.createdNames.contains("failed.txt"))
+        assertFalse(provider.contains("failed.txt"))
+        assertEquals(listOf("failed.txt"), provider.deletedNames)
+        assertEquals("Источник", provider.bytes("source.txt").toString(Charsets.UTF_8))
+    } }
+
+    @Test fun cancelledNewDocumentCommitDeletesOnlyItsOwnedDocument(): Unit = runBlocking { withNewFileFixture { _, access, provider, path ->
+        provider.afterOutputClose = { if (it == "cancelled.txt") throw kotlinx.coroutines.CancellationException("cancelled provider commit") }
+        try {
+            writeTextFileTool(access).execute(buildJsonObject { put("path", path("cancelled.txt")); put("content", "partial") })
+            fail("Cancellation must propagate")
+        } catch (_: kotlinx.coroutines.CancellationException) { }
+        assertTrue("Must reach the new-document commit", provider.createdNames.contains("cancelled.txt"))
+        assertFalse(provider.contains("cancelled.txt"))
+        assertEquals(listOf("cancelled.txt"), provider.deletedNames)
+        assertEquals("Источник", provider.bytes("source.txt").toString(Charsets.UTF_8))
+    } }
+
+    @Test fun providerCleanupRefusalReportsOnlyTheOwnedDocumentForRecovery(): Unit = runBlocking { withNewFileFixture { _, access, provider, path ->
+        provider.refuseDelete = true
+        provider.afterOutputClose = { if (it == "recover.txt") throw java.io.IOException("provider commit failed") }
+        val result = body(writeTextFileTool(access).execute(buildJsonObject { put("path", path("recover.txt")); put("content", "partial") }))
+        assertEquals("creation_cleanup_failed", result["error"]!!.jsonPrimitive.content)
+        val created = Uri.parse(result["created_path"]!!.jsonPrimitive.content)
+        assertEquals("primary:Download/recover.txt", DocumentsContract.getDocumentId(created))
+        assertTrue(provider.contains("recover.txt"))
+        assertTrue(provider.deletedNames.isEmpty())
+        assertEquals("Источник", provider.bytes("source.txt").toString(Charsets.UTF_8))
+        assertTrue(access.list(access.resolve("/scratch")).isEmpty())
+    } }
+
+    @Test fun cancellationAtCreationAndOutputCloseCleansOwnedDocuments(): Unit = runBlocking { withNewFileFixture { _, access, provider, path ->
+        suspend fun cancelAt(name: String, creation: Boolean) {
+            lateinit var job: Job
+            val cancel: (String) -> Unit = { if (it == name) job.cancel() }
+            provider.afterCreate = if (creation) cancel else null
+            provider.afterOutputClose = if (creation) null else cancel
+            job = launch(start = CoroutineStart.LAZY) {
+                writeTextFileTool(access).execute(buildJsonObject { put("path", path(name)); put("content", "partial") })
+                fail("Cancelled write returned normally")
+            }
+            job.start(); job.join()
+            assertTrue(job.isCancelled)
+            assertTrue(provider.createdNames.contains(name))
+            assertFalse(provider.contains(name))
+            assertTrue(provider.deletedNames.contains(name))
+        }
+        cancelAt("create-cancelled.txt", creation = true)
+        cancelAt("close-cancelled.txt", creation = false)
+        assertEquals("Источник", provider.bytes("source.txt").toString(Charsets.UTF_8))
+        assertTrue("New-document cancellation must leave no staging or empty-original backups", access.list(access.resolve("/scratch")).isEmpty())
+    } }
 
     private class ModernDocumentsQueryTransport(private val documents: DocumentsProvider) : ContentProvider() {
         override fun onCreate() = true
@@ -235,13 +380,22 @@ class SafAbsolutePathRoutingTest {
 
     /** Bytes are reachable exclusively through the production ContentResolver stream operations. */
     private class MemoryStorageProvider(private val android: Context, private val tree: Uri,
-        initial: Map<String, ByteArray>) : DocumentsProvider() {
+        initial: Map<String, ByteArray>, private val opaqueIds: Boolean = false) : DocumentsProvider() {
         private val rootId = DocumentsContract.getTreeDocumentId(tree)
-        private val contents = initial.mapKeys { (name, _) -> "$rootId/$name" }.toMutableMap()
+        private var nextId = 100 + initial.size
+        private val idsByName = initial.keys.mapIndexed { index, name -> name to if (opaqueIds) "msf:${100 + index}" else "$rootId/$name" }.toMap().toMutableMap()
+        private val contents = initial.mapKeys { (name, _) -> idsByName.getValue(name) }.toMutableMap()
+        private fun displayName(id: String) = idsByName.entries.firstOrNull { it.value == id }?.key ?: id.substringAfterLast('/')
         val openedOutputs = mutableListOf<String>()
+        val createdNames = mutableListOf<String>()
+        val deletedNames = mutableListOf<String>()
+        var refuseDelete: Boolean = false
+        var afterCreate: ((String) -> Unit)? = null
+        var createdNameOverride: String? = null
+        var afterOutputClose: ((String) -> Unit)? = null
         init { contents.keys.toList().forEach(::registerStreams) }
-        fun bytes(name: String) = contents.getValue("$rootId/$name")
-        fun contains(name: String) = "$rootId/$name" in contents
+        fun bytes(name: String) = contents.getValue(idsByName.getValue(name))
+        fun contains(name: String) = idsByName[name] in contents
         private fun registerStreams(id: String) {
             val uri = DocumentsContract.buildDocumentUriUsingTree(tree, id)
             shadowOf(android.contentResolver).registerInputStreamSupplier(uri) {
@@ -249,9 +403,9 @@ class SafAbsolutePathRoutingTest {
             }
             shadowOf(android.contentResolver).registerOutputStreamSupplier(uri) {
                 require(id in contents)
-                openedOutputs += id.substringAfterLast('/')
+                openedOutputs += displayName(id)
                 object : ByteArrayOutputStream() {
-                    override fun close() { contents[id] = toByteArray(); super.close() }
+                    override fun close() { contents[id] = toByteArray(); super.close(); afterOutputClose?.invoke(displayName(id)) }
                 }
             }
         }
@@ -264,10 +418,20 @@ class SafAbsolutePathRoutingTest {
         override fun isChildDocument(parentDocumentId: String, documentId: String): Boolean = parentDocumentId == rootId && documentId in contents
         override fun createDocument(parentDocumentId: String, mimeType: String, displayName: String): String {
             require(parentDocumentId == rootId && mimeType != DocumentsContract.Document.MIME_TYPE_DIR)
-            val id = "$rootId/$displayName"
-            require(id !in contents)
-            contents[id] = byteArrayOf(); registerStreams(id)
+            val actualName = createdNameOverride ?: displayName
+            require(actualName !in idsByName)
+            val id = if (opaqueIds) "msf:${++nextId}" else "$rootId/$actualName"
+            idsByName[actualName] = id
+            contents[id] = byteArrayOf(); createdNames += actualName; registerStreams(id)
+            afterCreate?.invoke(actualName)
             return id
+        }
+        override fun deleteDocument(documentId: String) {
+            require(!refuseDelete) { "provider refuses delete" }
+            require(contents.remove(documentId) != null)
+            val name = displayName(documentId)
+            deletedNames += name
+            idsByName.remove(name)
         }
         override fun openDocument(documentId: String, mode: String, signal: CancellationSignal?): ParcelFileDescriptor =
             throw FileNotFoundException(documentId)
@@ -277,7 +441,7 @@ class SafAbsolutePathRoutingTest {
             return MatrixCursor(columns).apply {
                 ids.forEach { id -> addRow(columns.map { column -> when (column) {
                     DocumentsContract.Document.COLUMN_DOCUMENT_ID -> id
-                    DocumentsContract.Document.COLUMN_DISPLAY_NAME -> id.substringAfterLast('/')
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME -> displayName(id)
                     DocumentsContract.Document.COLUMN_MIME_TYPE -> if (id == rootId) DocumentsContract.Document.MIME_TYPE_DIR else "application/octet-stream"
                     DocumentsContract.Document.COLUMN_SIZE -> contents[id]?.size ?: 0
                     DocumentsContract.Document.COLUMN_FLAGS, DocumentsContract.Document.COLUMN_LAST_MODIFIED -> 0

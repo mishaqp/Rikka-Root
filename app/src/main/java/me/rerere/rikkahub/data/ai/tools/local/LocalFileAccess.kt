@@ -146,6 +146,78 @@ class LocalFileAccess internal constructor(
         return null
     }
 
+    /** Missing absolute SAF files are planned without creating provider documents. */
+    internal suspend fun planWritePath(reference: String): FileWritePlan {
+        require(reference.isNotBlank() && reference.length <= 8192 && reference.none(Char::isISOControl)) { "Некорректный путь." }
+        val path = if (reference.startsWith("file:")) File(URI(reference)).path else reference
+        @Suppress("DEPRECATION")
+        val primary = if (File(path).isAbsolute) runCatching { Environment.getExternalStorageDirectory() }.getOrNull() else null
+        if (File(path).isAbsolute && sharedStoragePathCandidate(path, primary, primaryStorageAliases)) {
+            val file = File(path)
+            val parentPath = file.parent ?: error("Не удалось определить папку назначения.")
+            val parent = resolve(parentPath, write = true)
+            if (parent is LocalFileSource.Content) {
+                // Validate the complete pathname with the same held-tree plan as resolve,
+                // including the final component's symlink and depth checks.
+                val heldTree = DocumentsContract.buildTreeDocumentUri(parent.uri.authority, DocumentsContract.getTreeDocumentId(parent.uri))
+                require(grantedStoragePathPlan(path, heldTree.toString(), scannerVolumeRoots(androidContext), primaryStorageAliases) != null) { "Путь вне выбранной папки SAF." }
+                validateChildName(file.name)
+                require(isDirectory(parent)) { "Папка назначения не найдена." }
+                val previous = findChild(parent, file.name)
+                if (previous is LocalFileSource.Content) checkGrant(previous, true)
+                return FileWritePlan(previous, parent, file.name)
+            }
+        }
+        return FileWritePlan(resolve(reference, write = true))
+    }
+
+    /** Ownership is recorded before cancellation can leave a new provider document behind. */
+    internal suspend fun <T> withWriteTarget(plan: FileWritePlan, action: suspend (LocalFileSource, Boolean) -> T): Pair<LocalFileSource, T> {
+        currentCoroutineContext().ensureActive()
+        var owned: LocalFileSource? = null
+        try {
+            val target = plan.existing ?: withContext(NonCancellable) {
+                val parent = requireNotNull(plan.parent)
+                require(findChild(parent, plan.name) == null) { "Назначение уже существует." }
+                createFile(parent, plan.name).also { owned = it }
+            }
+            currentCoroutineContext().ensureActive()
+            if (owned != null) require(name(target) == plan.name) { "Провайдер SAF изменил имя создаваемого файла." }
+            val result = action(target, owned != null)
+            currentCoroutineContext().ensureActive()
+            return target to result
+        } catch (failure: Exception) {
+            owned?.let { created ->
+                val cleaned = withContext(NonCancellable) {
+                    runCatching { !exists(created) || delete(created) }.getOrDefault(false)
+                }
+                if (!cleaned) {
+                    val cleanup = FileCreationCleanupFailedException(created, failure)
+                    if (failure is CancellationException) { failure.addSuppressed(cleanup); throw failure }
+                    throw cleanup
+                }
+            }
+            throw failure
+        }
+    }
+
+    internal suspend fun writePath(reference: String, bytes: ByteArray, overwrite: Boolean = false, append: Boolean = false): Pair<LocalFileSource, Long> {
+        require(bytes.size <= MAX_WRITE_BYTES) { "Запись превышает 16 МиБ." }
+        val plan = planWritePath(reference)
+        require(!append || plan.existing is LocalFileSource.Local) { "Добавление к SAF-файлу не поддерживается." }
+        return withWriteTarget(plan) { target, created ->
+            if (created) stagedWrite(target, true, false, ownedDestination = true) { output -> output.write(bytes); bytes.size.toLong() }
+            else write(target, bytes, overwrite, append)
+        }
+    }
+
+    internal suspend fun copyPath(from: LocalFileSource, reference: String, overwrite: Boolean = false): Pair<LocalFileSource, Long> {
+        require(exists(from)) { "Источник не найден." }
+        val plan = planWritePath(reference)
+        require(plan.existing != null || !isDirectory(from)) { "Для копирования папки сначала создайте папку назначения." }
+        return withWriteTarget(plan) { target, created -> copy(from, target, overwrite || created, ownedDestination = created) }
+    }
+
     fun checkFile(file: File, write: Boolean = false): File {
         val absolute = file.absoluteFile.toPath().normalize()
         var parent = absolute
@@ -415,7 +487,7 @@ class LocalFileAccess internal constructor(
     } catch (cancelled: CancellationException) { throw cancelled }
     catch (_: Exception) { true }
 
-    suspend fun copy(from: LocalFileSource, to: LocalFileSource, overwrite: Boolean = false): Long = withContext(Dispatchers.IO) {
+    suspend fun copy(from: LocalFileSource, to: LocalFileSource, overwrite: Boolean = false, ownedDestination: Boolean = false): Long = withContext(Dispatchers.IO) {
         val same = when {
             from is LocalFileSource.Local && to is LocalFileSource.Local -> checkFile(from.file) == checkFile(to.file)
             from is LocalFileSource.Content && to is LocalFileSource.Content -> sameDocumentIdentity(from.reference, to.reference)
@@ -466,7 +538,7 @@ class LocalFileAccess internal constructor(
         // Source use surrounds destination validation/open: early failures always close it (0ff79698).
         openInput(from).use { input ->
             require(!exists(to) || overwrite) { "Назначение уже существует. Укажите overwrite=true." }
-            stagedWrite(to, overwrite, false) { output -> copyBounded(input, output) }
+            stagedWrite(to, overwrite, false, ownedDestination) { output -> copyBounded(input, output) }
         }
     }
 
@@ -492,7 +564,7 @@ class LocalFileAccess internal constructor(
         stagedWrite(source, overwrite || append, append) { output -> output.write(bytes); bytes.size.toLong() }
     }
 
-    private suspend fun stagedWrite(source: LocalFileSource, overwrite: Boolean, append: Boolean, write: suspend (OutputStream) -> Long): Long {
+    private suspend fun stagedWrite(source: LocalFileSource, overwrite: Boolean, append: Boolean, ownedDestination: Boolean = false, write: suspend (OutputStream) -> Long): Long {
         require(!append || source is LocalFileSource.Local) { "Добавление к SAF-файлу не поддерживается." }
         val parent = if (source is LocalFileSource.Local) checkFile(source.file, true).parentFile else scratchRoot
         requireNotNull(parent).mkdirs()
@@ -518,13 +590,18 @@ class LocalFileAccess internal constructor(
                     }
                 }
                 is LocalFileSource.Content -> {
-                    // Preserve the original document before any provider truncation. A
-                    // cancelled or failed commit restores it under NonCancellable; if that
+                    // Existing documents keep their original bytes before provider truncation.
+                    // A cancelled or failed commit restores them under NonCancellable; if that
                     // fails the complete backup remains visible in scratch for recovery.
                     checkGrant(source, true)
                     require(!exists(source) || overwrite) { "Файл уже существует." }
-                    val backup = File.createTempFile(".rk-restore-", ".bak", scratchRoot)
-                    commitStreamWithRollback(staging, backup, { openInput(source) }, { openOutput(source) })
+                    if (ownedDestination) {
+                        staging.inputStream().use { input -> openOutput(source).use { output -> copyBounded(input, output) } }
+                        currentCoroutineContext().ensureActive()
+                    } else {
+                        val backup = File.createTempFile(".rk-restore-", ".bak", scratchRoot)
+                        commitStreamWithRollback(staging, backup, { openInput(source) }, { openOutput(source) })
+                    }
                 }
             }
             return count
@@ -646,6 +723,8 @@ internal suspend fun boundedDocumentReachable(
     }
     return false // Complete traversal proves that the target is unrelated.
 }
+
+internal data class FileWritePlan(val existing: LocalFileSource?, val parent: LocalFileSource.Content? = null, val name: String = "")
 
 internal class FileCreationCleanupFailedException(val created: LocalFileSource, cause: Exception) :
     java.io.IOException("Не удалось убрать созданный документ после ошибки доступа.", cause)

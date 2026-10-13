@@ -10,8 +10,7 @@ fun writeTextFileTool(access: LocalFileAccess): Tool = fileJsonTool(
     fileSchema(listOf("path", "content"), "path" to "string", "content" to "string", "append" to "boolean", "overwrite" to "boolean")) { obj ->
     val text = fileArgument(obj, "content")
     require(text.length <= LocalFileAccess.MAX_WRITE_BYTES) { "Текст слишком велик." }
-    val source = access.resolve(fileArgument(obj, "path"), true)
     val append = fileBoolean(obj, "append")
-    val bytes = access.write(source, text.toByteArray(Charsets.UTF_8), fileBoolean(obj, "overwrite"), append)
+    val (source, bytes) = access.writePath(fileArgument(obj, "path"), text.toByteArray(Charsets.UTF_8), fileBoolean(obj, "overwrite"), append)
     buildJsonObject { put("success", true); put("path", source.reference); put("bytes_written", bytes); put("appended", append) }
 }

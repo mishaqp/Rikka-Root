@@ -332,8 +332,8 @@ fun zipFilesTool(context: Context, access: LocalFileAccess = LocalFileAccess(con
         val references = obj["sources"]?.jsonArray?.map { it.jsonPrimitive.contentOrNull ?: throw ArchiveSafetyException("sources должен содержать пути к файлам.") }
             ?: throw ArchiveSafetyException("Укажите sources.")
         if (references.isEmpty() || references.size > 10_000) throw ArchiveSafetyException("Укажите от 1 до 10 000 источников.")
-        val destination = access.resolve(obj.archivePath("destination"), write = true)
-        if (access.isDirectory(destination)) throw ArchiveSafetyException("destination должен указывать файл ZIP, а не папку.")
+        val destinationPlan = access.planWritePath(obj.archivePath("destination"))
+        if (destinationPlan.existing?.let { access.isDirectory(it) } == true) throw ArchiveSafetyException("destination должен указывать файл ZIP, а не папку.")
         val roots = references.map { access.resolve(it) }
         val base = obj["base_dir"]?.jsonPrimitive?.contentOrNull?.let { access.resolve(it) }
         val level = obj["compression_level"]?.jsonPrimitive?.intOrNull ?: 6
@@ -347,17 +347,20 @@ fun zipFilesTool(context: Context, access: LocalFileAccess = LocalFileAccess(con
         try {
             val staged = scratchFile(access, scratch, "archive.zip")
             val stats = writeZipArchive(sources, access.openOutput(staged), level)
-            val backup = if (access.exists(destination)) backupArchiveTarget(access, destination, scratch, 0, backupBudget) else null
-            if (destination is LocalFileSource.Local) {
-                val parent = destination.file.parentFile ?: throw ArchiveSafetyException("Не удалось определить папку назначения.")
-                createArchiveDirectories(access, LocalFileSource.Local(parent), createdDirectories)
-            }
-            changes.add(ArchiveChange(destination, backup))
-            access.copy(staged, destination, overwrite = true)
-            coroutineContext.ensureActive()
+            val result = access.withWriteTarget(destinationPlan) { destination, created ->
+                val backup = if (!created && access.exists(destination)) backupArchiveTarget(access, destination, scratch, 0, backupBudget) else null
+                if (destination is LocalFileSource.Local) {
+                    val parent = destination.file.parentFile ?: throw ArchiveSafetyException("Не удалось определить папку назначения.")
+                    createArchiveDirectories(access, LocalFileSource.Local(parent), createdDirectories)
+                }
+                changes.add(ArchiveChange(destination, backup))
+                access.copy(staged, destination, overwrite = true, ownedDestination = created)
+                coroutineContext.ensureActive()
+                buildJsonObject { put("success", true); put("bytes_written", stats.bytes); put("entry_count", stats.entries) }
+            }.second
             changes.clear()
             createdDirectories.clear()
-            buildJsonObject { put("success", true); put("bytes_written", stats.bytes); put("entry_count", stats.entries) }
+            result
         } catch (failure: Throwable) {
             if (!rollbackArchiveChanges(access, changes, createdDirectories)) {
                 retainBackups = true
