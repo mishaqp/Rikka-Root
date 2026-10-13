@@ -305,7 +305,12 @@ private class HeadlessRootSession private constructor(
         runCatching { activeRequest?.let { File(it, "active").delete() } }
         runCatching { process.outputStream.close() } // EOF closes the existing privileged shell.
         runCatching { process.waitFor(500, TimeUnit.MILLISECONDS) }
-        runCatching { if (process.isAlive) process.destroyForcibly() }
+        runCatching {
+            if (process.isAlive) {
+                process.destroyForcibly()
+                process.waitFor(500, TimeUnit.MILLISECONDS)
+            }
+        }
         // An active guardian may still need these files; it removes its own FIFO control files.
         runCatching { if (activeRequest == null && !retainControl) directory.deleteRecursively() }
     }
