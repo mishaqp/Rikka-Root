@@ -299,13 +299,14 @@ private fun MessagePartsBlock(
     val hapticFeedback = rememberAppHapticFeedback(HapticAction.GENERATION)
     val settings = LocalSettings.current
     val partsState by rememberUpdatedState(parts)
+    val loadingState by rememberUpdatedState(loading)
 
     val handleClickCitation = rememberSearchCitationHandler(parts)
     LaunchedEffect(settings.displaySetting) {
         snapshotFlow { partsState }
             .debounce(50.milliseconds)
             .collect { parts ->
-                if (parts.isNotEmpty() && loading && settings.displaySetting.enableMessageGenerationHapticEffect) {
+                if (parts.isNotEmpty() && loadingState && settings.displaySetting.enableMessageGenerationHapticEffect) {
                     hapticFeedback.performHapticFeedback(HapticFeedbackType.KeyboardTap)
                 }
             }

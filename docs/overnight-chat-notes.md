@@ -11,7 +11,8 @@
 | Настройка прокрутки клавишами громкости изменена при смонтированном чате | P2 | `ChatListNormal` устанавливает listener в `DisposableEffect(Unit)` и сохраняет первоначальные enable/ratio/inset. Изменить выключено → включено; вызвать зарегистрированный listener на настоящей RouteActivity. Он должен перехватить клавишу и прокрутить настоящий LazyList. | RED подтверждён; GREEN 2/2. Listener читает актуальные settings/padding, Activity/state/density управляют регистрацией. |
 | Ссылка на источник в переводе | P2 | `ChatMessage` передаёт в перевод пустой `onClickCitation`, хотя исходный текст получает обработчик search_web. Свернуть/развернуть перевод, нажать citation; ожидать тот же Android VIEW intent, что в оригинале. | RED подтверждён; GREEN: original и translated intent проходят. Перевод использует прежний search_web resolver с актуальными parts. |
 | Программная прокрутка и auto-follow | Риск | Moru отличает пользовательское намерение от программного scroll; Kotlin использует `isScrollInProgress` для паузы. Последствия для IME/анимаций пока не воспроизведены. | Не исправлено без runtime evidence. |
-| Вибрация генерации после смены loading | Риск | `MessagePartsBlock` эффект зависит только от settings и захватывает loading. Требуется реальное воспроизведение события на переключении состояния. | Не исправлено без runtime evidence. |
+| Вибрация генерации после смены loading | P2 | Эффект захватывал первоначальный loading: старт не давал KeyboardTap, поздний update после Stop продолжал давать его. | RED оба направления; GREEN 2/2. Обработчик читает актуальный loading через rememberUpdatedState. |
+| Подсказка во время редактирования ответа | P2 | Обнуление editingMessage оставляло Reasoning/Tool в messageContent. getContents нового USER draft возвращал Text+Reasoning+Tool вместо только текста подсказки. | RED подтверждён; итоговый GREEN ожидается. clearInput применяется только к уходящему edit, обычный draft сохраняет вложения. |
 
 ## Живые сценарии
 
@@ -23,10 +24,18 @@
 
 Mocks заменяют внешние VM/аудио/файловые границы. Проверки этих сценариев доказывают UI→callback/intent, а не настоящее выполнение сетевого запроса, терминального процесса, браузерного WebView или TTS на устройстве.
 
+Новый `ChatListScrollRuntimeTest` проверяет настоящие top/bottom действия, живую смену ALWAYS/NEVER/SCROLL, крупный stream chunk на уже выровненном снизу списке, выключенный auto-scroll и сохранение чтения истории после перехода к началу во время генерации. Все четыре сценария проходят без изменения scroll production-кода.
+
+`ChatGenerationHapticRuntimeTest` монтирует настоящий ChatMessage и наблюдает platform HapticFeedback boundary. Перед движением часов тест дожидается recompose, затем проходит прежние 50 мс debounce. Start и поздний update после Stop воспроизводятся отдельно. `ChatDisplayBehaviorServiceRuntimeTest` вызывает публичные fork/regenerate, проверяет реальные Room/live sessions, выбранные версии, suffix settings и отправляемый request prefix. Только generation boundary выдаёт записанный chunk; metadata timestamps сравниваются с известной миллисекундной точностью Room, message IDs/parts/config проверяются полностью.
+
 ## Выполненные проверки
 
 - `/tmp/chat-runtime-red-local.log`: два ожидаемых volume assertions — enable не включается; новая дистанция 224 px остаётся 132 px. Дополнительные ошибки harness (inline badge без native rendering и отсутствующий Toaster) устранены в тестах; они не засчитываются как RED приложения.
 - `/tmp/chat-runtime-followup.log`: original search citation открывает URL; translated citation после collapse/reopen возвращает null вместо Android intent. Volume 2/2 и прочие новые Page scenarios проходят.
+- `/tmp/chat-haptic-service-green.log`: уточнённый RED обоих направлений loading; service assertions сначала отличались только nanoseconds/milliseconds timestamp metadata. Это известная точность Room, не баг приложения; тест исправлен с отдельной проверкой каждого epochMillis и полного остального Conversation.
+- `/tmp/chat-haptic-service-final.log`: **4/4**, 20 с — haptic start/stop и public fork/regenerate/Room.
+- `/tmp/chat-scroll-red.log`: **4/4**, 20 с — audit scenarios прошли без исправления; название лога не означает RED.
+- `/tmp/chat-suggestion-edit-red.log`: подтверждено сохранение Reasoning/Tool из edit в USER draft; обычные вложения draft и динамический citation URL проходят.
 - `/tmp/chat-runtime-green.log`: **104/104**, 43 с, 0 failures/errors. Включены все runtime/presentation suites из перечня выше, кроме нового haptic reproduction, который исследуется отдельно.
 - Первые запуски имели compile failure нового test harness (`RuntimeEnvironment.getApplication` без generics), затем Robolectric SDK download `UnknownHostException` и временный Google Maven mirror 503. Это ошибки настройки/среды; RED приложения установлен только последующими runtime assertions. SDK jar получен через session proxy в локальный Maven-кеш; проектные build/network настройки не менялись.
 
