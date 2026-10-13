@@ -6,6 +6,8 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.temporal.TemporalAdjusters
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /** Presentation state only: none of these values enter Settings or backups. */
 enum class DrawerConversationSort(val label: String) {
@@ -52,9 +54,15 @@ fun drawerConversationHeader(
 ): ConversationListItem? {
     if (after == null) return null
     if (after.isPinned) return if (before?.isPinned != true) ConversationListItem.PinnedHeader else null
-    val group = drawerDateGroup(after.drawerSortDate(sortOrder, zone), today)
-    if (before != null && !before.isPinned &&
-        drawerDateGroup(before.drawerSortDate(sortOrder, zone), today) == group
-    ) return null
-    return ConversationListItem.DateHeader(group.headerDate(today), group.label, sortOrder)
+    val date = after.drawerSortDate(sortOrder, zone)
+    if (before != null && !before.isPinned && before.drawerSortDate(sortOrder, zone) == date) return null
+    return ConversationListItem.DateHeader(date, drawerDateLabel(date, today), sortOrder)
+}
+
+/** Moru keeps one section per local day; older dates do not collapse into a week bucket. */
+internal fun drawerDateLabel(date: LocalDate, today: LocalDate): String = when (date) {
+    today -> DrawerConversationDateGroup.TODAY.label
+    today.minusDays(1) -> DrawerConversationDateGroup.YESTERDAY.label
+    else -> date.format(DateTimeFormatter.ofPattern(
+        if (date.year == today.year) "d MMMM" else "d MMMM yyyy", Locale.forLanguageTag("ru")))
 }

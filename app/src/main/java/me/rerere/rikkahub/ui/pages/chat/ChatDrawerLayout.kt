@@ -21,10 +21,10 @@ import me.rerere.rikkahub.ui.theme.LocalAmoledDarkMode
 /** Shared production layout, also rendered directly by the JVM screenshot fixtures. */
 @Composable
 internal fun ChatDrawerFrame(content: @Composable ColumnScope.() -> Unit) {
-    val width = minOf(LocalConfiguration.current.screenWidthDp.dp * .85f, 320.dp)
+    val width = minOf(LocalConfiguration.current.screenWidthDp.dp * .75f, 320.dp)
     val colors = MaterialTheme.colorScheme
     ModalDrawerSheet(modifier = Modifier.width(width).testTag("chat_drawer_sheet"),
-        drawerContainerColor = if (LocalAmoledDarkMode.current) colors.background else colors.surfaceContainerLow,
+        drawerContainerColor = if (LocalAmoledDarkMode.current) colors.background else colors.surface,
         drawerContentColor = colors.onSurface) {
         Column(Modifier.fillMaxSize(), content = content)
     }
@@ -33,7 +33,7 @@ internal fun ChatDrawerFrame(content: @Composable ColumnScope.() -> Unit) {
 @Composable
 internal fun ChatDrawerTopArea(content: @Composable ColumnScope.() -> Unit) {
     Column(Modifier.padding(horizontal = 16.dp).padding(top = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
+        verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
 }
 
 @Composable

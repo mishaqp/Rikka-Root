@@ -4,10 +4,13 @@ import android.app.Application
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -15,6 +18,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
@@ -55,6 +59,7 @@ class ConversationItemLayoutTest {
     )
     private val rowTag = "chat_drawer_conversation_${conversation.id}"
     private var selectedForeground = Color.Unspecified
+    private var selectedBackground = Color.Unspecified
 
     @Test
     fun `compact row grows with font scale instead of clipping its content`() {
@@ -62,22 +67,31 @@ class ConversationItemLayoutTest {
         showRow(fontScale = { fontScale.floatValue })
 
         val normalHeight = rowHeightDp()
-        assertEquals("Default font scale keeps the compact row at 56dp", 56f, normalHeight, 0.5f)
+        assertEquals("Moru title row retains a 48dp touch area", 48f, normalHeight, 0.5f)
 
-        compose.runOnIdle { fontScale.floatValue = 1.3f }
-        val enlargedHeight = rowHeightDp()
-        assertTrue("The row must grow when its two text lines need more space", enlargedHeight > normalHeight)
-        val rowBounds = compose.onNodeWithTag(rowTag).fetchSemanticsNode().boundsInRoot
-        listOf(conversation.title, metadata.preview, "02.01").forEach { text ->
-            val textBounds = compose.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-            assertTrue("$text extends above the row", textBounds.top >= rowBounds.top)
-            assertTrue("$text extends below the row", textBounds.bottom <= rowBounds.bottom)
-            assertTrue("$text extends past the trailing edge", textBounds.right <= rowBounds.right)
+        listOf(1.3f, 1.5f, 2f).forEach { scale ->
+            compose.runOnIdle { fontScale.floatValue = scale }
+            assertTrue("The title row grows for font scale $scale", rowHeightDp() > normalHeight)
+            val row = compose.onNodeWithTag(rowTag).fetchSemanticsNode()
+            val text = compose.onNodeWithText(conversation.title, useUnmergedTree = true).fetchSemanticsNode()
+            val rowBounds = row.boundsInRoot
+            val textBounds = text.boundsInRoot
+            assertTrue("Title extends above the row at $scale", textBounds.top >= rowBounds.top)
+            assertTrue("Title extends below the row at $scale", textBounds.bottom <= rowBounds.bottom)
+            assertTrue("Title extends past the leading edge at $scale", textBounds.left >= rowBounds.left)
+            assertTrue("Title extends past the trailing edge at $scale", textBounds.right <= rowBounds.right)
+            val layout = textLayout(conversation.title)
+            assertEquals("Moru has one title line", 1, layout.lineCount)
+            assertTrue("Short title must not clip at $scale", !layout.hasVisualOverflow)
+            assertAccessibleMetadata(row.config[SemanticsProperties.ContentDescription].joinToString(". "))
         }
+        // Moru's title-only appearance retains this information in the accessible row description.
+        compose.onNodeWithText(metadata.preview, useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText("02.01", useUnmergedTree = true).assertDoesNotExist()
     }
 
     @Test
-    fun `selected title preview and time use the selected container foreground`() {
+    fun `selected title uses onSurface and preserves contrast across all theme modes`() {
         val mode = mutableStateOf(ScreenshotThemeMode.Light)
         showRow(themeMode = { mode.value })
 
@@ -85,13 +99,18 @@ class ConversationItemLayoutTest {
             compose.runOnIdle { mode.value = theme }
             compose.waitForIdle()
             assertTextColor(conversation.title, selectedForeground)
-            assertTextColor(metadata.preview, selectedForeground)
-            assertTextColor("02.01", selectedForeground)
+            val foregroundLuminance = selectedForeground.luminance()
+            val backgroundLuminance = selectedBackground.luminance()
+            val contrast = (maxOf(foregroundLuminance, backgroundLuminance) + .05f) /
+                (minOf(foregroundLuminance, backgroundLuminance) + .05f)
+            assertTrue("Title contrast is too low in $theme: $contrast", contrast >= 4.5f)
+            assertAccessibleMetadata(compose.onNodeWithTag(rowTag).fetchSemanticsNode()
+                .config[SemanticsProperties.ContentDescription].joinToString(". "))
         }
     }
 
     @Test
-    fun `large font row retains all six accessible actions and status information`() {
+    fun `large font row retains all six accessible actions plus selection and status information`() {
         val invoked = mutableListOf<String>()
         showRow(fontScale = { 1.3f }, invoked = invoked)
         val row = compose.onNodeWithTag(rowTag).fetchSemanticsNode()
@@ -99,26 +118,30 @@ class ConversationItemLayoutTest {
         assertTrue(row.config[SemanticsProperties.Selected])
         val actions = row.config[SemanticsActions.CustomActions]
         assertEquals(
-            listOf("Открепить", "Переименовать", "Обновить название с ИИ", "В папку", "К ассистенту", "Удалить"),
+            listOf("Открепить", "Переименовать", "Обновить название с ИИ", "В папку", "К ассистенту", "Удалить", "Выбрать"),
             actions.map { it.label },
         )
         compose.runOnIdle {
             actions.forEach { assertTrue(it.action()) }
         }
-        assertEquals(listOf("pin", "rename", "regenerate", "folder", "assistant", "delete"), invoked)
+        assertEquals(listOf("pin", "rename", "regenerate", "folder", "assistant", "delete", "select"), invoked)
 
         val description = row.config[SemanticsProperties.ContentDescription].joinToString(". ")
-        listOf(conversation.title, metadata.preview, "02.01", "Закреплён", "Работали сценарии", "Ответ формируется")
-            .forEach { assertTrue("Missing accessible status: $it", description.contains(it)) }
+        assertAccessibleMetadata(description)
     }
 
     @Test
-    fun `long press keeps all six menu actions available with large fonts`() {
-        showRow(fontScale = { 1.3f })
-        compose.onNodeWithTag(rowTag).performTouchInput { longClick() }
-
-        listOf("Открепить", "Переименовать", "Обновить название с ИИ", "В папку", "К ассистенту", "Удалить")
-            .forEach { compose.onNodeWithText(it).assertExists() }
+    fun `long press keeps all six menu callbacks and selection available with large fonts`() {
+        val invoked = mutableListOf<String>()
+        showRow(fontScale = { 1.3f }, invoked = invoked)
+        val actions = listOf("Открепить" to "pin", "Переименовать" to "rename", "Обновить название с ИИ" to "regenerate",
+            "В папку" to "folder", "К ассистенту" to "assistant", "Удалить" to "delete", "Выбрать" to "select")
+        actions.forEachIndexed { index, (label, _) ->
+            compose.onNodeWithTag(rowTag).performTouchInput { longClick() }
+            actions.forEach { (text, _) -> compose.onNodeWithText(text).assertExists() }
+            compose.onNodeWithText(label).performClick()
+            assertEquals(actions.take(index + 1).map { it.second }, invoked)
+        }
     }
 
     private fun showRow(
@@ -128,21 +151,27 @@ class ConversationItemLayoutTest {
     ) {
         compose.setContent {
             ScreenshotTheme(mode = themeMode(), fontScale = fontScale()) {
-                selectedForeground = MaterialTheme.colorScheme.onSecondaryContainer
-                Box(Modifier.width(320.dp)) {
-                    ConversationItem(
-                        conversation = conversation,
-                        metadata = metadata,
-                        selected = true,
-                        loading = true,
-                        onDelete = { invoked += "delete" },
-                        onRegenerateTitle = { invoked += "regenerate" },
-                        onPin = { invoked += "pin" },
-                        onMoveToAssistant = { invoked += "assistant" },
-                        onMoveToFolder = { invoked += "folder" },
-                        onRename = { invoked += "rename" },
-                        onClick = {},
-                    )
+                val colors = MaterialTheme.colorScheme
+                val background = if (themeMode().amoled) colors.background else colors.surface
+                selectedForeground = colors.onSurface
+                selectedBackground = colors.primary.copy(alpha = .12f).compositeOver(background)
+                Surface(color = background) {
+                    Box(Modifier.width(320.dp)) {
+                        ConversationItem(
+                            conversation = conversation,
+                            metadata = metadata,
+                            selected = true,
+                            loading = true,
+                            onDelete = { invoked += "delete" },
+                            onRegenerateTitle = { invoked += "regenerate" },
+                            onPin = { invoked += "pin" },
+                            onMoveToAssistant = { invoked += "assistant" },
+                            onMoveToFolder = { invoked += "folder" },
+                            onRename = { invoked += "rename" },
+                            onClick = {},
+                            onStartSelection = { invoked += "select" },
+                        )
+                    }
                 }
             }
         }
@@ -151,12 +180,21 @@ class ConversationItemLayoutTest {
     private fun rowHeightDp(): Float =
         compose.onNodeWithTag(rowTag).fetchSemanticsNode().boundsInRoot.height / compose.density.density
 
-    private fun assertTextColor(text: String, expected: Color) {
+    private fun textLayout(text: String): TextLayoutResult {
         val layouts = mutableListOf<TextLayoutResult>()
         val node = compose.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode()
         compose.runOnIdle {
             assertTrue(node.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(layouts))
         }
-        assertEquals("Foreground for $text", expected, layouts.single().layoutInput.style.color)
+        return layouts.single()
+    }
+
+    private fun assertTextColor(text: String, expected: Color) {
+        assertEquals("Foreground for $text", expected, textLayout(text).layoutInput.style.color)
+    }
+
+    private fun assertAccessibleMetadata(description: String) {
+        listOf(conversation.title, metadata.preview, "02.01", "Закреплён", "Работали сценарии", "Ответ формируется")
+            .forEach { assertTrue("Missing accessible status: $it", description.contains(it)) }
     }
 }

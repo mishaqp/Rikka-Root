@@ -27,7 +27,9 @@ data class DrawerConversationSummary(
 /**
  * Only the presentation query changes: mutations, persistent sort settings and older paging
  * consumers continue to use their existing APIs. Sorting happens before LIMIT/OFFSET in SQLite.
+ * The legacy relative-date arguments remain for compatibility with drawer callers.
  */
+@Suppress("UNUSED_PARAMETER")
 internal fun drawerConversationQuery(
     assistantId: String,
     folderId: String?,
@@ -39,6 +41,7 @@ internal fun drawerConversationQuery(
     yesterdayMillis: Long,
     weekStartMillis: Long,
     includePreviews: Boolean = true,
+    searchQuery: String = "",
 ): SimpleSQLiteQuery {
     val folderCondition = when {
         includeAllFolders -> ""
@@ -46,8 +49,15 @@ internal fun drawerConversationQuery(
         else -> " AND c.folder_id = ?"
     }
     val dateColumn = if (sortByCreateTime) "c.create_at" else "c.update_at"
+    val searchCondition = if (searchQuery.isBlank()) "" else " AND c.title GLOB ?"
     val direction = if (oldestFirst) "ASC" else "DESC"
-    val groupDirection = if (oldestFirst) "DESC" else "ASC"
+    // SQLite localtime follows the device zone, matching the Java system zone used by headers.
+    // Pinned chats share one section, so their title order must not be split into days.
+    val dayOrder = """
+        CASE WHEN c.is_pinned = 0 THEN
+            strftime('%Y-%m-%d', $dateColumn / 1000.0, 'unixepoch', 'localtime')
+        END $direction
+    """.trimIndent()
     val titleOrder = if (alphabetical) "c.title COLLATE LOCALIZED ASC, " else ""
     val previewProjection = if (includePreviews) {
         """
@@ -82,9 +92,7 @@ internal fun drawerConversationQuery(
     val arguments = buildList<Any> {
         add(assistantId)
         if (!includeAllFolders && folderId != null) add(folderId)
-        add(todayMillis)
-        add(yesterdayMillis)
-        add(weekStartMillis)
+        if (searchQuery.isNotBlank()) add(drawerTitleSearchPattern(searchQuery.trim()))
     }.toTypedArray()
     return SimpleSQLiteQuery(
         """
@@ -92,16 +100,56 @@ internal fun drawerConversationQuery(
                 c.create_at AS createAt, c.update_at AS updateAt, c.folder_id AS folderId,
                 $previewProjection
             FROM conversationentity c
-            WHERE c.assistant_id = ?$folderCondition
+            WHERE c.assistant_id = ?$folderCondition$searchCondition
             ORDER BY c.is_pinned DESC,
-                CASE WHEN $dateColumn >= ? THEN 0
-                    WHEN $dateColumn >= ? THEN 1
-                    WHEN $dateColumn >= ? THEN 2 ELSE 3 END $groupDirection,
+                $dayOrder,
                 $titleOrder$dateColumn $direction, c.id ASC
         """.trimIndent(),
         arguments,
     )
 }
+
+/** SQLite NOCASE only folds ASCII; explicit letter pairs also match Russian topic names. */
+internal fun drawerTitleSearchPattern(query: String): String = buildString {
+    append('*')
+    query.forEach { character ->
+        when (character) {
+            '*' -> append("[*]")
+            '?' -> append("[?]")
+            '[' -> append("[[]")
+            ']' -> append("[]]")
+            else -> {
+                val pair = drawerTitleSearchCasePair(character)
+                if (pair.lower != pair.upper) append("[${pair.lower}${pair.upper}]") else append(character)
+            }
+        }
+    }
+    append('*')
+}
+
+/**
+ * The same literal substring and exact character pairs as [drawerTitleSearchPattern].
+ * Broad equalsIgnoreCase folds additional variants (ς/σ, ı/İ/i, ſ/s) that SQLite's GLOB does not.
+ * Selection must never add those invisible rows. UTF-16 pairs retain supplementary literals too.
+ */
+internal fun drawerTitleMatchesSearchQuery(title: String, query: String): Boolean {
+    val trimmed = query.trim()
+    if (trimmed.isBlank()) return true
+    if (trimmed.length > title.length) return false
+    val pairs = trimmed.map(::drawerTitleSearchCasePair)
+    return (0..title.length - pairs.size).any { start ->
+        pairs.indices.all { offset ->
+            val actual = title[start + offset]
+            val pair = pairs[offset]
+            actual == pair.lower || actual == pair.upper
+        }
+    }
+}
+
+private data class DrawerTitleSearchCasePair(val lower: Char, val upper: Char)
+
+private fun drawerTitleSearchCasePair(character: Char): DrawerTitleSearchCasePair =
+    DrawerTitleSearchCasePair(character.lowercaseChar(), character.uppercaseChar())
 
 // Guard malformed legacy JSON and invalid selected branches before evaluating JSON paths.
 private const val SELECTED_PARTS_JSON =

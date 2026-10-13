@@ -72,6 +72,25 @@ class ChatDrawerVM(
         } ?: DrawerConversationSort.NEWEST
     )
     val presentationSort: StateFlow<DrawerConversationSort> = _presentationSort.asStateFlow()
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+    private val _openOnNextChat = MutableStateFlow<Boolean>(savedStateHandle["drawerOpenOnNextChat"] ?: false)
+    val openOnNextChat: StateFlow<Boolean> = _openOnNextChat.asStateFlow()
+    var assistantPickerExpanded: Boolean
+        get() = savedStateHandle["drawerAssistantPickerExpanded"] ?: false
+        set(value) { savedStateHandle["drawerAssistantPickerExpanded"] = value }
+    fun requestOpenOnNextChat(origin: Uuid) {
+        savedStateHandle["drawerOpenOrigin"] = origin.toString()
+        savedStateHandle["drawerOpenOnNextChat"] = true
+        _openOnNextChat.value = true
+    }
+    fun hasOpenRequestFor(chatId: Uuid): Boolean =
+        _openOnNextChat.value && savedStateHandle.get<String>("drawerOpenOrigin") != chatId.toString()
+    fun consumeOpenRequest() {
+        savedStateHandle["drawerOpenOnNextChat"] = false
+        _openOnNextChat.value = false
+    }
+    fun setSearchQuery(query: String) { _searchQuery.value = query }
     private val dateRefresh = MutableStateFlow(0)
     private val loadedLegacyTitles = ConcurrentHashMap<Uuid, String>()
     private val pendingLegacyTitleBackfills = ConcurrentHashMap.newKeySet<Uuid>()
@@ -96,6 +115,7 @@ class ChatDrawerVM(
         val allFolders: Boolean,
         val dateBasis: ConversationSortOrder,
         val sort: DrawerConversationSort,
+        val query: String = "",
     )
 
     // 当前助手的文件夹列表（Room Flow，增删改自动刷新）
@@ -108,6 +128,7 @@ class ChatDrawerVM(
                 assistantId, folderId, allFolders, dateBasis, sort ->
             DrawerQueryOptions(assistantId, folderId, allFolders, dateBasis, sort)
         }
+            .combine(_searchQuery) { options, query -> options.copy(query = query.trim()) }
             .combine(dateContext) { options, dates -> options to dates }
             .flatMapLatest { (options, dates) ->
                 val paging = conversationRepo.getDrawerConversationsPaging(drawerConversationQuery(
@@ -121,6 +142,7 @@ class ChatDrawerVM(
                     yesterdayMillis = dates.today.minusDays(1).atStartOfDay(dates.zone).toInstant().toEpochMilli(),
                     weekStartMillis = drawerWeekStart(dates.today).atStartOfDay(dates.zone).toInstant().toEpochMilli(),
                     includePreviews = conversationRepo.drawerSupportsMessagePreviews(),
+                    searchQuery = options.query,
                 ))
                 paging.map { pagingData ->
                     pagingData

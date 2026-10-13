@@ -2,6 +2,8 @@ package me.rerere.rikkahub.ui.pages.chat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,7 +47,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
+import me.rerere.rikkahub.ui.hooks.HapticAction
+import me.rerere.rikkahub.ui.hooks.rememberAppHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
@@ -60,6 +68,7 @@ import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.Edit03
 import me.rerere.hugeicons.stroke.MessageAdd01
 import me.rerere.hugeicons.stroke.Tick01
+import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.Settings
@@ -105,6 +114,7 @@ internal fun ChatDrawerHeader(
         nickname = nickname,
         rootChip = rootChip,
         hasUpdate = showUpdateStatus && update.hasUpdate,
+        showAppUpdates = settings.displaySetting.showAppUpdates,
         onEditNickname = onEditNickname,
         onNavigate = onNavigate,
         modifier = modifier,
@@ -127,10 +137,12 @@ internal fun ChatDrawerHeaderContent(
     onEditNickname: () -> Unit,
     onNavigate: (Screen) -> Unit,
     modifier: Modifier = Modifier,
+    showAppUpdates: Boolean = true,
     greeting: @Composable () -> Unit = { Greeting(style = MaterialTheme.typography.bodySmall) },
     avatar: @Composable (Modifier) -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
+    val updateVisible = hasUpdate && showAppUpdates
     fun navigate(id: String) { ChatDrawerNavigation.route(id)?.let(onNavigate) }
 
     Row(
@@ -144,18 +156,19 @@ internal fun ChatDrawerHeaderContent(
                 Modifier.fillMaxWidth().heightIn(min = 40.dp)
                     .clickable(role = Role.Button, onClickLabel = "Изменить имя", onClick = onEditNickname),
             ) {
-                Text(nickname, style = MaterialTheme.typography.titleMedium, color = colors.onSurface)
+                Text(nickname, style = MaterialTheme.typography.titleMedium, color = colors.onSurface,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
                 CompositionLocalProvider(LocalContentColor provides colors.onSurfaceVariant) {
                     greeting()
                 }
             }
-            if (rootChip != null || hasUpdate) {
+            if (rootChip != null || updateVisible) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     rootChip?.let { chip ->
                         ChatDrawerStatusAction(ChatDrawerNavigation.item("root_status").icon, chip.tone,
                             "Root: ${chip.text}") { navigate("root_status") }
                     }
-                    if (hasUpdate) {
+                    if (updateVisible) {
                         ChatDrawerStatusAction(ChatDrawerNavigation.item("update").icon,
                             SettingsDashboardStatusTone.Success, "Есть обновление. Открыть сведения") {
                             navigate("update")
@@ -163,6 +176,10 @@ internal fun ChatDrawerHeaderContent(
                     }
                 }
             }
+        }
+        IconButton(onClick = { ChatDrawerNavigation.route("translator")?.let(onNavigate) }, modifier = Modifier.size(40.dp)) {
+            Icon(ChatDrawerNavigation.item("translator").icon, stringResource(R.string.moru_drawer_translator),
+                Modifier.size(22.dp), tint = colors.onSurface)
         }
         IconButton(onClick = { navigate("header_settings") }, modifier = Modifier.size(40.dp)) {
             Icon(ChatDrawerNavigation.item("header_settings").icon, "Настройки", Modifier.size(24.dp),
@@ -195,52 +212,56 @@ private fun ChatDrawerStatusAction(
     }
 }
 
+/** Moru's fixed topic search; the leading icon retains the full message-search destination. */
 @Composable
 internal fun ChatDrawerSearchBar(
     onNavigate: (Screen) -> Unit,
     onNewChat: () -> Unit,
     modifier: Modifier = Modifier,
+    query: String = "",
+    onQueryChange: (String) -> Unit = {},
 ) {
     val colors = MaterialTheme.colorScheme
-    val searchShape = MaterialTheme.shapes.extraLarge
-    val newChatShape = RoundedCornerShape(12.dp)
-    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Box(
-            Modifier.weight(1f).height(48.dp).clip(searchShape)
-                .clickable(role = Role.Button) { ChatDrawerNavigation.route("search")?.let(onNavigate) }
-                .semantics { contentDescription = "Поиск по сообщениям" },
-            contentAlignment = Alignment.Center,
-        ) {
-            Surface(Modifier.fillMaxWidth().height(44.dp), color = colors.surfaceContainerHigh, shape = searchShape) {}
-            Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(ChatDrawerNavigation.item("search").icon, null, Modifier.size(20.dp), tint = colors.onSurfaceVariant)
-                Text("Поиск", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium,
-                    color = colors.onSurfaceVariant)
-                IconButton(onClick = { ChatDrawerNavigation.route("history")?.let(onNavigate) }) {
-                    Icon(ChatDrawerNavigation.item("history").icon, "История чатов", Modifier.size(24.dp),
-                        tint = colors.onSurfaceVariant)
+    val haptic = rememberAppHapticFeedback(HapticAction.DRAWER)
+    val topicSearchLabel = stringResource(R.string.moru_drawer_search_topics)
+    Row(modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("chat_drawer_search_row"),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        BasicTextField(
+            value = query, onValueChange = onQueryChange, singleLine = true,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.onSurface),
+            modifier = Modifier.weight(1f).heightIn(min = 44.dp).testTag("chat_drawer_topic_search")
+                .semantics { contentDescription = topicSearchLabel },
+            decorationBox = { field ->
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                    .background(colors.surfaceContainerHigh.copy(alpha = .8f)),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        ChatDrawerNavigation.route("search")?.let(onNavigate)
+                    }, modifier = Modifier.size(40.dp)) {
+                        Icon(ChatDrawerNavigation.item("search").icon,
+                            stringResource(R.string.moru_drawer_search_messages), Modifier.size(18.dp),
+                            tint = colors.onSurfaceVariant)
+                    }
+                    Box(Modifier.weight(1f).padding(vertical = 10.dp)) {
+                        if (query.isEmpty()) Text(topicSearchLabel,
+                            color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        field()
+                    }
+                    if (query.isNotEmpty()) IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(32.dp)) {
+                        Icon(HugeIcons.Cancel01, stringResource(R.string.moru_drawer_clear_search), Modifier.size(16.dp))
+                    }
                 }
-            }
+            },
+        )
+        IconButton(onClick = { ChatDrawerNavigation.route("history")?.let(onNavigate) }, modifier = Modifier.size(44.dp)) {
+            Icon(ChatDrawerNavigation.item("history").icon, "История чатов", Modifier.size(20.dp), tint = colors.onSurface)
         }
-        TooltipBox(
-            positionProvider = TooltipDefaults.rememberTooltipPositionProvider(),
-            tooltip = { PlainTooltip { Text("Новый чат") } },
-            state = rememberTooltipState(),
-        ) {
-            Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                FilledTonalIconButton(
-                    onClick = onNewChat,
-                    modifier = Modifier.size(44.dp),
-                    shape = newChatShape,
-                    colors = IconButtonDefaults.filledTonalIconButtonColors(
-                        containerColor = colors.secondaryContainer,
-                        contentColor = colors.onSecondaryContainer,
-                    ),
-                ) {
-                    Icon(HugeIcons.MessageAdd01, "Новый чат", Modifier.size(22.dp))
-                }
+        TooltipBox(positionProvider = TooltipDefaults.rememberTooltipPositionProvider(),
+            tooltip = { PlainTooltip { Text("Новый чат") } }, state = rememberTooltipState()) {
+            IconButton(onClick = onNewChat, modifier = Modifier.size(44.dp)) {
+                Icon(HugeIcons.MessageAdd01, "Новый чат", Modifier.size(22.dp), tint = colors.onSurface)
             }
         }
     }
@@ -253,13 +274,21 @@ internal fun ChatDrawerAssistantCard(
     onUpdateSettings: ((Settings) -> Settings) -> Unit,
     onNavigate: (Screen) -> Unit,
     modifier: Modifier = Modifier,
+    isDrawerOpen: Boolean = true,
+    initiallyExpanded: Boolean = false,
+    onExpansionChange: (Boolean) -> Unit = {},
     avatarContent: @Composable (String, Avatar, Modifier, () -> Unit) -> Unit = { name, avatar, avatarModifier, onClick ->
         UIAvatar(name, avatar, avatarModifier, onClick = onClick)
     },
 ) {
     val state = rememberAssistantState(settings, onUpdateSettings)
     val defaultAssistantName = stringResource(R.string.assistant_page_default_assistant)
-    var expanded by remember { mutableStateOf(false) }
+    var expanded by remember { mutableStateOf(initiallyExpanded) }
+    androidx.compose.runtime.LaunchedEffect(expanded) { onExpansionChange(expanded) }
+    val haptic = rememberAppHapticFeedback(HapticAction.DRAWER)
+    androidx.compose.runtime.LaunchedEffect(isDrawerOpen) {
+        if (!isDrawerOpen && !settings.displaySetting.keepAssistantListExpandedOnSidebarClose) expanded = false
+    }
     var selectedTagIds by remember { mutableStateOf(emptySet<Uuid>()) }
     val selected = state.currentAssistant
     val name = selected.name.ifBlank { defaultAssistantName }
@@ -269,16 +298,24 @@ internal fun ChatDrawerAssistantCard(
 
     Box(modifier.fillMaxWidth().testTag("chat_drawer_assistant")) {
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(MaterialTheme.shapes.large)
-                .clickable(role = Role.Button) { expanded = !expanded }
-                .padding(vertical = 10.dp),
+            Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(16.dp))
+                .combinedClickable(role = Role.Button,
+                    onClick = { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); expanded = !expanded },
+                    onLongClickLabel = stringResource(R.string.moru_drawer_assistant_settings),
+                    onLongClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        ChatDrawerNavigation.route("assistant_detail", selected.id.toString())?.let(onNavigate)
+                    })
+                .padding(start = 4.dp, top = 6.dp, end = 12.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            avatarContent(name, selected.avatar, Modifier.size(28.dp)) { expanded = !expanded }
-            Text(name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f),
+            avatarContent(name, selected.avatar, Modifier.size(32.dp)) { expanded = !expanded }
+            Text(name, style = MaterialTheme.typography.titleSmall.copy(fontSize = 15.sp), modifier = Modifier.weight(1f),
+                maxLines = if (LocalDensity.current.fontScale > 1.15f) Int.MAX_VALUE else 1,
+                overflow = TextOverflow.Ellipsis,
                 color = MaterialTheme.colorScheme.onSurface)
-            Icon(HugeIcons.ArrowDown01, "Выбрать ассистента", Modifier.size(20.dp),
+            Icon(HugeIcons.ArrowDown01, "Выбрать ассистента", Modifier.size(18.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.heightIn(max = 440.dp)) {
@@ -298,7 +335,7 @@ internal fun ChatDrawerAssistantCard(
                     text = { Text(assistantName) },
                     leadingIcon = {
                         avatarContent(assistantName, assistant.avatar, Modifier.size(30.dp)) {
-                            expanded = false
+                            if (!settings.displaySetting.keepSidebarOpenOnAssistantTap) expanded = false
                             state.setSelectAssistant(assistant)
                         }
                     },
@@ -313,7 +350,10 @@ internal fun ChatDrawerAssistantCard(
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant) }
                         }
                     },
-                    onClick = { expanded = false; state.setSelectAssistant(assistant) },
+                    onClick = {
+                        if (!settings.displaySetting.keepSidebarOpenOnAssistantTap) expanded = false
+                        state.setSelectAssistant(assistant)
+                    },
                 )
             }
             if (filtered.isEmpty()) Text("Нет ассистентов с выбранными метками", Modifier.padding(12.dp))
@@ -356,29 +396,29 @@ internal fun ChatDrawerBottomBar(
     var showMore by remember { mutableStateOf(false) }
     val selectedItem = chatDrawerBottomSelection(activeDestination, currentAssistantId, showMore)
     val colors = MaterialTheme.colorScheme
-    val containerColor = if (LocalAmoledDarkMode.current) colors.background else colors.surfaceContainerLow
+    val containerColor = if (LocalAmoledDarkMode.current) colors.background else colors.surface
     Surface(modifier.fillMaxWidth().testTag("chat_drawer_bottom_bar"), color = containerColor) {
         Row(verticalAlignment = Alignment.Top) {
             ChatDrawerNavigation.section(ChatDrawerNavigationSection.Bottom).forEach { item ->
                 val isSelected = item.id == selectedItem
                 val contentColor = if (isSelected) colors.onSecondaryContainer else colors.onSurfaceVariant
                 Column(
-                    Modifier.weight(1f).heightIn(min = 64.dp)
+                    Modifier.weight(1f).heightIn(min = 48.dp)
                         .semantics { selected = isSelected }
                         .clickable(role = Role.Button) {
                             if (item.id == "more") showMore = true
                             else item.destination(currentAssistantId)?.let(onNavigate)
                         }
-                        .padding(vertical = 6.dp),
+                        .padding(vertical = 4.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Box(
-                        Modifier.size(width = 56.dp, height = 32.dp)
+                        Modifier.size(width = 48.dp, height = 24.dp)
                             .then(if (isSelected) Modifier.background(colors.secondaryContainer, RoundedCornerShape(50)) else Modifier),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(item.icon, null, Modifier.size(24.dp), tint = contentColor)
+                        Icon(item.icon, null, Modifier.size(20.dp), tint = contentColor)
                     }
                     Text(item.title, style = MaterialTheme.typography.labelSmall.copy(
                         lineBreak = LineBreak.Heading,

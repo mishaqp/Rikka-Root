@@ -13,6 +13,9 @@ import me.rerere.ai.ui.ServerToolStatus
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.entity.ConversationEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
+import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.ui.pages.chat.drawerSelectableConversations
+import me.rerere.rikkahub.ui.pages.chat.drawerToggleAllSelection
 import me.rerere.rikkahub.utils.JsonInstant
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -24,13 +27,16 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import java.time.LocalDate
+import java.time.ZoneId
+import kotlin.uuid.Uuid
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = Application::class, manifest = Config.NONE)
 class DrawerConversationQueryTest {
     private lateinit var database: AppDatabase
     private val assistant = "0950e2dc-9bd5-4801-afa3-aa887aa36b4e"
-    private val today = 1_000_000_000L
+    private val today = LocalDate.of(2026, 5, 21).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
     private val day = 86_400_000L
 
     @Before fun setUp() {
@@ -48,7 +54,7 @@ class DrawerConversationQueryTest {
         assertEquals((0 until 20).map { "chat-$it" }, result.map { it.id })
     }
 
-    @Test fun titleSortingHappensGloballyBeforePaging() = runBlocking {
+    @Test fun titleSortingWithinCalendarDayHappensBeforePaging() = runBlocking {
         repeat(70) { insert(id = "chat-$it", title = "Title ${it.toString().padStart(2, '0')}", update = today + it) }
         val result = load(query(alphabetical = true), size = 20)
         assertEquals((0 until 20).map { "chat-$it" }, result.map { it.id })
@@ -71,14 +77,30 @@ class DrawerConversationQueryTest {
         assertEquals(listOf("folder-chat"), load(query(all = false, folder = "folder")).map { it.id })
     }
 
-    @Test fun dateBucketsStayContiguousWhenSortingByName() = runBlocking {
+    @Test fun calendarDaysStayContiguousWhenSortingByNameIncludingDifferentDaysInTheSameWeek() = runBlocking {
         insert("today-b", title = "B", update = today)
         insert("today-a", title = "A", update = today + 1)
         insert("yesterday-a", title = "A", update = today - 1)
-        insert("week-a", title = "A", update = today - 3 * day)
+        insert("week-tuesday-b", title = "B", update = today - 2 * day)
+        insert("week-tuesday-a", title = "A", update = today - 2 * day + 1)
+        insert("week-monday-a", title = "A", update = today - 3 * day)
+        insert("week-monday-b", title = "B", update = today - 3 * day + 1)
         insert("earlier-a", title = "A", update = today - 8 * day)
-        assertEquals(listOf("today-a", "today-b", "yesterday-a", "week-a", "earlier-a"),
+        insert("earlier-other-a", title = "A", update = today - 9 * day)
+        assertEquals(listOf("today-a", "today-b", "yesterday-a", "week-tuesday-a", "week-tuesday-b",
+            "week-monday-a", "week-monday-b", "earlier-a", "earlier-other-a"),
             load(query(alphabetical = true)).map { it.id })
+    }
+
+    @Test fun calendarDaysFollowTheSelectedChronologicalDirection() = runBlocking {
+        insert("today-early", update = today)
+        insert("today-late", update = today + 1)
+        insert("yesterday", update = today - 1)
+        insert("same-week", update = today - 3 * day)
+        insert("earlier", update = today - 8 * day)
+        val oldest = listOf("earlier", "same-week", "yesterday", "today-early", "today-late")
+        assertEquals(oldest, load(query(oldest = true)).map { it.id })
+        assertEquals(oldest.reversed(), load(query()).map { it.id })
     }
 
     @Test fun pinnedChatsStayInThePinnedSectionUnderAllSortModes() = runBlocking {
@@ -87,6 +109,73 @@ class DrawerConversationQueryTest {
         assertEquals("pinned", load(query()).first().id)
         assertEquals("pinned", load(query(oldest = true)).first().id)
         assertEquals("pinned", load(query(alphabetical = true)).first().id)
+    }
+
+    @Test fun pinnedTitleSortingRemainsAlphabeticalAcrossDifferentCalendarDays() = runBlocking {
+        insert("recent", title = "A", update = today + 1)
+        insert("pinned-recent", title = "Z", update = today, pinned = true)
+        insert("pinned-earlier", title = "A", update = today - 8 * day, pinned = true)
+        assertEquals(listOf("pinned-earlier", "pinned-recent", "recent"),
+            load(query(alphabetical = true)).map { it.id })
+    }
+
+    @Test fun titleSearchFiltersBeforePagingAndMatchesRussianCase() = runBlocking {
+        repeat(65) { insert("home-$it", title = "Дом $it", update = today + it) }
+        repeat(30) { insert("server-$it", title = "Сервер $it", update = today - day - it) }
+        val result = load(query(search = "  СЕРВЕР "), size = 20)
+        assertEquals(20, result.size)
+        assertTrue(result.all { it.title.startsWith("Сервер") })
+        assertEquals(emptyList<DrawerConversationEntity>(), load(query(search = "нет такого чата")))
+    }
+
+    @Test fun titleSearchTreatsGlobCharactersAndQuotesAsLiteralText() = runBlocking {
+        insert("literal", title = "Файл [1]*? 'готов'")
+        insert("other", title = "Файл 11 любой")
+        assertEquals(listOf("literal"), load(query(search = "[1]*? 'готов'")).map { it.id })
+        assertEquals(listOf("literal"), load(query(search = "]")).map { it.id })
+    }
+
+    @Test fun unicodeLiteralSearchMatchesExactlyTheSameRowsInSqlAndSelectAll() = runBlocking {
+        val titles = listOf("σ", "Σ", "ς", "i", "I", "ı", "İ", "s", "S", "ſ", "😀", "𐐀", "𐐨", "[x]*?", "axxx")
+        val models = titles.mapIndexed { index, title ->
+            Conversation(id = Uuid.parse("61000000-0000-0000-0000-${(index + 1).toString().padStart(12, '0')}"),
+                assistantId = Uuid.parse(assistant), title = title, messageNodes = emptyList())
+        }
+        models.forEach { insert(it.id.toString(), title = it.title) }
+        val expected = mapOf(
+            "σ" to setOf("σ", "Σ"), "ς" to setOf("ς", "Σ"),
+            "I" to setOf("i", "I"), "ı" to setOf("ı", "I"), "İ" to setOf("i", "İ"),
+            "s" to setOf("s", "S"), "ſ" to setOf("ſ", "S"),
+            "😀" to setOf("😀"), "𐐀" to setOf("𐐀"), "𐐨" to setOf("𐐨"), "[x]*?" to setOf("[x]*?"),
+        )
+        expected.forEach { (search, expectedTitles) ->
+            val sql = load(query(search = search))
+            val candidates = drawerSelectableConversations(models, search, true, null)
+            val selected = drawerToggleAllSelection(emptyMap(), candidates).values
+            assertEquals("SQL $search", expectedTitles, sql.map { it.title }.toSet())
+            assertEquals("Select-all $search", expectedTitles, selected.map { it.title }.toSet())
+            assertEquals("Visible ids $search", sql.map { it.id }.toSet(), selected.map { it.id.toString() }.toSet())
+        }
+    }
+
+    @Test fun unicodeFilteredPagingAndSelectAllExcludeEveryInvisibleCaseVariant() = runBlocking {
+        val models = (0 until 100).map { index ->
+            Conversation(id = Uuid.parse("62000000-0000-0000-0000-${(index + 1).toString().padStart(12, '0')}"),
+                assistantId = Uuid.parse(assistant), title = if (index < 70) "Чат ς $index" else "Чат σ $index",
+                messageNodes = emptyList())
+        }
+        models.forEachIndexed { index, item ->
+            insert(item.id.toString(), title = item.title, update = if (index < 70) today + day else today - day - index)
+        }
+        val visiblePage = load(query(search = "σ"), size = 20)
+        val allVisible = load(query(search = "σ"), size = 100)
+        val selected = drawerToggleAllSelection(emptyMap(), drawerSelectableConversations(models, "σ", true, null))
+        assertEquals(20, visiblePage.size)
+        assertEquals(30, allVisible.size)
+        assertEquals(30, selected.size)
+        assertTrue(visiblePage.all { it.title.contains("σ") })
+        assertTrue(selected.values.none { it.title.contains("ς") })
+        assertEquals(allVisible.map { it.id }.toSet(), selected.keys.map { it.toString() }.toSet())
     }
 
     @Test fun previewUsesTheLatestTextFromTheSelectedBranch() = runBlocking {
@@ -275,11 +364,11 @@ class DrawerConversationQueryTest {
     }
 
     private fun query(oldest: Boolean = false, alphabetical: Boolean = false, all: Boolean = true,
-        folder: String? = null, previews: Boolean = true): SimpleSQLiteQuery = drawerConversationQuery(
+        folder: String? = null, previews: Boolean = true, search: String = ""): SimpleSQLiteQuery = drawerConversationQuery(
         assistantId = assistant, folderId = folder, includeAllFolders = all,
         sortByCreateTime = false, oldestFirst = oldest, alphabetical = alphabetical,
         todayMillis = today, yesterdayMillis = today - day, weekStartMillis = today - 4 * day,
-        includePreviews = previews,
+        includePreviews = previews, searchQuery = search,
     )
 
     private suspend fun load(query: SimpleSQLiteQuery, size: Int = 40): List<DrawerConversationEntity> {

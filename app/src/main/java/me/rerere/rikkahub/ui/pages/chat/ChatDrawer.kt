@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.pages.chat
 
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -108,6 +109,8 @@ fun ChatDrawerContent(
     settings: Settings,
     current: Conversation,
     isOpen: Boolean = true,
+    onRequestOpen: () -> Unit = {},
+    onRequestClose: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -121,6 +124,15 @@ fun ChatDrawerContent(
     LaunchedEffect(drawerVm, isOpen) { if (isOpen) drawerVm.refreshDateGrouping() }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { drawerVm.refreshDateGrouping() }
     val conversations = drawerVm.conversations.collectAsLazyPagingItems()
+    val searchQuery by drawerVm.searchQuery.collectAsStateWithLifecycle()
+    var reopenPending by remember(current.id) { mutableStateOf(drawerVm.hasOpenRequestFor(current.id)) }
+    LaunchedEffect(isOpen) { if (isOpen) reopenPending = false }
+    LaunchedEffect(current.id) {
+        if (drawerVm.hasOpenRequestFor(current.id)) {
+            onRequestOpen()
+            drawerVm.consumeOpenRequest()
+        }
+    }
     val folders by drawerVm.folders.collectAsStateWithLifecycle()
     val selectedFolderId by drawerVm.selectedFolderId.collectAsStateWithLifecycle()
     val conversationListState = rememberLazyListState(
@@ -191,8 +203,91 @@ fun ChatDrawerContent(
     val showAllFolders by drawerVm.showAllFolders.collectAsStateWithLifecycle()
     val presentationSort by drawerVm.presentationSort.collectAsStateWithLifecycle()
     var conversationToRename by remember { mutableStateOf<Conversation?>(null) }
+    var selectionMode by remember(settings.assistantId) { mutableStateOf(false) }
+    var selectedConversations by remember(settings.assistantId) { mutableStateOf(emptyMap<Uuid, Conversation>()) }
+    var selectionCandidates by remember(settings.assistantId) { mutableStateOf(emptyList<Conversation>()) }
+    var showBatchDeleteDialog by remember(settings.assistantId) { mutableStateOf(false) }
+    var showBatchMoveSheet by remember(settings.assistantId) { mutableStateOf(false) }
+    var batchMoving by remember(settings.assistantId) { mutableStateOf(emptyList<Conversation>()) }
+    fun exitSelection() { selectionMode = false; selectedConversations = emptyMap() }
+    fun navigateChat(id: Uuid? = null, keepOpen: Boolean = false) {
+        if (keepOpen && id == current.id) return
+        if (keepOpen) drawerVm.requestOpenOnNextChat(current.id) else {
+            drawerVm.consumeOpenRequest()
+            onRequestClose()
+        }
+        navigateToChatPage(navController, id ?: Uuid.random())
+    }
+    BackHandler(enabled = isOpen && selectionMode) { exitSelection() }
+    LaunchedEffect(isOpen) { if (!isOpen) exitSelection() }
+    LaunchedEffect(selectionMode, settings.assistantId, searchQuery, showAllFolders, selectedFolderId) {
+        if (selectionMode) repo.getConversationsOfAssistant(settings.assistantId).collectLatest { live ->
+            val byId = live.associateBy { it.id }
+            selectedConversations = selectedConversations.keys.mapNotNull { byId[it] }.associateBy { it.id }
+            selectionCandidates = drawerSelectableConversations(live, searchQuery, showAllFolders, selectedFolderId)
+        }
+    }
+    val allSelected = selectionCandidates.isNotEmpty() && selectionCandidates.all { it.id in selectedConversations }
+    val batchFailureMessage = stringResource(R.string.moru_drawer_batch_failed)
     val deleteFolderGeneratingMessage = stringResource(R.string.chat_page_delete_folder_generating)
     ChatDrawerFrame {
+        ChatDrawerTopArea {
+            BackupReminderCard(settings, onClick = { navController.navigate(Screen.Backup) })
+            if (selectionMode) ChatDrawerSelectionHeader(
+                selectedCount = selectedConversations.size, allSelected = allSelected,
+                onCancel = { exitSelection() },
+                onToggleSelectAll = {
+                    selectedConversations = drawerToggleAllSelection(selectedConversations,
+                        selectionCandidates.filterNot { it.id in pendingRemovalIds })
+                },
+            ) else ChatDrawerSearchBar(onNavigate = { navController.navigate(it) },
+                onNewChat = { navigateChat() }, query = searchQuery, onQueryChange = { drawerVm.setSearchQuery(it) })
+            ChatDrawerAssistantCard(
+                settings = settings,
+                onUpdateSettings = { updated ->
+                    val selectedId = updated(settings).assistantId
+                    val updateJob = vm.updateSettings(updated)
+                    scope.launch {
+                        updateJob.join()
+                        val id = if (settings.displaySetting.newChatOnAssistantSwitch
+                            ?: context.readBooleanPreference("create_new_conversation_on_start", true)) {
+                            Uuid.random()
+                        } else {
+                            repo.getConversationsOfAssistant(selectedId).first().firstOrNull()?.id ?: Uuid.random()
+                        }
+                        navigateChat(id, settings.displaySetting.keepSidebarOpenOnAssistantTap)
+                    }
+                },
+                onNavigate = { navController.navigate(it) },
+                isDrawerOpen = isOpen || reopenPending,
+                initiallyExpanded = drawerVm.assistantPickerExpanded,
+                onExpansionChange = { drawerVm.assistantPickerExpanded = it },
+            )
+            ChatDrawerFolderControls(
+                sort = { ConversationSortButton(
+                    presentationSort = presentationSort,
+                    onPresentationSortChange = {
+                        drawerVm.setPresentationSort(it)
+                        scope.launch { conversationListState.scrollToItem(0) }
+                    },
+                    sortOrder = settings.displaySetting.conversationSortOrder,
+                    onSortOrderChange = { sortOrder ->
+                        vm.updateSettings { current -> current.copy(displaySetting = current.displaySetting.copy(conversationSortOrder = sortOrder)) }
+                        scope.launch { conversationListState.scrollToItem(0) }
+                    },
+                ) },
+                folders = { FolderBar(
+                folders = folders, selectedFolderId = selectedFolderId,
+                showAll = showAllFolders,
+                onSelectAll = { drawerVm.selectAllFolders() },
+                onSelect = { drawerVm.selectFolder(it) },
+                onCreate = { showCreateFolderDialog = true },
+                onRename = { folderToRename = it },
+                onDelete = { folderToDelete = it },
+                modifier = Modifier.fillMaxWidth(),
+            ) },
+            )
+        }
         ConversationList(
             current = current,
             conversations = conversations,
@@ -202,65 +297,20 @@ fun ChatDrawerContent(
             folderSelected = !showAllFolders,
             rowMetadata = currentRowMetadata,
             modifier = Modifier.fillMaxWidth().weight(1f),
-            headerContent = {
-                ChatDrawerTopArea {
-                    ChatDrawerHeader(
-                        settings = settings,
-                        onEditNickname = { nicknameEditState.open(settings.displaySetting.userNickname) },
-                        onUpdateAvatar = { avatar ->
-                            vm.updateSettings { current -> current.copy(displaySetting = current.displaySetting.copy(userAvatar = avatar)) }
-                        },
-                        onNavigate = { navController.navigate(it) },
-                        showUpdateStatus = updateChecksEnabled && !isPlayStore,
-                    )
-                    BackupReminderCard(settings, onClick = { navController.navigate(Screen.Backup) })
-                    ChatDrawerSearchBar(onNavigate = { navController.navigate(it) },
-                        onNewChat = { navigateToChatPage(navController) })
-                    ChatDrawerAssistantCard(
-                        settings = settings,
-                        onUpdateSettings = { updated ->
-                            val selectedId = updated(settings).assistantId
-                            val updateJob = vm.updateSettings(updated)
-                            scope.launch {
-                                updateJob.join()
-                                val id = if (context.readBooleanPreference("create_new_conversation_on_start", true)) {
-                                    Uuid.random()
-                                } else {
-                                    repo.getConversationsOfAssistant(selectedId).first().firstOrNull()?.id ?: Uuid.random()
-                                }
-                                navigateToChatPage(navController, id)
-                            }
-                        },
-                        onNavigate = { navController.navigate(it) },
-                    )
-                    ChatDrawerFolderControls(
-                        sort = { ConversationSortButton(
-                            presentationSort = presentationSort,
-                            onPresentationSortChange = {
-                                drawerVm.setPresentationSort(it)
-                                scope.launch { conversationListState.scrollToItem(0) }
-                            },
-                            sortOrder = settings.displaySetting.conversationSortOrder,
-                            onSortOrderChange = { sortOrder ->
-                                vm.updateSettings { current -> current.copy(displaySetting = current.displaySetting.copy(conversationSortOrder = sortOrder)) }
-                                scope.launch { conversationListState.scrollToItem(0) }
-                            },
-                        ) },
-                        folders = { FolderBar(
-                        folders = folders, selectedFolderId = selectedFolderId,
-                        showAll = showAllFolders,
-                        onSelectAll = { drawerVm.selectAllFolders() },
-                        onSelect = { drawerVm.selectFolder(it) },
-                        onCreate = { showCreateFolderDialog = true },
-                        onRename = { folderToRename = it },
-                        onDelete = { folderToDelete = it },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) },
-                    )
-                }
+            selectionMode = selectionMode,
+            selectedConversationIds = selectedConversations.keys,
+            onToggleSelection = { conversation ->
+                selectedConversations = if (conversation.id in selectedConversations) selectedConversations - conversation.id
+                    else selectedConversations + (conversation.id to conversation)
             },
+            onStartSelection = { conversation ->
+                selectionMode = true
+                selectedConversations = mapOf(conversation.id to conversation)
+            },
+            searchQuery = searchQuery,
+            showDates = settings.displaySetting.showChatListDate,
             onNewChat = { navigateToChatPage(navController) },
-            onClick = { navigateToChatPage(navController, it.id) },
+            onClick = { navigateChat(it.id, settings.displaySetting.keepSidebarOpenOnTopicTap) },
             onRename = { conversationToRename = it },
             onRegenerateTitle = { conversation ->
                 if (settings.hasFastModelTarget()) {
@@ -288,7 +338,12 @@ fun ChatDrawerContent(
                             commit = {
                                 withContext(Dispatchers.IO) { repo.deleteConversation(conversation) }
                                 conversations.refresh()
-                                if (scope.isActive && conversation.id == latestCurrentId) navigateToChatPage(navController)
+                                if (scope.isActive && conversation.id == latestCurrentId) {
+                                    val next = if (settings.displaySetting.newChatAfterDelete) null else
+                                        repo.getConversationsOfAssistant(settings.assistantId).first()
+                                            .firstOrNull { it.id != conversation.id }?.id
+                                    navigateChat(next)
+                                }
                             },
                         )
                     } catch (cancelled: CancellationException) {
@@ -303,7 +358,70 @@ fun ChatDrawerContent(
             onMoveToFolder = { conversationToMoveFolder = it; showMoveToFolderSheet = true },
         )
         SnackbarHost(snackbarHostState, Modifier.padding(horizontal = 8.dp))
-        ChatDrawerBottomBar(settings.assistantId.toString(), onNavigate = { navController.navigate(it) })
+        if (selectionMode) ChatDrawerSelectionActionBar(
+            selectedCount = selectedConversations.size,
+            allSelectedPinned = selectedConversations.isNotEmpty() && selectedConversations.values.all { it.isPinned },
+            onPin = {
+                val unpin = selectedConversations.values.all { it.isPinned }
+                selectedConversations.values.filter { it.isPinned == unpin }.forEach { vm.updatePinnedStatus(it) }
+                exitSelection()
+            },
+            onMove = { batchMoving = selectedConversations.values.toList(); showBatchMoveSheet = true },
+            onDelete = { showBatchDeleteDialog = true },
+        ) else {
+            Box(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                ChatDrawerHeader(
+                    settings = settings,
+                    onEditNickname = { nicknameEditState.open(settings.displaySetting.userNickname) },
+                    onUpdateAvatar = { avatar ->
+                        vm.updateSettings { current -> current.copy(displaySetting = current.displaySetting.copy(userAvatar = avatar)) }
+                    },
+                    onNavigate = { navController.navigate(it) },
+                    showUpdateStatus = updateChecksEnabled && !isPlayStore,
+                )
+            }
+            ChatDrawerBottomBar(settings.assistantId.toString(), onNavigate = { navController.navigate(it) })
+        }
+    }
+
+    if (showBatchDeleteDialog) {
+        AlertDialog(onDismissRequest = { showBatchDeleteDialog = false },
+            title = { Text(stringResource(R.string.moru_drawer_delete_selected_title)) },
+            text = { Text(stringResource(R.string.moru_drawer_delete_selected_message, selectedConversations.size)) },
+            confirmButton = {
+                TextButton(enabled = selectedConversations.isNotEmpty(), onClick = {
+                    val targets = selectedConversations.values.toList()
+                    showBatchDeleteDialog = false
+                    scope.launch {
+                        try {
+                            withContext(Dispatchers.IO) { targets.forEach { repo.deleteConversation(it) } }
+                            conversations.refresh()
+                            exitSelection()
+                            if (targets.any { it.id == latestCurrentId }) {
+                                val next = if (settings.displaySetting.newChatAfterDelete) null else
+                                    repo.getConversationsOfAssistant(settings.assistantId).first()
+                                        .firstOrNull { remaining -> targets.none { it.id == remaining.id } }?.id
+                                navigateChat(next)
+                            }
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { snackbarHostState.showSnackbar(batchFailureMessage) }
+                    }
+                }) { Text(stringResource(R.string.chat_page_delete)) }
+            },
+            dismissButton = { TextButton(onClick = { showBatchDeleteDialog = false }) { Text(stringResource(R.string.chat_page_cancel)) } },
+        )
+    }
+    if (showBatchMoveSheet) {
+        ModalBottomSheet(onDismissRequest = { showBatchMoveSheet = false; batchMoving = emptyList() }) {
+            Text(stringResource(R.string.moru_drawer_move_selected_title), Modifier.padding(16.dp),
+                style = MaterialTheme.typography.titleLarge)
+            TextButton(onClick = { showBatchMoveSheet = false; showMoveToFolderSheet = true }) {
+                Text(stringResource(R.string.moru_drawer_move_selected_folder))
+            }
+            TextButton(onClick = { showBatchMoveSheet = false; showMoveToAssistantSheet = true }) {
+                Text(stringResource(R.string.moru_drawer_move_selected_assistant))
+            }
+        }
     }
 
     conversationToRename?.let { conversation ->
@@ -367,6 +485,12 @@ fun ChatDrawerContent(
     // 移动到文件夹 Bottom Sheet
     if (showMoveToFolderSheet) {
         val doMove: (Uuid?) -> Unit = { folderId ->
+            if (batchMoving.isNotEmpty()) {
+                batchMoving.forEach { drawerVm.moveConversationToFolder(it.id, folderId) }
+                batchMoving = emptyList()
+                exitSelection()
+                scope.launch { folderSheetState.hide(); showMoveToFolderSheet = false; conversations.refresh() }
+            }
             conversationToMoveFolder?.let { conversation ->
                 drawerVm.moveConversationToFolder(conversation.id, folderId)
                 scope.launch {
@@ -381,6 +505,7 @@ fun ChatDrawerContent(
             onDismissRequest = {
                 showMoveToFolderSheet = false
                 conversationToMoveFolder = null
+                batchMoving = emptyList()
             },
             sheetState = folderSheetState
         ) {
@@ -556,6 +681,7 @@ fun ChatDrawerContent(
             onDismissRequest = {
                 showMoveToAssistantSheet = false
                 conversationToMove = null
+                batchMoving = emptyList()
             },
             sheetState = bottomSheetState
         ) {
@@ -580,6 +706,12 @@ fun ChatDrawerContent(
                             assistant = assistant,
                             isCurrentAssistant = assistant.id == conversationToMove?.assistantId,
                             onClick = {
+                                if (batchMoving.isNotEmpty()) {
+                                    batchMoving.forEach { vm.moveConversationToAssistant(it, assistant.id) }
+                                    batchMoving = emptyList()
+                                    exitSelection()
+                                    scope.launch { bottomSheetState.hide(); showMoveToAssistantSheet = false; conversations.refresh() }
+                                }
                                 conversationToMove?.let { conversation ->
                                     vm.moveConversationToAssistant(conversation, assistant.id)
                                     scope.launch {
