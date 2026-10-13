@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.pages.chat
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -23,7 +24,9 @@ import me.rerere.rikkahub.ui.theme.LocalAmoledDarkMode
 internal fun ChatDrawerFrame(content: @Composable ColumnScope.() -> Unit) {
     val width = minOf(LocalConfiguration.current.screenWidthDp.dp * .75f, 320.dp)
     val colors = MaterialTheme.colorScheme
-    ModalDrawerSheet(modifier = Modifier.width(width).testTag("chat_drawer_sheet"),
+    // Material3 requests focus when the drawer opens. Keep that initial focus on
+    // the pane so its first text field only starts the IME after an explicit tap/Tab.
+    ModalDrawerSheet(modifier = Modifier.width(width).testTag("chat_drawer_sheet").focusable(),
         drawerContainerColor = if (LocalAmoledDarkMode.current) colors.background else colors.surface,
         drawerContentColor = colors.onSurface) {
         Column(Modifier.fillMaxSize(), content = content)

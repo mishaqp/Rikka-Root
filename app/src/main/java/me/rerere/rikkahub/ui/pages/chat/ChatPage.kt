@@ -137,12 +137,11 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         }
     }
 
-    // Clear input focus so popup transitions cannot reopen the keyboard.
+    // The drawer remains composed while hidden: clear its search focus on close
+    // as well, otherwise Android keeps the search IME open over the conversation.
     LaunchedEffect(drawerState.isOpen) {
-        if (drawerState.isOpen) {
-            focusManager.clearFocus(force = true)
-            softwareKeyboardController?.hide()
-        }
+        focusManager.clearFocus(force = true)
+        softwareKeyboardController?.hide()
     }
 
     val windowAdaptiveInfo = currentWindowDpSize()

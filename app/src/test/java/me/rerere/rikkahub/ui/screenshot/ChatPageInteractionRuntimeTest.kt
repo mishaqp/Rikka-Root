@@ -12,11 +12,20 @@ import androidx.compose.ui.Modifier
 import com.dokar.sonner.Toaster
 import com.dokar.sonner.rememberToasterState
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
 import io.mockk.every
 import io.mockk.mockk
@@ -126,6 +135,44 @@ class ChatPageInteractionRuntimeTest {
         assertEquals(BrowserActivity::class.java.name, intent.component?.className)
         assertEquals(fixture.conversation.id.toString(), intent.getStringExtra(BrowserActivity.EXTRA_CONVERSATION_ID))
         assertEquals(emptyList<androidx.navigation3.runtime.NavKey>(), navigation)
+    }
+
+    @Test fun openingDrawerDoesNotStartTypingWithoutTappingTheSearchField() {
+        render()
+        compose.onNodeWithTag("chat_input").assertIsNotFocused()
+        compose.onNodeWithContentDescription("Открыть список чатов").performClick()
+        compose.onNodeWithTag("chat_drawer_topic_search").assertIsDisplayed().assertIsNotFocused()
+        compose.onNodeWithTag("chat_input").assertIsNotFocused()
+        // The pane has a neutral initial focus; keyboard navigation still enters search.
+        compose.onNodeWithTag("chat_drawer_sheet").assertIsFocused().performKeyInput { pressKey(Key.Tab) }
+        compose.onNodeWithTag("chat_drawer_topic_search").assertIsFocused()
+    }
+
+    @Test fun closingDrawerEndsSearchFocusAndReopeningDoesNotRestoreIt() {
+        render()
+        compose.onNodeWithContentDescription("Открыть список чатов").performClick()
+        compose.onNodeWithTag("chat_drawer_topic_search").performClick().performTextReplacement("Проверка")
+        compose.onNodeWithTag("chat_drawer_topic_search").assertIsFocused()
+        // Touch the actual modal scrim; this goes through the same close action as on the phone.
+        compose.onNodeWithTag("chat_header_bar").performTouchInput { click(Offset(width - 4f, height / 2f)) }
+        compose.onNodeWithTag("chat_drawer_topic_search").assertIsNotFocused()
+        compose.onNodeWithTag("chat_input").assertIsNotFocused()
+        compose.onNodeWithContentDescription("Открыть список чатов").performClick()
+        compose.onNodeWithTag("chat_drawer_topic_search").assertIsDisplayed().assertIsNotFocused()
+        compose.onNodeWithTag("chat_drawer_topic_search").performClick().assertIsFocused()
+        compose.onNodeWithText("Проверка", useUnmergedTree = true).assertExists()
+    }
+
+    @Test fun openingDrawerEndsComposerFocusAndComposerStillAcceptsExplicitTypingAfterClosing() {
+        render()
+        compose.onNodeWithTag("chat_input").performClick().performTextReplacement("Черновик")
+        compose.onNodeWithTag("chat_input").assertIsFocused()
+        compose.onNodeWithContentDescription("Открыть список чатов").performClick()
+        compose.onNodeWithTag("chat_input").assertIsNotFocused()
+        compose.onNodeWithTag("chat_drawer_topic_search").assertIsNotFocused()
+        compose.onNodeWithTag("chat_header_bar").performTouchInput { click(Offset(width - 4f, height / 2f)) }
+        compose.onNodeWithTag("chat_input").assertIsNotFocused().performClick().assertIsFocused()
+        compose.runOnIdle { assertEquals("Черновик", fixture.vm.inputState.textContent.text.toString()) }
     }
 
     @Test fun insertSuggestionChangesActualComposerAndExitsEditingWithoutSending() {
