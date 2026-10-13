@@ -132,14 +132,30 @@ class ChatPageInteractionRuntimeTest {
         settings.value = settings.value.copy(displaySetting = settings.value.displaySetting.copy(insertSuggestionOnly = true))
         val input = fixture.vm.inputState
         input.editingMessage = Uuid.random()
-        input.setContents(listOf(UIMessagePart.Text("Редактируемый ответ")))
+        input.setContents(listOf(UIMessagePart.Text("Редактируемый ответ"),
+            UIMessagePart.Reasoning("Мышление редактируемого ответа"),
+            UIMessagePart.Tool("old-tool", "search_web", "{}", output = listOf(UIMessagePart.Text("Результат")))))
         render()
         compose.onNodeWithText(SUGGESTION).assertIsDisplayed().performClick()
         compose.runOnIdle {
             assertEquals(SUGGESTION, input.textContent.text.toString())
             assertNull(input.editingMessage)
+            assertEquals("Leaving an assistant edit must not copy its tool/reasoning parts into a new user draft",
+                listOf(UIMessagePart.Text(SUGGESTION)), input.getContents())
         }
         compose.onNodeWithTag("chat_input").assertIsDisplayed()
+        verify(exactly = 0) { fixture.vm.handleMessageSend(any(), any()) }
+    }
+
+    @Test fun insertingSuggestionPreservesAttachmentsOfAnOrdinaryDraft() {
+        settings.value = settings.value.copy(displaySetting = settings.value.displaySetting.copy(insertSuggestionOnly = true))
+        val attachment = UIMessagePart.Document("content://fixture/draft", "Черновик.txt", "text/plain")
+        val input = fixture.vm.inputState
+        input.setMessageText("Обычный черновик")
+        input.messageContent = listOf(attachment)
+        render()
+        compose.onNodeWithText(SUGGESTION).performClick()
+        compose.runOnIdle { assertEquals(listOf(UIMessagePart.Text(SUGGESTION), attachment), input.getContents()) }
         verify(exactly = 0) { fixture.vm.handleMessageSend(any(), any()) }
     }
 
@@ -181,6 +197,25 @@ class ChatPageInteractionRuntimeTest {
         compose.onNodeWithText("Источник перевода").assertIsDisplayed().performClick()
         assertEquals("Translated citations must reach the browser like original citations",
             "https://example.com/source", shadowOf(RuntimeEnvironment.getApplication()).nextStartedActivity?.dataString)
+    }
+
+    @Test fun translatedCitationUsesUpdatedSearchResultOnTheMountedMessage() {
+        prepareSearchCitation()
+        render()
+        compose.onNodeWithText("Источник перевода").performClick()
+        assertEquals("https://example.com/source", shadowOf(RuntimeEnvironment.getApplication()).nextStartedActivity?.dataString)
+        compose.runOnIdle {
+            val conversation = fixture.conversationFlow.value
+            val node = conversation.messageNodes.single()
+            val message = node.currentMessage
+            fixture.conversationFlow.value = conversation.copy(messageNodes = listOf(node.copy(messages = listOf(message.copy(
+                parts = message.parts.map { part ->
+                    if (part is UIMessagePart.Tool) part.copy(output = listOf(UIMessagePart.Text(
+                        """{"items":[{"id":"source","url":"https://example.com/updated","title":"Новый источник"}]}"""))) else part
+                })))))
+        }
+        compose.onNodeWithText("Источник перевода").performClick()
+        assertEquals("https://example.com/updated", shadowOf(RuntimeEnvironment.getApplication()).nextStartedActivity?.dataString)
     }
 
     private fun prepareSearchCitation() {

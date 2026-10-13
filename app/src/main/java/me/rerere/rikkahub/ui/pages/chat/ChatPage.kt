@@ -505,7 +505,7 @@ private fun ChatPageContent(
                     vm.saveConversationAsync()
                 },
                 onClickSuggestion = { suggestion ->
-                    inputState.editingMessage = null
+                    if (inputState.isEditing()) inputState.clearInput()
                     inputState.setMessageText(suggestion)
                 },
                 // Moru's default tap: send the suggestion as the next message (opt-in via settings).

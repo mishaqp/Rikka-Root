@@ -20,7 +20,9 @@ class ChatFunctionChecklistTest(
     private val required: List<String>,
 ) {
     @Test fun productionUiAndCallbackRemainConnected() {
-        val body = ChatProductionSource.canonical(ChatProductionSource.function(path, function))
+        val body = ChatProductionSource.canonical(function.split("+").joinToString("\n") {
+            ChatProductionSource.function(path, it.trim())
+        })
         required.forEach { fragment ->
             assertTrue("$action lost production UI/callback in $path::$function: $fragment", body.contains(ChatProductionSource.canonical(fragment)))
         }
@@ -58,7 +60,7 @@ class ChatFunctionChecklistTest(
             row("video audio document open local files", MESSAGE + "ChatMessage.kt", "MessagePartsBlock", "is UIMessagePart.Video", "is UIMessagePart.Audio", "is UIMessagePart.Document", "ChatMessageMediaTile(", "ChatMessageFileChip(", "onClick = { context.openLocalFile(part.url) }"),
             row("image zoom viewer", MESSAGE + "ChatMessage.kt", "MessagePartsBlock", "is UIMessagePart.Image", "ZoomableAsyncImage(", "model = part.url"),
             row("citations expand and open links", MESSAGE + "ChatMessageCitations.kt", "ChatMessageCitations", "onClick = { showSources = true }", "ModalBottomSheet(", "onDismissRequest = { showSources = false }", "onOpen = { uriHandler.openUri(annotation.url) }"),
-            row("inline search citation opens matching URL", MESSAGE + "ChatMessage.kt", "MessagePartsBlock", "part.toolName == \"search_web\" && part.isExecuted", "if (citationId == id)", "context.openUrl(url)", "onClickCitation = handleClickCitation"),
+            row("inline search citation opens matching URL", MESSAGE + "ChatMessage.kt", "MessagePartsBlock + rememberSearchCitationHandler", "val handleClickCitation = rememberSearchCitationHandler(parts)", "part.toolName == \"search_web\" && part.isExecuted", "if (citationId == id)", "context.openUrl(url)", "onClickCitation = handleClickCitation"),
             row("translation language picker and clear entry", MESSAGE + "ChatMessageTranslation.kt", "LanguageSelectionDialog", "onLanguageSelected(language)", "onClearTranslation()", "R.string.translation_clear"),
             row("collapse and expand translation", MESSAGE + "ChatMessageTranslation.kt", "CollapsibleTranslationText", ".clickable(", "onClick = { isCollapsed = !isCollapsed }", "R.string.expand_translation", "R.string.collapse_translation"),
             row("tool approvals four choices and denial reason", MESSAGE + "ChatMessageTools.kt", "ChatMessageToolStep", "listOf(ToolApprovalAction.Once, ToolApprovalAction.Deny)", "listOf(ToolApprovalAction.ChatScope, ToolApprovalAction.Always)", "IconButton(", "onToolApproval(tool.toolCallId, action.approved, \"\", action.scope, tool.toolName)", "ToolDenyReasonDialog(", "onToolApproval(tool.toolCallId, false, reason, ApprovalScope.Once, tool.toolName)"),
@@ -132,7 +134,7 @@ class ChatFunctionChecklistTest(
             row("selection cancel select all and export confirm", CHAT + "ChatList.kt", "ChatListNormal", "HorizontalFloatingToolbar(", "selecting = false selectedItems.clear()", "if (selectedItems.isNotEmpty()) { selectedItems.clear() } else { selectedItems.addAll(conversation.messageNodes.map { it.id }) }", "if (messages.isNotEmpty()) { showExportSheet = true }", "ChatExportSheet("),
             row("Markdown export", CHAT + "ConversationExport.kt", "ChatExportSheet", "OutlinedCard( onClick = { exportToMarkdown(context, conversation, selectedMessages, exportOptions)"),
             row("image export and reasoning options", CHAT + "ConversationExport.kt", "ChatExportSheet", "exportOptions = exportOptions.copy(includeReasoning = it)", "enabled = exportOptions.includeReasoning", "exportOptions = exportOptions.copy(expandReasoning = it)", "exportToImage("),
-            row("suggestion fills input", CHAT + "ChatPage.kt", "ChatPageContent", "onClickSuggestion = { suggestion -> inputState.editingMessage = null inputState.setMessageText(suggestion) }"),
+            row("suggestion fills input", CHAT + "ChatPage.kt", "ChatPageContent", "onClickSuggestion = { suggestion -> if (inputState.isEditing()) inputState.clearInput() inputState.setMessageText(suggestion) }"),
             row("conversation system prompt edit", CHAT + "ChatList.kt", "ChatListNormal", "assistant?.allowConversationSystemPrompt == true", "ConversationSystemPromptButton(", "onSystemPromptChange = onConversationSystemPromptChange"),
             row("conversation system prompt expand save and reset", CHAT + "ConversationSystemPromptCard.kt", "ConversationSystemPromptButton", "onClick = { expanded = !expanded }", "onSystemPromptChange(null)", "onSystemPromptChange(editText.ifBlank { null })"),
             row("message scroll jumper", CHAT + "ChatList.kt", "MessageJumper", "state.scrollToItem(0)", "state.scrollToItem(state.layoutInfo.totalItemsCount - 1)", "R.string.chat_page_scroll_to_bottom"),
