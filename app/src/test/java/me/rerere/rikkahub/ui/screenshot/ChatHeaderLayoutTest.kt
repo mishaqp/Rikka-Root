@@ -65,7 +65,7 @@ class ChatHeaderLayoutTest(private val width: Int, private val fontScale: Float)
         assertTrue("A short identity wraps its content instead of filling the middle", identity.width < actions.left - leading.right)
         val avatar = compose.onNodeWithTag("chat_header_avatar").fetchSemanticsNode().boundsInRoot
         val title = compose.onNodeWithText("Чат", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-        assertEquals("Center the visible avatar and text without spare title width", (leading.right + actions.left) / 2f, (avatar.left + title.right) / 2f, 1f)
+        assertEquals("Center the visible avatar and text without spare title width", expectedIdentityCenter(), (avatar.left + title.right) / 2f, 1f)
         assertAvatarAndHeaderSize()
     }
 
@@ -113,9 +113,29 @@ class ChatHeaderLayoutTest(private val width: Int, private val fontScale: Float)
         val identity = compose.onNodeWithTag("chat_header_identity").fetchSemanticsNode().boundsInRoot
         val leading = compose.onNodeWithTag("chat_header_leading").fetchSemanticsNode().boundsInRoot
         val actions = compose.onNodeWithTag("chat_header_actions").fetchSemanticsNode().boundsInRoot
-        assertEquals("Center the whole avatar/title group in the available space", (leading.right + actions.left) / 2f, identity.center.x, 1f)
-        assertTrue("The identity must stay clear of navigation", identity.left >= leading.right)
-        assertTrue("The identity must stay clear of menu and new chat", identity.right <= actions.left)
+        assertEquals("Center the whole avatar/title group in the available space", expectedIdentityCenter(), identity.center.x, 1f)
+        if (identityOnSecondLine()) {
+            // Moru: with a workspace the capsule owns the bar and the name is a quiet line below it.
+            val bar = compose.onNodeWithTag("chat_header_bar").fetchSemanticsNode().boundsInRoot
+            assertTrue("The identity sits below the bar", identity.top >= bar.bottom - 0.5f)
+            assertTrue("The identity stays inside the screen", identity.left >= 0f && identity.right <= width)
+        } else {
+            assertTrue("The identity must stay clear of navigation", identity.left >= leading.right)
+            assertTrue("The identity must stay clear of menu and new chat", identity.right <= actions.left)
+        }
+    }
+
+    private fun identityOnSecondLine(): Boolean {
+        val identity = compose.onNodeWithTag("chat_header_identity").fetchSemanticsNode().boundsInRoot
+        val bar = compose.onNodeWithTag("chat_header_bar").fetchSemanticsNode().boundsInRoot
+        return identity.top >= bar.bottom - 0.5f
+    }
+
+    private fun expectedIdentityCenter(): Float {
+        if (identityOnSecondLine()) return width / 2f
+        val leading = compose.onNodeWithTag("chat_header_leading").fetchSemanticsNode().boundsInRoot
+        val actions = compose.onNodeWithTag("chat_header_actions").fetchSemanticsNode().boundsInRoot
+        return (leading.right + actions.left) / 2f
     }
 
     private fun assertAvatarAndHeaderSize() {
@@ -136,7 +156,9 @@ class ChatHeaderLayoutTest(private val width: Int, private val fontScale: Float)
     ) {
         compose.setContent {
             ScreenshotTheme(ScreenshotThemeMode.Light, fontScale) {
-                expectedTitleColor = MaterialTheme.colorScheme.onSurface
+                // Under the workspace capsule the name is Moru's quiet secondary line.
+                expectedTitleColor = if (showWorkspace) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.onSurface
                 Surface(Modifier.requiredSize(width.dp, 180.dp)) {
                     ChatHeader(
                         title = title,
