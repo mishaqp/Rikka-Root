@@ -42,6 +42,8 @@ fun Favicon(
         contentDescription = null,
         contentScale = ContentScale.Crop,
         placeholder = rememberVectorPainter(HugeIcons.Link01),
+        // A missing favicon keeps the link glyph instead of an empty circle.
+        error = rememberVectorPainter(HugeIcons.Link01),
         fallback = rememberVectorPainter(HugeIcons.Link01),
     )
 }

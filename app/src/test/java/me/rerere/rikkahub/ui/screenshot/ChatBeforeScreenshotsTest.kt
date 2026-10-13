@@ -54,6 +54,7 @@ import coil3.ImageLoader
 import coil3.EventListener
 import coil3.SingletonImageLoader
 import coil3.compose.AsyncImagePainter
+import coil3.serviceLoaderEnabled
 import coil3.annotation.DelicateCoilApi
 import coil3.decode.BitmapFactoryDecoder
 import coil3.svg.SvgDecoder
@@ -231,6 +232,8 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         }
             // Keep the whole Coil pipeline on the requesting (main) coroutine: each request reaches
             // its terminal state before the frame that started it settles, on every machine.
+            // No auto-registered network fetcher: favicons must never reach the real internet.
+            .serviceLoaderEnabled(false)
             .interceptorCoroutineContext(EmptyCoroutineContext)
             .fetcherCoroutineContext(EmptyCoroutineContext)
             .decoderCoroutineContext(EmptyCoroutineContext)
