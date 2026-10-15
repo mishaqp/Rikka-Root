@@ -150,6 +150,26 @@ class SafAbsolutePathRoutingTest {
         denied { access.resolve(path) }
     }
 
+    @Test fun ungrantedSharedStoragePathsExplainHowToGrantAccess(): Unit = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val primary = primary(context)
+        val alias = File(temporary.root, "sdcard")
+        Files.createSymbolicLink(alias.toPath(), primary.toPath())
+        val access = LocalFileAccess(temporary.newFolder("scratch"), temporary.newFolder("upload"),
+            context = context, primaryStorageAliases = listOf(alias))
+        for (path in listOf(File(alias, "Download/a.txt").path, File(primary, "Download/a.txt").path)) {
+            for (write in listOf(false, true)) {
+                val error = assertThrows(IllegalArgumentException::class.java) { runBlocking { access.resolve(path, write) } }
+                assertEquals(path, NO_STORAGE_GRANT_MESSAGE, error.message)
+            }
+            val written = writeTextFileTool(access).execute(buildJsonObject {
+                put("path", path); put("content", "x")
+            })
+            assertTrue(written.toString(), written.toString().contains("grant_directory_access"))
+        }
+        assertFalse(File(primary, "Download/a.txt").exists())
+    }
+
     @Test fun downloadsProviderSuppliesOpaqueIdsForEachSelectedDescendant(): Unit = runBlocking {
         val context = RuntimeEnvironment.getApplication()
         val primary = primary(context)

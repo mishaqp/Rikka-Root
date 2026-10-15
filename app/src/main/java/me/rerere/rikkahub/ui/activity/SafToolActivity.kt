@@ -77,7 +77,7 @@ class SafToolActivity : ComponentActivity() {
                 Scaffold { padding ->
                     Column(Modifier.fillMaxSize().padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Text("Доступ к папке", style = MaterialTheme.typography.titleLarge)
-                        Text(current.request.label ?: "Выберите папку в системном окне Android. Доступ сохранится до его отзыва в системе.")
+                        Text(current.request.label ?: "Выберите папку в системном окне Android, например Download, и нажмите «Использовать эту папку». Корень памяти для записи не подходит. Доступ сохранится до его отзыва в системе.")
                         Button(onClick = { cancel() }) { Text("Отмена") }
                     }
                 }

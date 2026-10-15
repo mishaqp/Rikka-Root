@@ -111,6 +111,9 @@ class LocalFileAccess internal constructor(
             val primary = runCatching { Environment.getExternalStorageDirectory() }.getOrNull()
             if (sharedStoragePathCandidate(path, primary, primaryStorageAliases)) {
                 resolveGrantedStoragePath(path, write)?.let { return@withContext it }
+                // Shared storage is never reachable by raw File I/O; explain the grant instead of
+                // reporting the /sdcard alias symlink or the scratch/workspace boundary.
+                throw IllegalArgumentException(NO_STORAGE_GRANT_MESSAGE)
             }
         }
         LocalFileSource.Local(checkFile(file, write))
@@ -810,6 +813,9 @@ internal suspend fun boundedDocumentReachable(
     }
     return false // Complete traversal proves that the target is unrelated.
 }
+
+internal const val NO_STORAGE_GRANT_MESSAGE =
+    "Нет доступа к этой папке. Выдайте его через grant_directory_access (выберите саму папку, например Download)."
 
 private class SafStoragePathNotFoundException : IllegalArgumentException("Файл или папка не найдены в выбранной папке SAF.")
 

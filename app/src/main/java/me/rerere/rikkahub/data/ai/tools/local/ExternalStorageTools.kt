@@ -28,6 +28,50 @@ internal fun classifyAuthority(authority: String): String = when {
     else -> "other"
 }
 
+private const val EXTERNAL_STORAGE_AUTHORITY = "com.android.externalstorage.documents"
+private const val INITIAL_FOLDER_ERROR = "initial_uri должен быть content:// URI папки или путём вроде /sdcard/Download."
+private val removableVolumePath = Regex("^/storage/([0-9A-Fa-f]{4}-[0-9A-Fa-f]{4})(/.*)?$")
+private fun encodeDocumentId(id: String) = java.net.URLEncoder.encode(id, "UTF-8").replace("+", "%20")
+private fun externalDocumentUri(id: String) = "content://$EXTERNAL_STORAGE_AUTHORITY/document/${encodeDocumentId(id)}"
+
+/** The picker opens in Download unless the model names another folder by URI or phone path. */
+internal fun safInitialFolderUri(value: String?): String {
+    val text = value?.trim().orEmpty()
+    if (text.isEmpty()) return externalDocumentUri("primary:Download")
+    require(text.length <= 4096 && text.none(Char::isISOControl)) { INITIAL_FOLDER_ERROR }
+    if (text.startsWith("/")) {
+        val path = text.trimEnd('/')
+        require(path.split('/').none { it == ".." || it == "." }) { INITIAL_FOLDER_ERROR }
+        val primaryPrefix = listOf("/sdcard", "/mnt/sdcard", "/storage/self/primary", "/storage/emulated/0")
+            .firstOrNull { path == it || path.startsWith("$it/") }
+        if (primaryPrefix != null) return externalDocumentUri("primary:" + path.removePrefix(primaryPrefix).removePrefix("/"))
+        val removable = requireNotNull(removableVolumePath.matchEntire(path)) { INITIAL_FOLDER_ERROR }
+        return externalDocumentUri(removable.groupValues[1].uppercase() + ":" + removable.groupValues[2].removePrefix("/"))
+    }
+    val uri = try { java.net.URI(text) } catch (_: Exception) { throw IllegalArgumentException(INITIAL_FOLDER_ERROR) }
+    require(uri.scheme == "content" && !uri.authority.isNullOrBlank() && uri.query == null && uri.fragment == null) { INITIAL_FOLDER_ERROR }
+    val parts = uri.rawPath.orEmpty().split('/').filter(String::isNotEmpty)
+    return when {
+        parts.size == 2 && parts[0] == "document" -> text
+        parts.size == 4 && parts[0] == "tree" && parts[2] == "document" -> text
+        parts.size == 2 && parts[0] == "tree" -> "content://${uri.rawAuthority}/document/${parts[1]}"
+        parts.size == 2 && parts[0] == "root" && uri.authority == EXTERNAL_STORAGE_AUTHORITY ->
+            externalDocumentUri(java.net.URLDecoder.decode(parts[1], "UTF-8") + ":")
+        else -> throw IllegalArgumentException(INITIAL_FOLDER_ERROR)
+    }
+}
+
+/** A whole-volume grant reads fine, but Android commonly refuses to write through the storage root. */
+internal fun safGrantWarning(treeUri: String): String? {
+    val uri = runCatching { java.net.URI(treeUri) }.getOrNull() ?: return null
+    if (uri.authority != EXTERNAL_STORAGE_AUTHORITY) return null
+    val parts = uri.rawPath.orEmpty().split('/').filter(String::isNotEmpty)
+    if (parts.size != 2 || parts[0] != "tree") return null
+    val id = runCatching { java.net.URLDecoder.decode(parts[1], "UTF-8") }.getOrNull() ?: return null
+    return if (id.endsWith(":")) "Выбран корень памяти. Android обычно не разрешает запись в корень — " +
+        "для записи выдайте доступ заново и выберите саму папку, например Download." else null
+}
+
 fun listStorageVolumesTool(context: Context): Tool = Tool(
     name = "list_storage_volumes",
     description = "Показать физические накопители и сведения о сохранённом доступе к их папкам. Для облачных папок используйте list_granted_directories.",
@@ -105,19 +149,17 @@ fun listGrantedDirectoriesTool(context: Context): Tool = Tool(
 
 fun grantDirectoryAccessTool(context: Context): Tool = Tool(
     name = "grant_directory_access",
-    description = "Открыть системный выбор папки для постоянного доступа к SD, USB, загрузкам или облачному хранилищу. Требуется открытое приложение. initial_uri и request_label необязательны.",
+    description = "Открыть системный выбор папки для постоянного доступа к SD, USB, загрузкам или облачному хранилищу. Требуется открытое приложение. Выбор открывается в Download; для записи выбирайте саму папку, а не корень памяти. initial_uri и request_label необязательны.",
     parameters = { InputSchema.Obj(buildJsonObject {
-        put("initial_uri", buildJsonObject { put("type", "string"); put("description", "Начальный content:// URI папки для системного выбора") })
+        put("initial_uri", buildJsonObject { put("type", "string"); put("description", "Папка, с которой откроется выбор: content:// URI или путь вроде /sdcard/Documents. По умолчанию Download") })
         put("request_label", buildJsonObject { put("type", "string"); put("description", "Подпись запроса доступа") })
     }) },
     needsApproval = { true },
     execute = { input ->
         try {
             val obj = input.jsonObject
-            val initial = obj["initial_uri"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
-            if (initial != null && (initial.length > 4096 || Uri.parse(initial).scheme != "content" || !DocumentsContract.isTreeUri(Uri.parse(initial)))) {
-                return@Tool storageError("initial_uri должен быть content:// URI папки Android.")
-            }
+            val initial = try { safInitialFolderUri(obj["initial_uri"]?.jsonPrimitive?.contentOrNull) }
+            catch (invalid: IllegalArgumentException) { return@Tool storageError(invalid.message ?: INITIAL_FOLDER_ERROR) }
             val label = obj["request_label"]?.jsonPrimitive?.contentOrNull?.take(256)
             when (val result = awaitSafToolUi(context, SafUiRequest(initial, label))) {
                 is SafUiResult.Granted -> withContext(Dispatchers.IO) {
@@ -129,6 +171,7 @@ fun grantDirectoryAccessTool(context: Context): Tool = Tool(
                         put("content_uri", result.contentUri)
                         put("display_name", displayName.take(4096))
                         put("authority", uri.authority.orEmpty())
+                        safGrantWarning(result.contentUri)?.let { put("warning", it) }
                     })
                 }
                 SafUiResult.Cancelled -> storageParts(buildJsonObject { put("granted", false) })
