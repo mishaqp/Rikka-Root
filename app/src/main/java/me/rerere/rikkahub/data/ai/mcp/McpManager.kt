@@ -40,6 +40,13 @@ import java.util.concurrent.TimeUnit
 import kotlin.io.encoding.Base64
 import kotlin.uuid.Uuid
 
+/** Set only by our failure producer; successful MCP text remains untrusted data. */
+internal const val MCP_TOOL_FAILURE_METADATA_KEY = "rikkahub.mcp.tool_failure"
+
+private fun mcpFailurePart(payload: JsonObject): UIMessagePart.Text = UIMessagePart.Text(
+    payload.toString(), metadata = buildJsonObject { put(MCP_TOOL_FAILURE_METADATA_KEY, true) },
+)
+
 /**
  * MCP 子系统的公共入口。
  *
@@ -144,10 +151,10 @@ class McpManager(
         } catch (e: CancellationException) {
             throw e
         } catch (e: McpClientUnavailableException) {
-            return listOf(UIMessagePart.Text(buildJsonObject {
+            return listOf(mcpFailurePart(buildJsonObject {
                 put("error", "mcp_client_unavailable")
                 put("detail", SecretRedactor.redact("Не удалось выполнить инструмент MCP. ${e.message}"))
-            }.toString()))
+            }))
         } catch (e: Exception) {
             val rawError = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
             val (error, hint) = classifyMcpError(rawError)
@@ -161,11 +168,11 @@ class McpManager(
                     "Не удалось выполнить инструмент MCP. Проверьте адрес, порт и доступность сервера, затем повторите вызов."
                 else -> hint
             }
-            return listOf(UIMessagePart.Text(buildJsonObject {
+            return listOf(mcpFailurePart(buildJsonObject {
                 put("error", error)
                 put("detail", SecretRedactor.redact(detail))
                 put("raw_error", SecretRedactor.redact(rawError))
-            }.toString()))
+            }))
         }
         val contentParts = result.content.map { content ->
             when (content) {
@@ -176,11 +183,11 @@ class McpManager(
         }
         if (result.isError == true) {
             val rawError = result.content.filterIsInstance<TextContent>().joinToString("\n") { it.text }
-            val explanation = UIMessagePart.Text(buildJsonObject {
+            val explanation = mcpFailurePart(buildJsonObject {
                 put("error", "mcp_tool_error")
                 put("detail", "Сервер MCP сообщил об ошибке инструмента. Проверьте параметры вызова и повторите запрос.")
                 put("raw_error", SecretRedactor.redact(rawError))
-            }.toString())
+            })
             return listOf(explanation) + contentParts
         }
         return contentParts

@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.ai.tools.local
 import android.content.Context
 import me.rerere.rikkahub.data.ai.mcp.control.*
 import me.rerere.ai.core.Tool
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.files.FilesManager
@@ -29,15 +30,16 @@ internal fun scopedFileTools(
     chatImages: List<String> = emptyList(),
     resolveWorkspacePath: (suspend (String) -> File)? = null,
     modelCanReadImages: Boolean = false,
+    guard: (LocalToolOption, Tool) -> Tool = { _, tool -> tool },
 ): List<Tool> = buildList {
     if (options.any { it in listOf(LocalToolOption.Files, LocalToolOption.Archive,
             LocalToolOption.MediaPlayer, LocalToolOption.MediaScanner, LocalToolOption.Download) }) {
         val access = LocalFileAccess(context, workspaceCwd, chatImages, resolveWorkspacePath)
-        if (LocalToolOption.Files in options) addAll(fileManagerTools(access, context, modelCanReadImages))
-        if (LocalToolOption.Archive in options) addAll(listOf(zipFilesTool(context, access), unzipFileTool(context, access), listZipContentsTool(context, access)))
-        if (LocalToolOption.MediaPlayer in options) addAll(listOf(playMediaTool(context, access), stopMediaTool(context), pauseMediaTool(context), resumeMediaTool(context, access), seekMediaTool(context), getMediaStatusTool()))
-        if (LocalToolOption.MediaScanner in options) add(mediaScannerTool(context, access))
-        if (LocalToolOption.Download in options) addAll(listOf(downloadTool(context, access), writeTextFileTool(access)))
+        if (LocalToolOption.Files in options) addAll(fileManagerTools(access, context, modelCanReadImages).map { guard(LocalToolOption.Files, it) })
+        if (LocalToolOption.Archive in options) addAll(listOf(zipFilesTool(context, access), unzipFileTool(context, access), listZipContentsTool(context, access)).map { guard(LocalToolOption.Archive, it) })
+        if (LocalToolOption.MediaPlayer in options) addAll(listOf(playMediaTool(context, access), stopMediaTool(context), pauseMediaTool(context), resumeMediaTool(context, access), seekMediaTool(context), getMediaStatusTool()).map { guard(LocalToolOption.MediaPlayer, it) })
+        if (LocalToolOption.MediaScanner in options) add(guard(LocalToolOption.MediaScanner, mediaScannerTool(context, access)))
+        if (LocalToolOption.Download in options) addAll(listOf(downloadTool(context, access), writeTextFileTool(access)).map { guard(LocalToolOption.Download, it) })
     }
 }
 
@@ -84,12 +86,25 @@ class LocalTools(
         knownToolNames: (() -> Collection<String>)? = null,
     ): List<Tool> {
         val tools = mutableListOf<Tool>()
+        val callerId = assistantId ?: callerAssistant?.id?.toString()
+        fun guard(option: LocalToolOption, tool: Tool): Tool = tool.copy(execute = { input ->
+            // localTools belongs to the stored assistant, not the conversation's workspace/config snapshot.
+            val live = settingsStore.settingsFlow.value.assistants.singleOrNull { it.id.toString() == callerId }
+            val reason = when {
+                live == null -> "Ассистент недоступен. Откройте чат заново перед вызовом инструмента."
+                option !in live.localTools -> "Функция отключена у ассистента. Включите её в настройках инструментов перед новым вызовом."
+                else -> null
+            }
+            if (reason != null) listOf(UIMessagePart.Text(deviceToolError(reason).toString())) else tool.execute(input)
+        })
+        fun add(option: LocalToolOption, tool: Tool) { tools.add(guard(option, tool)) }
+        fun addAll(option: LocalToolOption, values: List<Tool>) { values.forEach { add(option, it) } }
         if (LocalToolOption.Browser in options) {
             val enabled = (browserPreferences ?: get().get<me.rerere.rikkahub.browser.BrowserPreferences>()).snapshotBlocking()
             val invocation = me.rerere.rikkahub.browser.ToolInvocationContext(
                 callerAssistantId = assistantId, callerConversationId = conversationId, modelCanSeeImages = modelCanReadImages)
             me.rerere.rikkahub.browser.BrowserToolDefaults.ALL_TOOLS.forEach { name ->
-                if (enabled[name] == true) createBrowserTool(name, context, invocation)?.let(tools::add)
+                if (enabled[name] == true) createBrowserTool(name, context, invocation)?.let { add(LocalToolOption.Browser, it) }
             }
         }
         if (LocalToolOption.SkillImport in options) {
@@ -98,12 +113,12 @@ class LocalTools(
                 enabledSkills = { callerAssistant?.enabledSkills ?: emptySet() },
                 saveEnabledSkills = { error("Для установки навыка нужен подтверждённый контекст текущего чата.") })
             val importer = get().get<me.rerere.rikkahub.skills.SkillUrlImporter>()
-            tools.add(me.rerere.rikkahub.skills.skillInstallFromUrlTool(importer, caller, manager))
-            tools.add(me.rerere.rikkahub.skills.skillInstallFromTextTool(importer, caller, manager))
+            add(LocalToolOption.SkillImport, me.rerere.rikkahub.skills.skillInstallFromUrlTool(importer, caller, manager))
+            add(LocalToolOption.SkillImport, me.rerere.rikkahub.skills.skillInstallFromTextTool(importer, caller, manager))
         }
-        if (LocalToolOption.JsSkills in options) tools.add(me.rerere.rikkahub.skills.js.runJsTool(
+        if (LocalToolOption.JsSkills in options) add(LocalToolOption.JsSkills, me.rerere.rikkahub.skills.js.runJsTool(
             context, get().get(), get().get(), get().get()))
-        if (LocalToolOption.ScreenAutomation in options) tools.addAll(createScreenAutomationTools(context, rootShellManager) { name, input ->
+        if (LocalToolOption.ScreenAutomation in options) addAll(LocalToolOption.ScreenAutomation, createScreenAutomationTools(context, rootShellManager) { name, input ->
             val live = settingsStore.settingsFlow.value.assistants.singleOrNull { it.id.toString() == assistantId }
             if (live == null || LocalToolOption.ScreenAutomation !in live.localTools) false
             else {
@@ -116,7 +131,7 @@ class LocalTools(
         })
         if (LocalToolOption.ExternalAutomation in options) {
             val config = get().get<me.rerere.rikkahub.automation.ExternalAutomationConfig>()
-            tools.addAll(listOf(me.rerere.rikkahub.automation.externalAutomationStatusTool(config),
+            addAll(LocalToolOption.ExternalAutomation, listOf(me.rerere.rikkahub.automation.externalAutomationStatusTool(config),
                 me.rerere.rikkahub.automation.externalAutomationSetEnabledTool(config),
                 me.rerere.rikkahub.automation.externalAutomationAddTrustedPackageTool(config),
                 me.rerere.rikkahub.automation.externalAutomationRemoveTrustedPackageTool(config)))
@@ -129,7 +144,7 @@ class LocalTools(
                 assistantMcpServers = { callerAssistant?.mcpServers ?: emptySet() },
                 addServer = { error("Контекст текущего чата MCP недоступен.") },
                 removeServer = { error("Контекст текущего чата MCP недоступен.") })
-            tools.addAll(listOf(mcpListTool(settingsStore, manager, caller), mcpGetTool(settingsStore, manager, caller),
+            addAll(LocalToolOption.McpControl, listOf(mcpListTool(settingsStore, manager, caller), mcpGetTool(settingsStore, manager, caller),
                 mcpAddTool(settingsStore, manager, caller, secrets), mcpUpdateTool(settingsStore, manager, secrets),
                 mcpDeleteTool(settingsStore, manager, caller), mcpSetEnabledTool(settingsStore, manager, secrets),
                 mcpTestTool(settingsStore, manager, secrets), mcpListToolsTool(settingsStore, manager, caller),
@@ -142,16 +157,16 @@ class LocalTools(
         }
         if (LocalToolOption.Ssh in options) {
             val access = LocalFileAccess(context, workspaceCwd, chatImages, resolveWorkspacePath)
-            tools.addAll(listOf(sshExecTool(context, sshHostRepository.toolSecrets),
+            addAll(LocalToolOption.Ssh, listOf(sshExecTool(context, sshHostRepository.toolSecrets),
                 saveSshHostTool(sshHostRepository), listSshHostsTool(sshHostRepository),
                 deleteSshHostTool(sshHostRepository), forgetSshHostKeyTool(context),
                 sshExecSavedTool(context, sshHostRepository), sshUploadTool(context, sshHostRepository, access),
                 sshDownloadTool(context, sshHostRepository, access)))
         }
-        if (LocalToolOption.Termux in options) tools.addAll(listOf(
+        if (LocalToolOption.Termux in options) addAll(LocalToolOption.Termux, listOf(
             termuxRunCommandTool(context), termuxSessionStartTool(context), termuxSessionSendTool(context),
             termuxSessionReadTool(context), termuxSessionKillTool(context), termuxSessionListTool(context)))
-        if (LocalToolOption.Reliability in options) tools.add(generateBugReportTool(
+        if (LocalToolOption.Reliability in options) add(LocalToolOption.Reliability, generateBugReportTool(
             context, BugReportBuilder(context) {
                 get().get<ChatService>().errors.value.map { it.error }
             }, copyToWorkspace = resolveWorkspacePath?.let { resolver ->
@@ -164,81 +179,81 @@ class LocalTools(
                 id = assistantId?.let { runCatching { Uuid.parse(it) }.getOrNull() } ?: Uuid.random(),
                 localTools = options,
             )
-            tools.add(checkTokenUsageTool(callerAssistant = caller,
+            add(LocalToolOption.CostGuards, checkTokenUsageTool(callerAssistant = caller,
                 conversationId = conversationId?.let { runCatching { Uuid.parse(it) }.getOrNull() },
                 tokenBudget = tokenBudget,
                 loadConversation = { id -> get().get<ConversationRepository>().getConversationById(id) }))
         }
-        tools.addAll(scopedFileTools(context, options, workspaceCwd, chatImages, resolveWorkspacePath, modelCanReadImages))
-        if (LocalToolOption.ExternalStorage in options) tools.addAll(listOf(listStorageVolumesTool(context), listGrantedDirectoriesTool(context), grantDirectoryAccessTool(context), revokeDirectoryAccessTool(context)))
-        if (LocalToolOption.SystemIntents in options) tools.addAll(systemIntentTools(context))
-        if (LocalToolOption.AppLauncher in options) tools.addAll(appLauncherTools(context))
-        if (LocalToolOption.Location in options) tools.add(locationTool(context))
-        if (LocalToolOption.Contacts in options) { tools.add(listContactsTool(context)); tools.add(searchContactsTool(context)) }
-        if (LocalToolOption.CallLog in options) tools.add(callLogTool(context))
-        if (LocalToolOption.SmsInbox in options) { tools.add(listSmsInboxTool(context)); tools.add(searchSmsTool(context)) }
-        if (LocalToolOption.SmsSend in options) tools.add(smsSendTool(context))
-        if (LocalToolOption.CameraPhoto in options) tools.add(cameraPhotoTool(context, filesManager))
-        if (LocalToolOption.MicRecorder in options) tools.add(micRecorderTool(context, filesManager))
-        if (LocalToolOption.SpeechToText in options) tools.add(speechToTextTool(context))
-        if (LocalToolOption.Fingerprint in options) tools.add(fingerprintTool(context))
-        if (LocalToolOption.Keystore in options) tools.addAll(keystoreTools(context, keystoreCrypto))
-        if (LocalToolOption.Battery in options) tools.add(batteryTool(context))
-        if (LocalToolOption.AudioInfo in options) tools.add(audioInfoTool(context))
-        if (LocalToolOption.TelephonyInfo in options) tools.add(telephonyInfoTool(context))
-        if (LocalToolOption.WifiInfo in options) tools.add(wifiInfoTool(context))
+        tools.addAll(scopedFileTools(context, options, workspaceCwd, chatImages, resolveWorkspacePath, modelCanReadImages, ::guard))
+        if (LocalToolOption.ExternalStorage in options) addAll(LocalToolOption.ExternalStorage, listOf(listStorageVolumesTool(context), listGrantedDirectoriesTool(context), grantDirectoryAccessTool(context), revokeDirectoryAccessTool(context)))
+        if (LocalToolOption.SystemIntents in options) addAll(LocalToolOption.SystemIntents, systemIntentTools(context))
+        if (LocalToolOption.AppLauncher in options) addAll(LocalToolOption.AppLauncher, appLauncherTools(context))
+        if (LocalToolOption.Location in options) add(LocalToolOption.Location, locationTool(context))
+        if (LocalToolOption.Contacts in options) { add(LocalToolOption.Contacts, listContactsTool(context)); add(LocalToolOption.Contacts, searchContactsTool(context)) }
+        if (LocalToolOption.CallLog in options) add(LocalToolOption.CallLog, callLogTool(context))
+        if (LocalToolOption.SmsInbox in options) { add(LocalToolOption.SmsInbox, listSmsInboxTool(context)); add(LocalToolOption.SmsInbox, searchSmsTool(context)) }
+        if (LocalToolOption.SmsSend in options) add(LocalToolOption.SmsSend, smsSendTool(context))
+        if (LocalToolOption.CameraPhoto in options) add(LocalToolOption.CameraPhoto, cameraPhotoTool(context, filesManager))
+        if (LocalToolOption.MicRecorder in options) add(LocalToolOption.MicRecorder, micRecorderTool(context, filesManager))
+        if (LocalToolOption.SpeechToText in options) add(LocalToolOption.SpeechToText, speechToTextTool(context))
+        if (LocalToolOption.Fingerprint in options) add(LocalToolOption.Fingerprint, fingerprintTool(context))
+        if (LocalToolOption.Keystore in options) addAll(LocalToolOption.Keystore, keystoreTools(context, keystoreCrypto))
+        if (LocalToolOption.Battery in options) add(LocalToolOption.Battery, batteryTool(context))
+        if (LocalToolOption.AudioInfo in options) add(LocalToolOption.AudioInfo, audioInfoTool(context))
+        if (LocalToolOption.TelephonyInfo in options) add(LocalToolOption.TelephonyInfo, telephonyInfoTool(context))
+        if (LocalToolOption.WifiInfo in options) add(LocalToolOption.WifiInfo, wifiInfoTool(context))
         if (LocalToolOption.Sensors in options) {
-            tools.add(listSensorsTool(context))
-            tools.add(readSensorTool(context))
+            add(LocalToolOption.Sensors, listSensorsTool(context))
+            add(LocalToolOption.Sensors, readSensorTool(context))
         }
-        if (LocalToolOption.StorageInfo in options) tools.add(storageTool())
-        if (LocalToolOption.Toast in options) tools.add(toastTool(context))
-        if (LocalToolOption.Notification in options) tools.add(notificationTool(context, conversationId))
-        if (LocalToolOption.Share in options) tools.add(shareTool(context))
-        if (LocalToolOption.Torch in options) tools.add(torchTool(context))
-        if (LocalToolOption.Vibrate in options) tools.add(vibrateTool(context))
+        if (LocalToolOption.StorageInfo in options) add(LocalToolOption.StorageInfo, storageTool())
+        if (LocalToolOption.Toast in options) add(LocalToolOption.Toast, toastTool(context))
+        if (LocalToolOption.Notification in options) add(LocalToolOption.Notification, notificationTool(context, conversationId))
+        if (LocalToolOption.Share in options) add(LocalToolOption.Share, shareTool(context))
+        if (LocalToolOption.Torch in options) add(LocalToolOption.Torch, torchTool(context))
+        if (LocalToolOption.Vibrate in options) add(LocalToolOption.Vibrate, vibrateTool(context))
         if (LocalToolOption.Brightness in options) {
-            tools.add(getBrightnessTool(context))
-            tools.add(setBrightnessTool(context))
+            add(LocalToolOption.Brightness, getBrightnessTool(context))
+            add(LocalToolOption.Brightness, setBrightnessTool(context))
         }
         if (LocalToolOption.Volume in options) {
-            tools.add(getVolumeTool(context))
-            tools.add(setVolumeTool(context))
+            add(LocalToolOption.Volume, getVolumeTool(context))
+            add(LocalToolOption.Volume, setVolumeTool(context))
         }
-        if (LocalToolOption.Wallpaper in options) tools.add(setWallpaperTool(context,
+        if (LocalToolOption.Wallpaper in options) add(LocalToolOption.Wallpaper, setWallpaperTool(context,
             LocalImageSources(File(context.filesDir, "upload"), workspaceCwd, chatImages, resolveWorkspacePath)))
         if (LocalToolOption.Nfc in options) {
-            tools.add(nfcStatusTool(context))
-            tools.add(nfcReadTagTool(context))
-            tools.add(nfcWriteTagTool(context))
+            add(LocalToolOption.Nfc, nfcStatusTool(context))
+            add(LocalToolOption.Nfc, nfcReadTagTool(context))
+            add(LocalToolOption.Nfc, nfcWriteTagTool(context))
         }
         if (options.contains(LocalToolOption.Root)) {
-            tools.add(buildRootTool(rootShellManager, rootAccessStore, assistantId))
+            add(LocalToolOption.Root, buildRootTool(rootShellManager, rootAccessStore, assistantId))
         }
         if (options.contains(LocalToolOption.JavascriptEngine)) {
-            tools.add(javascriptTool)
+            add(LocalToolOption.JavascriptEngine, javascriptTool)
         }
         if (options.contains(LocalToolOption.TimeInfo)) {
-            tools.add(timeTool)
+            add(LocalToolOption.TimeInfo, timeTool)
         }
         if (options.contains(LocalToolOption.Clipboard)) {
-            tools.add(clipboardTool)
+            add(LocalToolOption.Clipboard, clipboardTool)
         }
         if (options.contains(LocalToolOption.Tts)) {
-            tools.add(ttsTool)
+            add(LocalToolOption.Tts, ttsTool)
         }
         if (options.contains(LocalToolOption.AskUser)) {
-            tools.add(askUserTool)
+            add(LocalToolOption.AskUser, askUserTool)
         }
         if (options.contains(LocalToolOption.ScreenTime)) {
-            tools.add(screenTimeTool)
+            add(LocalToolOption.ScreenTime, screenTimeTool)
         }
         if (options.contains(LocalToolOption.Calendar)) {
-            tools.add(calendarQueryTool)
-            tools.add(calendarCreateTool)
+            add(LocalToolOption.Calendar, calendarQueryTool)
+            add(LocalToolOption.Calendar, calendarCreateTool)
         }
         if (options.contains(LocalToolOption.ChartDisplay)) {
-            tools.add(chartDisplayTool)
+            add(LocalToolOption.ChartDisplay, chartDisplayTool)
         }
         if (LocalToolOption.Workflows in options) {
             val repo = get().get<me.rerere.rikkahub.workflow.repository.WorkflowRepository>()
@@ -247,7 +262,7 @@ class LocalTools(
                 chatModelId = it.chatModelId, reasoningLevel = it.reasoningLevel, enableWebSearch = it.enableWebSearch,
                 mcpServers = it.mcpServers, workspaceId = it.workspaceId, enabledSkills = it.enabledSkills) }
             val registered = { knownToolNames?.invoke()?.toList() ?: tools.map { it.name } }
-            tools.addAll(listOf(
+            addAll(LocalToolOption.Workflows, listOf(
                 me.rerere.rikkahub.workflow.tools.workflowCreateTool(repo, registered, assistantId, conversationId, config),
                 me.rerere.rikkahub.workflow.tools.workflowUpdateTool(repo, registered, assistantId, conversationId, config),
                 me.rerere.rikkahub.workflow.tools.workflowListTool(repo), me.rerere.rikkahub.workflow.tools.workflowGetTool(repo),

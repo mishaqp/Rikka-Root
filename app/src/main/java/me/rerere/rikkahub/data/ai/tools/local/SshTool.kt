@@ -11,9 +11,15 @@ import com.jcraft.jsch.JSch
 import com.jcraft.jsch.Session
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -602,10 +608,9 @@ fun sshExecTool(context: Context, toolSecrets: SshToolSecretSanitizer = SshToolS
  * leaves the operation running on the IO thread until the OS TCP timeout (~75s on most
  * kernels) even though we've already returned "timeout" to the model.
  *
- * Strategy: the inner [block] stashes its live Session in [sessionRef] as soon as it's
- * open. If the outer withTimeoutOrNull cancels (or anything else throws), we forcibly
- * disconnect that Session in finally — closing the underlying socket unblocks JSch's JNI
- * read on the IO thread.
+ * The inner [block] publishes its live Session in [sessionRef]. A sibling coroutine closes
+ * that session when the timeout scope is cancelled, before waiting for blocking IO to
+ * finish. The outer finally remains an idempotent fallback for other exit paths.
  */
 internal suspend fun runCancellableSshOp(
     timeoutMs: Long,
@@ -614,7 +619,25 @@ internal suspend fun runCancellableSshOp(
 ): JsonObject {
     val sessionRef = AtomicReference<Session?>(null)
     return try {
-        withTimeoutOrNull(timeoutMs) { block(sessionRef) }
+        withTimeoutOrNull(timeoutMs) {
+            // This sibling is cancelled while blocking IO is still running. Closing the
+            // socket here unblocks reads that ignore Thread.interrupt(); outer finally
+            // runs only after those reads finish and therefore cannot do that job alone.
+            val cleanup = launch(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) {
+                try {
+                    awaitCancellation()
+                } finally {
+                    sessionRef.getAndSet(null)?.let { session ->
+                        try { session.disconnect() } catch (_: Throwable) {}
+                    }
+                }
+            }
+            try {
+                block(sessionRef)
+            } finally {
+                cleanup.cancelAndJoin()
+            }
+        }
             ?: buildJsonObject {
                 put("error", "timeout")
                 put("recovery", "Операция SSH/SFTP не завершилась за ${timeoutMs / 1000} с. Проверьте состояние операции на сервере перед повтором; при необходимости увеличьте timeout_seconds.")
@@ -658,11 +681,12 @@ internal suspend fun execOneShot(
     // java.net.Socket first lets us tell the model exactly which layer is failing, AND
     // pick the working network for JSch to bind to.
     val outcome = probeReachability(context, host, port)
-    if (outcome.winningNetwork == null && outcome.failures.isNotEmpty()) {
+    if (outcome.winningLabel == null && outcome.failures.isNotEmpty()) {
         return unreachableEnvelope(host, port, outcome)
     }
 
     // Stage 2 (blocking IO, interruptible): JSch handshake + exec.
+    val operationContext = currentCoroutineContext()
     return runInterruptible(Dispatchers.IO) {
         val jsch = newJSch(context)
         val handshakeStart = System.currentTimeMillis()
@@ -675,6 +699,10 @@ internal suspend fun execOneShot(
         sessionRef.set(session)
         Log.i(TAG_SSH, "ssh session up via ${outcome.winningLabel ?: "default"} in ${System.currentTimeMillis() - handshakeStart}ms")
         try {
+            // A handshake may finish after cancellation already drained sessionRef.
+            // Publish before checking cancellation so finally always closes this session,
+            // and never dispatch a remote command after the caller stopped waiting.
+            operationContext.ensureActive()
             runOnSession(session, command, timeoutMs, stdin, output)
         } catch (e: Throwable) {
             JsonObject(sshFailureEnvelope(e, "Ошибка выполнения SSH.",

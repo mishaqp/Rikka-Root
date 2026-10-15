@@ -25,6 +25,7 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationLoop
+import me.rerere.rikkahub.data.ai.mcp.MCP_TOOL_FAILURE_METADATA_KEY
 import me.rerere.rikkahub.data.ai.tools.ChatToolFactory
 import me.rerere.rikkahub.data.ai.tools.HeadlessToolPolicy
 import me.rerere.rikkahub.data.ai.tools.RunExecutionContext
@@ -301,6 +302,9 @@ internal fun classifyHeadlessToolResult(name: String, output: List<UIMessagePart
 
 /** Interpret only registered native envelopes; reader contents and nested arbitrary JSON remain data. */
 internal fun classifyHeadlessToolFailure(name: String, output: List<UIMessagePart>): HeadlessToolFailure? {
+    if (name.startsWith("mcp__") && output.filterIsInstance<UIMessagePart.Text>().any {
+            it.metadata?.get(MCP_TOOL_FAILURE_METADATA_KEY) == JsonPrimitive(true)
+        }) return HeadlessToolFailure(HeadlessTaskStatus.FAILED, "tool_failed")
     if (localOptionForHeadlessTool(name) == null && name !in nativeEnvelopeTools) return null
     for (part in output) {
         val text = (part as? UIMessagePart.Text)?.text ?: continue

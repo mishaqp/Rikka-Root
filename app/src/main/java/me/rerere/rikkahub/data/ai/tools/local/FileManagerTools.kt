@@ -96,7 +96,9 @@ fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCan
         return buildJsonObject { put("files", JsonArray(selected)); put("truncated", matches.size > limit) }
     }
     suspend fun batch(obj: JsonObject, operation: String): JsonObject {
-        val explicit = obj["paths"] as? JsonArray
+        val explicit = if ("paths" in obj) requireNotNull(obj["paths"] as? JsonArray) {
+            "paths должен быть массивом путей. Укажите массив либо уберите paths для выбора по root и pattern."
+        } else null
         val paths = if (explicit != null) {
             require(explicit.isNotEmpty() && explicit.size <= 500) { "paths должен содержать от 1 до 500 путей." }
             explicit.map { requireNotNull((it as? JsonPrimitive)?.takeIf { it.isString }?.content) { "paths должен содержать строки." } }

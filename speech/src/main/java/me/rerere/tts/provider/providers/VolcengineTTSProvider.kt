@@ -108,7 +108,7 @@ class VolcengineTTSProvider : TTSProvider<TTSProviderSetting.Volcengine> {
     ): Flow<AudioChunk> = flow {
         val processor = VolcengineTTSStreamProcessor()
         httpClient.sseFlow(buildVolcengineTTSRequest(providerSetting, request.text))
-            // sseFlow uses trySend; fuse an unlimited buffer so audio bursts are not dropped.
+            // Keep buffering audio bursts while the speech consumer processes a chunk.
             .buffer(Channel.UNLIMITED)
             .transformWhile { event ->
                 val chunk = processor.process(event)

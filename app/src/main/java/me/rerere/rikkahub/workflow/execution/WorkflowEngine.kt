@@ -2,6 +2,10 @@ package me.rerere.rikkahub.workflow.execution
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -157,7 +161,17 @@ class WorkflowEngine(
         }
 
         // Execute the action sequence. ActionRunner enforces per-action timeout + HARDLINE.
-        val result = actionRunner.run(def)
+        val result = try {
+            actionRunner.run(def)
+        } catch (cancelled: CancellationException) {
+            // Actions may already have effects. Preserve this attempt for history,
+            // cooldown and daily limits without swallowing caller cancellation.
+            withContext(NonCancellable) {
+                persistAndReturn(workflowId, firedAtMs, started, WorkflowRunStatus.FAILED,
+                    "execution_interrupted", "")
+            }
+            throw cancelled
+        }
         val status = if (result.success) WorkflowRunStatus.SUCCESS else WorkflowRunStatus.FAILED
         return persistAndReturn(workflowId, firedAtMs, started, status, result.error, result.summary)
     }
@@ -183,15 +197,20 @@ class WorkflowEngine(
         summary: String,
     ): FireOutcome {
         val durationMs = (System.nanoTime() - startedNanos) / 1_000_000L
-        runCatching {
-            repository.recordFire(
-                workflowId = workflowId,
-                firedAtMs = firedAtMs,
-                status = status,
-                durationMs = durationMs,
-                errorMessage = error,
-            )
-        }.onFailure { Log.w(TAG, "recordFire failed for $workflowId", it) }
+        // Once actions have returned, cancellation must not split history insertion
+        // from quota/cooldown accounting or discard the completed outcome.
+        withContext(NonCancellable) {
+            runCatching {
+                repository.recordFire(
+                    workflowId = workflowId,
+                    firedAtMs = firedAtMs,
+                    status = status,
+                    durationMs = durationMs,
+                    errorMessage = error,
+                )
+            }.onFailure { Log.w(TAG, "recordFire failed for $workflowId", it) }
+        }
+        currentCoroutineContext().ensureActive()
         return FireOutcome(status, error, summary)
     }
 

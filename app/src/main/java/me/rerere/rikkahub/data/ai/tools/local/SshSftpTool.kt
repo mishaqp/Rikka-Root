@@ -6,6 +6,8 @@ import android.util.Log
 import com.jcraft.jsch.ChannelSftp
 import com.jcraft.jsch.Session
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.runInterruptible
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -54,9 +56,10 @@ private suspend fun withSavedHostSession(
     // app's outgoing connections away from WiFi LAN even though WiFi is up — meaning every
     // recent fix that gave SSH exec the WiFi-binding behaviour was bypassed for SFTP.
     val outcome = probeReachability(context, h.host, h.port)
-    if (outcome.winningNetwork == null && outcome.failures.isNotEmpty()) {
+    if (outcome.winningLabel == null && outcome.failures.isNotEmpty()) {
         return unreachableEnvelope(h.host, h.port, outcome)
     }
+    val operationContext = currentCoroutineContext()
     return runInterruptible(Dispatchers.IO) {
         val jsch = newJSch(context)
         val session = try {
@@ -67,6 +70,7 @@ private suspend fun withSavedHostSession(
         }
         sessionRef.set(session)
         try {
+            operationContext.ensureActive()
             block(session)
         } finally {
             sessionRef.set(null)

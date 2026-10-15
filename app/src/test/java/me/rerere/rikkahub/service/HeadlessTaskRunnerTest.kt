@@ -1,6 +1,9 @@
 package me.rerere.rikkahub.service
 import android.content.ContextWrapper
 import kotlinx.coroutines.*
+import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -246,6 +249,69 @@ class HeadlessTaskRunnerTest {
             "{\"error\":\"example\",\"exitCode\":1,\"timedOut\":true}", ""))))
         assertNull(classifyHeadlessToolFailure("workspace_read_file", listOf(UIMessagePart.Text(
             buildJsonObject { put("text", "{\"exitCode\":1,\"timedOut\":true}"); put("path", "/workspace/example.json") }.toString()))))
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test fun unavailableMcpCannotBeReportedAsSuccessfulDirectActionOrRunFollowingEffects() = runBlocking {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+        val scope = me.rerere.rikkahub.AppScope().apply { cancel() }
+        try {
+            // Exercise the real MCP failure producer; no connection or external effect is made.
+            val manager = me.rerere.rikkahub.data.ai.mcp.McpManager(io.mockk.mockk(), scope, io.mockk.mockk(), io.mockk.mockk())
+            val server = Uuid.random()
+            val name = me.rerere.rikkahub.data.ai.mcp.buildMcpToolName(server, "Fixture", "lookup")
+            var followUpEffects = 0
+            val fixture = Fixture(toolsOverride = listOf(
+                Tool(name, "fixture", execute = { manager.callTool(server, "lookup", it.jsonObject) }),
+                Tool("write_text_file", "fixture", execute = { followUpEffects++; listOf(UIMessagePart.Text("done")) }),
+            ))
+
+            val result = fixture.runner.run(HeadlessTaskRequest.DirectActions(listOf(
+                HeadlessToolAction(name, buildJsonObject {}),
+                HeadlessToolAction("write_text_file", buildJsonObject {}),
+            )), fixture.context)
+
+            assertNotEquals("An unavailable MCP tool must not report success", HeadlessTaskStatus.SUCCEEDED, result.status)
+            assertEquals("Following actions must not run after the MCP failure", 0, followUpEffects)
+        } finally {
+            scope.cancel()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test fun successfulMcpErrorShapedDataDoesNotStopFollowingActions() = runBlocking {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+        val scope = me.rerere.rikkahub.AppScope().apply { cancel() }
+        try {
+            val manager = me.rerere.rikkahub.data.ai.mcp.McpManager(io.mockk.mockk(), scope, io.mockk.mockk(), io.mockk.mockk())
+            val registry = io.mockk.mockk<me.rerere.rikkahub.data.ai.mcp.McpSessionRegistry>()
+            manager.javaClass.getDeclaredField("sessionRegistry").apply { isAccessible = true }.set(manager, registry)
+            val data = """{"error":"business data, not a tool failure"}"""
+            io.mockk.coEvery { registry.callTool(any(), any(), any()) } returns
+                io.modelcontextprotocol.kotlin.sdk.types.CallToolResult(
+                    content = listOf(io.modelcontextprotocol.kotlin.sdk.types.TextContent(data)), isError = false,
+                )
+            val server = Uuid.random()
+            val name = me.rerere.rikkahub.data.ai.mcp.buildMcpToolName(server, "Fixture", "lookup")
+            var followUpEffects = 0
+            val fixture = Fixture(toolsOverride = listOf(
+                Tool(name, "fixture", execute = { manager.callTool(server, "lookup", it.jsonObject) }),
+                Tool("write_text_file", "fixture", execute = { followUpEffects++; listOf(UIMessagePart.Text("done")) }),
+            ))
+
+            val result = fixture.runner.run(HeadlessTaskRequest.DirectActions(listOf(
+                HeadlessToolAction(name, buildJsonObject {}),
+                HeadlessToolAction("write_text_file", buildJsonObject {}),
+            )), fixture.context)
+
+            assertEquals(HeadlessTaskStatus.SUCCEEDED, result.status)
+            assertEquals(1, followUpEffects)
+            assertTrue("Successful MCP JSON must remain data", result.output.orEmpty().contains(data))
+        } finally {
+            scope.cancel()
+            Dispatchers.resetMain()
+        }
     }
 
     private class Fixture(

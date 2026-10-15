@@ -36,18 +36,24 @@ val Migration_15_16 = object : Migration(15, 16) {
                 )
 
                 val rows = mutableListOf<NodeRow>()
-                while (nodeCursor.moveToNext()) {
-                    val id = nodeCursor.getString(0)
-                    val messagesJson = nodeCursor.getString(1)
-                    val selectIndex = nodeCursor.getInt(3)
-                    runCatching {
-                        val messages = JsonInstant.decodeFromString<List<UIMessage>>(messagesJson)
-                        rows.add(NodeRow(id, messages, selectIndex))
-                    }.onFailure {
-                        Log.w(TAG, "migrate: failed to parse messages for node $id", it)
+                try {
+                    while (nodeCursor.moveToNext()) {
+                        val id = nodeCursor.getString(0)
+                        val messagesJson = nodeCursor.getString(1)
+                        val selectIndex = nodeCursor.getInt(3)
+                        try {
+                            val messages = JsonInstant.decodeFromString<List<UIMessage>>(messagesJson)
+                            rows.add(NodeRow(id, messages, selectIndex))
+                        } catch (error: Exception) {
+                            throw IllegalStateException(
+                                "Не удалось перенести узел $id разговора $conversationId: формат сообщений повреждён или не поддерживается. Исходная история сохранена. Восстановите корректную копию или используйте совместимую версию приложения.",
+                                error,
+                            )
+                        }
                     }
+                } finally {
+                    nodeCursor.close()
                 }
-                nodeCursor.close()
 
                 if (rows.isEmpty()) continue
 

@@ -96,7 +96,7 @@ internal fun waitForMatches(pane: String, pattern: String): Boolean {
 /**
  * Decide whether the polling loop should stop, given every pane snapshot taken so far
  * (chronological, each with its elapsed time since the send). Order of precedence:
- * wait_for match, then settle (screen unchanged for >= settleMs), then timeout.
+ * wait_for match, then settle without a wait_for pattern, then timeout.
  */
 internal fun evaluatePoll(
     samples: List<PaneSample>,
@@ -112,7 +112,7 @@ internal fun evaluatePoll(
     for (i in samples.indices.reversed()) {
         if (samples[i].content == cur.content) stableSince = samples[i].elapsedMs else break
     }
-    if (samples.size >= 2 && cur.elapsedMs - stableSince >= settleMs) {
+    if (waitFor.isNullOrEmpty() && samples.size >= 2 && cur.elapsedMs - stableSince >= settleMs) {
         return PollResult.Done(PollResult.Reason.SETTLED, cur.content)
     }
     if (cur.elapsedMs >= timeoutMs) {

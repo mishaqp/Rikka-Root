@@ -76,6 +76,15 @@ class MessageQueue(private val attachmentReferences: AttachmentReferenceCoordina
         }
     }
 
+    /** A stopped submission that never reached history still belongs before later input. */
+    @Synchronized
+    internal fun restoreForRetry(message: QueuedMessage) {
+        val current = state.value
+        val messages = if (current.messages.any { it.id == message.id }) current.messages else listOf(message) + current.messages
+        publish(current.copy(messages = messages, paused = true))
+        messages.forEach { it.reply?.completeExceptionally(MessageQueuePausedException()) }
+    }
+
     @Synchronized
     fun remove(id: Uuid): QueuedMessage? {
         val removed = state.value.messages.find { it.id == id } ?: return null

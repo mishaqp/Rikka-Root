@@ -43,6 +43,18 @@ class GoogleRequestMessageTest {
     }
 
     @Test
+    fun `inline image is sent as raw base64 to Gemini`() {
+        val result = invokeBuildContents(listOf(UIMessage(
+            role = MessageRole.USER,
+            parts = listOf(UIMessagePart.Image("data:image/png;base64,aGVsbG8=")),
+        )))
+
+        val image = result.single().jsonObject["parts"]!!.jsonArray.single().jsonObject["inlineData"]!!.jsonObject
+        assertEquals("image/png", image["mimeType"]!!.jsonPrimitive.content)
+        assertEquals("aGVsbG8=", image["data"]!!.jsonPrimitive.content)
+    }
+
+    @Test
     fun `multi-round tool calls should produce functionCall followed by functionResponse`() {
         // Scenario: Multiple rounds of tool calls
         val assistantMessage = UIMessage(

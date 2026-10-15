@@ -5,6 +5,8 @@ import androidx.room.Room
 import androidx.lifecycle.viewModelScope
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.Called
+import io.mockk.verify
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.install
 import io.ktor.server.cio.CIO
@@ -14,15 +16,23 @@ import io.ktor.server.routing.routing
 import io.ktor.server.sse.SSE
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
@@ -35,13 +45,18 @@ import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.costguards.TokenBudgetLedger
 import me.rerere.rikkahub.costguards.TokenBudgetStore
+import me.rerere.rikkahub.data.ai.GenerationChunk
+import me.rerere.rikkahub.data.ai.GenerationLoop
+import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.dao.ConversationDAO
+import me.rerere.rikkahub.data.db.entity.ConversationEntity
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
@@ -50,11 +65,18 @@ import me.rerere.rikkahub.data.model.ConversationConfig
 import me.rerere.rikkahub.data.model.toMessageNode
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.ui.pages.chat.ChatVM
+import me.rerere.rikkahub.subagent.SubAgentOwner
+import me.rerere.rikkahub.subagent.SubAgentRegistry
+import me.rerere.rikkahub.subagent.SubAgentRun
+import me.rerere.rikkahub.subagent.SubAgentStatus
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.web.routes.conversationRoutes
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -64,6 +86,7 @@ import org.robolectric.annotation.Config
 import java.time.Instant
 import java.net.HttpURLConnection
 import java.net.URI
+import java.io.IOException
 import kotlin.uuid.Uuid
 
 /** Delayed real service operations against Room, with only the external provider deferred. */
@@ -80,6 +103,9 @@ class ChatServiceMetadataTest {
     private lateinit var dao: BarrierConversationDao
     private lateinit var settingsStore: SettingsStore
     private lateinit var settings: MutableStateFlow<Settings>
+    private lateinit var budgets: TokenBudgetStore
+    private lateinit var generation: GenerationLoop
+    private lateinit var subAgents: SubAgentRegistry
     private val assistant = Assistant()
     private val targetAssistant = Assistant()
     private val model = Model(modelId = "fast", displayName = "Fast")
@@ -105,17 +131,19 @@ class ChatServiceMetadataTest {
         provider = DeferredProvider()
         val manager = mockk<ProviderManager>()
         every { manager.getProviderByType(any()) } returns provider
-        val budgets = mockk<TokenBudgetStore>()
+        budgets = mockk<TokenBudgetStore>()
         every { budgets.getLedger(any(), any(), any()) } returns TokenBudgetLedger(enabled = false)
+        generation = mockk(relaxed = true)
+        subAgents = SubAgentRegistry()
         appScope = AppScope()
         service = ChatService(context = application, appScope = appScope, appEventBus = mockk(relaxed = true),
             settingsStore = settingsStore, conversationRepo = repository, memoryRepository = mockk(relaxed = true),
-            generationLoop = mockk(relaxed = true), translationHandler = mockk(relaxed = true),
+            generationLoop = generation, translationHandler = mockk(relaxed = true),
             templateTransformer = mockk(relaxed = true), providerManager = manager,
             chatToolFactory = mockk(relaxed = true), mcpManager = mockk(relaxed = true), filesManager = files,
             workspaceRepository = mockk(relaxed = true), folderRepository = mockk(relaxed = true),
             toolApprovalPreferences = mockk(relaxed = true), tokenBudgetStore = budgets,
-            subAgentRegistry = mockk(relaxed = true))
+            subAgentRegistry = subAgents)
     }
 
     @After fun tearDown() {
@@ -123,6 +151,174 @@ class ChatServiceMetadataTest {
         appScope.cancel()
         database.close()
         Dispatchers.resetMain()
+    }
+
+    @Test(timeout = 30_000)
+    fun `stopping before the first history save cannot discard the submitted question`() = runBlocking {
+        val source = seed(title = "Сохранённый чат")
+        val writeGate = FullWriteGate()
+        dao.fullWriteGate = writeGate
+        val question = "Не потерять этот вопрос при остановке"
+        service.sendMessage(source.id, listOf(UIMessagePart.Text(question)), answer = false)
+        writeGate.entered.await()
+        val nextQuestion = "Следующий вопрос из очереди"
+        service.sendMessage(source.id, listOf(UIMessagePart.Text(nextQuestion)), answer = false)
+        try {
+            service.stopGeneration(source.id)
+            val history = service.getConversationFlow(source.id).value.currentMessages.map { it.toText() }
+            val queued = service.getMessageQueueFlow(source.id).value.messages.flatMap { it.parts }
+                .filterIsInstance<UIMessagePart.Text>().map { it.text }
+            assertTrue("An accepted question must remain in history or the paused queue after Stop; history=$history queue=$queued",
+                question in history || question in queued)
+            assertEquals("Restored input must keep its original position before later queued questions",
+                listOf(question, nextQuestion), queued)
+            assertTrue(service.getMessageQueueFlow(source.id).value.paused)
+        } finally { writeGate.release.complete(Unit) }
+    }
+
+    @Test(timeout = 30_000)
+    fun `budget storage failure fails the voice reply and pauses queued generation`() = runBlocking {
+        val source = seed(title = "Сохранённый чат")
+        settings.value = settings.value.copy(assistants = settings.value.assistants.map {
+            if (it.id == assistant.id) it.copy(localTools = it.localTools + LocalToolOption.CostGuards) else it
+        })
+        every { budgets.getLedger(any(), any(), any()) } throws IOException("budget journal unavailable")
+        val reply = service.enqueueVoiceMessage(source.id, "Вопрос голосом")
+        val result = withTimeout(5_000) { runCatching { reply.await() } }
+        assertNotNull("A request that never reached the model must not resolve to an empty successful reply", result.exceptionOrNull())
+        assertTrue("A failed budget journal must require an explicit queue resume",
+            service.getMessageQueueFlow(source.id).value.paused)
+        assertTrue(service.errors.value.any { it.error is IOException })
+        verify { generation wasNot Called }
+    }
+
+    @Test(timeout = 30_000)
+    fun `stop cleanup still cancels child runs when the caller leaves during final persistence`() = runBlocking {
+        val source = seed(title = "Сохранённый чат")
+        val enteredGeneration = CompletableDeferred<Unit>()
+        every { generation.generateText(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+            any(), any(), any(), any(), any(), any(), any(), any()) } answers {
+            val input = arg<List<UIMessage>>(2)
+            flow {
+                emit(GenerationChunk.Messages(input + UIMessage.assistant("Полученная часть ответа")))
+                enteredGeneration.complete(Unit)
+                awaitCancellation()
+            }
+        }
+        val owner = SubAgentOwner(assistant.id.toString(), source.id.toString())
+        val run = SubAgentRun("child-stop-audit", owner, "Child", model.modelId)
+        assertTrue(subAgents.reserve(run, 1))
+        val child = appScope.launch(start = CoroutineStart.LAZY) {
+            try { awaitCancellation() }
+            finally { subAgents.finish(owner, run.id) { it.copy(status = SubAgentStatus.CANCELLED) } }
+        }
+        assertTrue(subAgents.attach(owner, run.id, child))
+        child.start()
+        val callerScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+        val writeGate = FullWriteGate()
+        try {
+            service.sendMessage(source.id, listOf(UIMessagePart.Text("Начать ответ")))
+            enteredGeneration.await()
+            val producer = service.getGenerationJobStateFlow(source.id).first { it != null }!!
+            dao.fullWriteGate = writeGate
+            val stopping = callerScope.launch(start = CoroutineStart.UNDISPATCHED) { service.stopGeneration(source.id) }
+            writeGate.entered.await()
+            stopping.cancel()
+            writeGate.release.complete(Unit)
+            stopping.join()
+            producer.join()
+            assertTrue("Leaving the chat while Stop waits for final save must not leave its child task running", child.isCancelled)
+        } finally {
+            writeGate.release.complete(Unit)
+            child.cancelAndJoin()
+            callerScope.cancel()
+        }
+    }
+
+    @Test(timeout = 30_000)
+    fun `normal stop preserves saved question and partial output without queueing or generating twice`() = runBlocking {
+        val source = seed(title = "Сохранённый чат")
+        val question = "Вопрос уже записан"
+        val partial = "Ответ, полученный до остановки"
+        val enteredGeneration = CompletableDeferred<Unit>()
+        every { generation.generateText(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+            any(), any(), any(), any(), any(), any(), any(), any()) } answers {
+            val input = arg<List<UIMessage>>(2)
+            flow {
+                emit(GenerationChunk.Messages(input + UIMessage.assistant(partial)))
+                enteredGeneration.complete(Unit)
+                awaitCancellation()
+            }
+        }
+        val writeGate = FullWriteGate()
+        try {
+            service.sendMessage(source.id, listOf(UIMessagePart.Text(question)))
+            enteredGeneration.await()
+            dao.fullWriteGate = writeGate
+            val stopping = launch(start = CoroutineStart.UNDISPATCHED) { service.stopGeneration(source.id) }
+            writeGate.entered.await()
+            assertFalse("Stop must wait for partial output to become durable", stopping.isCompleted)
+            writeGate.release.complete(Unit)
+            stopping.join()
+            service.resumeMessageQueue(source.id)
+            val live = service.getConversationFlow(source.id).value
+            val persisted = repository.getConversationById(source.id)!!
+            assertEquals(1, live.currentMessages.count { it.toText() == question })
+            assertEquals(1, persisted.currentMessages.count { it.toText() == question })
+            assertEquals(partial, live.currentMessages.last().toText())
+            assertEquals(partial, persisted.currentMessages.last().toText())
+            assertTrue(service.getMessageQueueFlow(source.id).value.messages.isEmpty())
+            verify(exactly = 1) { generation.generateText(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any(), any(), any()) }
+        } finally { writeGate.release.complete(Unit) }
+    }
+
+    @Test(timeout = 30_000)
+    fun `stop during optimistic history update retains the question durably or in paused queue`() = runBlocking {
+        assertStoppedSubmissionRetainedAfterOptimisticPublication(existing = true)
+    }
+
+    @Test(timeout = 30_000)
+    fun `stop during optimistic first insert retains the question durably or in paused queue`() = runBlocking {
+        assertStoppedSubmissionRetainedAfterOptimisticPublication(existing = false)
+    }
+
+    @Test(timeout = 30_000)
+    fun `cancelled first published write cannot launch the model after committing`() = runBlocking {
+        assertStoppedSubmissionRetainedAfterOptimisticPublication(existing = true, answer = true)
+    }
+
+    private suspend fun assertStoppedSubmissionRetainedAfterOptimisticPublication(existing: Boolean, answer: Boolean = false) = coroutineScope {
+        val conversationId = if (existing) seed(title = "Сохранённый чат").id else Uuid.random().also {
+            service.initializeConversation(it)
+            service.addConversationReference(it)
+        }
+        val writeGate = FullWriteGate()
+        if (existing) dao.updateWriteGate = writeGate else dao.insertWriteGate = writeGate
+        val question = "Вопрос опубликован, но ещё не записан"
+        service.sendMessage(conversationId, listOf(UIMessagePart.Text(question)), answer = answer)
+        writeGate.entered.await()
+        assertEquals("The DAO gate must run after optimistic publication", 1,
+            service.getConversationFlow(conversationId).value.currentMessages.count { it.toText() == question })
+        try {
+            val stopping = launch(start = CoroutineStart.UNDISPATCHED) { service.stopGeneration(conversationId) }
+            // A fix may finish this already-started write before Stop completes. Do not require
+            // either rollback or commit; require one retained submission after the outcome settles.
+            writeGate.release.complete(Unit)
+            stopping.join()
+            val durable = repository.getConversationById(conversationId)?.currentMessages.orEmpty()
+                .count { it.toText() == question }
+            val queue = service.getMessageQueueFlow(conversationId).value
+            val retained = queue.messages.count { queued ->
+                queued.parts.filterIsInstance<UIMessagePart.Text>().any { it.text == question }
+            }
+            assertEquals("Optimistic state is not a durable receipt: the question must be saved or retained once in the paused queue", 1,
+                durable + retained)
+            assertTrue("Stop must keep dispatch paused", queue.paused)
+            assertTrue("The live history must not duplicate an accepted question",
+                service.getConversationFlow(conversationId).value.currentMessages.count { it.toText() == question } <= 1)
+            verify { generation wasNot Called }
+        } finally { writeGate.release.complete(Unit) }
     }
 
     @Test(timeout = 30_000)
@@ -572,7 +768,23 @@ class ChatServiceMetadataTest {
     private class BarrierConversationDao(private val delegate: ConversationDAO) : ConversationDAO by delegate {
         var fullWriteGate: FullWriteGate? = null
         var titleCasGate: FullWriteGate? = null
+        var insertWriteGate: FullWriteGate? = null
+        var updateWriteGate: FullWriteGate? = null
         val titleWriteEntered = CompletableDeferred<Unit>()
+        override suspend fun insert(conversation: ConversationEntity) {
+            insertWriteGate?.also { insertWriteGate = null }?.let {
+                it.entered.complete(Unit)
+                it.release.await()
+            }
+            delegate.insert(conversation)
+        }
+        override suspend fun update(conversation: ConversationEntity) {
+            updateWriteGate?.also { updateWriteGate = null }?.let {
+                it.entered.complete(Unit)
+                it.release.await()
+            }
+            delegate.update(conversation)
+        }
         override suspend fun existsById(id: String): Boolean {
             val exists = delegate.existsById(id)
             fullWriteGate?.also { fullWriteGate = null }?.let {

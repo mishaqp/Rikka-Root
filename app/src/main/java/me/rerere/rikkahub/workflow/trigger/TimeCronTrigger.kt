@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.workflow.trigger
 
 import android.content.Context
+import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -110,8 +112,22 @@ internal class TimeCronTriggerFamily(
             // A synchronous checked commit is both the occurrence claim and durable
             // next-run recovery plan. Both alarm/fallback workers use this same CAS.
             if (!occurrences.advance(workflowId, pending, next)) return@withLock null
-            scheduling.cancelTimer(workflowId, pending)
-            scheduling.schedule(workflowId, next)
+            // The current occurrence is already consumed. Backend failures for its
+            // timers must not discard its execution; restore can rearm durable `next`.
+            try {
+                scheduling.cancelTimer(workflowId, pending)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.w("WorkflowTrigger", "Consumed timer cleanup failed (${error.javaClass.simpleName})")
+            }
+            try {
+                scheduling.schedule(workflowId, next)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.w("WorkflowTrigger", "Next timer rearm failed (${error.javaClass.simpleName}); keeping durable occurrence")
+            }
             wf
         } ?: return false
         // Await the engine in the WorkManager lifecycle. Its existing enabled/owner,

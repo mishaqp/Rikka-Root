@@ -8,6 +8,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -592,6 +593,7 @@ class ChatService(
                 // 添加消息到列表
                 val newConversation = currentConversation.copy(
                     messageNodes = currentConversation.messageNodes + UIMessage(
+                        id = queued.id,
                         role = MessageRole.USER,
                         parts = processedContent,
                     ).toMessageNode(),
@@ -628,7 +630,13 @@ class ChatService(
         job.invokeOnCompletion { cause ->
             if (cause != null) queued.reply?.completeExceptionally(cause)
             synchronized(session) {
-                if (session.submittingMessage?.id == queued.id) session.submittingMessage = null
+                if (session.submittingMessage?.id == queued.id) {
+                    val reachedHistory = session.state.value.messageNodes.any { node ->
+                        node.messages.any { it.id == queued.id }
+                    }
+                    if (!reachedHistory) session.messageQueue.restoreForRetry(queued)
+                    session.submittingMessage = null
+                }
             }
         }
         session.setJob(job)
@@ -847,6 +855,7 @@ class ChatService(
         val generationBudget = try {
             tokenBudgetStore.getLedger(assistant, conversationId, initialConversation.currentMessages)
         } catch (error: java.io.IOException) {
+            sessionManager.get(conversationId)?.messageQueue?.pause()
             addError(error, conversationId, title = context.getString(R.string.error_title_generation))
             return
         }
@@ -1584,26 +1593,34 @@ class ChatService(
 
                 // Capture metadata after taking the persistence lock, even for an older final/checkpoint snapshot.
                 val settings = loadedSettings()
-                val updatedConversation = session.updateState { current ->
-                    val latestMetadata = if (exists && hadMetadataOwnership) current.copy(
-                        messageNodes = conversation.messageNodes,
-                        updateAt = conversation.updateAt,
-                    ) else conversation
-                    applyLocalConversationTitle(settings, latestMetadata)
-                        .bindConfig(settings).fillModelSnapshots(settings)
-                        .also {
-                            requireWritableSession(session, it)
-                            checkFilesDelete(it, current)
-                        }
-                }
-                if (!exists) {
-                    conversationRepo.insertConversation(updatedConversation)
-                } else {
-                    conversationRepo.updateConversation(updatedConversation)
+                currentCoroutineContext().ensureActive()
+                // Before publication Stop can return input to the queue; after publication
+                // the write must settle so live history cannot be the only surviving copy.
+                withContext(NonCancellable) {
+                    val updatedConversation = session.updateState { current ->
+                        val latestMetadata = if (exists && hadMetadataOwnership) current.copy(
+                            messageNodes = conversation.messageNodes,
+                            updateAt = conversation.updateAt,
+                        ) else conversation
+                        applyLocalConversationTitle(settings, latestMetadata)
+                            .bindConfig(settings).fillModelSnapshots(settings)
+                            .also {
+                                requireWritableSession(session, it)
+                                checkFilesDelete(it, current)
+                            }
+                    }
+                    if (!exists) {
+                        conversationRepo.insertConversation(updatedConversation)
+                    } else {
+                        conversationRepo.updateConversation(updatedConversation)
+                    }
                 }
                 true
             }
         }
+        // NonCancellable on the same dispatcher need not reject the cancelled caller
+        // on exit. A committed question must not let that caller start model execution.
+        currentCoroutineContext().ensureActive()
         if (!saved) return
 
         val candidates = pendingAttachmentCleanup[conversationId].orEmpty()
@@ -1925,10 +1942,11 @@ class ChatService(
             session.messageQueue.pause()
             session.cancelJobs()
         }
-        jobs.forEach { it.join() }
-        // Stop the producer first: while it is alive it can still attach another child.
-        subAgentRegistry.cancelAllAndJoin(SubAgentOwner(session.state.value.assistantId.toString(), conversationId.toString()))
-        if (jobs.isEmpty()) return
-        finishInterruptedPendingTools(conversationId)
+        withContext(NonCancellable) {
+            jobs.forEach { it.join() }
+            // Stop the producer first: while it is alive it can still attach another child.
+            subAgentRegistry.cancelAllAndJoin(SubAgentOwner(session.state.value.assistantId.toString(), conversationId.toString()))
+            if (jobs.isNotEmpty()) finishInterruptedPendingTools(conversationId)
+        }
     }
 }

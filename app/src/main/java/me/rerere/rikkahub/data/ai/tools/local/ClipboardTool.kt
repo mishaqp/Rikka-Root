@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.data.ai.tools.local
 
 import android.content.Context
+import android.content.ClipData
+import android.content.ClipboardManager
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -12,7 +14,6 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.utils.readClipboardText
-import me.rerere.rikkahub.utils.writeClipboardText
 
 internal fun buildClipboardTool(context: Context): Tool = Tool(
     name = "clipboard_tool",
@@ -56,7 +57,10 @@ internal fun buildClipboardTool(context: Context): Tool = Tool(
 
             "write" -> {
                 val text = params["text"]?.jsonPrimitive?.contentOrNull ?: error("Для записи в буфер обмена укажите text.")
-                context.writeClipboardText(text)
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                    ?: error("Буфер обмена Android недоступен. Проверьте системную службу буфера обмена.")
+                // Unlike the UI helper, a tool must propagate a rejected write instead of claiming success.
+                clipboard.setPrimaryClip(ClipData.newPlainText("text", text))
                 val payload = buildJsonObject {
                     put("success", true)
                     put("text", text)

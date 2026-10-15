@@ -54,6 +54,18 @@ class ClaudeRequestMessageTest {
     }
 
     @Test
+    fun `inline image is sent as raw base64 to Claude`() {
+        val result = invokeBuildMessages(listOf(UIMessage(
+            role = MessageRole.USER,
+            parts = listOf(UIMessagePart.Image("data:image/png;base64,aGVsbG8=")),
+        )))
+
+        val image = result.single().jsonObject["content"]!!.jsonArray.single().jsonObject["source"]!!.jsonObject
+        assertEquals("image/png", image["media_type"]!!.jsonPrimitive.content)
+        assertEquals("aGVsbG8=", image["data"]!!.jsonPrimitive.content)
+    }
+
+    @Test
     fun `multi-round tool calls should produce tool_use followed by tool_result`() {
         // Scenario: Multiple rounds of tool calls
         val assistantMessage = UIMessage(

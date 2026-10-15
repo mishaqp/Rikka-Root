@@ -5,8 +5,10 @@ import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
@@ -57,6 +59,7 @@ class ChatListScrollRuntimeTest {
     private lateinit var state: LazyListState
     private val conversation = mutableStateOf<Conversation?>(null)
     private val loading = mutableStateOf(false)
+    private val bottomPadding = mutableStateOf(80.dp)
     private val settings = mutableStateOf(ScreenshotFixtures.settings.copy(displaySetting =
         ScreenshotFixtures.settings.displaySetting.copy(enableAutoScroll = true, autoScrollIdleSeconds = 0,
             showMessageJumper = true, messageNavButtonsMode = MessageNavButtonsMode.ALWAYS,
@@ -71,7 +74,7 @@ class ChatListScrollRuntimeTest {
     }
     @After fun close() { fixture.close() }
 
-    private fun render() {
+    private fun render(scaffoldPadding: Boolean = false) {
         val tts = mockk<CustomTtsState>(relaxed = true)
         every { tts.isAvailable } returns MutableStateFlow(false)
         every { tts.isSpeaking } returns MutableStateFlow(false)
@@ -84,8 +87,15 @@ class ChatListScrollRuntimeTest {
                     CompositionLocalProvider(LocalSettings provides settings.value, LocalTTSState provides tts,
                         LocalToaster provides toaster, LocalSharedTransitionScope provides this) {
                         Box(Modifier.requiredSize(411.dp, 600.dp)) {
-                            ChatList(PaddingValues(bottom = 80.dp), requireNotNull(conversation.value), state,
-                                loading.value, previewMode = false, settings = settings.value, hazeState = haze)
+                            if (scaffoldPadding) {
+                                Scaffold(bottomBar = { Box(Modifier.height(bottomPadding.value)) }) { padding ->
+                                    ChatList(padding, requireNotNull(conversation.value), state,
+                                        loading.value, previewMode = false, settings = settings.value, hazeState = haze)
+                                }
+                            } else {
+                                ChatList(PaddingValues(bottom = 80.dp), requireNotNull(conversation.value), state,
+                                    loading.value, previewMode = false, settings = settings.value, hazeState = haze)
+                            }
                         }
                     }
                 }
@@ -143,5 +153,19 @@ class ChatListScrollRuntimeTest {
         compose.onNodeWithContentDescription("К началу чата").performClick()
         compose.runOnIdle { growLastReply(20) }
         compose.runOnIdle { assertEquals(0, state.firstVisibleItemIndex); assertTrue(state.canScrollForward) }
+    }
+
+    @Test fun scaffoldComposerShrinkingDuringGenerationKeepsFollowingTheNextStreamChunk() {
+        bottomPadding.value = 220.dp
+        loading.value = true
+        render(scaffoldPadding = true)
+        compose.onNodeWithContentDescription("Прокрутить вниз").performClick()
+        compose.runOnIdle { assertFalse(state.canScrollForward) }
+        compose.runOnIdle { bottomPadding.value = 80.dp }
+        compose.runOnIdle { assertFalse(state.canScrollForward) }
+        compose.runOnIdle { growLastReply(20) }
+        compose.runOnIdle {
+            assertFalse("Following must track the actual Scaffold composer geometry", state.canScrollForward)
+        }
     }
 }
