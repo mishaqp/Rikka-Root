@@ -47,20 +47,19 @@ fun decideAutoEnable(
 ): AutoEnableOutcome = when {
     skillName in enabledSkills -> AutoEnableOutcome(
         autoEnabled = true,
-        detail = "Skill is already enabled for the active assistant and ready to use.",
+        detail = "Навык уже включён в текущем чате и готов к работе.",
         updatedEnabledSkills = null,
     )
 
     existedBefore -> AutoEnableOutcome(
         autoEnabled = false,
-        detail = "Skill content was updated but it remains disabled (you previously disabled it). " +
-            "Re-enable in Settings > Assistants > Skills before calling use_skill.",
+        detail = "Навык обновлён, но остаётся выключенным. Включите его в настройках навыков текущего чата перед use_skill.",
         updatedEnabledSkills = null,
     )
 
     else -> AutoEnableOutcome(
         autoEnabled = true,
-        detail = "Skill is now enabled for the active assistant and ready to use.",
+        detail = "Навык включён в текущем чате и готов к работе.",
         updatedEnabledSkills = enabledSkills + skillName,
     )
 }
@@ -252,4 +251,14 @@ private fun err(code: String, detail: String): List<UIMessagePart> =
         put("ok", false)
         put("error", code)
         put("detail", detail)
+        put("message", when (code) {
+            "missing_url", "invalid_url", "unsupported_url_scheme" -> "Адрес навыка отсутствует или неверен. Укажите полный URL с http или https."
+            "loopback_host_rejected" -> "Адрес навыка недоступен для импорта. Используйте разрешённый внешний URL или skill_install_from_text."
+            "missing_content", "empty_body" -> "Текст навыка пуст. Укажите полный текст в content."
+            "body_too_large" -> "Текст навыка слишком велик. Сократите его до 256 КБ и повторите установку."
+            "missing_name", "invalid_name" -> "Имя навыка отсутствует или неверно. Укажите name длиной 1–40 символов из a-z, 0-9, дефиса и подчёркивания."
+            "fetch_failed" -> "Не удалось скачать навык. Проверьте сеть и URL или используйте skill_install_from_text."
+            "save_failed" -> "Не удалось сохранить навык. Проверьте свободное место и повторите установку."
+            else -> "Не удалось установить навык. Проверьте формат и содержимое источника, затем повторите вызов."
+        })
     }.toString()))

@@ -54,7 +54,7 @@ fun tapTool(
             return@Tool listOf(
                 UIMessagePart.Text(
                     buildJsonObject {
-                        put("error", "x and y are required and must be non-negative numbers")
+                        put("error", "Укажите x и y — неотрицательные координаты на экране.")
                     }.toString()
                 )
             )
@@ -120,7 +120,7 @@ fun longPressTool(
             return@Tool listOf(
                 UIMessagePart.Text(
                     buildJsonObject {
-                        put("error", "x and y are required and must be non-negative numbers")
+                        put("error", "Укажите x и y — неотрицательные координаты на экране.")
                     }.toString()
                 )
             )
@@ -131,7 +131,7 @@ fun longPressTool(
             return@Tool listOf(
                 UIMessagePart.Text(
                     buildJsonObject {
-                        put("error", "duration_ms must be between 100 and 5000")
+                        put("error", "Укажите duration_ms от 100 до 5000 миллисекунд.")
                     }.toString()
                 )
             )

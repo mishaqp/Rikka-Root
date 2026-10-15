@@ -22,10 +22,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.contentOrNull
@@ -34,10 +32,12 @@ import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tools
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.ui.components.richtext.HighlightCodeBlock
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
-import me.rerere.rikkahub.utils.JsonInstant
-import me.rerere.rikkahub.utils.JsonInstantPretty
+import me.rerere.rikkahub.ui.components.message.ToolResultPreview
+import me.rerere.rikkahub.ui.components.message.parseToolOutputJson
+import me.rerere.rikkahub.ui.components.message.presentToolDetails
+import me.rerere.rikkahub.ui.components.message.presentToolOutputTexts
+import me.rerere.rikkahub.ui.components.message.presentToolResult
 import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
 import me.rerere.ui.components.FormItem
 
@@ -58,7 +58,7 @@ data class ToolUIContext(
  * 单个工具的 UI 渲染器
  *
  * 在 [ToolUIRegistry] 注册后, 聊天消息中对应的工具调用将使用该渲染器展示;
- * 未注册的工具 fallback 到接口的默认实现 (通用标题/图标 + JSON 详情)
+ * 未注册的工具 fallback 到接口的默认实现 (通用标题/图标 + 可读详情)
  */
 interface ToolUIRenderer {
     /** 渲染器对应的工具名 */
@@ -124,7 +124,7 @@ internal fun JsonElement?.getStringContent(key: String): String? =
     this?.jsonObjectOrNull?.get(key)?.jsonPrimitiveOrNull?.contentOrNull
 
 /**
- * 默认工具详情: 入参与输出的 JSON 高亮展示
+ * Generic details render readable fields; protocol JSON remains in the model-facing parts.
  *
  * @param headerActions 标题栏右侧的附加操作区
  */
@@ -157,11 +157,8 @@ fun DefaultToolPreview(
                 Text(stringResource(R.string.chat_message_tool_call_label, context.tool.toolName))
             }
         ) {
-            HighlightCodeBlock(
-                code = JsonInstantPretty.encodeToString(context.arguments),
-                language = "json",
-                style = TextStyle(fontSize = 10.sp, lineHeight = 12.sp)
-            )
+            Text(presentToolDetails(context.tool.toolName, context.arguments, isResult = false),
+                style = MaterialTheme.typography.bodySmall)
         }
         if (context.tool.output.isNotEmpty()) {
             FormItem(
@@ -170,17 +167,17 @@ fun DefaultToolPreview(
                 }
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val textParts = context.tool.output.filterIsInstance<UIMessagePart.Text>().map { it.text }
+                    val resultJson = parseToolOutputJson(context.tool.toolName, textParts)
+                    val resultPreview = presentToolResult(context.tool.toolName, textParts.joinToString("\n"), resultJson)
+                    presentToolOutputTexts(context.tool.toolName, textParts).forEachIndexed { index, text ->
+                        Text(text, style = MaterialTheme.typography.bodySmall,
+                            color = if (index == 0 && resultPreview is ToolResultPreview.Error)
+                                MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+                    }
                     context.tool.output.fastForEach { part ->
                         when (part) {
-                            is UIMessagePart.Text -> HighlightCodeBlock(
-                                code = runCatching {
-                                    JsonInstantPretty.encodeToString(
-                                        JsonInstant.parseToJsonElement(part.text)
-                                    )
-                                }.getOrElse { part.text },
-                                language = "json",
-                                style = TextStyle(fontSize = 10.sp, lineHeight = 12.sp)
-                            )
+                            is UIMessagePart.Text -> Unit
 
                             is UIMessagePart.Image -> ZoomableAsyncImage(
                                 model = part.url,

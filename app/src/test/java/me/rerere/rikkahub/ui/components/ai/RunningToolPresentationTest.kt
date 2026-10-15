@@ -47,6 +47,21 @@ class RunningToolPresentationTest {
         }
     }
 
+    @Test fun booleanMarkersRecognizeRussianRootAndGenericCheckpoints() {
+        listOf(root, UIMessagePart.Tool("file", "read_file", "{}", approvalState = ToolApprovalState.Auto)).forEach { tool ->
+            val initial = observeRunningTools(RunningToolObservation(), conversation(tool), true, 1_000)
+            val checkpoint = tool.copy(output = listOf(UIMessagePart.Text(buildJsonObject {
+                put("error", if (tool.toolName == "root_exec") "root_execution_indeterminate" else "tool_execution_indeterminate")
+                put("checkpointed_before_launch", true)
+                put("reason", "Вызов сохранён перед запуском. Не повторяйте его автоматически.")
+            }.toString())))
+            val active = observeRunningTools(initial, conversation(checkpoint), true, 2_000)
+            assertEquals(tool.toolCallId, active.activeClientKey?.toolCallId)
+            if (tool.toolName == "root_exec") assertEquals(tool.toolCallId, active.presentation?.toolCallId)
+            else assertNull(active.presentation)
+        }
+    }
+
     @Test fun pendingDeniedAndAnsweredNeverBecomeActiveEvenWithPlaceholderOutput() {
         listOf(ToolApprovalState.Pending, ToolApprovalState.Denied("Нет"), ToolApprovalState.Answered("Да")).forEach { approval ->
             val initial = observeRunningTools(RunningToolObservation(), conversation(root.copy(approvalState = approval)), true, 1_000)

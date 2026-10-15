@@ -12,6 +12,7 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.files.SkillManager
+import me.rerere.rikkahub.data.ai.tools.local.deviceToolFailureReason
 
 /**
  * Phase 18 — `run_js` tool. The LLM uses this to invoke a JS skill that lives in the
@@ -84,8 +85,9 @@ fun runJsTool(
         val secretKey = params["secret_key"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
         val secret = try {
             secretKey?.let { secretsStore.get(skillName, it) }.orEmpty()
-        } catch (_: Exception) {
-            return@Tool err("secret_unavailable", "Секрет навыка недоступен в AndroidKeyStore или имя секрета недопустимо.")
+        } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            return@Tool err("secret_unavailable", deviceToolFailureReason(error))
         }
 
         val skillDir = skillManager.getSkillDir(skillName)
@@ -120,7 +122,7 @@ fun runJsTool(
                     val resolvedUrl = resolveSkillWebviewUrl(url, scriptFile, skillDir)
                     if (resolvedUrl != null) {
                         parts.add(UIMessagePart.Text(
-                            text = parsed.text ?: "Open in a viewer",
+                            text = parsed.text ?: "Открыть результат",
                             metadata = buildJsonObject {
                                 put("rikkahub.webview", buildJsonObject {
                                     put("url", resolvedUrl)
@@ -140,7 +142,7 @@ fun runJsTool(
                     parts.add(UIMessagePart.Text(t))
                 }
                 if (parts.isEmpty()) {
-                    parts.add(UIMessagePart.Text("(skill returned no result)"))
+                    parts.add(UIMessagePart.Text("Навык не вернул результат. Проверьте входные данные и повторите вызов."))
                 }
                 parts
             }
@@ -153,6 +155,17 @@ private fun err(code: String, detail: String): List<UIMessagePart> =
         put("ok", false)
         put("error", code)
         put("detail", detail)
+        put("message", when (code) {
+            "missing_skill_name" -> "Не указано имя JS-навыка. Укажите skill_name установленного навыка."
+            "data_too_large" -> "Входные данные слишком велики. Сократите data до 64 КБ."
+            "secret_unavailable" -> "Секрет навыка недоступен. Проверьте имя secret_key и настройку секрета навыка."
+            "skill_not_found" -> "JS-навык не найден. Проверьте skill_name и установку навыка."
+            "invalid_script_path" -> "Путь скрипта выходит за папку навыка. Укажите script из ссылок в SKILL.md."
+            "script_not_found" -> "Файл JS-навыка не найден. Проверьте script или установите навык заново."
+            "script_timeout" -> "Время выполнения JS-навыка истекло. Проверьте сеть и сократите задачу навыка."
+            "secure_webview_unavailable" -> "Безопасный запуск JS-навыка недоступен. Обновите Android System WebView и повторите вызов."
+            else -> "JS-навык завершился с ошибкой. Проверьте входные данные и скрипт, затем повторите вызов."
+        })
     }.toString()))
 
 /**

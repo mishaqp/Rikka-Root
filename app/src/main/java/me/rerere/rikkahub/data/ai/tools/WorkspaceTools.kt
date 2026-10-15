@@ -14,6 +14,8 @@ import me.rerere.ai.ui.DiffMetadata
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.toMetadata
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.data.ai.tools.local.deviceToolParts
+import me.rerere.rikkahub.data.ai.tools.local.commandExitFailureReason
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.utils.generateUnifiedDiff
 import me.rerere.workspace.WorkspaceCommandResult
@@ -25,6 +27,8 @@ import java.io.ByteArrayOutputStream
 
 private const val SHELL_TIMEOUT_MAX_SECONDS = 600L
 private const val MAX_READ_FILE_BYTES = 8L * 1024 * 1024
+private const val WORKSPACE_EXISTS_ERROR = "Файл уже существует. Укажите другое имя или overwrite=true."
+private const val WORKSPACE_NOT_FILE_ERROR = "Это папка, а нужен файл. Укажите путь к файлу."
 
 val WorkspaceToolDefaultApprovals: Map<String, Boolean> = mapOf(
     "workspace_read_file" to false,
@@ -56,12 +60,14 @@ suspend fun createWorkspaceTools(
 
     val shellCwd = cwd?.removePrefix("/workspace/")?.removePrefix("/workspace")
 
-    return listOf(
+    return (listOf(
         createReadFileTool(workspaceId, ::needsApproval, workspaceRepository),
         createWriteFileTool(workspaceId, ::needsApproval, workspaceRepository),
         createEditFileTool(workspaceId, ::needsApproval, workspaceRepository),
         createShellTool(workspaceId, ::needsApproval, workspaceRepository, shellCwd),
-    ) + createBackgroundTools(workspaceId, workspaceRepository, shellCwd)
+    ) + createBackgroundTools(workspaceId, workspaceRepository, shellCwd)).map { tool ->
+        tool.copy(execute = { input -> deviceToolParts { tool.execute(input) } })
+    }
 }
 
 private fun createBackgroundTools(id: String, repository: WorkspaceRepository, defaultCwd: String?): List<Tool> = listOf(
@@ -76,7 +82,7 @@ private fun createBackgroundTools(id: String, repository: WorkspaceRepository, d
         execute = { args ->
             val params = args.jsonObject
             val cwd = (params.string("cwd") ?: defaultCwd.orEmpty()).removePrefix("/workspace/").removePrefix("/workspace")
-            listOf(UIMessagePart.Text(repository.startBackground(id, params.string("command") ?: error("command required"), cwd).toBackgroundJson(false).toString()))
+            listOf(UIMessagePart.Text(repository.startBackground(id, params.string("command") ?: error("Укажите команду в command."), cwd).toBackgroundJson(false).toString()))
         },
     ),
     Tool(
@@ -89,14 +95,14 @@ private fun createBackgroundTools(id: String, repository: WorkspaceRepository, d
         name = "workspace_background_output", description = "Read bounded stdout/stderr tails and exit code of a managed process in this workspace.",
         parameters = { backgroundIdSchema() },
         execute = { args -> listOf(UIMessagePart.Text(repository.backgroundOutput(id,
-            args.jsonObject.string("process_id") ?: error("process_id required")).toBackgroundJson(true).toString())) },
+            args.jsonObject.string("process_id") ?: error("Укажите process_id из списка фоновых процессов.")).toBackgroundJson(true).toString())) },
     ),
     Tool(
         name = "workspace_background_stop", description = "Stop a managed process and its child processes in this workspace; retain its output record.",
         parameters = { backgroundIdSchema() }, needsApproval = { true },
         execute = { args ->
-            val processId = args.jsonObject.string("process_id") ?: error("process_id required")
-            check(repository.stopBackground(id, processId)) { "Process not found in this workspace" }
+            val processId = args.jsonObject.string("process_id") ?: error("Укажите process_id из списка фоновых процессов.")
+            check(repository.stopBackground(id, processId)) { "Процесс не найден в этой рабочей папке. Проверьте process_id через workspace_background_list." }
             listOf(UIMessagePart.Text(repository.backgroundOutput(id, processId).toBackgroundJson(false).toString()))
         },
     ),
@@ -191,7 +197,7 @@ private fun createWriteFileTool(
     execute = {
         val params = it.jsonObject
         val path = params.absolutePath("path")
-        val text = params.string("text") ?: error("text is required")
+        val text = params.string("text") ?: error("Укажите текст в text.")
         val overwrite = params["overwrite"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true
         val entry = workspaceRepository.writeTextInRootfs(workspaceId, path, text, overwrite)
         listOf(UIMessagePart.Text(entry.toJson().toString()))
@@ -234,18 +240,14 @@ private fun createEditFileTool(
     execute = {
         val params = it.jsonObject
         val path = params.absolutePath("path")
-        val oldText = params.string("old_text") ?: error("old_text is required")
-        val newText = params.string("new_text") ?: error("new_text is required")
+        val oldText = params.string("old_text") ?: error("Укажите исходный фрагмент в old_text.")
+        val newText = params.string("new_text") ?: error("Укажите новый фрагмент в new_text.")
         val replaceAll = params["replace_all"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
-        require(oldText.isNotEmpty()) { "old_text must not be empty" }
+        require(oldText.isNotEmpty()) { "old_text не должен быть пустым. Укажите текст для замены." }
 
         val original = workspaceRepository.readTextInRootfs(workspaceId, path)
         // 逐级尝试 exact -> line_trimmed -> block_anchor 替换器, 见 TextReplacers.kt
-        val result = try {
-            replaceText(original, oldText, newText, replaceAll)
-        } catch (e: IllegalArgumentException) {
-            error("${e.message} (path: $path)")
-        }
+        val result = replaceText(original, oldText, newText, replaceAll)
         val entry = workspaceRepository.writeTextInRootfs(workspaceId, path, result.updated, overwrite = true)
         val diff = generateUnifiedDiff(original, result.updated, entry.path)
         listOf(
@@ -311,7 +313,7 @@ private fun createShellTool(
     needsApproval = { needsApproval("workspace_shell") },
     execute = {
         val params = it.jsonObject
-        val command = params.string("command") ?: error("command is required")
+        val command = params.string("command") ?: error("Укажите команду в command.")
         val cwd = (params.string("cwd") ?: defaultCwd.orEmpty())
             .removePrefix("/workspace/").removePrefix("/workspace")
         val timeoutMillis = params.string("timeout")?.toLongOrNull()
@@ -326,7 +328,12 @@ private fun createShellTool(
                     put("stdout", result.stdout)
                     put("stderr", result.stderr)
                     put("timedOut", result.timedOut)
-                    if (result.truncated) put("truncated", true)
+                    if (result.timedOut) put("message", "Время команды истекло. Проверьте, что успело выполниться, перед новым вызовом; команда автоматически не повторяется.")
+                    else commandExitFailureReason(result.exitCode)?.let { put("message", it) }
+                    if (result.truncated) {
+                        put("truncated", true)
+                        put("warning", "Вывод команды получен не полностью. Для проверки прочитайте нужную часть вывода отдельно.")
+                    }
                 }.toString()
             )
         )
@@ -351,7 +358,7 @@ private suspend fun WorkspaceRepository.readRootfsBuffer(
 ): ByteArrayOutputStream {
     val size = rootfsFileSize(workspaceId, path)
     require(size <= MAX_READ_FILE_BYTES) {
-        "File is too large to read: $path (${size / 1024 / 1024}MB, max ${MAX_READ_FILE_BYTES / 1024 / 1024}MB). Use shell commands like head, tail, or grep to read parts of it."
+        "Файл слишком большой (${size / 1024 / 1024} МБ, максимум ${MAX_READ_FILE_BYTES / 1024 / 1024} МБ). Прочитайте нужную часть через workspace_shell: head, tail или grep."
     }
     return ByteArrayOutputStream(size.toInt()).also { exportRootfsFile(workspaceId, path, it) }
 }
@@ -384,14 +391,14 @@ private suspend fun WorkspaceRepository.writeTextInRootfs(
     val pathArg = path.shellQuote()
     val result = runRootfsCommand(
         workspaceId = workspaceId,
-        action = "Write file",
+        action = "Запись файла",
         command = """
             if [ -e $pathArg ] && [ ${(!overwrite).shellFlag()} = 1 ]; then
-              printf '%s\n' ${"File already exists: $path".shellQuote()} >&2
+              printf '%s\n' ${WORKSPACE_EXISTS_ERROR.shellQuote()} >&2
               exit 1
             fi
             if [ -e $pathArg ] && [ ! -f $pathArg ]; then
-              printf '%s\n' ${"Path is not a file: $path".shellQuote()} >&2
+              printf '%s\n' ${WORKSPACE_NOT_FILE_ERROR.shellQuote()} >&2
               exit 1
             fi
             parent=${'$'}(dirname -- $pathArg) || exit 1
@@ -417,14 +424,15 @@ private suspend fun WorkspaceRepository.runRootfsCommand(
         stdin = stdin,
     )
     if (result.timedOut) {
-        error("$action timed out")
+        error("$action не завершена вовремя. Проверьте файл перед повторной попыткой.")
     }
     if (result.exitCode != 0) {
-        val message = result.stderr.ifBlank { result.stdout }.trim()
-        error(if (message.isBlank()) "$action failed with exit code ${result.exitCode}" else message)
+        val authored = result.stderr.trim().takeIf { it == WORKSPACE_EXISTS_ERROR || it == WORKSPACE_NOT_FILE_ERROR }
+        if (authored != null) error(authored)
+        error("$action не выполнена (код ${result.exitCode}). Проверьте путь, доступ и свободное место.")
     }
     if (result.truncated) {
-        error("$action output is too large")
+        error("$action вернула слишком большой ответ. Проверьте файл через workspace_shell.")
     }
     return result
 }
@@ -440,15 +448,15 @@ private fun statEntryCommand(path: String): String {
 }
 
 private fun String.parseRootfsEntry(): WorkspaceFileEntry =
-    parseRootfsEntries().singleOrNull() ?: error("Invalid file metadata output")
+    parseRootfsEntries().singleOrNull() ?: error("Не удалось прочитать сведения о файле. Проверьте файл через workspace_shell.")
 
 private fun String.parseRootfsEntries(): List<WorkspaceFileEntry> {
     val fields = split('\u0000').dropLastWhile { it.isEmpty() }
-    require(fields.size % 4 == 0) { "Invalid file metadata output" }
+    require(fields.size % 4 == 0) { "Не удалось прочитать сведения о файле. Проверьте файл через workspace_shell." }
     return fields.chunked(4).map { chunk ->
         val type = chunk[0]
-        val size = chunk[1].toLongOrNull() ?: error("Invalid file size: ${chunk[1]}")
-        val updatedAt = (chunk[2].toLongOrNull() ?: error("Invalid file mtime: ${chunk[2]}")) * 1_000L
+        val size = chunk[1].toLongOrNull() ?: error("Не удалось определить размер файла. Проверьте файл через workspace_shell.")
+        val updatedAt = (chunk[2].toLongOrNull() ?: error("Не удалось определить время изменения файла. Проверьте файл через workspace_shell.")) * 1_000L
         val path = chunk[3]
         WorkspaceFileEntry(
             path = path,
@@ -461,10 +469,10 @@ private fun String.parseRootfsEntries(): List<WorkspaceFileEntry> {
 }
 
 private fun kotlinx.serialization.json.JsonObject.absolutePath(name: String): String {
-    val path = string(name)?.replace('\\', '/')?.trim() ?: error("$name is required")
-    require(path.isNotBlank()) { "$name is required" }
-    require(path.startsWith("/")) { "$name must be an absolute path inside Rootfs" }
-    require(!path.contains('\u0000')) { "$name contains invalid character" }
+    val path = string(name)?.replace('\\', '/')?.trim() ?: error("Укажите путь в $name.")
+    require(path.isNotBlank()) { "Укажите путь в $name." }
+    require(path.startsWith("/")) { "Укажите в $name полный путь внутри Rootfs, начиная с /." }
+    require(!path.contains('\u0000')) { "Путь в $name содержит недопустимый символ. Укажите другой путь." }
     return path
 }
 

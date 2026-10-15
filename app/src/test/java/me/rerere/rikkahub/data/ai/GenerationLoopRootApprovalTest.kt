@@ -53,6 +53,55 @@ class GenerationLoopRootApprovalTest {
     @get:Rule val folder = TemporaryFolder()
 
     @Test(timeout = 15_000)
+    fun `unexpected tool exceptions become safe Russian results without stack traces`() = runBlocking {
+        Fixture(folder.newFolder()).use { fixture ->
+            val broken = Tool("workspace_shell", "test", execute = {
+                throw java.io.IOException("open failed errno=5 password=private /Секретные данные/input.txt")
+            })
+            fixture.collect(listOf(UIMessage.assistant("").copy(parts = listOf(
+                UIMessagePart.Tool("broken", broken.name, "{}", approvalState = ToolApprovalState.Approved),
+            ))), extraTools = listOf(broken), maxSteps = 1)
+            val text = fixture.latest.last().getTools().single().output.filterIsInstance<UIMessagePart.Text>().single().text
+            val result = Json.parseToJsonElement(text).jsonObject
+            val error = result["error"]!!.jsonPrimitive.content
+            assertTrue(text, error.contains("Проверьте"))
+            assertEquals("java.io.IOException", result["detail"]?.jsonPrimitive?.content)
+            assertEquals("open failed errno=5 password=[redacted] /Секретные данные/input.txt",
+                result["raw_error"]?.jsonPrimitive?.content)
+            assertFalse(text, text.contains("private"))
+            assertFalse(error, error.contains("Секретные"))
+            assertFalse(text, text.contains("\\n\\tat"))
+        }
+    }
+
+    @Test(timeout = 15_000)
+    fun `unexpected tool exception without message keeps its class as raw diagnostics`() = runBlocking {
+        Fixture(folder.newFolder()).use { fixture ->
+            val broken = Tool("workspace_shell", "test", execute = { throw java.io.IOException() })
+            fixture.collect(listOf(UIMessage.assistant("").copy(parts = listOf(
+                UIMessagePart.Tool("broken", broken.name, "{}", approvalState = ToolApprovalState.Approved),
+            ))), extraTools = listOf(broken), maxSteps = 1)
+            val text = fixture.latest.last().getTools().single().output.filterIsInstance<UIMessagePart.Text>().single().text
+            val result = Json.parseToJsonElement(text).jsonObject
+            assertEquals("java.io.IOException", result["raw_error"]?.jsonPrimitive?.content)
+            assertTrue(text, result["error"]!!.jsonPrimitive.content.contains("Проверьте"))
+            assertFalse(text, text.contains("\\n\\tat"))
+        }
+    }
+
+    @Test(timeout = 15_000)
+    fun `denied tool explains refusal in Russian and keeps user reason`() = runBlocking {
+        Fixture(folder.newFolder()).use { fixture ->
+            val denied = UIMessagePart.Tool("denied", "workspace_shell", "{}",
+                approvalState = ToolApprovalState.Denied("Не отправлять данные"))
+            fixture.collect(listOf(UIMessage.assistant("").copy(parts = listOf(denied))), maxSteps = 1)
+            val text = fixture.latest.last().getTools().single().output.filterIsInstance<UIMessagePart.Text>().single().text
+            val error = Json.parseToJsonElement(text).jsonObject["error"]!!.jsonPrimitive.content
+            assertEquals("Пользователь отклонил выполнение. Причина: Не отправлять данные", error)
+        }
+    }
+
+    @Test(timeout = 15_000)
     fun `yolo after search executes capabilities but keeps mandatory confirmations pending`() = runBlocking {
         ToolApprovalTestStore(folder.newFolder()).use { approvals ->
             approvals.preferences.setYolo(true)
@@ -150,7 +199,7 @@ class GenerationLoopRootApprovalTest {
             assertEquals(ToolApprovalState.Approved, result.approvalState)
             val error = Json.parseToJsonElement(result.output.filterIsInstance<UIMessagePart.Text>().single().text)
                 .jsonObject.getValue("error").jsonPrimitive.content
-            assertTrue(error, error.contains("blocked by safety floor (hardline): hardline:js_cookie_write"))
+            assertEquals("Команда заблокирована защитой (hardline:js_cookie_write). Выберите безопасное действие.", error)
             assertFalse(result.isPending)
             assertTrue(result.isExecuted)
             assertEquals(0, effects.get())

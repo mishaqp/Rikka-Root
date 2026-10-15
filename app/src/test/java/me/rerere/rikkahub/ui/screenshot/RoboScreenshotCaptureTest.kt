@@ -92,6 +92,35 @@ class RoboScreenshotCaptureTest {
         } finally { frame.recycle() }
     }
 
+    @Test fun afterWarmupSettlesBeforeTheOnlyActualDrawAndKeepsOriginalVerification() {
+        val baseline = File(directory.root, "expected_settled.png")
+        val artifact = File(directory.root, "actual_settled.png")
+        val frame = createFrame()
+        val events = mutableListOf<String>()
+        var captures = 0
+        try {
+            frame.captureRoboImage(baseline.absolutePath, roborazziOptions = record)
+            val expectedBytes = baseline.readBytes()
+            val failure = assertThrows(AssertionError::class.java) {
+                captureRoboFrame(artifact, baseline, verify, afterWarmup = {
+                    events += "settle"
+                    frame.setPixel(20, 10, Color.RED)
+                }) { file, options ->
+                    captures++
+                    events += if (file == artifact) "actual" else "warmup"
+                    frame.captureRoboImage(file.absolutePath, roborazziOptions = options)
+                }
+            }
+            assertEquals(listOf("warmup", "settle", "actual"), events)
+            assertEquals("Settling does not introduce another UI capture", 2, captures)
+            assertTrue("The unchanged comparator rejects the actual post-settle pixels", failure.message.orEmpty().contains("is changed"))
+            assertArrayEquals("Verification cannot overwrite the expected pixels", expectedBytes, baseline.readBytes())
+            val actual = requireNotNull(BitmapFactory.decodeFile(artifact.absolutePath))
+            try { assertEquals("Published pixels come from after settling", Color.RED, actual.getPixel(20, 10)) }
+            finally { actual.recycle() }
+        } finally { frame.recycle() }
+    }
+
     @Test fun verifyRefusesAnArtifactAliasOfItsBaselineBeforeAnyNativeDraw() {
         val baseline = File(directory.root, "expected_same.png")
         val frame = createFrame()

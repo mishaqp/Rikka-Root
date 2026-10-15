@@ -564,7 +564,7 @@ object BrowserController {
     /** Returned when the 5-min single-task window has elapsed without a browser_done call. */
     fun taskTimeoutEnvelope(): JsonObject = buildJsonObject {
         put("error", "browser_task_timeout")
-        put("recovery", "Call browser_done with a summary; the per-task 5-minute cap has been reached.")
+        put("recovery", "Время задачи браузера истекло. Вызовите browser_done с итогом; для новой задачи повторите browser_open.")
     }
 
     /**
@@ -574,7 +574,7 @@ object BrowserController {
      */
     fun sessionLostEnvelope(): JsonObject = buildJsonObject {
         put("error", "browser_session_lost")
-        put("recovery", "The headless browser session ended (the calling foreground service was killed). Ask the user to retry.")
+        put("recovery", "Фоновая сессия браузера завершилась. Откройте приложение и повторите задачу через browser_open.")
     }
 
     /**
@@ -585,7 +585,7 @@ object BrowserController {
      */
     fun bindBusyEnvelope(): JsonObject = buildJsonObject {
         put("error", "browser_busy")
-        put("recovery", "Another conversation is currently driving the browser. Wait for it to finish (it calls browser_done), then retry browser_open.")
+        put("recovery", "Браузер занят другим диалогом. Дождитесь завершения его задачи и повторите browser_open.")
     }
 
     /**

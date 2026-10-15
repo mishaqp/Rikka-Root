@@ -13,6 +13,7 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.ai.tools.local.deviceToolParts
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.utils.toLocalString
 import java.time.LocalDate
@@ -70,23 +71,23 @@ fun buildMemoryTools(
                 required = listOf("action")
             )
         },
-        execute = {
+        execute = { deviceToolParts {
             val params = it.jsonObject
-            val action = params["action"]?.jsonPrimitive?.contentOrNull ?: error("action is required")
+            val action = params["action"]?.jsonPrimitive?.contentOrNull ?: error("Укажите action: create, edit или delete для работы с памятью.")
             val payload = when (action) {
                 "create" -> {
-                    val content = params["content"]?.jsonPrimitive?.contentOrNull ?: error("content is required")
+                    val content = params["content"]?.jsonPrimitive?.contentOrNull ?: error("Укажите content — текст записи памяти.")
                     json.encodeToJsonElement(AssistantMemory.serializer(), onCreation(content))
                 }
 
                 "edit" -> {
-                    val id = params["id"]?.jsonPrimitive?.intOrNull ?: error("id is required")
-                    val content = params["content"]?.jsonPrimitive?.contentOrNull ?: error("content is required")
+                    val id = params["id"]?.jsonPrimitive?.intOrNull ?: error("Укажите id существующей записи памяти.")
+                    val content = params["content"]?.jsonPrimitive?.contentOrNull ?: error("Укажите content — текст записи памяти.")
                     json.encodeToJsonElement(AssistantMemory.serializer(), onUpdate(id, content))
                 }
 
                 "delete" -> {
-                    val id = params["id"]?.jsonPrimitive?.intOrNull ?: error("id is required")
+                    val id = params["id"]?.jsonPrimitive?.intOrNull ?: error("Укажите id существующей записи памяти.")
                     onDelete(id)
                     buildJsonObject {
                         put("success", true)
@@ -94,9 +95,9 @@ fun buildMemoryTools(
                     }
                 }
 
-                else -> error("unknown action: $action, must be one of [create, edit, delete]")
+                else -> error("Укажите action: create, edit или delete для работы с памятью.")
             }
             listOf(UIMessagePart.Text(payload.toString()))
-        }
+        } }
     )
 )

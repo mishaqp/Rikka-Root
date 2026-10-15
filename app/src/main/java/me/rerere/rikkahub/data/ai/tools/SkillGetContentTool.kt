@@ -59,6 +59,7 @@ fun skillGetContentTool(
         fun notFound(name: String): List<UIMessagePart> = listOf(
             UIMessagePart.Text(buildJsonObject {
                 put("error", "skill_not_found")
+                put("message", "Навык не найден. Выберите имя из available_skills и повторите вызов.")
                 put("name", name)
                 put("available_skills", buildJsonArray {
                     allSkills.forEach { add(JsonPrimitive(it.name)) }
@@ -71,6 +72,7 @@ fun skillGetContentTool(
                 UIMessagePart.Text(buildJsonObject {
                     put("error", "missing_required_arg")
                     put("detail", "skill_get_content requires a 'name' argument.")
+                    put("message", "Не указано имя навыка. Укажите name из available_skills.")
                     put("available_skills", buildJsonArray {
                         allSkills.forEach { add(JsonPrimitive(it.name)) }
                     })

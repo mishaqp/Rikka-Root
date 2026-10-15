@@ -2,6 +2,7 @@ package me.rerere.rikkahub.skills
 
 import me.rerere.rikkahub.data.files.SkillFrontmatterParser
 import me.rerere.rikkahub.data.files.SkillManager
+import me.rerere.rikkahub.data.ai.tools.local.deviceToolFailureReason
 import me.rerere.rikkahub.data.files.SkillMetadata
 import kotlinx.serialization.json.contentOrNull
 import okhttp3.OkHttpClient
@@ -61,7 +62,8 @@ class SkillUrlImporter(
         val raw = try {
             fetch(url)
         } catch (t: Throwable) {
-            return Result.Err("fetch_failed", t.message ?: "network error")
+            if (t is kotlinx.coroutines.CancellationException) throw t
+            return Result.Err("fetch_failed", deviceToolFailureReason(t))
         }
         return importFromText(raw, sourceLabel = url, overrideName = overrideName)
     }

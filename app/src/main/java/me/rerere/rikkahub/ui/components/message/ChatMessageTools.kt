@@ -71,7 +71,6 @@ import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.ui.ChainOfThoughtScope
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.utils.JsonInstant
-import me.rerere.rikkahub.utils.JsonInstantPretty
 import me.rerere.ui.components.DotLoading
 import me.rerere.rikkahub.data.ai.tools.ToolPermissionPolicy
 import me.rerere.rikkahub.service.ChatService.ApprovalScope
@@ -149,11 +148,11 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(
                 Text(timelineStatusText(status), style = MaterialTheme.typography.labelMedium)
                 tool.input?.let { input ->
                     Text(stringResource(R.string.chat_timeline_server_input), style = MaterialTheme.typography.labelMedium)
-                    Text(JsonInstantPretty.encodeToString(input), style = MaterialTheme.typography.bodySmall)
+                    Text(presentToolDetails(tool.toolName, input, isResult = false), style = MaterialTheme.typography.bodySmall)
                 }
                 tool.output?.let { result ->
                     Text(stringResource(R.string.chat_timeline_server_output), style = MaterialTheme.typography.labelMedium)
-                    Text(JsonInstantPretty.encodeToString(result), style = MaterialTheme.typography.bodySmall)
+                    Text(presentToolDetails(tool.toolName, result), style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -179,11 +178,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     val renderer = remember(tool.toolName) { ToolUIRegistry.resolve(tool.toolName) }
     val outputJson = remember(tool) {
         if (tool.isExecuted) {
-            runCatching {
-                JsonInstant.parseToJsonElement(
-                    tool.output.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }
-                )
-            }.getOrNull()
+            parseToolOutputJson(tool.toolName, tool.output.filterIsInstance<UIMessagePart.Text>().map { it.text })
         } else {
             null
         }
@@ -233,10 +228,13 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     val headline = remember(tool.toolName, tool.input) { presentToolHeadline(tool.toolName, tool.inputAsJson()) }
     // Command output and errors are always shown as text; other tools keep their own summary renderer.
     val ownPreview = resultPreview != null && (resultPreview !is ToolResultPreview.Summary ||
-        outputUnparsable || !renderer.hasSummary(context))
+        outputUnparsable || !renderer.hasSummary(context) ||
+        (outputJson as? JsonObject)?.let { toolWarningMessage(tool.toolName, it) } != null)
     val pendingPreview = if (isPending && !useCustomMcpPreview && workflowPreview == null) {
         ((tool.inputAsJson() as? JsonObject)?.get("command") as? JsonPrimitive)?.contentOrNull
-            ?: tool.input.takeIf { it.isNotBlank() }
+            ?: tool.input.takeIf { it.isNotBlank() }?.let {
+                presentToolDetails(tool.toolName, tool.inputAsJson(), isResult = false)
+            }
     } else null
 
     // 摘要由注册的渲染器决定; 图片输出与拒绝原因为所有工具通用
@@ -445,7 +443,8 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                     // MCP controls can carry secrets in arguments; their pending sheet shows only
                     // the existing redacted approval preview and scoped actions.
                     if (!isPending || !useCustomMcpPreview) {
-                        if (outputUnparsable) DefaultToolPreview(context = context)
+                        if (resultPreview is ToolResultPreview.Error) DefaultToolPreview(context = context)
+                        else if (outputUnparsable) DefaultToolPreview(context = context)
                         else renderer.Preview(context = context, onDismissRequest = { showResult = false })
                     }
                 }
@@ -471,7 +470,7 @@ private fun TimelineStepTitle(text: String, loading: Boolean, fontSizeRatio: Flo
     )
 }
 
-/** Up to four lines of result: command output in monospace, a readable error or a short summary. */
+/** Command previews are compact; full failure reasons and partial-effect warnings are never cut. */
 @Composable
 private fun ToolResultPreviewText(preview: ToolResultPreview, testTag: String, fontSizeRatio: Float) {
     val base = MaterialTheme.typography.bodySmall.copy(
@@ -506,6 +505,11 @@ private fun ToolResultPreviewText(preview: ToolResultPreview, testTag: String, f
                 style = MaterialTheme.typography.labelSmall,
                 color = error,
             )
+            preview.reason?.let { reason -> Text(
+                text = reason,
+                style = base,
+                color = error,
+            ) }
         }
 
         is ToolResultPreview.Error -> Text(
@@ -513,8 +517,6 @@ private fun ToolResultPreviewText(preview: ToolResultPreview, testTag: String, f
             modifier = Modifier.testTag(testTag),
             style = base,
             color = error,
-            maxLines = 4,
-            overflow = TextOverflow.Ellipsis,
         )
 
         is ToolResultPreview.Summary -> Text(
@@ -522,8 +524,8 @@ private fun ToolResultPreviewText(preview: ToolResultPreview, testTag: String, f
             modifier = Modifier.testTag(testTag),
             style = base,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 4,
-            overflow = TextOverflow.Ellipsis,
+            maxLines = if (preview.preserveFullText) Int.MAX_VALUE else 4,
+            overflow = if (preview.preserveFullText) TextOverflow.Clip else TextOverflow.Ellipsis,
         )
     }
 }

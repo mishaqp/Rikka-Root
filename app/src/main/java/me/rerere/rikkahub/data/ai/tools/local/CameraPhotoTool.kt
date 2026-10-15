@@ -30,21 +30,21 @@ fun cameraPhotoTool(context: Context, files: FilesManager): Tool = Tool(
         try {
             val result=awaitPersonalToolUi(context,request,300000)
             if (result !is PersonalUiResult.Photo) return@deviceToolParts listOf(UIMessagePart.Text(buildJsonObject {
-                val error = if (result == PersonalUiResult.Cancelled) deviceToolError("Съёмка отменена пользователем.") else personalUiError(result)
+                val error = if (result == PersonalUiResult.Cancelled) deviceToolError("Съёмка отменена пользователем.") else personalUiError(result, "Проверьте разрешение камеры и доступность приложения камеры Android.")
                 error.forEach { (key,value) -> put(key,value) }
                 request.captureState.failure?.let { put("camera_diagnostic", cameraDiagnostic(it)) }
             }.toString()))
             val captured=result.file
             withContext(Dispatchers.IO) {
-                if (!captured.isFile || captured.length() !in 1..33_554_432L) return@withContext listOf(UIMessagePart.Text(deviceToolError("Камера не создала допустимое фото. Пустой или слишком большой файл удалён.").toString()))
+                if (!captured.isFile || captured.length() !in 1..33_554_432L) return@withContext listOf(UIMessagePart.Text(deviceToolError("Камера не создала допустимое фото. Пустой или слишком большой файл удалён. Сделайте снимок снова с меньшим размером изображения.").toString()))
                 try {
                     val bytes=captured.inputStream().use { readBoundedImage(it,33_554_432) }
                     val bounds=BitmapFactory.Options().apply { inJustDecodeBounds=true }
                     BitmapFactory.decodeByteArray(bytes,0,bytes.size,bounds)
-                    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@withContext listOf(UIMessagePart.Text(deviceToolError("Камера вернула повреждённое изображение.").toString()))
+                    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@withContext listOf(UIMessagePart.Text(deviceToolError("Камера вернула повреждённое изображение. Сделайте снимок снова.").toString()))
                     val decoded=BitmapFactory.decodeByteArray(bytes,0,bytes.size,BitmapFactory.Options().apply {
                         inSampleSize=wallpaperSampleSize(bounds.outWidth,bounds.outHeight); inScaled=false
-                    }) ?: return@withContext listOf(UIMessagePart.Text(deviceToolError("Не удалось обработать фото.").toString()))
+                    }) ?: return@withContext listOf(UIMessagePart.Text(deviceToolError("Не удалось обработать фото. Сделайте снимок снова с меньшим размером изображения.").toString()))
                     val bitmap=try {
                         val orientation=captured.inputStream().use { ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION,ExifInterface.ORIENTATION_NORMAL) }
                         val matrix=Matrix()
@@ -62,8 +62,8 @@ fun cameraPhotoTool(context: Context, files: FilesManager): Tool = Tool(
                     if (bitmap !== decoded) decoded.recycle()
                     try {
                         val encoded=ByteArrayOutputStream()
-                        check(bitmap.compress(Bitmap.CompressFormat.JPEG,92,encoded))
-                        require(encoded.size() in 1..16_777_216)
+                        check(bitmap.compress(Bitmap.CompressFormat.JPEG,92,encoded)) { "Не удалось сохранить фото в JPEG. Сделайте снимок снова." }
+                        require(encoded.size() in 1..16_777_216) { "Фото пустое или превышает 16 МиБ. Сделайте снимок снова с меньшим размером изображения." }
                         val entity=files.saveManagedFromBytes(FileFolders.UPLOAD,encoded.toByteArray(),"Фото.jpg","image/jpeg")
                         val file=files.getFile(entity)
                         listOf(UIMessagePart.Image(file.toUri().toString()),UIMessagePart.Text(buildJsonObject {

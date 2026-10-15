@@ -43,9 +43,9 @@ internal fun buildClipboardTool(context: Context): Tool = Tool(
             required = listOf("action")
         )
     },
-    execute = {
+    execute = { deviceToolParts {
         val params = it.jsonObject
-        val action = params["action"]?.jsonPrimitive?.contentOrNull ?: error("action is required")
+        val action = params["action"]?.jsonPrimitive?.contentOrNull ?: error("Укажите action: read для чтения или write для записи в буфер обмена.")
         when (action) {
             "read" -> {
                 val payload = buildJsonObject {
@@ -55,7 +55,7 @@ internal fun buildClipboardTool(context: Context): Tool = Tool(
             }
 
             "write" -> {
-                val text = params["text"]?.jsonPrimitive?.contentOrNull ?: error("text is required")
+                val text = params["text"]?.jsonPrimitive?.contentOrNull ?: error("Для записи в буфер обмена укажите text.")
                 context.writeClipboardText(text)
                 val payload = buildJsonObject {
                     put("success", true)
@@ -64,7 +64,7 @@ internal fun buildClipboardTool(context: Context): Tool = Tool(
                 listOf(UIMessagePart.Text(payload.toString()))
             }
 
-            else -> error("unknown action: $action, must be one of [read, write]")
+            else -> error("Укажите action: read для чтения или write для записи в буфер обмена.")
         }
-    }
+    } }
 )

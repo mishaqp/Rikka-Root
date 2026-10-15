@@ -58,14 +58,14 @@ fun notificationTool(context: Context, conversationId: String? = null): Tool = T
             return@deviceToolResult deviceToolError("Разрешите уведомления при включении функции в настройках ассистента.", Manifest.permission.POST_NOTIFICATIONS)
         }
         val manager = NotificationManagerCompat.from(context)
-        if (!manager.areNotificationsEnabled()) return@deviceToolResult deviceToolError("Уведомления приложения отключены в настройках Android.")
+        if (!manager.areNotificationsEnabled()) return@deviceToolResult deviceToolError("Уведомления приложения отключены. Включите их в настройках уведомлений Android для Rikka-Root.")
         manager.createNotificationChannel(NotificationChannelCompat.Builder(CHANNEL_ID, NotificationManager.IMPORTANCE_DEFAULT)
             .setName(context.getString(R.string.assistant_page_local_tools_notification_channel)).build())
         if (manager.getNotificationChannel(CHANNEL_ID)?.importance == NotificationManager.IMPORTANCE_NONE) {
-            return@deviceToolResult deviceToolError("Канал «Уведомления ассистента» отключён в настройках Android.")
+            return@deviceToolResult deviceToolError("Канал «Уведомления ассистента» отключён. Включите его в настройках уведомлений Android для Rikka-Root.")
         }
         val id = explicitId ?: nextNotificationId(context)
-            ?: return@deviceToolResult deviceToolError("Не удалось сохранить новый ID уведомления. Уведомление не опубликовано.")
+            ?: return@deviceToolResult deviceToolError("Не удалось сохранить новый ID уведомления. Уведомление не опубликовано. Повторите запрос или укажите id явно.")
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setContentTitle(title).setSmallIcon(android.R.drawable.ic_dialog_info).setAutoCancel(true)
         body?.let { builder.setContentText(it).setStyle(NotificationCompat.BigTextStyle().bigText(it)) }

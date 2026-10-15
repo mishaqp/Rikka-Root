@@ -1,14 +1,13 @@
 package me.rerere.rikkahub.ui.components.ai
 
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import me.rerere.ai.core.MessageRole
-import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.HistoryLoadState
+import me.rerere.rikkahub.ui.components.message.hasExecutionCheckpoint
 import kotlin.uuid.Uuid
 
 internal data class RunningToolPresentation(
@@ -132,18 +131,6 @@ private fun UIMessagePart.Tool.isForegroundCommandTool(): Boolean {
         if (toolName == "termux_run_command" && enabled("interactive")) return false
     }
     return true
-}
-
-private fun UIMessagePart.Tool.hasExecutionCheckpoint(): Boolean {
-    if (approvalState != ToolApprovalState.Approved && approvalState != ToolApprovalState.Auto) return false
-    val text = (output.singleOrNull() as? UIMessagePart.Text)?.text ?: return false
-    val expected = if (toolName == "root_exec") "root_execution_indeterminate" else "tool_execution_indeterminate"
-    // Runtime checkpoints use buildJsonObject with error first. Avoid parsing large completed
-    // historical results on every streaming update when their prefix cannot be a checkpoint.
-    if (!text.startsWith("{\"error\":\"$expected\"")) return false
-    val result = runCatching { Json.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return false
-    return (result["error"] as? JsonPrimitive)?.content == expected &&
-        (result["reason"] as? JsonPrimitive)?.content?.contains("checkpointed before launch") == true
 }
 
 private fun runningToolCommand(toolName: String, input: JsonElement?): String {

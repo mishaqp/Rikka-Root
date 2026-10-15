@@ -104,4 +104,22 @@ class McpErrorClassificationTest {
         )
         assertEquals("request_timeout", kind)
     }
+
+    @Test
+    fun `URL guard rejections retain their code instead of turning into authentication failures`() {
+        val failures = mapOf(
+            "private_address_forbidden: Локальные адреса MCP запрещены" to "private_address_forbidden",
+            "url_credentials_forbidden: Не помещайте логин, пароль или токен в URL" to "url_credentials_forbidden",
+            "host_not_found: Не удалось проверить DNS сервера MCP" to "host_not_found",
+            "unsupported_url_scheme: Поддерживаются только http и https" to "unsupported_url_scheme",
+            "invalid_url: В URL отсутствует имя сервера" to "invalid_url",
+            "MCP: локальный или служебный адрес запрещён" to "private_address_forbidden",
+        )
+        for ((failure, expectedCode) in failures) {
+            val (code, explanation) = classifyMcpError(failure)
+            assertEquals(failure, expectedCode, code)
+            assertTrue(explanation, Regex("Проверьте|Укажите|Используйте|Удалите").containsMatchIn(explanation))
+            assertTrue(explanation, !explanation.contains("403"))
+        }
+    }
 }

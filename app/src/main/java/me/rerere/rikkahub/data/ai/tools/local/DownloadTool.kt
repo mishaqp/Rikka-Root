@@ -141,13 +141,13 @@ fun downloadTool(context: Context, access: LocalFileAccess = LocalFileAccess(con
     execute = { arguments -> deviceToolResult {
         withContext(Dispatchers.IO) {
             val params = arguments.jsonObject
-            val url = validatedDownloadUrl(params.textArgument("url") ?: error("url is required"))
+            val url = validatedDownloadUrl(params.textArgument("url") ?: error("Укажите адрес файла в url."))
             val name = validatedDownloadFilename(params.textArgument("filename") ?: run {
                 URI(url).path?.substringAfterLast('/')?.takeIf { it.isNotBlank() && !it.startsWith('.') }
                     ?: "download_${System.currentTimeMillis()}"
             })
             val maxBytes = validatedDownloadLimit(if (params.containsKey("max_bytes"))
-                params["max_bytes"]?.jsonPrimitive?.longOrNull ?: error("max_bytes must be an integer") else MAX_DOWNLOAD_BYTES)
+                params["max_bytes"]?.jsonPrimitive?.longOrNull ?: error("Укажите max_bytes целым числом.") else MAX_DOWNLOAD_BYTES)
             val directory = params.textArgument("directory")?.let { access.resolve(it) }
             if (directory != null) {
                 require(access.isDirectory(directory)) { "Назначение должно быть папкой." }

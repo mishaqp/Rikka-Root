@@ -2,7 +2,6 @@ package me.rerere.rikkahub.ui.components.message
 
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
@@ -124,17 +123,21 @@ internal fun presentToolStatus(tool: UIMessagePart.Tool, loading: Boolean): Time
     }
     if (tool.hasExecutionCheckpoint()) return TimelineStatus.Indeterminate
     if (tool.output.isEmpty()) return TimelineStatus.Waiting
-    val json = tool.output.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }
-        .takeIf { it.isNotBlank() }?.let { runCatching { JsonInstant.parseToJsonElement(it) }.getOrNull() } as? JsonObject
-        ?: return TimelineStatus.ResultReceived
-    val errorValue = json["error"]
-    val error = errorValue as? JsonPrimitive
-    val errorName = error?.contentOrNull
+    val textParts = tool.output.filterIsInstance<UIMessagePart.Text>().map { it.text }
+    val outputJson = parseToolOutputJson(tool.toolName, textParts)
+    val json = outputJson as? JsonObject ?: return if (
+        presentToolResult(tool.toolName, textParts.joinToString("\n"), outputJson) is ToolResultPreview.Error
+    ) TimelineStatus.Failed else TimelineStatus.ResultReceived
+    val errorName = toolErrorCode(json)
     if (errorName == "root_execution_indeterminate" || errorName == "root_cleanup_unconfirmed" ||
         errorName == "command_timeout" || errorName == "tool_execution_indeterminate") return TimelineStatus.Indeterminate
     if (errorName in setOf("root_interaction_required", "root_approval_required", "root_not_granted", "root_command_blocked"))
         return TimelineStatus.Blocked
-    if (errorValue != null && errorValue != JsonNull && error?.booleanOrNull != false) return TimelineStatus.Failed
+    if (json["status"]?.let { (it as? JsonPrimitive)?.contentOrNull?.lowercase() } in setOf("blocked", "denied"))
+        return TimelineStatus.Blocked
+    if (tool.toolName == "workspace_shell" && (json["timedOut"] as? JsonPrimitive)?.booleanOrNull == true)
+        return TimelineStatus.Indeterminate
+    if (toolErrorMessage(tool.toolName, json) != null) return TimelineStatus.Failed
     if ((json["success"] as? JsonPrimitive)?.booleanOrNull == false) return TimelineStatus.Failed
     if (tool.toolName == "workspace_shell") {
         if ((json["timedOut"] as? JsonPrimitive)?.booleanOrNull == true) return TimelineStatus.Indeterminate
@@ -158,5 +161,6 @@ internal fun UIMessagePart.Tool.hasExecutionCheckpoint(): Boolean {
     if (!text.startsWith("{\"error\":\"$expected\"")) return false
     val json = runCatching { JsonInstant.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return false
     return (json["error"] as? JsonPrimitive)?.contentOrNull == expected &&
-        (json["reason"] as? JsonPrimitive)?.contentOrNull?.contains("checkpointed before launch") == true
+        ((json["checkpointed_before_launch"] as? JsonPrimitive)?.booleanOrNull == true ||
+            (json["reason"] as? JsonPrimitive)?.contentOrNull?.contains("checkpointed before launch") == true)
 }

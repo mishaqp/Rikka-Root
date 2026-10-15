@@ -83,7 +83,7 @@ fun scrollTool(
             return@Tool listOf(
                 UIMessagePart.Text(
                     buildJsonObject {
-                        put("error", "direction must be one of [up, down, left, right]")
+                        put("error", "Укажите direction: up, down, left или right.")
                     }.toString()
                 )
             )

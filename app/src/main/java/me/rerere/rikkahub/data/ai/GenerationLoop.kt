@@ -62,6 +62,7 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
+import me.rerere.rikkahub.reliability.SecretRedactor
 import java.io.File
 import java.io.IOException
 import java.net.ConnectException
@@ -324,7 +325,8 @@ class GenerationLoop(
                                         buildJsonObject {
                                             put(
                                                 "error",
-                                                JsonPrimitive("Tool execution denied by user. Reason: ${reason.ifBlank { "No reason provided" }}")
+                                                JsonPrimitive(if (reason.isBlank()) "Пользователь отклонил выполнение. Повторный вызов возможен после нового подтверждения."
+                                                else "Пользователь отклонил выполнение. Причина: $reason")
                                             )
                                         }
                                     )
@@ -356,8 +358,7 @@ class GenerationLoop(
                             executedTools += tool.copy(output = listOf(UIMessagePart.Text(
                                 json.encodeToString(buildJsonObject {
                                     put("error", JsonPrimitive(
-                                        "blocked by safety floor (hardline): $resumeHardlineReason. " +
-                                            "This command cannot run via the agent under any circumstances."
+                                        "Команда заблокирована защитой ($resumeHardlineReason). Выберите безопасное действие."
                                     ))
                                 })
                             )))
@@ -373,11 +374,11 @@ class GenerationLoop(
                         }
                         runCatching {
                             val toolDef = tools.find { toolDef -> toolDef.name == tool.toolName }
-                                ?: error("Tool ${tool.toolName} not found")
+                                ?: error("Инструмент недоступен. Начните новый ответ после изменения настроек инструментов.")
                             val args = runCatching {
                                 json.parseToJsonElement(tool.input.ifBlank { "{}" })
                             }.getOrElse {
-                                error("Invalid tool arguments JSON for ${tool.toolName}: ${it.message}")
+                                error("Некорректный JSON параметров инструмента. Проверьте формат и типы значений.")
                             }
                             if (tool.approvalState == ToolApprovalState.Auto && needsApproval(tool, toolDef)
                             ) {
@@ -419,11 +420,12 @@ class GenerationLoop(
                             } else {
                                 persistStarted(tool.copy(output = listOf(UIMessagePart.Text(buildJsonObject {
                                     put("error", "tool_execution_indeterminate")
-                                    put("reason", "This tool was checkpointed before launch. Its effects are unknown if interrupted. This call will not run again; review its effects before requesting a new call.")
+                                    put("checkpointed_before_launch", true)
+                                    put("reason", "Выполнение инструмента было прервано; результат неизвестен. Проверьте, что успело выполниться, перед новым вызовом. Этот вызов автоматически не повторяется.")
                                 }.toString()))))
                                 currentCoroutineContext().ensureActive()
                                 check(tool.approvalState == ToolApprovalState.Approved || !needsApproval(tool, toolDef)) {
-                                    "Automatic permission revoked before launch"
+                                    "Автоматическое разрешение отозвано до запуска. Подтвердите новый вызов инструмента."
                                 }
                                 executeWithBudget()
                             }
@@ -432,7 +434,7 @@ class GenerationLoop(
                             val hasShellAccess = tools.any { it.name == "workspace_shell" }
                             executedTools += tool.copy(
                                 output = maybeTruncateToolOutput(tool, result, hasShellAccess)
-                                    .ifEmpty { listOf(UIMessagePart.Text("Tool completed without output.")) }
+                                    .ifEmpty { listOf(UIMessagePart.Text("Инструмент выполнен без вывода.")) }
                             )
                         }.onFailure {
                             // 取消必须向上传播，否则停止生成会被误报为工具执行错误
@@ -444,17 +446,14 @@ class GenerationLoop(
                                     UIMessagePart.Text(
                                         json.encodeToString(
                                             buildJsonObject {
-                                                put(
-                                                    "error",
-                                                    JsonPrimitive(buildString {
-                                                        if (tool.toolName == "root_exec") {
-                                                            append("Root execution stopped before a result could be confirmed (${it.javaClass.simpleName}). Review the device and request a new command; this call will not be replayed.")
-                                                        } else {
-                                                            append("[${it.javaClass.name}] ${it.message}")
-                                                            append("\n${it.stackTraceToString()}")
-                                                        }
-                                                    })
-                                                )
+                                                if (tool.toolName == "root_exec") {
+                                                    put("error", "root_execution_indeterminate")
+                                                    put("reason", "Не удалось подтвердить результат root-команды. Проверьте устройство перед новым вызовом. Эта команда автоматически не повторяется.")
+                                                } else {
+                                                    put("error", me.rerere.rikkahub.data.ai.tools.local.deviceToolFailureReason(it))
+                                                    put("raw_error", SecretRedactor.redact(it.message ?: it.javaClass.name))
+                                                }
+                                                put("detail", it.javaClass.name)
                                             }
                                         )
                                     )

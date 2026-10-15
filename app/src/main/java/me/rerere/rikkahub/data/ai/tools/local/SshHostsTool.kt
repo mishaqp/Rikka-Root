@@ -46,9 +46,9 @@ fun saveSshHostTool(repo: SshHostRepository): Tool = Tool(
     needsApproval = { true },
     execute = { input ->
         val p = repo.toolSecrets.resolveArgs("save_ssh_host", input).jsonObject
-        val name = p["name"]?.jsonPrimitive?.contentOrNull ?: error("Обязательный параметр: name")
-        val host = p["host"]?.jsonPrimitive?.contentOrNull ?: error("Обязательный параметр: host")
-        val user = p["user"]?.jsonPrimitive?.contentOrNull ?: error("Обязательный параметр: user")
+        val name = p["name"]?.jsonPrimitive?.contentOrNull ?: error("Укажите обязательный параметр: name")
+        val host = p["host"]?.jsonPrimitive?.contentOrNull ?: error("Укажите обязательный параметр: host")
+        val user = p["user"]?.jsonPrimitive?.contentOrNull ?: error("Укажите обязательный параметр: user")
         val port = p["port"]?.jsonPrimitive?.intOrNull ?: 22
         val password = p["password"]?.jsonPrimitive?.contentOrNull
         val privateKey = p["private_key"]?.jsonPrimitive?.contentOrNull
@@ -58,14 +58,20 @@ fun saveSshHostTool(repo: SshHostRepository): Tool = Tool(
                 buildJsonObject { put("error", "Укажите password или private_key. Безопаснее сохранить хост в настройках SSH и использовать ssh_exec_saved.") }.toString()
             ))
         }
-        repo.upsert(SshHostEntity(
-            name = name, host = host, port = port, user = user,
-            createdAtMs = System.currentTimeMillis(),
-        ).apply {
-            this.password = password
-            this.privateKey = privateKey
-            this.passphrase = passphrase
-        })
+        try {
+            repo.upsert(SshHostEntity(
+                name = name, host = host, port = port, user = user,
+                createdAtMs = System.currentTimeMillis(),
+            ).apply {
+                this.password = password
+                this.privateKey = privateKey
+                this.passphrase = passphrase
+            })
+        } catch (error: Exception) {
+            return@Tool sshFailureParts(error,
+                "Проверьте доступность хранилища SSH в настройках приложения и повторите сохранение хоста.",
+                buildJsonObject { put("name", name); put("host", host); put("port", port); put("user", user) })
+        }
         listOf(UIMessagePart.Text(buildJsonObject {
             put("success", true)
             put("name", name)
@@ -80,7 +86,10 @@ fun listSshHostsTool(repo: SshHostRepository): Tool = Tool(
     parameters = { InputSchema.Obj(properties = buildJsonObject {}) },
     needsApproval = { true },
     execute = {
-        val all = repo.getAll()
+        val all = try { repo.getAll() } catch (error: Exception) {
+            return@Tool sshFailureParts(error,
+                "Проверьте доступность сохранённых хостов в настройках SSH и повторите получение списка.")
+        }
         listOf(UIMessagePart.Text(buildJsonObject {
             put("hosts", buildJsonArray {
                 all.forEach { h ->
@@ -113,8 +122,12 @@ fun deleteSshHostTool(repo: SshHostRepository): Tool = Tool(
     needsApproval = { true },
     execute = { input ->
         val name = input.jsonObject["name"]?.jsonPrimitive?.contentOrNull
-            ?: error("Обязательный параметр: name")
-        repo.deleteByName(name)
+            ?: error("Укажите обязательный параметр: name")
+        try { repo.deleteByName(name) } catch (error: Exception) {
+            return@Tool sshFailureParts(error,
+                "Проверьте список хостов в настройках SSH перед повторным удалением.",
+                buildJsonObject { put("name", name) })
+        }
         listOf(UIMessagePart.Text(buildJsonObject {
             put("success", true)
             put("name", name)
@@ -148,8 +161,12 @@ fun forgetSshHostKeyTool(context: Context): Tool = Tool(
     needsApproval = { true },
     execute = { input ->
         val host = input.jsonObject["host"]?.jsonPrimitive?.contentOrNull
-            ?: error("Обязательный параметр: host")
-        val removed = forgetHostKey(context, host)
+            ?: error("Укажите обязательный параметр: host")
+        val removed = try { forgetHostKey(context, host) } catch (error: Exception) {
+            return@Tool sshFailureParts(error,
+                "Проверьте доступность хранилища known_hosts. Повторяйте удаление ключа SSH только после подтверждения пользователя.",
+                buildJsonObject { put("host", host) })
+        }
         listOf(UIMessagePart.Text(buildJsonObject {
             put("success", true)
             put("host", host)
@@ -181,15 +198,19 @@ fun sshExecSavedTool(context: Context, repo: SshHostRepository): Tool = Tool(
     needsApproval = { true },
     execute = { input ->
         val p = input.jsonObject
-        val name = p["name"]?.jsonPrimitive?.contentOrNull ?: error("Обязательный параметр: name")
-        val command = p["command"]?.jsonPrimitive?.contentOrNull ?: error("Обязательный параметр: command")
+        val name = p["name"]?.jsonPrimitive?.contentOrNull ?: error("Укажите обязательный параметр: name")
+        val command = p["command"]?.jsonPrimitive?.contentOrNull ?: error("Укажите обязательный параметр: command")
         val stdin = p["stdin"]?.jsonPrimitive?.contentOrNull
         blockedSshCommand(command, stdin)?.let { blocked -> return@Tool listOf(UIMessagePart.Text(blocked.toString())) }
         val background = p["background"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
         val timeoutSec = (p["timeout_seconds"]?.jsonPrimitive?.intOrNull ?: 30).coerceIn(1, 300)
-        val h = repo.getByName(name)
+        val h = try { repo.getByName(name) } catch (error: Exception) {
+            return@Tool sshFailureParts(error,
+                "Проверьте сохранённый хост и его учётные данные в настройках SSH, затем повторите вызов.",
+                buildJsonObject { put("name", name) })
+        }
             ?: return@Tool listOf(UIMessagePart.Text(
-                buildJsonObject { put("error", "Сохранённый хост не найден: $name") }.toString()
+                buildJsonObject { put("error", "Сохранённый хост не найден: $name. Проверьте name через list_ssh_hosts или сохраните хост в настройках SSH.") }.toString()
             ))
         val auth = SshAuth(password = h.password, privateKey = h.privateKey, passphrase = h.passphrase)
         if (!auth.isUsable()) {
@@ -203,8 +224,9 @@ fun sshExecSavedTool(context: Context, repo: SshHostRepository): Tool = Tool(
             ))
         }
         val effectiveCommand = if (background) wrapDetachedCommand(command) else command
-        val payload = runCancellableSshOp(timeoutSec * 1000L) { sessionRef ->
-            execOneShot(context, h.host, h.port, h.user, auth, effectiveCommand, timeoutSec * 1000, sessionRef, stdin)
+        val output = SshCommandOutput()
+        val payload = runCancellableSshOp(timeoutSec * 1000L, output) { sessionRef ->
+            execOneShot(context, h.host, h.port, h.user, auth, effectiveCommand, timeoutSec * 1000, sessionRef, stdin, output)
         }
         listOf(UIMessagePart.Text(payload.toString()))
     }

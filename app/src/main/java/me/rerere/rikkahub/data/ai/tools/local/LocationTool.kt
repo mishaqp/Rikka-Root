@@ -42,8 +42,8 @@ fun locationTool(context: Context): Tool = personalJsonTool(context, "get_locati
         if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@withContext deviceToolError("Для получения местоположения откройте Rikka-Root. Фоновый доступ не используется.")
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED)
-            return@withContext deviceToolError("Разрешение местоположения отозвано.", Manifest.permission.ACCESS_COARSE_LOCATION)
-        val manager = context.getSystemService(LocationManager::class.java) ?: return@withContext deviceToolError("Служба местоположения недоступна.")
+            return@withContext deviceToolError("Разрешение местоположения отозвано. Включите его в настройках функции ассистента.", Manifest.permission.ACCESS_COARSE_LOCATION)
+        val manager = context.getSystemService(LocationManager::class.java) ?: return@withContext deviceToolError("Служба местоположения недоступна. Включите геолокацию в настройках Android.")
         val precise = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val providers = locationProviders(args.accuracy, precise, Build.VERSION.SDK_INT) { runCatching { manager.isProviderEnabled(it) }.getOrDefault(false) }
         if (providers.isEmpty()) return@withContext deviceToolError(if (precise) "Местоположение выключено или нет доступного провайдера. Включите геолокацию Android." else "Нет провайдера приблизительного местоположения. Включите сетевое определение местоположения или выдайте точный доступ в настройках Android.")
@@ -74,7 +74,7 @@ fun locationTool(context: Context): Tool = personalJsonTool(context, "get_locati
             if (requested == 0) return@withContext deviceToolError("Провайдеры местоположения недоступны. Проверьте настройки Android.")
             val location = withTimeoutOrNull(args.timeoutMs.toLong()) { fix.await() }
             when {
-                background || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) -> deviceToolError("Получение местоположения отменено: приложение ушло в фон.")
+                background || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) -> deviceToolError("Получение местоположения отменено: приложение ушло в фон. Откройте Rikka-Root и при необходимости повторите запрос.")
                 location != null -> locationPayload(location, false, precise, args.accuracy)
                 cached != null -> locationPayload(cached, true, precise, args.accuracy)
                 else -> deviceToolError("За отведённое время местоположение не получено. Проверьте геолокацию и попробуйте у окна или на открытом месте.")

@@ -95,12 +95,24 @@ private suspend fun isHeadlessInvocation(ctx: ToolInvocationContext?): Boolean =
 private fun timeoutEnvelope(toolName: String): JsonObject = buildJsonObject {
     put("error", "tool_timeout")
     put("tool", toolName)
-    put("recovery", "The browser tool exceeded its $toolTimeoutMs-ms budget. Retry, or simplify the selector.")
+    put("recovery", "Браузер не ответил за $toolTimeoutMs мс. Повторите вызов или укажите более простой selector.")
 }
 
 private fun missingArgEnvelope(name: String, detail: String): JsonObject = buildJsonObject {
     put("error", "missing_$name")
     put("detail", detail)
+    put("message", when (name) {
+        "url" -> "Не указан адрес страницы. Укажите непустой url."
+        "selector" -> "Не указан элемент страницы. Укажите непустой CSS selector."
+        "direction" -> "Не указано допустимое направление прокрутки. Укажите direction: up, down, top или bottom."
+        "state" -> "Не указано допустимое состояние элемента. Укажите state: attached, detached, visible или hidden."
+        "text" -> "Не указан текст. Укажите text; пустая строка очищает поле."
+        "value" -> "Не указано значение. Укажите value для выбора."
+        "key" -> "Не указана клавиша. Укажите key, например Enter или Escape."
+        "code" -> "Не указан JavaScript. Укажите непустой code."
+        "summary" -> "Не указан итог задачи. Укажите непустой summary."
+        else -> "Параметр $name отсутствует или неверен. Укажите его и повторите вызов."
+    })
 }
 
 private fun textPart(obj: JsonObject): List<UIMessagePart> =
@@ -186,6 +198,7 @@ fun browserOpenTool(context: Context, invocationContext: ToolInvocationContext? 
             buildJsonObject {
                 put("error", "scheme_not_allowed")
                 put("detail", "browser_open only accepts http(s) and about: URLs; got scheme '$scheme'")
+                put("message", "Схема адреса не поддерживается. Укажите url с http, https или about.")
             }
         } else {
             withTimeoutOrNull(toolTimeoutMs) {
@@ -314,11 +327,11 @@ fun browserOpenTool(context: Context, invocationContext: ToolInvocationContext? 
             rawOut.forEach { (k, v) -> put(k, v) }
             put(
                 "warning",
-                "URL query string carries content shaped like sensitive data " +
+                "В параметрах запроса URL обнаружены данные, похожие на конфиденциальные " +
                     "(${exfilHits.joinToString { it.name.lowercase() }}). " +
-                    "Verify with the user that they intended to send this " +
-                    "to ${rawOut["current_url"]?.jsonPrimitive?.contentOrNull ?: url} " +
-                    "before relying on the result, and do NOT echo the value back."
+                    "Уточните у пользователя, намеренно ли эти данные отправлены " +
+                    "на ${rawOut["current_url"]?.jsonPrimitive?.contentOrNull ?: url}, " +
+                    "прежде чем использовать результат; не повторяйте сами значения в ответе."
             )
         }
         textPart(out)
@@ -592,6 +605,7 @@ fun browserWaitForTool(): Tool = Tool(
                             put("found", found)
                             put("elapsed_ms", System.currentTimeMillis() - started)
                             put("state", state)
+                            if (!found) put("message", "Элемент не достиг нужного состояния за время ожидания. Проверьте selector, state и contains_text или увеличьте timeout_ms.")
                             if (containsText != null) put("contains_text", containsText)
                         }
                     }
@@ -990,7 +1004,8 @@ fun browserEvalJsTool(): Tool = Tool(
                             android.util.Log.w("BrowserTools", "browser_eval_js: dispatch threw type=${it.javaClass.simpleName}")
                             buildJsonObject {
                                 put("error", "eval_dispatch_failed")
-                                put("detail", (it.message ?: it.javaClass.simpleName).take(200))
+                                put("detail", deviceToolFailureReason(it))
+                                put("message", "Не удалось выполнить JavaScript в браузере. Повторите browser_open и проверьте code.")
                             }
                         }
                     }
@@ -1098,6 +1113,7 @@ fun browserClickAndReadTool(): Tool = Tool(
                                         put("post_click_url", postUrl)
                                         put("page_title", postTitle)
                                         put("error", "readability_failed")
+                                        put("message", "Не удалось извлечь статью. Используйте extract_mode: auto или raw.")
                                     }
                                 } else {
                                     // Fall back to selector-based body innerText.
@@ -1306,8 +1322,7 @@ private fun parseFullArg(input: kotlinx.serialization.json.JsonElement): Boolean
  * value that can't be parsed — both surface to the LLM cleanly without throwing.
  */
 private fun parseJsResult(raw: String?): JsonObject {
-    if (raw == null) return buildJsonObject { put("error", "js_no_result") }
-    return runCatching {
+    val result = if (raw == null) buildJsonObject { put("error", "js_no_result") } else runCatching {
         // evaluateJavascript wraps a JS string return value in JSON-quoted form, so
         // raw is "\"{...}\"" — parse the outer quoted string into a Kotlin string,
         // then parse that string as JSON.
@@ -1315,6 +1330,18 @@ private fun parseJsResult(raw: String?): JsonObject {
         val inner = if (outer is JsonPrimitive && outer.isString) outer.contentOrNull.orEmpty() else outer.toString()
         Json.parseToJsonElement(inner).jsonObject
     }.getOrElse { buildJsonObject { put("error", "js_parse_failed"); put("raw", raw) } }
+    val code = result["error"]?.jsonPrimitive?.contentOrNull ?: return result
+    return buildJsonObject {
+        result.forEach { (key, value) -> put(key, value) }
+        put("message", when (code) {
+            "selector_not_found" -> "Элемент страницы не найден. Проверьте selector или дождитесь загрузки страницы."
+            "no_enclosing_form" -> "У элемента нет формы для отправки. Укажите selector формы или её поля."
+            "not_a_select" -> "Элемент не является списком выбора. Укажите selector элемента select."
+            "js_no_result" -> "Страница не вернула результат. Повторите вызов после загрузки страницы."
+            "js_parse_failed" -> "Не удалось прочитать ответ страницы. Повторите вызов или откройте страницу заново."
+            else -> "Не удалось выполнить действие на странице. Проверьте параметры и повторите вызов."
+        })
+    }
 }
 
 /**
@@ -1377,7 +1404,7 @@ private suspend fun runGetText(input: kotlinx.serialization.json.JsonElement): J
                     if (text.isNullOrEmpty()) {
                         buildJsonObject {
                             put("error", "readability_failed")
-                            put("recovery", "Try extract_mode:'auto' or pass a specific selector")
+                            put("recovery", "Не удалось извлечь статью. Используйте extract_mode: auto или укажите selector нужного элемента.")
                         }
                     } else {
                         buildJsonObject {
@@ -1528,8 +1555,11 @@ private suspend fun runHistoryNav(toolName: String, forward: Boolean): JsonObjec
                         put("error", "nav_failed")
                         put(
                             "detail",
-                            (navResult.exceptionOrNull()?.message ?: "webview navigation threw").take(200),
+                            deviceToolFailureReason(requireNotNull(navResult.exceptionOrNull())),
                         )
+                        put("message", "Не удалось перейти по истории браузера. Повторите browser_open с нужным адресом.")
+                    } else if (!ok) {
+                        put("message", "В истории браузера нет страницы в этом направлении. Откройте нужный адрес через browser_open.")
                     }
                 }
             }

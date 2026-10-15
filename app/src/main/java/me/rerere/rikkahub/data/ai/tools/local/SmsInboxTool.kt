@@ -19,7 +19,7 @@ private fun smsInboxTool(context: Context, search: Boolean): Tool = personalJson
         args.since?.let { filters += "date >= ?"; values += it.toString() }
         args.query?.let { filters += "body LIKE ? ESCAPE '\\'"; values += smsSubstringSelection(it) }
         val cursor = context.contentResolver.query(Telephony.Sms.Inbox.CONTENT_URI, arrayOf("_id", "address", "body", "date", "read"),
-            filters.takeIf { it.isNotEmpty() }?.joinToString(" AND "), values.takeIf { it.isNotEmpty() }?.toTypedArray(), "date DESC") ?: error("SMS provider unavailable")
+            filters.takeIf { it.isNotEmpty() }?.joinToString(" AND "), values.takeIf { it.isNotEmpty() }?.toTypedArray(), "date DESC") ?: error("Хранилище SMS Android недоступно. Проверьте разрешение на чтение SMS и включите приложение сообщений.")
         buildJsonObject { put("messages", buildJsonArray {
             cursor.use { c ->
                 val columns = listOf("_id", "address", "body", "date", "read").map(c::getColumnIndexOrThrow)

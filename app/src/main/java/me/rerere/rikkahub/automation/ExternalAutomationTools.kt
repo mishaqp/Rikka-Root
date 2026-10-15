@@ -37,6 +37,9 @@ private fun errEnv(error: String, detail: String): List<UIMessagePart> {
     val obj = buildJsonObject {
         put("error", error)
         put("detail", detail)
+        put("message", detail)
+        put("recovery", if (error == "invalid_enabled") "Укажите enabled: true или false и повторите вызов."
+            else "Укажите package_name в формате Android, например com.example.app, и повторите вызов.")
     }
     return listOf(UIMessagePart.Text(obj.toString()))
 }
@@ -68,6 +71,19 @@ fun externalAutomationStatusTool(config: ExternalAutomationConfig): Tool = Tool(
                         put("caller_package", entry.callerPackage)
                         put("action", entry.action)
                         put("status", entry.status)
+                        if (entry.status.startsWith("rejected:") || entry.status == "deduped:request_id_replay" ||
+                            entry.status in setOf("failed", "blocked", "cancelled")) {
+                            put("message", if (entry.status == "deduped:request_id_replay")
+                                "Повторный request_id отклонён; новая задача не запускалась."
+                                else "Внешний запуск отклонён или не выполнен.")
+                            put("recovery", when (entry.status.substringAfter(':')) {
+                                "untrusted_or_disabled", "disabled", "untrusted" -> "Проверьте переключатель внешней автоматизации и доверенный пакет вызывающего приложения."
+                                "callback_package_mismatch" -> "Укажите return_package, совпадающий с пакетом вызывающего приложения."
+                                "empty_prompt", "missing_prompt" -> "Укажите непустую задачу в task или task_b64 и повторите запуск."
+                                "request_id_replay", "duplicate_request_id" -> "Дождитесь окончания окна повторных запросов или укажите новый request_id для новой задачи."
+                                else -> "Проверьте параметры вызова и настройки внешней автоматизации, затем повторите запуск."
+                            })
+                        }
                         if (!entry.requestId.isNullOrBlank()) put("request_id", entry.requestId)
                     }
                 }

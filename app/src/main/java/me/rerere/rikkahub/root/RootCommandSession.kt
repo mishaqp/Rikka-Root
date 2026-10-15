@@ -74,7 +74,7 @@ internal class RootCommandSession(private val suExecutable: String, directory: F
         """.trimIndent()
         val result = RootProcessRunner.run(listOf(suExecutable, "-c", cleanup), 3_000, 512, 512)
         if (result.error != null || result.exitCode != 0) {
-            cleanupError = "Root process-group cleanup could not be confirmed; review running processes on the device."
+            cleanupError = "Не удалось подтвердить остановку root-процессов. Проверьте запущенные процессы на устройстве перед новым вызовом."
         }
     }
 

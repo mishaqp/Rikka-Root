@@ -149,7 +149,7 @@ class ExampleUnitTest {
         val result = manager.executeCommand(root, "cat /etc/os-release")
 
         assertEquals(127, result.exitCode)
-        assertEquals("Rootfs is not installed", result.stderr)
+        assertEquals("Среда Rootfs не установлена. Установите её в настройках рабочей папки.", result.stderr)
     }
 
     @Test

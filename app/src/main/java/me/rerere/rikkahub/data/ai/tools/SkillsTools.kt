@@ -121,7 +121,21 @@ fun createSkillTools(
                         buildJsonObject {
                             put("error", code)
                             put("detail", detail)
-                            put("recovery", "Re-call use_skill with one of the listed skill names in `name`.")
+                            put("message", when (code) {
+                                "missing_required_arg" -> "Не указано имя навыка."
+                                "skill_not_enabled" -> "Навык выключен в текущем чате."
+                                "skill_not_found" -> "Навык не найден на устройстве."
+                                "skill_body_not_found" -> "Файл SKILL.md навыка не найден."
+                                "path_outside_skill" -> "Путь выходит за папку навыка."
+                                "skill_file_not_found" -> "Файл навыка не найден."
+                                else -> "Не удалось прочитать навык."
+                            })
+                            put("recovery", when (code) {
+                                "skill_not_enabled" -> "Включите навык в настройках текущего чата и повторите use_skill."
+                                "skill_body_not_found", "skill_not_found" -> "Проверьте установку навыка или установите его заново."
+                                "path_outside_skill", "skill_file_not_found" -> "Укажите path из ссылок в SKILL.md внутри папки навыка."
+                                else -> "Укажите name из available_skills и повторите use_skill."
+                            })
                             put(
                                 "available_skills",
                                 kotlinx.serialization.json.buildJsonArray {
@@ -141,6 +155,7 @@ fun createSkillTools(
                     UIMessagePart.Text(
                         buildJsonObject {
                             put("error", "skill_file_too_large")
+                            put("message", "Файл навыка превышает допустимый размер. Сократите его до ${SkillManager.MAX_SKILL_FILE_BYTES} байт и повторите вызов.")
                             put("max_bytes", SkillManager.MAX_SKILL_FILE_BYTES)
                             put("size_bytes", file.length())
                         }.toString()

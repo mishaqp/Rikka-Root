@@ -49,7 +49,6 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.common.http.jsonObjectOrNull
-import me.rerere.highlight.CodeHighlightText
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ChartColumn
 import me.rerere.hugeicons.stroke.ChartLineData01
@@ -76,7 +75,7 @@ import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.ui.Favicon
 import me.rerere.rikkahub.ui.components.ui.FaviconRow
 import me.rerere.rikkahub.ui.modifier.shimmer
-import me.rerere.rikkahub.utils.JsonInstantPretty
+import me.rerere.rikkahub.ui.components.message.presentToolDetails
 import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
 import me.rerere.rikkahub.utils.openUrl
 import me.rerere.rikkahub.utils.toLocalString
@@ -726,12 +725,7 @@ private fun SearchWebPreview(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     parameters.forEach { (name, value) ->
-                        val displayValue = when (value) {
-                            is JsonArray -> value.joinToString(", ") {
-                                it.jsonPrimitiveOrNull?.contentOrNull ?: it.toString()
-                            }
-                            else -> value.jsonPrimitiveOrNull?.contentOrNull ?: value.toString()
-                        }
+                        val displayValue = presentToolDetails("search_web", value, isResult = false)
                         Surface(
                             shape = RoundedCornerShape(8.dp),
                             color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -850,11 +844,7 @@ private fun SearchWebPreview(
             }
         } else {
             item {
-                CodeHighlightText(
-                    code = JsonInstantPretty.encodeToString(content),
-                    language = "json",
-                    fontSize = 12.sp
-                )
+                Text(presentToolDetails("search_web", content), style = MaterialTheme.typography.bodySmall)
             }
         }
     }

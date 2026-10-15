@@ -55,7 +55,7 @@ fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = nul
         val result = when {
             command.isNullOrBlank() || timeout == null -> buildJsonObject {
                 put("error", "invalid_arguments")
-                put("reason", "command must be a non-empty string and timeout_ms must be an integer.")
+                put("reason", "Укажите непустую команду в command, а timeout_ms — целым числом.")
             }
             // An Approved invocation has already passed the explicit confirmation in the loop.
             (headless || invocation == null && !automaticAtStart && !automaticInvocation) && RootCommandGuard.check(command) != null -> buildJsonObject {
@@ -99,8 +99,13 @@ fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = nul
                     put("stderr", executed.stderr)
                     executed.exitCode?.let { put("exit_code", it) }
                     executed.error?.let { put("error", it) }
-                    executed.reason?.let { put("reason", it) }
-                    if (journalError) put("journal_error", "root_journal_save_failed")
+                    val reason = executed.reason ?:
+                        if (executed.error == null) commandExitFailureReason(executed.exitCode) else null
+                    reason?.let { put("reason", it) }
+                    if (journalError) {
+                        put("journal_error", "root_journal_save_failed")
+                        put("warning", "Команда завершилась, но результат не удалось сохранить в журнале. Проверьте устройство перед новым вызовом; команда автоматически не повторяется.")
+                    }
                 }
             }
         }

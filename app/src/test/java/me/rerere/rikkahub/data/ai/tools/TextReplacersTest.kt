@@ -36,21 +36,23 @@ class TextReplacersTest {
         val e = assertThrows(IllegalArgumentException::class.java) {
             replaceText("foo foo", "foo", "bar", replaceAll = false)
         }
-        assertEquals(true, e.message!!.contains("2 locations"))
+        assertEquals("old_text найден в 2 местах (strategy: exact). Добавьте окружающий текст или укажите replace_all=true.", e.message)
     }
 
     @Test
     fun `throws when old_text is not found anywhere`() {
-        assertThrows(IllegalArgumentException::class.java) {
+        val e = assertThrows(IllegalArgumentException::class.java) {
             replaceText("hello world", "missing", "x", replaceAll = false)
         }
+        assertEquals("Текст old_text не найден. Прочитайте файл заново и скопируйте нужный фрагмент из его текущего содержимого.", e.message)
     }
 
     @Test
     fun `throws when old_text is empty`() {
-        assertThrows(IllegalArgumentException::class.java) {
+        val e = assertThrows(IllegalArgumentException::class.java) {
             replaceText("hello", "", "x", replaceAll = false)
         }
+        assertEquals("old_text не должен быть пустым. Укажите текст для замены.", e.message)
     }
 
     // ---- line_trimmed ----

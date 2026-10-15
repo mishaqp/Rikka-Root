@@ -141,7 +141,7 @@ internal class McpSessionRegistry(
 
     suspend fun callTool(serverId: Uuid, toolName: String, args: JsonObject): CallToolResult {
         val session = sessions[serverId]
-            ?: throw McpClientUnavailableException("No MCP session for server $serverId")
+            ?: throw McpClientUnavailableException("Сессия MCP сервера $serverId недоступна. Проверьте подключение сервера в настройках MCP и повторите вызов.")
         val freshConfig = oauthCoordinator.ensureFreshToken(session.config)
         if (!hasSameConnectionParameters(session.connectedConfig, freshConfig)) {
             session.config = freshConfig
@@ -149,7 +149,7 @@ internal class McpSessionRegistry(
         }
 
         val sdkClient = session.client
-            ?: throw McpClientUnavailableException("MCP client $serverId is not connected")
+            ?: throw McpClientUnavailableException("Клиент MCP сервера $serverId не подключён. Проверьте подключение сервера в настройках MCP и повторите вызов.")
         val config = session.connectedConfig ?: session.config
         Log.i(TAG, "Calling tool $toolName on $serverId (${config.commonOptions.name})")
         return try {
@@ -380,7 +380,7 @@ internal class McpSessionRegistry(
                     session.client = null
                     session.connectedConfig = null
                     failedClient?.let { closeClient(it, session.config.commonOptions.name) }
-                    statusStore.update(configId, McpStatus.Error("连接断开，已达最大重连次数"))
+                    statusStore.update(configId, McpStatus.Error("Соединение MCP разорвано, попытки повторного подключения исчерпаны. Проверьте сервер и запустите проверку в настройках MCP."))
                     return@withLock
                 }
 

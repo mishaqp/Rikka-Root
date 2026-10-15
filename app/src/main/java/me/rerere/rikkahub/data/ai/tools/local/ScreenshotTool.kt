@@ -80,7 +80,7 @@ fun takeScreenshotTool(context: Context, service: RootScreenService): Tool = Too
                         res.bitmap.recycle()
                         return@withService buildJsonObject {
                             put("error", "write_failed")
-                            put("reason", t.message ?: t::class.simpleName ?: "unknown")
+                            put("reason", deviceToolFailureReason(t))
                         }
                     }
 
@@ -94,6 +94,7 @@ fun takeScreenshotTool(context: Context, service: RootScreenService): Tool = Too
                         put("success", true)
                         put("file_path", cacheFile.absolutePath)
                         put("gallery_path", galleryPath ?: "(gallery_save_failed)")
+                        if (galleryPath == null) put("warning", "Снимок получен, но копию в галерею сохранить не удалось. Проверьте свободное место и доступ к фото; сам снимок доступен в чате.")
                         put("saved_to", "Pictures/$PICTURES_SUBDIR")
                         put("screen_state", screenStateJson(svc, screenChanged = null))
                     }

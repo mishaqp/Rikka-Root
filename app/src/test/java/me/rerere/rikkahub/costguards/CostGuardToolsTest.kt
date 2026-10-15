@@ -59,6 +59,7 @@ class CostGuardToolsTest {
         assertFalse(payload.containsKey("soft_cap"))
         assertFalse(payload.containsKey("hard_cap"))
         assertEquals("NO_BUDGET", payload.getValue("status").jsonPrimitive.contentOrNull)
+        assertEquals("Лимит токенов не задан. При необходимости задайте его в настройках ассистента.", payload.getValue("message").jsonPrimitive.contentOrNull)
     }
     @Test fun `missing context and mismatched owner never expose conversation`() = runBlocking {
         val caller = Assistant()

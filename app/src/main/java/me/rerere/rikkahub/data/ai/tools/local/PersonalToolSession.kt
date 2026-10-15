@@ -111,7 +111,7 @@ internal class PersonalToolSessions {
             if (!isForeground()) return PersonalUiResult.Error("Приложение ушло в фон. Откройте Rikka-Root и повторите запрос.")
             startUi(session.id)
             val result=withTimeoutOrNull(timeoutMs) { session.await() }
-                ?: return PersonalUiResult.Error("Время сеанса истекло.")
+                ?: return PersonalUiResult.Error("Время сеанса истекло. Откройте Rikka-Root и при необходимости повторите запрос.")
             delivered=true
             return result
         } finally {
@@ -145,8 +145,8 @@ internal suspend fun awaitPersonalToolUi(context: Context, request: PersonalUiRe
             context.startActivity(Intent(context,host).apply { putExtra(PersonalToolActivity.EXTRA_REQUEST_ID,id); addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
         } })
 
-internal fun personalUiError(result: PersonalUiResult): JsonObject = deviceToolError(when (result) {
-    is PersonalUiResult.Error -> result.message
-    PersonalUiResult.Cancelled -> "Функция отменена пользователем или при уходе приложения в фон."
-    else -> "Android вернул неожиданный результат сеанса."
+internal fun personalUiError(result: PersonalUiResult, recovery: String? = null): JsonObject = deviceToolError(when (result) {
+    is PersonalUiResult.Error -> result.message + recovery?.let { " $it" }.orEmpty()
+    PersonalUiResult.Cancelled -> "Функция отменена пользователем или при уходе приложения в фон. Откройте Rikka-Root, если хотите выполнить её снова."
+    else -> "Android вернул неожиданный результат сеанса. Откройте Rikka-Root и повторите запрос."
 })

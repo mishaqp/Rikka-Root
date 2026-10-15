@@ -44,7 +44,7 @@ private suspend fun withSavedHostSession(
     block: (Session) -> JsonObject,
 ): JsonObject {
     val h = repo.getByName(name)
-        ?: return buildJsonObject { put("error", "Сохранённый хост не найден: $name") }
+        ?: return buildJsonObject { put("error", "Сохранённый хост не найден: $name. Проверьте name через list_ssh_hosts или сохраните хост в настройках SSH.") }
     val auth = SshAuth(password = h.password, privateKey = h.privateKey, passphrase = h.passphrase)
     if (!auth.isUsable()) {
         return buildJsonObject { put("error", "У сохранённого хоста нет доступного пароля или приватного ключа. Сохраните хост заново в настройках SSH.") }
@@ -96,16 +96,16 @@ fun sshUploadTool(context: Context, repo: SshHostRepository, access: LocalFileAc
     needsApproval = { true },
     execute = { input ->
         val p = input.jsonObject
-        val name = p["name"]?.jsonPrimitive?.contentOrNull ?: error("Обязательный параметр: name")
-        val localPath = p["local_path"]?.jsonPrimitive?.contentOrNull ?: error("Обязательный параметр: local_path")
-        val remotePath = p["remote_path"]?.jsonPrimitive?.contentOrNull ?: error("Обязательный параметр: remote_path")
+        val name = p["name"]?.jsonPrimitive?.contentOrNull ?: error("Укажите обязательный параметр: name")
+        val localPath = p["local_path"]?.jsonPrimitive?.contentOrNull ?: error("Укажите обязательный параметр: local_path")
+        val remotePath = p["remote_path"]?.jsonPrimitive?.contentOrNull ?: error("Укажите обязательный параметр: remote_path")
         val timeoutSec = (p["timeout_seconds"]?.jsonPrimitive?.intOrNull ?: 60).coerceIn(1, 600)
         val localFile = requireNotNull((access.resolve(localPath) as? LocalFileSource.Local)?.file) {
             "SFTP работает с локальными файлами scratch, upload или workspace."
         }
         if (!localFile.exists() || !localFile.isFile) {
             return@Tool listOf(UIMessagePart.Text(
-                buildJsonObject { put("error", "Локальный файл не найден: $localPath") }.toString()
+                buildJsonObject { put("error", "Локальный файл не найден: $localPath. Проверьте local_path и выберите существующий файл.") }.toString()
             ))
         }
         val payload = runCancellableSshOp(timeoutSec * 1000L) { sessionRef ->
@@ -119,13 +119,14 @@ fun sshUploadTool(context: Context, repo: SshHostRepository, access: LocalFileAc
                         put("bytes", localFile.length())
                     }
                 } catch (e: Throwable) {
-                    buildJsonObject { put("error", "Ошибка загрузки SFTP: ${e.message ?: "неизвестная ошибка"}") }
+                    sshFailureEnvelope(e, "Ошибка загрузки SFTP.",
+                        "Проверьте local_path, существование удалённой папки remote_path и право записи на сервере, затем повторите ssh_upload.")
                 } finally {
                     try { sftp.disconnect() } catch (_: Throwable) {}
                 }
             }
         }
-        listOf(UIMessagePart.Text(payload.toString()))
+        listOf(UIMessagePart.Text(withSftpPaths(payload, name, localPath, remotePath).toString()))
     }
 )
 
@@ -151,9 +152,9 @@ fun sshDownloadTool(context: Context, repo: SshHostRepository, access: LocalFile
     needsApproval = { true },
     execute = { input ->
         val p = input.jsonObject
-        val name = p["name"]?.jsonPrimitive?.contentOrNull ?: error("Обязательный параметр: name")
-        val remotePath = p["remote_path"]?.jsonPrimitive?.contentOrNull ?: error("Обязательный параметр: remote_path")
-        val localPath = p["local_path"]?.jsonPrimitive?.contentOrNull ?: error("Обязательный параметр: local_path")
+        val name = p["name"]?.jsonPrimitive?.contentOrNull ?: error("Укажите обязательный параметр: name")
+        val remotePath = p["remote_path"]?.jsonPrimitive?.contentOrNull ?: error("Укажите обязательный параметр: remote_path")
+        val localPath = p["local_path"]?.jsonPrimitive?.contentOrNull ?: error("Укажите обязательный параметр: local_path")
         val timeoutSec = (p["timeout_seconds"]?.jsonPrimitive?.intOrNull ?: 60).coerceIn(1, 600)
         val localFile = requireNotNull((access.resolve(localPath, write = true) as? LocalFileSource.Local)?.file) {
             "SFTP работает с локальными файлами scratch, upload или workspace."
@@ -173,7 +174,8 @@ fun sshDownloadTool(context: Context, repo: SshHostRepository, access: LocalFile
                         put("bytes", localFile.length())
                     }
                 } catch (e: Throwable) {
-                    buildJsonObject { put("error", "Ошибка скачивания SFTP: ${e.message ?: "неизвестная ошибка"}") }
+                    sshFailureEnvelope(e, "Ошибка скачивания SFTP.",
+                        "Проверьте remote_path, право чтения на сервере и доступ к local_path, затем повторите ssh_download.")
                 } finally {
                     // Delete partial files left by a failed get. Otherwise the user is left
                     // with a half-written file that LOOKS like a successful download —
@@ -183,6 +185,14 @@ fun sshDownloadTool(context: Context, repo: SshHostRepository, access: LocalFile
                 }
             }
         }
-        listOf(UIMessagePart.Text(payload.toString()))
+        listOf(UIMessagePart.Text(withSftpPaths(payload, name, localPath, remotePath).toString()))
     }
 )
+
+private fun withSftpPaths(payload: JsonObject, name: String, localPath: String, remotePath: String): JsonObject =
+    if (payload["error"] == null) payload else buildJsonObject {
+        payload.forEach { (key, value) -> put(key, value) }
+        put("name", name)
+        put("local_path", localPath)
+        put("remote_path", remotePath)
+    }

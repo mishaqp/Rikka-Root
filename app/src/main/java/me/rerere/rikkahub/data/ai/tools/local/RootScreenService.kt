@@ -16,6 +16,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
@@ -77,7 +79,8 @@ class RootScreenService internal constructor(
                 val payload = block(this)
                 // Preserve the action result, while explaining the root backend's exact failure.
                 val result = if (lastFailure != null && payload["error"] == null) JsonObject(payload + failure(lastFailure!!)) else payload
-                if (result["error"] != null && exceptionDetail != null) JsonObject(result + exceptionDiagnostic()) else result
+                val explained = explainScreenResult(result)
+                if (result["error"] != null && exceptionDetail != null) JsonObject(explained + exceptionDiagnostic()) else explained
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -345,6 +348,28 @@ class RootScreenService internal constructor(
         private const val MAX_PNG_BYTES = 32L * 1024 * 1024
         private const val MAX_SCREENSHOT_PIXELS = 24L * 1024 * 1024
     }
+}
+
+/** Preserve machine codes and screen diagnostics, while giving the caller a next step. */
+private fun explainScreenResult(result: JsonObject): JsonObject {
+    fun text(key: String) = (result[key] as? JsonPrimitive)?.contentOrNull
+    val code = text("reason") ?: text("error") ?: return result
+    if (listOf("message", "reason", "recovery").any { text(it)?.let { value -> Regex("[А-Яа-яЁё]").containsMatchIn(value) } == true }) return result
+    val message = when (code) {
+        "out_of_bounds" -> "Координаты вне экрана. Проверьте размер экрана и укажите точку внутри него."
+        "wrong_foreground_app" -> "Открыто другое приложение. Откройте нужное приложение и повторите чтение экрана."
+        "no_active_window", "ui_tree_unavailable", "ui_tree_decode_failed" -> "Не удалось прочитать экран. Разблокируйте устройство и откройте нужное приложение; при необходимости используйте take_screenshot."
+        "no_match", "nth_out_of_range" -> "Элемент экрана не найден. Повторите read_window_tree и уточните поиск или номер nth."
+        "stale_node_id", "wrong_window" -> "Экран изменился. Повторите read_window_tree и используйте новый node_id."
+        "no_clickable_ancestor" -> "Этот элемент не поддерживает нажатие. Выберите другой элемент или используйте tap с координатами."
+        "node_not_editable" -> "В этот элемент нельзя ввести текст. Выберите текстовое поле."
+        "gesture_cancelled_or_timeout", "action_rejected", "rejected_by_os" -> "Android не подтвердил действие. Проверьте экран перед новым вызовом."
+        "no_scroll_action_accepted" -> "Не удалось прокрутить экран. Выберите другую область или используйте swipe."
+        "screencap_failed", "screenshot_unavailable", "screenshot_empty_or_too_large", "bitmap_invalid_or_too_large", "bitmap_decode_failed" ->
+            "Не удалось снять экран. Проверьте Root в настройках и откройте нужный экран."
+        else -> "Не удалось выполнить действие на экране. Проверьте Root и прочитайте экран перед новым вызовом."
+    }
+    return JsonObject(result + ("message" to JsonPrimitive(message)))
 }
 
 internal class RootScreenNode(

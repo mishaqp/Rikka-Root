@@ -53,7 +53,7 @@ fun globalActionTool(
             return@Tool listOf(
                 UIMessagePart.Text(
                     buildJsonObject {
-                        put("error", "action must be one of ${ACTION_MAP.keys.toList()}")
+                        put("error", "Укажите action из списка: ${ACTION_MAP.keys.toList()}.")
                     }.toString()
                 )
             )

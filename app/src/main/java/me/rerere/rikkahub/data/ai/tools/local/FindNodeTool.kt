@@ -120,7 +120,7 @@ fun findNodeTool(
             return@Tool listOf(
                 UIMessagePart.Text(
                     buildJsonObject {
-                        put("error", "by must be one of [text, content_description, view_id_resource_name] and value is required")
+                        put("error", "Укажите by: text, content_description или view_id_resource_name, и искомое значение в value.")
                     }.toString()
                 )
             )
@@ -197,7 +197,7 @@ fun clickNodeTool(
             return@Tool listOf(
                 UIMessagePart.Text(
                     buildJsonObject {
-                        put("error", "node_id must look like \"windowId:index\" as returned by read_window_tree")
+                        put("error", "Укажите node_id в формате windowId:index из нового вызова read_window_tree.")
                     }.toString()
                 )
             )
@@ -206,7 +206,7 @@ fun clickNodeTool(
             return@Tool listOf(
                 UIMessagePart.Text(
                     buildJsonObject {
-                        put("error", "provide node_id, or by (one of [text, content_description, view_id_resource_name]) plus value")
+                        put("error", "Укажите node_id из read_window_tree или by (text, content_description, view_id_resource_name) вместе с value.")
                     }.toString()
                 )
             )
@@ -215,7 +215,7 @@ fun clickNodeTool(
             return@Tool listOf(
                 UIMessagePart.Text(
                     buildJsonObject {
-                        put("error", "nth must be >= 0")
+                        put("error", "Укажите nth — номер совпадения, начиная с 0.")
                     }.toString()
                 )
             )
@@ -250,7 +250,7 @@ fun clickNodeTool(
                     return@withActionEnvelope buildJsonObject {
                         put("error", staleReason ?: "no_match")
                         if (staleReason == "stale_node_id") {
-                            put("hint", "the screen changed since read_window_tree; re-run it and use a fresh node_id")
+                            put("hint", "Экран изменился. Повторите read_window_tree и используйте новый node_id.")
                         }
                     }
                 }
@@ -341,7 +341,7 @@ fun setTextTool(
         if (newText == null) {
             return@Tool listOf(
                 UIMessagePart.Text(
-                    buildJsonObject { put("error", "text is required") }.toString()
+                    buildJsonObject { put("error", "Укажите текст для ввода в text.") }.toString()
                 )
             )
         }
@@ -349,7 +349,7 @@ fun setTextTool(
             return@Tool listOf(
                 UIMessagePart.Text(
                     buildJsonObject {
-                        put("error", "node_id must look like \"windowId:index\" as returned by read_window_tree")
+                        put("error", "Укажите node_id в формате windowId:index из нового вызова read_window_tree.")
                     }.toString()
                 )
             )
@@ -358,7 +358,7 @@ fun setTextTool(
             return@Tool listOf(
                 UIMessagePart.Text(
                     buildJsonObject {
-                        put("error", "provide node_id, or by (one of [text, content_description, view_id_resource_name]) plus value")
+                        put("error", "Укажите node_id из read_window_tree или by (text, content_description, view_id_resource_name) вместе с value.")
                     }.toString()
                 )
             )
@@ -366,7 +366,7 @@ fun setTextTool(
         if (nth < 0) {
             return@Tool listOf(
                 UIMessagePart.Text(
-                    buildJsonObject { put("error", "nth must be >= 0") }.toString()
+                    buildJsonObject { put("error", "Укажите nth — номер совпадения, начиная с 0.") }.toString()
                 )
             )
         }
@@ -400,7 +400,7 @@ fun setTextTool(
                     return@withActionEnvelope buildJsonObject {
                         put("error", staleReason ?: "no_match")
                         if (staleReason == "stale_node_id") {
-                            put("hint", "the screen changed since read_window_tree; re-run it and use a fresh node_id")
+                            put("hint", "Экран изменился. Повторите read_window_tree и используйте новый node_id.")
                         }
                     }
                 }

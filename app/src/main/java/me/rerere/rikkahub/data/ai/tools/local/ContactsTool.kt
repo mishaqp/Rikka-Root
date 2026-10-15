@@ -10,7 +10,7 @@ import me.rerere.ai.core.Tool
 
 private fun contactItems(context: Context, id: Long, uri: Uri, value: String, type: String, contactId: String, key: String, phone: Boolean): JsonArray = buildJsonArray {
     val cursor = context.contentResolver.query(uri, arrayOf(value, type), "$contactId = ?", arrayOf(id.toString()), null)
-        ?: error("Contacts provider unavailable")
+        ?: error("Служба контактов Android недоступна. Проверьте доступ к контактам и включите приложение контактов.")
     cursor.use { c ->
         val valueIndex = c.getColumnIndexOrThrow(value); val typeIndex = c.getColumnIndexOrThrow(type)
         var count = 0
@@ -24,7 +24,7 @@ private fun contactItems(context: Context, id: Long, uri: Uri, value: String, ty
 private fun queryContacts(context: Context, uri: Uri, limit: Int): JsonObject = buildJsonObject {
     put("contacts", buildJsonArray {
         val cursor = context.contentResolver.query(uri, arrayOf(ContactsContract.Contacts._ID, ContactsContract.Contacts.DISPLAY_NAME), null, null,
-            "${ContactsContract.Contacts.DISPLAY_NAME} ASC") ?: error("Contacts provider unavailable")
+            "${ContactsContract.Contacts.DISPLAY_NAME} ASC") ?: error("Служба контактов Android недоступна. Проверьте доступ к контактам и включите приложение контактов.")
         cursor.use { c ->
             val idIndex = c.getColumnIndexOrThrow(ContactsContract.Contacts._ID)
             val nameIndex = c.getColumnIndexOrThrow(ContactsContract.Contacts.DISPLAY_NAME)

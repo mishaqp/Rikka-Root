@@ -79,6 +79,7 @@ class RootExecutionJournalTest {
         assertEquals(listOf(UIMessagePart.Text("completed")), output)
         assertFalse(checkpoint!!.canResumeExecution)
         assertTrue((checkpoint!!.output.single() as UIMessagePart.Text).text.contains("root_execution_indeterminate"))
+        assertTrue((checkpoint!!.output.single() as UIMessagePart.Text).text.contains("Проверьте"))
         assertFalse(approved().copy(output = output).canResumeExecution)
     }
 

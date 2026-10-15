@@ -22,30 +22,30 @@ import me.rerere.ai.core.Tool
 import java.net.URI
 
 internal fun safeNativeUrl(value: String): String {
-    require(value.isNotBlank() && value.length <= 8192 && value.none { it.isISOControl() }) { "Некорректный URL." }
-    val uri = try { URI(value) } catch (_: Exception) { throw IllegalArgumentException("Некорректный URL.") }
+    require(value.isNotBlank() && value.length <= 8192 && value.none { it.isISOControl() }) { "Некорректный URL. Укажите полную ссылку с допустимой схемой." }
+    val uri = try { URI(value) } catch (_: Exception) { throw IllegalArgumentException("Некорректный URL. Укажите полную ссылку с допустимой схемой.") }
     val scheme = uri.scheme?.lowercase()
-    require(scheme in setOf("http", "https", "mailto", "tel", "geo", "market")) { "Допустимы только http, https, mailto, tel, geo и market." }
-    require(uri.rawUserInfo == null && !uri.rawSchemeSpecificPart.isNullOrBlank()) { "URL не должен содержать логин или пароль." }
-    if (scheme in setOf("http", "https", "market")) require(!uri.host.isNullOrBlank()) { "В URL отсутствует адрес сервера." }
+    require(scheme in setOf("http", "https", "mailto", "tel", "geo", "market")) { "Используйте ссылку со схемой http, https, mailto, tel, geo или market." }
+    require(uri.rawUserInfo == null && !uri.rawSchemeSpecificPart.isNullOrBlank()) { "Укажите URL без логина и пароля и с непустым адресом." }
+    if (scheme in setOf("http", "https", "market")) require(!uri.host.isNullOrBlank()) { "В URL отсутствует адрес сервера. Укажите полную ссылку." }
     return value
 }
 internal fun nativePackageName(value: String): String = value.also {
-    require(it.length <= 255 && it.matches(Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+"))) { "Некорректное имя пакета." }
+    require(it.length <= 255 && it.matches(Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+"))) { "Укажите корректное имя пакета, например org.example.app." }
 }
 internal fun nativeActivityName(pkg: String, value: String): String {
     nativePackageName(pkg)
     val name = if (value.startsWith('.')) pkg + value else value
-    require(name.length <= 512 && name.matches(Regex("[A-Za-z_$][A-Za-z0-9_$]*(\\.[A-Za-z_$][A-Za-z0-9_$]*)+"))) { "Некорректное имя Activity." }
+    require(name.length <= 512 && name.matches(Regex("[A-Za-z_$][A-Za-z0-9_$]*(\\.[A-Za-z_$][A-Za-z0-9_$]*)+"))) { "Укажите полное имя Activity или имя с ведущей точкой, например .MainActivity." }
     return name
 }
 internal fun validateCalendarTimes(start: Long?, end: Long?) {
-    require((start == null || start >= 0) && (end == null || end >= 0) && (start == null || end == null || end >= start)) { "Некорректное время события: конец должен быть не раньше начала." }
+    require((start == null || start >= 0) && (end == null || end >= 0) && (start == null || end == null || end >= start)) { "Укажите неотрицательное время события: конец должен быть не раньше начала." }
 }
 private fun nativeText(args: JsonObject, key: String, required: Boolean = false, max: Int = 16000): String? {
     if (key !in args) { require(!required) { "Нужен параметр $key." }; return null }
     val value = args.textArgument(key) ?: throw IllegalArgumentException("$key должен быть строкой.")
-    require(value.length <= max && (!required || value.isNotBlank()) && '\u0000' !in value) { "Некорректный параметр $key." }
+    require(value.length <= max && (!required || value.isNotBlank()) && '\u0000' !in value) { "Проверьте параметр $key: допустимая длина — до $max символов; обязательное значение не должно быть пустым." }
     return value
 }
 private fun nativeLong(args: JsonObject, key: String): Long? {
@@ -58,7 +58,7 @@ private fun nativeSchema(fields: Map<String, String>, required: List<String> = e
 private fun nativeTool(context: Context, name: String, description: String, option: LocalToolOption,
     fields: Map<String, String>, required: List<String> = emptyList(), execute: suspend (JsonObject) -> JsonObject,
 ) = personalJsonTool(context, name, description, option, nativeSchema(fields, required), validate = { it }, read = { args ->
-    try { execute(args) } catch (error: IllegalArgumentException) { deviceToolError(error.message ?: "Некорректные параметры.") }
+    try { execute(args) } catch (error: IllegalArgumentException) { deviceToolError(deviceToolFailureReason(error)) }
 })
 
 private suspend fun dispatchNative(context: Context, intent: Intent, action: String): JsonObject = withContext(Dispatchers.Main.immediate) {
@@ -68,7 +68,7 @@ private suspend fun dispatchNative(context: Context, intent: Intent, action: Str
     try {
         context.startActivity(intent)
         buildJsonObject { put("success", true); put("intent_fired", true); put("action", action); put("ok", true); put("confirmed_foreground", false); put("note", "Действие передано Android. Завершите его в открывшемся приложении.") }
-    } catch (_: android.content.ActivityNotFoundException) { deviceToolError("Нет приложения для этого действия.") }
+    } catch (_: android.content.ActivityNotFoundException) { deviceToolError("Нет приложения для этого действия. Установите или включите подходящее приложение Android.") }
     catch (_: SecurityException) { deviceToolError("Android запретил запуск этого экрана. Выберите доступное приложение или экспортированную Activity.") }
 }
 
@@ -94,14 +94,14 @@ internal fun systemIntentTools(context: Context): List<Tool> = listOf(
     },
     nativeTool(context,"send_email_intent","Открыть черновик письма. Пользователь сам нажимает «Отправить».",LocalToolOption.SystemIntents,
         mapOf("to" to "string","subject" to "string","body" to "string"),listOf("to")) { args ->
-        val to=nativeText(args,"to",true,512)!!; require(to.none { it.isISOControl() }) { "Некорректный адрес почты." }
+        val to=nativeText(args,"to",true,512)!!; require(to.none { it.isISOControl() }) { "Укажите адрес почты без управляющих символов." }
         val intent=Intent(Intent.ACTION_SENDTO,Uri.parse("mailto:")).putExtra(Intent.EXTRA_EMAIL,arrayOf(to))
         nativeText(args,"subject",max=2048)?.let { intent.putExtra(Intent.EXTRA_SUBJECT,it) }; nativeText(args,"body")?.let { intent.putExtra(Intent.EXTRA_TEXT,it) }
         dispatchNative(context,intent,"send_email_intent")
     },
     nativeTool(context,"send_sms_intent","Открыть черновик SMS. Пользователь сам нажимает «Отправить».",LocalToolOption.SystemIntents,
         mapOf("phone_number" to "string","body" to "string"),listOf("phone_number")) { args ->
-        val phone=nativeText(args,"phone_number",true,64)!!; require(phone.matches(Regex("[+0-9 ()-]{1,64}"))) { "Некорректный номер телефона." }
+        val phone=nativeText(args,"phone_number",true,64)!!; require(phone.matches(Regex("[+0-9 ()-]{1,64}"))) { "Укажите номер телефона из цифр, пробелов, скобок, знаков + и - длиной до 64 символов." }
         val intent=Intent(Intent.ACTION_SENDTO,Uri.fromParts("smsto",phone,null)); nativeText(args,"body")?.let { intent.putExtra("sms_body",it) }
         dispatchNative(context,intent,"send_sms_intent")
     },
@@ -116,7 +116,7 @@ internal fun appLauncherTools(context: Context): List<Tool> = listOf(
     nativeTool(context,"launch_app","Открыть установленное приложение по имени пакета.",LocalToolOption.AppLauncher,mapOf("package_name" to "string"),listOf("package_name")) { args ->
         val pkg=nativePackageName(nativeText(args,"package_name",true,255)!!)
         val intent=context.packageManager.getLaunchIntentForPackage(pkg)
-        if (intent==null) deviceToolError("Пакет не виден Android, не установлен или не имеет экрана запуска.") else dispatchNative(context,intent,"launch_app")
+        if (intent==null) deviceToolError("Пакет не виден Android, не установлен или не имеет экрана запуска. Проверьте package_name или выберите приложение из list_installed_apps.") else dispatchNative(context,intent,"launch_app")
     },
     nativeTool(context,"open_url","Открыть URL в системном приложении. Чтение содержимого страницы не выполняется.",LocalToolOption.AppLauncher,mapOf("url" to "string","package_name" to "string"),listOf("url")) { args ->
         val intent=Intent(Intent.ACTION_VIEW,Uri.parse(safeNativeUrl(nativeText(args,"url",true,8192)!!)))
@@ -136,14 +136,14 @@ internal fun appLauncherTools(context: Context): List<Tool> = listOf(
     },
     nativeTool(context,"list_app_activities","Список Activity видимого Android пакета.",LocalToolOption.AppLauncher,mapOf("package_name" to "string","filter" to "string","exported_only" to "boolean","limit" to "integer"),listOf("package_name")) { args ->
         val pkg=nativePackageName(nativeText(args,"package_name",true,255)!!); val filter=nativeText(args,"filter",max=512).orEmpty().lowercase(); val exportedOnly=personalBoolean(args,"exported_only",false); val limit=personalInt(args,"limit",100,1..500)
-        val info=try { context.packageManager.getPackageInfo(pkg,PackageManager.GET_ACTIVITIES) } catch (_: PackageManager.NameNotFoundException) { return@nativeTool deviceToolError("Пакет не установлен или скрыт Android.") }
+        val info=try { context.packageManager.getPackageInfo(pkg,PackageManager.GET_ACTIVITIES) } catch (_: PackageManager.NameNotFoundException) { return@nativeTool deviceToolError("Пакет не установлен или скрыт Android. Проверьте package_name или выберите видимый пакет из list_installed_apps.") }
         val activities=info.activities.orEmpty().filter { (!exportedOnly || it.exported) && (filter.isEmpty() || filter in it.name.lowercase()) }
         buildJsonObject { put("package",pkg); put("matched",activities.size); put("activities",buildJsonArray { activities.take(limit).forEach { add(buildJsonObject { put("name",it.name); put("exported",it.exported); put("enabled",it.enabled) }) } }) }
     },
     nativeTool(context,"launch_activity","Открыть экспортированную Activity установленного приложения.",LocalToolOption.AppLauncher,mapOf("package_name" to "string","activity_name" to "string"),listOf("package_name","activity_name")) { args ->
         val pkg=nativePackageName(nativeText(args,"package_name",true,255)!!); val activity=nativeActivityName(pkg,nativeText(args,"activity_name",true,512)!!); val component=ComponentName(pkg,activity)
-        val info=try { context.packageManager.getActivityInfo(component,0) } catch (_: PackageManager.NameNotFoundException) { return@nativeTool deviceToolError("Activity не найдена или скрыта Android.") }
-        if (!info.exported || !info.enabled || info.applicationInfo?.enabled==false) deviceToolError("Activity не экспортирована или отключена.")
+        val info=try { context.packageManager.getActivityInfo(component,0) } catch (_: PackageManager.NameNotFoundException) { return@nativeTool deviceToolError("Activity не найдена или скрыта Android. Проверьте package_name и activity_name через list_app_activities.") }
+        if (!info.exported || !info.enabled || info.applicationInfo?.enabled==false) deviceToolError("Activity не экспортирована или отключена. Выберите включённую экспортированную Activity через list_app_activities.")
         else dispatchNative(context,Intent(Intent.ACTION_MAIN).setComponent(component),"launch_activity")
     },
 )

@@ -15,6 +15,38 @@ import kotlin.uuid.Uuid
 
 val CRON_TOOL_NAMES = setOf("schedule_job", "list_jobs", "get_job_history", "delete_job", "pause_job", "resume_job", "trigger_job_now")
 
+private fun scheduleJobMessage(code: String): String = when (code) {
+    "invalid_arguments", "unsupported_field" -> "Параметры задания неверны. Проверьте поля вызова и повторите его."
+    "invalid_name" -> "Имя задания отсутствует или слишком длинное. Укажите name длиной 1–80 символов."
+    "invalid_mode" -> "Режим задания неверен. Укажите mode: llm или direct."
+    "invalid_payload" -> "Содержимое задания не соответствует режиму. Укажите prompt для llm или actions для direct."
+    "invalid_actions" -> "Действия задания неверны. Укажите от 1 до 12 объектов actions с tool и args."
+    "tool_unavailable", "tool_not_allowed", "interactive_tool", "mandatory_confirmation" -> "Инструмент недоступен для фонового задания. Выберите разрешённый инструмент без обязательного диалога."
+    "invalid_number" -> "Числовой параметр задания неверен. Укажите целое число без кавычек."
+    "invalid_bounds" -> "Границы расписания неверны. Укажите будущий end_at_unix_ms позже start_at_unix_ms в пределах 10 лет."
+    "invalid_time" -> "Время разового запуска неверно. Укажите будущий at_unix_ms в пределах 10 лет и границ расписания."
+    "invalid_cron" -> "Cron-расписание неверно. Проверьте cron_expression и уберите at_unix_ms."
+    "invalid_schedule" -> "Тип расписания неверен. Укажите schedule_type: once или cron."
+    "invalid_timezone" -> "Часовой пояс неверен. Укажите timezone в формате IANA, например Europe/Moscow."
+    "invalid_run_limit" -> "Лимит запусков неверен. Укажите max_runs от 1 до 100000."
+    "invalid_catchup" -> "Режим пропущенных запусков неверен. Укажите catchup: skip, fire_once или fire_all."
+    "payload_too_large" -> "Задание слишком велико. Сократите prompt или actions и повторите вызов."
+    "missing_id" -> "Не указан ID задания. Вызовите list_jobs и укажите id нужного задания."
+    "not_found" -> "Задание текущего ассистента не найдено. Вызовите list_jobs и выберите доступный id."
+    "invalid_limit" -> "Лимит истории неверен. Укажите limit от 1 до 100."
+    "no_future_occurrence" -> "В расписании нет будущего запуска. Проверьте время и границы задания."
+    "missing_conversation_snapshot", "payload_unavailable" -> "Настройки задания недоступны. Откройте текущий чат и создайте задание заново."
+    "enqueue_failed", "job_unavailable" -> "Не удалось поставить задание в очередь. Проверьте, что оно включено, и повторите запуск."
+    "android_permission_required", "root_not_granted", "root_interaction_required", "root_approval_required", "approval_required" -> "Для запуска нужен доступ на устройстве. Откройте приложение и проверьте разрешения задания и его инструментов."
+    "feature_disabled", "job_disabled", "run_no_longer_allowed" -> "Задание или его функция выключены. Проверьте настройки и возобновите задание."
+    "run_limit", "hard_budget_exhausted", "token_budget_exceeded", "step_limit" -> "Достигнут лимит выполнения. Проверьте лимит запусков, шагов и бюджет токенов задания."
+    "stale_revision", "run_already_claimed", "concurrent_run" -> "Запуск устарел или уже выполняется. Дождитесь завершения и проверьте историю задания."
+    "model_unavailable", "unknown_or_ambiguous_model", "unknown_owner" -> "Ассистент или модель задания недоступны. Проверьте настройки текущего чата и создайте задание заново."
+    "root_command_blocked", "web_content_blocked" -> "Действие задания заблокировано проверкой безопасности. Проверьте команду и источники данных задания."
+    "deadline_exceeded", "command_timeout", "execution_cancelled", "process_interrupted", "execution_interrupted", "root_cleanup_unconfirmed", "root_execution_indeterminate", "tool_result_indeterminate" -> "Выполнение прервано; результат действий может быть неполным. Проверьте его на устройстве перед повторным запуском."
+    else -> "Не удалось выполнить операцию с заданием. Проверьте историю, параметры и доступность инструментов, затем повторите вызов."
+}
+
 object ScheduleJobValidator {
     private val keys = setOf("name", "mode", "prompt", "actions", "schedule_type", "at_unix_ms", "cron_expression", "timezone", "start_at_unix_ms", "end_at_unix_ms", "max_runs", "catchup")
     fun validate(input: JsonObject, knownToolNames: Set<String>, now: Long): String? {
@@ -72,13 +104,17 @@ fun createCronJobTools(
 ): List<Tool> {
     val owner = callerConversation.assistantId.toString()
     fun result(payload: JsonObject) = listOf(UIMessagePart.Text(payload.toString()))
-    fun error(code: String) = result(buildJsonObject { put("status", "error"); put("code", code) })
+    fun error(code: String, cause: Throwable? = null) = result(buildJsonObject {
+        put("status", "error"); put("code", code); put("message", scheduleJobMessage(code))
+        cause?.let { put("detail", deviceToolFailureReason(it)) }
+    })
     fun schema(vararg names: String, required: List<String> = emptyList()) = InputSchema.Obj(
         properties = buildJsonObject { names.forEach { name -> put(name, buildJsonObject { put("type", if (name in setOf("at_unix_ms", "start_at_unix_ms", "end_at_unix_ms", "max_runs", "limit")) "integer" else if (name == "actions") "array" else "string"); if (name == "actions") put("items", buildJsonObject { put("type", "object"); put("properties", buildJsonObject { put("tool", buildJsonObject { put("type", "string") }); put("args", buildJsonObject { put("type", "object") }) }); put("required", buildJsonArray { add("tool"); add("args") }) }) }) } }, required = required)
     fun summary(job: ScheduledJobEntity) = buildJsonObject {
         put("id", job.id)
         val payload = runCatching { repo.payload(job) }.getOrNull()
         put("name", payload?.name ?: "Задание недоступно после восстановления")
+        if (payload == null) put("message", "Содержимое задания недоступно. Откройте текущий чат и создайте задание заново.")
         put("mode", job.mode); put("schedule_type", job.scheduleType); put("enabled", job.enabled)
         job.cronExpression?.let { put("cron_expression", it) }; job.atUnixMs?.let { put("at_unix_ms", it) }
         put("timezone", job.timezone); job.nextRunAtMs?.let { put("next_run_at_ms", it) }
@@ -108,9 +144,9 @@ fun createCronJobTools(
             try {
                 val created = repo.create(job.copy(nextRunAtMs = next), payload)
                 val enqueued = scheduler.schedule(created)
-                result(buildJsonObject { put("status", if (enqueued) "scheduled" else "blocked"); if (!enqueued) put("code", "enqueue_failed"); put("job", summary(repo.getById(created.id) ?: created)) })
+                result(buildJsonObject { put("status", if (enqueued) "scheduled" else "blocked"); if (!enqueued) { put("code", "enqueue_failed"); put("message", scheduleJobMessage("enqueue_failed")) }; put("job", summary(repo.getById(created.id) ?: created)) })
             } catch (cancel: CancellationException) { throw cancel }
-            catch (_: Exception) { error("schedule_failed") }
+            catch (cause: Exception) { error("schedule_failed", cause) }
         },
     )
     val list = Tool(name = "list_jobs", needsApproval = { true }, description = "Список заданий текущего помощника без промптов, аргументов и результатов действий.", parameters = { schema() }, execute = {
@@ -124,14 +160,14 @@ fun createCronJobTools(
         if (limit !in 1..100) return@Tool error("invalid_limit")
         result(buildJsonObject { put("runs", buildJsonArray { runRepo.recent(id, limit).forEach { run -> add(buildJsonObject {
             put("occurrence_id", run.occurrenceId); put("status", run.status); put("scheduled_at_ms", run.scheduledAtMs)
-            run.startedAtMs?.let { put("started_at_ms", it) }; run.finishedAtMs?.let { put("finished_at_ms", it) }; run.outcomeCode?.let { put("code", it) }
+            run.startedAtMs?.let { put("started_at_ms", it) }; run.finishedAtMs?.let { put("finished_at_ms", it) }; run.outcomeCode?.let { put("code", it); put("message", scheduleJobMessage(it)) }
         }) } }) })
     })
     fun mutation(name: String, description: String, action: suspend (String) -> List<UIMessagePart>): Tool = Tool(
         name = name, needsApproval = { true }, description = description, parameters = { schema("id", required = listOf("id")) }, execute = { input ->
             val id = ((input as? JsonObject)?.get("id") as? JsonPrimitive)?.contentOrNull ?: return@Tool error("missing_id")
             repo.getOwned(id, owner) ?: return@Tool error("not_found")
-            try { action(id) } catch (cancel: CancellationException) { throw cancel } catch (_: Exception) { error("mutation_failed") }
+            try { action(id) } catch (cancel: CancellationException) { throw cancel } catch (cause: Exception) { error("mutation_failed", cause) }
         })
     val delete = mutation("delete_job", "Удалить задание текущего помощника и его историю; отменить обычные, ручные и пропущенные запуски.") { id ->
         if (!repo.deleteOwned(id, owner)) error("not_found") else { scheduler.cancel(id); runRepo.deleteForJob(id); result(buildJsonObject { put("status", "deleted"); put("id", id) }) }
@@ -141,7 +177,7 @@ fun createCronJobTools(
     }
     val resume = mutation("resume_job", "Возобновить задание текущего помощника с новым будущим запуском.") { id ->
         val job = repo.setEnabled(id, owner, true)
-        if (job == null) error("not_found") else { scheduler.cancel(id); val enqueued = scheduler.schedule(job); result(buildJsonObject { put("status", if (enqueued) "resumed" else "blocked"); if (!enqueued) put("code", "job_unavailable"); put("id", id) }) }
+        if (job == null) error("not_found") else { scheduler.cancel(id); val enqueued = scheduler.schedule(job); result(buildJsonObject { put("status", if (enqueued) "resumed" else "blocked"); if (!enqueued) { put("code", "job_unavailable"); put("message", scheduleJobMessage("job_unavailable")) }; put("id", id) }) }
     }
     val trigger = mutation("trigger_job_now", "Поставить ручной запуск задания текущего помощника в очередь WorkManager. Возвращает настоящий occurrence_id и статус, без обещания успеха.") { id ->
         val run = scheduler.triggerNow(id, owner)

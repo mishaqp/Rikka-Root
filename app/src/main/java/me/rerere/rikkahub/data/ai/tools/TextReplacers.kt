@@ -40,14 +40,14 @@ fun replaceText(
     replaceAll: Boolean,
     replacers: List<TextReplacer> = WorkspaceEditReplacers,
 ): ReplaceTextResult {
-    require(oldText.isNotEmpty()) { "old_text must not be empty" }
+    require(oldText.isNotEmpty()) { "old_text не должен быть пустым. Укажите текст для замены." }
     for (replacer in replacers) {
         val matches = replacer.findMatches(content, oldText, newText)
         if (matches.isEmpty()) continue
         if (!replaceAll) {
             require(matches.size == 1) {
-                "old_text matches ${matches.size} locations (strategy: ${replacer.name}); " +
-                    "add more surrounding context to make it unique, or set replace_all=true"
+                "old_text найден в ${matches.size} местах (strategy: ${replacer.name}). " +
+                    "Добавьте окружающий текст или укажите replace_all=true."
             }
         }
         val applied = if (replaceAll) matches.sortedBy { it.start } else listOf(matches.minBy { it.start })
@@ -67,8 +67,7 @@ fun replaceText(
         )
     }
     throw IllegalArgumentException(
-        "old_text was not found, even with whitespace-tolerant matching; " +
-            "read the file again and copy old_text exactly from its current content"
+        "Текст old_text не найден. Прочитайте файл заново и скопируйте нужный фрагмент из его текущего содержимого."
     )
 }
 

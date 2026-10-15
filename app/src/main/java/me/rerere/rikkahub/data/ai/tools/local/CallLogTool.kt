@@ -26,7 +26,7 @@ fun callLogTool(context: Context): Tool = personalJsonTool(context, "list_call_l
         val uri = CallLog.Calls.CONTENT_URI.buildUpon().appendQueryParameter("limit", args.limit.toString()).build()
         val cursor = context.contentResolver.query(uri, arrayOf("_id", "number", "name", "type", "date", "duration"),
             filters.takeIf { it.isNotEmpty() }?.joinToString(" AND "), values.takeIf { it.isNotEmpty() }?.toTypedArray(), "${CallLog.Calls.DATE} DESC")
-            ?: error("Call log provider unavailable")
+            ?: error("Журнал звонков Android недоступен. Проверьте разрешение на чтение журнала звонков в настройках функции.")
         buildJsonObject { put("calls", buildJsonArray {
             cursor.use { c ->
                 val columns = listOf("_id", "number", "name", "type", "date", "duration").map(c::getColumnIndexOrThrow)

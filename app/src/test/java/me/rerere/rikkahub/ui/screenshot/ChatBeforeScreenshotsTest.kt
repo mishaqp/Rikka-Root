@@ -1594,7 +1594,9 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
                 compose.onNodeWithTag("chat_stage1").captureRoboImage(file.absolutePath, roborazziOptions = captureOptions)
             }
         }
-        captureRoboFrame(snapshots.artifact(name), baseline, options, ::captureTo)
+        captureRoboFrame(snapshots.artifact(name), baseline, options,
+            afterWarmup = { if (compose.mainClock.autoAdvance) settleNativeRipple() },
+            captureUi = ::captureTo)
         assertTrue("Missing committed baseline: $baseline", baseline.isFile && baseline.length() > 0)
     }
 

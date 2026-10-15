@@ -6,7 +6,9 @@ import org.junit.Test
 class RootCommandGuardTest {
     @Test fun `blocks obvious Android system destruction`() {
         listOf("rm -rf /", "rm -rf /system", "rm -rf /vendor/app", "rm -rf /data", "rm -rf /data/system", "rm -rf '/system'", "rm -rf /data/", "mkfs.ext4 /dev/block/mmcblk0", "dd if=/tmp/x of=/dev/block/by-name/boot", "echo x > /dev/block/by-name/boot", "dd if=/tmp/x of=\"/dev/block/by-name/boot\"", "echo x > '/dev/block/by-name/boot'", "reboot", "sh -c 'reboot'", "echo x | base64 -d | sh").forEach {
-            assertNotNull("must block: $it", RootCommandGuard.check(it))
+            val reason = RootCommandGuard.check(it)
+            assertNotNull("must block: $it", reason)
+            assertTrue("Reason must explain the block in Russian: $reason", Regex("[А-Яа-яЁё]{3}").containsMatchIn(reason!!))
         }
     }
 

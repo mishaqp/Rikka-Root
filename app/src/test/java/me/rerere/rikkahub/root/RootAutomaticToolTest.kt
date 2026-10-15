@@ -126,6 +126,8 @@ class RootAutomaticToolTest {
         val result = Json.parseToJsonElement((output.single() as UIMessagePart.Text).text).jsonObject
         assertEquals(9, result["exit_code"]!!.jsonPrimitive.int)
         assertEquals("private-failed-output", result["stdout"]!!.jsonPrimitive.content)
+            assertEquals("Команда завершилась с ошибкой (код 9). Проверьте вывод и результат перед новым запуском.",
+                result["reason"]?.jsonPrimitive?.content)
         assertEquals("failed", store.entries.value.single().status)
         assertFalse(store.entries.value.single().command.contains("private-failed-output"))
     }
@@ -151,6 +153,8 @@ class RootAutomaticToolTest {
             assertEquals(9, result["exit_code"]!!.jsonPrimitive.int)
             assertEquals("private-completed-output", result["stdout"]!!.jsonPrimitive.content)
             assertEquals("root_journal_save_failed", result["journal_error"]!!.jsonPrimitive.content)
+            assertEquals("Команда завершилась, но результат не удалось сохранить в журнале. Проверьте устройство перед новым вызовом; команда автоматически не повторяется.",
+                result["warning"]?.jsonPrimitive?.content)
             assertEquals("failed", store.entries.value.single().status)
         } finally {
             job.cancelAndJoin()

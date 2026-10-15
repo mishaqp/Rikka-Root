@@ -44,12 +44,12 @@ fun mediaScannerTool(context: Context, access: LocalFileAccess = LocalFileAccess
     },
     needsApproval = { true },
     execute = { arguments -> deviceToolResult {
-        val entries = arguments.jsonObject["paths"] as? JsonArray ?: error("paths is required")
+        val entries = arguments.jsonObject["paths"] as? JsonArray ?: error("Укажите paths — массив из 1–64 разрешённых путей или URI медиафайлов.")
         require(entries.size in 1..64) { "Укажите от 1 до 64 файлов." }
         val paths = entries.map { entry ->
-            val reference = (entry as? JsonPrimitive)?.takeIf { it.isString }?.content ?: error("Путь должен быть строкой.")
+            val reference = (entry as? JsonPrimitive)?.takeIf { it.isString }?.content ?: error("Укажите каждый путь в paths строкой.")
             when (val source = access.resolve(reference)) {
-                is LocalFileSource.Local -> access.checkFile(source.file).also { require(it.isFile) { "Путь должен вести к существующему файлу." } }.absolutePath
+                is LocalFileSource.Local -> access.checkFile(source.file).also { require(it.isFile) { "Путь должен вести к существующему файлу. Проверьте paths и доступ к файлам." } }.absolutePath
                 is LocalFileSource.Content -> {
                     if (source.uri.authority != "com.android.externalstorage.documents") {
                         return@deviceToolResult deviceToolError(
@@ -60,11 +60,11 @@ fun mediaScannerTool(context: Context, access: LocalFileAccess = LocalFileAccess
                             val documentUri = if (DocumentsContract.isDocumentUri(context, source.uri)) source.uri
                             else DocumentsContract.buildDocumentUriUsingTree(source.uri, DocumentsContract.getTreeDocumentId(source.uri))
                             val mapped = externalStorageMediaScanPath(DocumentsContract.getDocumentId(documentUri), scannerVolumeRoots(context))
-                            require(!access.isDirectory(source)) { "Для сканирования нужен файл, а не папка." }
+                            require(!access.isDirectory(source)) { "Для сканирования нужен файл, а не папка. Выберите медиафайл." }
                             // A URI grant can open the document while direct Linux path reads are denied.
                             // Do not require File.isFile/canRead or a broad READ_MEDIA permission.
                             requireNotNull(context.contentResolver.openFileDescriptor(documentUri, "r")) {
-                                "Не удалось открыть выбранный документ."
+                                "Не удалось открыть выбранный документ. Выберите его снова через системное меню Android."
                             }.use { }
                             mapped.absolutePath
                         }
@@ -78,9 +78,10 @@ fun mediaScannerTool(context: Context, access: LocalFileAccess = LocalFileAccess
             }
         }.distinct()
         val results = withTimeoutOrNull(15_000) { scanGuardedFiles(context, paths) }
-            ?: return@deviceToolResult deviceToolError("Android не завершил сканирование за 15 секунд.")
+            ?: return@deviceToolResult deviceToolError("Android не завершил сканирование за 15 секунд. Проверьте подключение накопителя и повторите запрос с меньшим числом файлов.")
         buildJsonObject {
             put("success", results.values.all { it != null })
+            if (results.values.any { it == null }) put("error", "Android не проиндексировал часть файлов. Проверьте indexed в results, формат файлов и доступность накопителя.")
             put("scanned", results.values.count { it != null })
             put("results", buildJsonArray {
                 results.forEach { (path, uri) -> add(buildJsonObject {
@@ -110,7 +111,7 @@ internal fun externalStorageMediaScanPath(documentId: String, volumeRoots: Map<S
     require(relative.isNotEmpty() && relative.none { it == '\\' || it.isISOControl() } &&
         components.all { it.isNotEmpty() && it != "." && it != ".." }) { "Некорректный путь документа." }
     val trustedRoot = volumeRoots.entries.firstOrNull { it.key.lowercase(Locale.ROOT) == volume }?.value
-        ?: throw IllegalArgumentException("Накопитель недоступен.")
+        ?: throw IllegalArgumentException("Накопитель недоступен. Подключите его и выберите файл снова.")
     // /sdcard may itself be a trusted system alias; descendants cannot introduce aliases.
     val root = trustedRoot.canonicalFile
     require(root.toPath().parent != null) { "Корень файловой системы не является накопителем." }
@@ -127,7 +128,7 @@ internal fun externalStorageMediaScanPath(documentId: String, volumeRoots: Map<S
 /** Uses actual Android volumes; API 26–29 fallback interpolates only the narrow FAT UUID shape. */
 internal fun scannerVolumeRoots(context: Context): Map<String, File> {
     val manager = context.getSystemService(StorageManager::class.java)
-        ?: throw IllegalStateException("Список накопителей недоступен.")
+        ?: throw IllegalStateException("Список накопителей недоступен. Проверьте подключение накопителя в настройках Android.")
     val roots = linkedMapOf<String, File>()
     if (Build.VERSION.SDK_INT < 30) {
         @Suppress("DEPRECATION")

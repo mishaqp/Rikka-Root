@@ -14,9 +14,9 @@ fun micRecorderTool(context: Context, files: FilesManager): Tool = personalJsonT
     InputSchema.Obj(buildJsonObject { put("duration_ms",buildJsonObject { put("type","integer"); put("minimum",1000); put("maximum",300000) }) }), ::recordingDuration,
     read={ duration ->
         val result=awaitPersonalToolUi(context,PersonalUiRequest.Record(duration),duration+20000L)
-        if (result !is PersonalUiResult.Recording) return@personalJsonTool personalUiError(result)
+        if (result !is PersonalUiResult.Recording) return@personalJsonTool personalUiError(result, "Проверьте разрешение микрофона и завершите другой звонок или запись.")
         try {
-            if (!result.file.isFile || result.file.length() !in 1..16_777_216L) return@personalJsonTool deviceToolError("Запись отсутствует или повреждена.")
+            if (!result.file.isFile || result.file.length() !in 1..16_777_216L) return@personalJsonTool deviceToolError("Запись отсутствует или повреждена. Проверьте микрофон и выполните новую запись.")
             val entity=files.saveManagedFromUri(FileFolders.UPLOAD,result.file.toUri(),"Запись.m4a","audio/mp4")
             val file=files.getFile(entity)
             buildJsonObject { put("success",true); put("path",file.path); put("file_uri",file.toUri().toString()); put("workspace_path","/upload/${file.name}"); put("duration_ms",result.durationMs) }

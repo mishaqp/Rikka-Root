@@ -14,5 +14,5 @@ fun speechToTextTool(context: Context): Tool = personalJsonTool(context,"speech_
     }), validate={ PersonalUiRequest.Speech(speechLanguage(if (it.containsKey("language")) it.textArgument("language").also { v -> require(v != null) { "language должен быть строкой." } } else null),speechTimeout(it),personalBoolean(it,"prefer_offline",true)) },
     read={ request -> when (val result=awaitPersonalToolUi(context,request,request.timeoutMs+10000L)) {
         is PersonalUiResult.Speech -> buildJsonObject { put("text",result.text) }
-        else -> personalUiError(result)
+        else -> personalUiError(result, "Проверьте микрофон, язык Android и провайдер распознавания речи в настройках приложения.")
     } })

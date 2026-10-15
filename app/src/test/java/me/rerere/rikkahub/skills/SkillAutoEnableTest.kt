@@ -23,7 +23,7 @@ class SkillAutoEnableTest {
 
         assertTrue(outcome.autoEnabled)
         assertEquals(setOf("agent-core", "zip-and-send"), outcome.updatedEnabledSkills)
-        assertTrue(outcome.detail.contains("now enabled"))
+        assertTrue(outcome.detail.contains("Навык включён"))
     }
 
     @Test
@@ -36,7 +36,7 @@ class SkillAutoEnableTest {
 
         assertTrue(outcome.autoEnabled)
         assertNull(outcome.updatedEnabledSkills)
-        assertTrue(outcome.detail.contains("already enabled"))
+        assertTrue(outcome.detail.contains("уже включён"))
     }
 
     @Test
@@ -51,7 +51,7 @@ class SkillAutoEnableTest {
 
         assertFalse(outcome.autoEnabled)
         assertNull(outcome.updatedEnabledSkills)
-        assertTrue(outcome.detail.contains("previously disabled"))
+        assertTrue(outcome.detail.contains("остаётся выключенным"))
     }
 
     @Test

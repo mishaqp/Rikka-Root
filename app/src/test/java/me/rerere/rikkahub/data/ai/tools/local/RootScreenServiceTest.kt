@@ -8,7 +8,11 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.root.RootProcessResult
 import me.rerere.rikkahub.root.RootShellManager
 import me.rerere.rikkahub.root.clipboard.RootClipboardInput
@@ -64,6 +68,25 @@ class RootScreenServiceTest {
     }
     private fun runTool(tool: me.rerere.ai.core.Tool, input: String = "{}"): String = runBlocking {
         tool.execute(Json.parseToJsonElement(input)).joinToString { it.toString() }
+    }
+
+    @Test fun `screen argument errors explain how to fix the call in Russian`() {
+        listOf(tapTool(service()), longPressTool(service()), swipeTool(service()), findNodeTool(service()),
+            clickNodeTool(service()), setTextTool(service()), scrollTool(service()), globalActionTool(service()))
+            .forEach { tool ->
+                val output = runTool(tool)
+                assertTrue("${tool.name}: $output", Regex("[А-Яа-яЁё]{3}").containsMatchIn(output))
+            }
+    }
+
+    @Test fun `screenshot failure explains recovery and preserves the native reason code`() {
+        val svc = service(runner = { command, _ ->
+            RootProcessResult(exitCode = if (command.startsWith("screencap")) 1 else 0,
+                stdout = if (command == "wm size") "Physical size: 1080x2400" else "")
+        })
+        val output = runTool(takeScreenshotTool(context, svc))
+        assertTrue(output, output.contains("screencap_failed"))
+        assertTrue(output, output.contains("Не удалось снять экран"))
     }
 
     @Test fun `all Agent screen tools have explicit approval`() {
@@ -237,7 +260,52 @@ class RootScreenServiceTest {
         return result
     }
     @Test fun `root executor reaches tap`() {
-        assertToolWorks(tapTool(service()), "{\"x\":10,\"y\":20}", "input tap 10 20")
+        val result = assertToolWorks(tapTool(service()), "{\"x\":10,\"y\":20}", "input tap 10 20")
+        assertFalse(result, result.contains("\"warning\""))
+    }
+    @Test fun `accepted tap keeps success and explains an unconfirmed after snapshot`() = runBlocking {
+        var accepted = false
+        val svc = service(runner = { command, _ ->
+            when {
+                command == "wm size" -> RootProcessResult(exitCode = 0, stdout = "Physical size: 1080x2400")
+                command.startsWith("uiautomator dump") -> {
+                    if (accepted) RootProcessResult(error = "command_timeout")
+                    else {
+                        File(command.substringAfter("uiautomator dump ").removeSurrounding("'")).writeText(XML)
+                        RootProcessResult(exitCode = 0)
+                    }
+                }
+                command == "input tap 10 20" -> {
+                    accepted = true
+                    RootProcessResult(exitCode = 0)
+                }
+                else -> RootProcessResult(exitCode = 0)
+            }
+        })
+        val output = tapTool(svc).execute(Json.parseToJsonElement("{\"x\":10,\"y\":20}"))
+        val result = Json.parseToJsonElement((output.single() as UIMessagePart.Text).text).jsonObject
+        assertEquals(true, result["success"]?.jsonPrimitive?.booleanOrNull)
+        assertFalse(result.containsKey("error"))
+        assertEquals("command_timeout", result["after"]?.jsonObject?.get("tree_error")?.jsonPrimitive?.content)
+        assertEquals("Действие принято, но состояние экрана не подтверждено. Прочитайте экран перед повторным действием.",
+            result["warning"]?.jsonPrimitive?.content)
+        assertEquals(1, calls.count { it.first == "input tap 10 20" })
+    }
+    @Test fun `failed tap does not claim an accepted action when the tree is unavailable`() = runBlocking {
+        val svc = service(runner = { command, _ ->
+            when {
+                command == "wm size" -> RootProcessResult(exitCode = 0, stdout = "Physical size: 1080x2400")
+                command.startsWith("uiautomator dump") -> RootProcessResult(exitCode = 1)
+                command == "input tap 10 20" -> RootProcessResult(error = "command_timeout")
+                else -> RootProcessResult(exitCode = 0)
+            }
+        })
+        val output = tapTool(svc).execute(Json.parseToJsonElement("{\"x\":10,\"y\":20}"))
+        val result = Json.parseToJsonElement((output.single() as UIMessagePart.Text).text).jsonObject
+        assertEquals(false, result["success"]?.jsonPrimitive?.booleanOrNull)
+        assertEquals("command_timeout", result["error"]?.jsonPrimitive?.content)
+        assertFalse(result.containsKey("warning"))
+        assertEquals(1, calls.count { it.first == "input tap 10 20" })
     }
     @Test fun `root executor reaches long press`() {
         assertToolWorks(longPressTool(service()), "{\"x\":10,\"y\":20}", "input swipe 10 20 10 20")

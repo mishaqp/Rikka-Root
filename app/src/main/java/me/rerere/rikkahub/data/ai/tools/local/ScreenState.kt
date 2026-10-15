@@ -11,6 +11,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
@@ -134,5 +135,10 @@ internal suspend fun withActionEnvelope(svc: RootScreenService, act: suspend (Ro
     if (actionFailure == null) svc.refreshAfterSnapshot()
     val after = treeHash(svc)
     val changed = if (before != null && after != null) before != after else null
-    return JsonObject(result + ("after" to screenStateJson(svc, changed, svc.lastTreeError != null)))
+    return JsonObject(result + buildJsonObject {
+        put("after", screenStateJson(svc, changed, svc.lastTreeError != null))
+        if ((result["success"] as? JsonPrimitive)?.booleanOrNull == true && svc.lastTreeError != null) {
+            put("warning", "Действие принято, но состояние экрана не подтверждено. Прочитайте экран перед повторным действием.")
+        }
+    })
 }

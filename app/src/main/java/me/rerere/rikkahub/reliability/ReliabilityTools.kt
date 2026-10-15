@@ -7,6 +7,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.ai.tools.local.LocalFileAccess
+import me.rerere.rikkahub.data.ai.tools.local.deviceToolFailureReason
 import java.io.File
 import androidx.core.content.FileProvider
 import kotlinx.serialization.json.buildJsonObject
@@ -25,7 +26,18 @@ fun generateBugReportTool(
     parameters = { InputSchema.Obj(properties = buildJsonObject {}, required = emptyList()) },
     needsApproval = { true },
     execute = {
-        val zip = builder.build()
+        val zip = try {
+            builder.build()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            return@Tool listOf(UIMessagePart.Text(buildJsonObject {
+                put("ok", false)
+                put("error", "report_failed")
+                put("message", "Не удалось создать отчёт об ошибке. Проверьте свободное место и повторите вызов.")
+                put("detail", deviceToolFailureReason(error))
+            }.toString()))
+        }
         val authority = "${context.packageName}.fileprovider"
         val uri = runCatching {
             FileProvider.getUriForFile(context, authority, zip)

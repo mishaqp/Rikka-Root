@@ -47,12 +47,14 @@ class RootProcessRunnerTest {
         val result = RootProcessRunner.run(listOf("sh", "-c", "printf started; exec sleep 30"), 100)
         assertEquals("command_timeout", result.error)
         assertEquals("started", result.stdout)
+        assertEquals("Время root-команды истекло. Проверьте, что успело выполниться, перед новым вызовом; команда автоматически не повторяется.", result.reason)
     }
 
     @Test fun `process launch failure is a structured error`() {
         val result = RootProcessRunner.run(listOf("/nonexistent/root-port-executable"), 1_000)
         assertEquals("exec_failed", result.error)
         assertNull(result.exitCode)
+        assertEquals("Не удалось запустить root-команду. Проверьте Root в настройках приложения.", result.reason)
     }
 
     @Test fun `coroutine cancellation terminates the launched process`() = runBlocking {

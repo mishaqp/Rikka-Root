@@ -87,6 +87,10 @@ private fun serverViewEnvelope(
     put("status", statusLabel)
     put("tool_count", config.commonOptions.tools.size)
     if (errorMessage != null) put("error", SecretRedactor.redact(errorMessage))
+    if (errorMessage != null && status is McpStatus.Error) {
+        put("raw_error", SecretRedactor.redact(status.message))
+        status.detail?.let { put("error_detail", SecretRedactor.redact(it)) }
+    }
     putJsonArray("headers") {
         McpHeaderRedactor.redactHeaders(config.commonOptions.headers).forEach { (n, v) ->
             addJsonObject {
@@ -114,9 +118,9 @@ private fun renderStatus(enabled: Boolean, status: McpStatus?): Pair<String, Str
         null, McpStatus.Idle, McpStatus.Connecting -> "CONNECTING" to null
         McpStatus.Connected -> "CONNECTED" to null
         is McpStatus.Reconnecting -> "CONNECTING" to "повторное подключение (${status.attempt}/${status.maxAttempts})"
-        is McpStatus.Error -> "ERROR" to status.message
+        is McpStatus.Error -> "ERROR" to classifyMcpError(status.message).second
         McpStatus.Authorizing -> "CONNECTING" to "авторизация"
-        McpStatus.NeedsAuthorization -> "ERROR" to "требуется авторизация"
+        McpStatus.NeedsAuthorization -> "ERROR" to "Требуется авторизация MCP. Откройте настройки сервера MCP и войдите в учётную запись."
     }
 }
 
@@ -225,6 +229,26 @@ private suspend fun awaitTerminal(manager: McpManager, serverId: Uuid, timeoutMs
 internal fun classifyMcpError(message: String): Pair<String, String> {
     val m = message.lowercase()
     return when {
+        m.startsWith("private_address_forbidden:") || m.contains("локальный или служебный адрес запрещён") -> {
+            "private_address_forbidden" to
+                "Локальный, частный или служебный адрес MCP запрещён. Используйте публичный адрес сервера."
+        }
+        m.startsWith("url_credentials_forbidden:") -> {
+            "url_credentials_forbidden" to
+                "Учётные данные и параметры в URL MCP запрещены. Удалите их из URL и задайте секретный заголовок в настройках MCP."
+        }
+        m.startsWith("host_not_found:") -> {
+            "host_not_found" to
+                "Не удалось проверить DNS сервера MCP. Проверьте URL и подключение к сети, затем повторите запрос."
+        }
+        m.startsWith("unsupported_url_scheme:") -> {
+            "unsupported_url_scheme" to
+                "Схема URL MCP не поддерживается. Укажите адрес с http:// или https://."
+        }
+        m.startsWith("invalid_url:") -> {
+            "invalid_url" to
+                "Некорректный URL сервера MCP. Проверьте адрес, имя сервера и порт."
+        }
         // kotlinx-serialization shape: "Field 'X' is required for type with serial name 'io.modelcontextprotocol...'"
         m.contains("field '") && m.contains("is required for type") -> {
             "remote_invalid_tool_def" to
@@ -256,14 +280,25 @@ internal fun classifyMcpError(message: String): Pair<String, String> {
         }
         m.contains(" 403") || m.contains("forbidden") -> {
             "auth_forbidden" to
-                "Сервер вернул 403. Учётные данные не дают доступа к этому endpoint."
+                "Сервер вернул 403. Проверьте права учётной записи на доступ к этому адресу."
         }
         m.contains(" 404") || m.contains("not found") -> {
             "endpoint_not_found" to
                 "Сервер вернул 404. Проверьте путь к MCP endpoint (обычно /mcp или /sse)."
         }
-        else -> "connect_failed" to
-            "Сервер не подключился. Проверьте URL, transport и headers, затем повторите."
+        else -> {
+            val authoredMessage = message.trim().takeIf { text ->
+                text.firstOrNull()?.let { it in 'А'..'я' || it == 'Ё' || it == 'ё' } == true
+            }
+            val hint = if (authoredMessage != null) {
+                if (Regex("проверьте|введите|повторите|откройте|запустите", RegexOption.IGNORE_CASE)
+                        .containsMatchIn(authoredMessage)) authoredMessage
+                else "$authoredMessage Проверьте настройки MCP и повторите запрос."
+            } else {
+                "Сервер не подключился. Проверьте URL, transport и headers, затем повторите."
+            }
+            "connect_failed" to hint
+        }
     }
 }
 
@@ -466,7 +501,7 @@ fun mcpAddTool(settingsStore: SettingsStore, manager: McpManager, caller: McpCon
             val (kind, hint) = classifyMcpError(finalStatus.message)
             return@Tool errEnv(
                 kind,
-                "Не удалось добавить MCP: ${finalStatus.message}. $hint Конфигурация удалена, можно повторить с тем же именем.",
+                "Не удалось добавить MCP. $hint Конфигурация удалена, можно повторить с тем же именем.",
                 extra = mapOf(
                     "raw_error" to kotlinx.serialization.json.JsonPrimitive(finalStatus.message),
                     "name" to kotlinx.serialization.json.JsonPrimitive(name),

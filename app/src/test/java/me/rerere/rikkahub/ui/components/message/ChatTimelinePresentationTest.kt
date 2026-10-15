@@ -150,6 +150,54 @@ class ChatTimelinePresentationTest {
             output = """{"exit_code":1}""").tool, false))
     }
 
+    @Test fun falseEmptyErrorsAndWarningsPreserveSuccessfulStatus() {
+        listOf("false", "null", "\"\"", "0", "[]", "{}").forEach { error ->
+            assertEquals("$error is not a failure", TimelineStatus.Succeeded,
+                presentToolStatus(tool("success", "wake_screen", output =
+                    """{"success":true,"error":$error,"warn":"Пользователь должен разблокировать экран."}""").tool, false))
+        }
+        assertEquals(TimelineStatus.Succeeded, presentToolStatus(tool("batch", "batch_copy",
+            output = """{"success":true,"failed":[],"warnings":["Проверьте копию."]}""").tool, false))
+    }
+
+    @Test fun cronMcpAndPartialFailuresAreVisibleAndCannotFold() {
+        listOf(
+            "schedule_job" to """{"status":"error","code":"invalid_time"}""",
+            "resume_job" to """{"status":"blocked","code":"job_unavailable"}""",
+            "mcp_test" to """{"isError":true,"content":[{"type":"text","text":"Unauthorized"}]}""",
+            "batch_move" to """{"success":1,"failed":[{"path":"a.txt","error":"Нет доступа."}]}""",
+            "batch_copy" to """{"success":true,"results":[{"path":"a.txt","success":false,"error":"Нет доступа."}]}""",
+        ).forEach { (name, output) ->
+            val result = presentTimeline(listOf(tool("failure", name, output = output)), options, false, "m", 0)
+            assertTrue("$name must remain visible", result.steps.single().mustStayVisible)
+            assertFalse("$name cannot fold as successful", result.canFoldToSummary)
+        }
+    }
+
+    @Test fun multipartMcpErrorEnvelopeAndPastHistoryKeepTheirOwnStatus() {
+        val call = tool("mcp", "mcp__server__run").tool.copy(output = listOf(
+            UIMessagePart.Text("""{"error":"mcp_tool_error","detail":"Сервер MCP сообщил об ошибке инструмента."}"""),
+            UIMessagePart.Text("java.lang.IllegalStateException: native MCP failure"),
+        ))
+        assertEquals(TimelineStatus.Failed, presentToolStatus(call, false))
+        assertEquals(TimelineStatus.Succeeded, presentToolStatus(tool("history", "get_job_history", output =
+            """{"success":true,"runs":[{"status":"failed","code":"run_failed"}]}""").tool, false))
+    }
+
+    @Test fun russianCheckpointMarkersRemainRunningOnlyForTheObservedActiveCall() {
+        listOf("root_exec" to "root_execution_indeterminate", "read_file" to "tool_execution_indeterminate").forEach { (name, code) ->
+            val step = tool("active", name, output = """{"error":"$code","checkpointed_before_launch":true,"reason":"Вызов сохранён перед запуском. Не повторяйте его автоматически."}""")
+            assertTrue(step.tool.hasExecutionCheckpoint())
+            assertEquals(TimelineStatus.Running, presentTimeline(listOf(step), options, true, "m", 0,
+                activeToolCallId = "active").steps.single().status)
+        }
+    }
+
+    @Test fun workspaceTimeoutKeepsTheIndeterminateStatus() {
+        assertEquals(TimelineStatus.Indeterminate, presentToolStatus(tool("timeout", "workspace_shell", output =
+            """{"exitCode":-1,"stdout":"partial output","stderr":"","timedOut":true}""").tool, false))
+    }
+
     private fun tool(
         id: String,
         name: String = "search_web",

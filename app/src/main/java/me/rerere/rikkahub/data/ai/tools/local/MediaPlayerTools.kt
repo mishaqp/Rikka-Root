@@ -20,11 +20,11 @@ private suspend fun playbackUri(source: String, access: LocalFileAccess): String
     return when (val guarded = access.resolve(source)) {
         is LocalFileSource.Local -> {
             val file = access.checkFile(guarded.file)
-            require(file.isFile) { "Источник должен быть существующим медиафайлом." }
+            require(file.isFile) { "Источник должен быть существующим медиафайлом. Проверьте source и доступ к файлу." }
             Uri.fromFile(file).toString()
         }
         is LocalFileSource.Content -> {
-            require(!access.isDirectory(guarded)) { "Папку нельзя воспроизвести." }
+            require(!access.isDirectory(guarded)) { "Папку нельзя воспроизвести. Укажите медиафайл в source." }
             // Verify that a persisted or current user grant still opens this document.
             access.openInput(guarded).use { }
             guarded.uri.toString()
@@ -40,6 +40,7 @@ private fun ToolMediaStatus.payload(): JsonObject = buildJsonObject {
     put("position_ms", positionMs); put("duration_ms", durationMs)
     title?.let { put("title", it) }; artist?.let { put("artist", it) }; album?.let { put("album", it) }
     error?.let { put("error", it) }
+    if (error == null && state == "no_session") put("message", "Нет медиасеанса. Для начала воспроизведения вызовите play_media и укажите source.")
 }
 
 private fun emptyMediaSchema() = InputSchema.Obj(properties = buildJsonObject { })
@@ -59,7 +60,7 @@ fun playMediaTool(context: Context, access: LocalFileAccess = LocalFileAccess(co
     needsApproval = { true },
     execute = { arguments -> deviceToolResult {
         val params = arguments.jsonObject
-        val source = params.textArgument("source") ?: error("source is required")
+        val source = params.textArgument("source") ?: error("Укажите source — HTTP(S)-ссылку, разрешённый путь или URI медиафайла.")
         val resolved = playbackUri(source, access)
         params.textArgument("artwork_uri")?.let { playbackUri(it, access) }
         ToolMediaPlaybackService.command(context, ToolMediaPlaybackService.ACTION_PLAY, source, resolved,
@@ -107,8 +108,8 @@ fun seekMediaTool(context: Context): Tool = Tool(
     },
     needsApproval = { true },
     execute = { arguments -> deviceToolResult {
-        val position = arguments.jsonObject["position_ms"]?.jsonPrimitive?.longOrNull ?: error("position_ms is required")
-        require(position >= 0) { "Позиция не может быть отрицательной." }
+        val position = arguments.jsonObject["position_ms"]?.jsonPrimitive?.longOrNull ?: error("Укажите position_ms — неотрицательную позицию в миллисекундах.")
+        require(position >= 0) { "Укажите неотрицательную позицию position_ms в миллисекундах." }
         ToolMediaPlaybackService.command(context, ToolMediaPlaybackService.ACTION_SEEK, positionMs = position).payload()
     } }
 )

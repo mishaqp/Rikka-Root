@@ -184,7 +184,30 @@ internal fun smsOutcomeJson(outcome: SmsDeliveryResult, total: Int): JsonObject 
             report.format?.let { put("format", it) }
         } }
     })
-    if (!outcome.success) put("error", "Отправка не подтверждена полностью. Некоторые части уже могли уйти. Не отправляйте сообщение повторно без проверки и нового решения пользователя.")
+    val noRetry = "Не отправляйте сообщение повторно без проверки и нового решения пользователя."
+    if (!outcome.success) {
+        val reason = when {
+            outcome.nativeErrorType == "SecurityException" -> "Android запретил отправку SMS. Проверьте разрешение отправки SMS в настройках функции."
+            outcome.nativeErrorType == "IllegalArgumentException" -> "Android отклонил параметры SMS. Проверьте recipient, body и subscription_id."
+            outcome.nativeErrorType == "UnsupportedOperationException" -> "Устройство не поддерживает отправку SMS. Проверьте наличие SIM и поддержку SMS."
+            outcome.nativeErrorType != null -> "Служба SMS Android не завершила отправку. Проверьте SIM и настройки сообщений Android."
+            2 in outcome.failedParts.values -> "Сотовая связь выключена. Включите сотовую связь и проверьте режим полёта."
+            4 in outcome.failedParts.values -> "Нет сотовой сети для отправки SMS. Проверьте сигнал и состояние SIM."
+            5 in outcome.failedParts.values -> "Android ограничил число отправляемых SMS. Проверьте ограничение отправки в настройках сообщений."
+            6 in outcome.failedParts.values -> "Отправка заблокирована списком разрешённых номеров SIM. Проверьте настройки фиксированного набора SIM."
+            outcome.failedParts.values.any { it == 7 || it == 8 } -> "Android запретил SMS на короткий номер. Проверьте разрешение платных SMS в настройках Android."
+            outcome.failedParts.isNotEmpty() -> "Android отклонил отправку части SMS. Проверьте коды в failed_parts и состояние SIM."
+            else -> "Подтверждение отправки SMS не получено вовремя. Проверьте состояние сообщения в приложении SMS."
+        }
+        put("error", "$reason Некоторые части уже могли уйти. $noRetry")
+    } else if (!outcome.recipientDeliveryConfirmed) {
+        val reason = when {
+            deliveryFailed > 0 -> "Получен отчёт об ошибке доставки SMS. Проверьте состояние сообщения у оператора или получателя."
+            outcome.timedOut && deliveryPending > 0 -> "Время ожидания отчёта о доставке SMS истекло. Проверьте состояние сообщения в приложении SMS или у получателя."
+            else -> "SMS передано в сеть, но доставка получателю не подтверждена. Проверьте состояние сообщения в приложении SMS или у получателя."
+        }
+        put("warning", "$reason $noRetry")
+    }
 }
 
 private fun smsCallbackIntent(context: Context, id: String, part: Int, delivered: Boolean): PendingIntent {
@@ -207,7 +230,7 @@ fun smsSendTool(context: Context): Tool = personalJsonTool(context, "send_sms",
         put("subscription_id", buildJsonObject { put("type", "integer"); put("minimum", 0) })
     }, listOf("recipient", "body")), ::validateSmsArguments, read = { args ->
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED)
-            return@personalJsonTool deviceToolError("Разрешение отправки SMS отозвано.", Manifest.permission.SEND_SMS)
+            return@personalJsonTool deviceToolError("Разрешение отправки SMS отозвано. Включите его в настройках функции ассистента.", Manifest.permission.SEND_SMS)
         var requestId: String? = null
         var receipt: SmsReceipt? = null
         var total = 0
@@ -218,9 +241,9 @@ fun smsSendTool(context: Context): Tool = personalJsonTool(context, "send_sms",
                 ?: return@personalJsonTool deviceToolError("В Android не выбрана SIM для SMS. Выберите её в настройках Android или укажите subscription_id.")
             val manager = if (Build.VERSION.SDK_INT >= 31) context.getSystemService(SmsManager::class.java)?.createForSubscriptionId(subscription)
                 else { @Suppress("DEPRECATION") SmsManager.getSmsManagerForSubscriptionId(subscription) }
-            if (manager == null) return@personalJsonTool deviceToolError("Отправка SMS на устройстве недоступна.")
+            if (manager == null) return@personalJsonTool deviceToolError("Отправка SMS на устройстве недоступна. Проверьте SIM и поддержку SMS в настройках Android.")
             val parts = manager.divideMessage(args.body)
-            if (parts.isNullOrEmpty() || parts.size > 64) return@personalJsonTool deviceToolError("Сообщение не удалось разделить на допустимое число частей.")
+            if (parts.isNullOrEmpty() || parts.size > 64) return@personalJsonTool deviceToolError("Сообщение не удалось разделить на допустимое число частей. Сократите body и проверьте кодировку текста.")
             total = parts.size
             val id = UUID.randomUUID().toString()
             requestId = id

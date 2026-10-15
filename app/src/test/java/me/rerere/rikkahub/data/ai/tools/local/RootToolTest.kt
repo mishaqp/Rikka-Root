@@ -52,6 +52,7 @@ class RootToolTest {
             val output = tool.execute(input)
             val response = Json.parseToJsonElement((output.single() as UIMessagePart.Text).text).jsonObject
             assertEquals("invalid_arguments", response["error"]!!.jsonPrimitive.content)
+            assertEquals("Укажите непустую команду в command, а timeout_ms — целым числом.", response["reason"]!!.jsonPrimitive.content)
         }
         assertEquals(RootStatus.UNCHECKED, manager.status.value)
     }

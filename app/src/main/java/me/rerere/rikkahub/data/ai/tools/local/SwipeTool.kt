@@ -53,7 +53,7 @@ fun swipeTool(
             return@Tool listOf(
                 UIMessagePart.Text(
                     buildJsonObject {
-                        put("error", "start_x, start_y, end_x, end_y are required and must be non-negative numbers")
+                        put("error", "Укажите start_x, start_y, end_x и end_y — неотрицательные координаты свайпа.")
                     }.toString()
                 )
             )
@@ -63,7 +63,7 @@ fun swipeTool(
             return@Tool listOf(
                 UIMessagePart.Text(
                     buildJsonObject {
-                        put("error", "duration_ms must be between 50 and 5000")
+                        put("error", "Укажите duration_ms от 50 до 5000 миллисекунд.")
                     }.toString()
                 )
             )

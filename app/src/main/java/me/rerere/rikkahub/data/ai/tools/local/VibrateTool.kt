@@ -34,7 +34,7 @@ fun vibrateTool(context: Context): Tool = Tool(
             @Suppress("DEPRECATION")
             context.getSystemService(Vibrator::class.java)
         }
-        if (vibrator == null || !vibrator.hasVibrator()) return@deviceToolResult deviceToolError("Вибрация на устройстве недоступна.")
+        if (vibrator == null || !vibrator.hasVibrator()) return@deviceToolResult deviceToolError("Вибрация на устройстве недоступна. Проверьте наличие вибромотора и настройки вибрации Android.")
         vibrator.vibrate(VibrationEffect.createWaveform(timings, -1))
         buildJsonObject { put("success", true); put("total_duration_ms", timings.sum()) }
     } },

@@ -15,8 +15,11 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.workflow.execution.WorkflowEngine
 import me.rerere.rikkahub.workflow.model.WorkflowDefinition
 import me.rerere.rikkahub.workflow.model.WorkflowJson
+import me.rerere.rikkahub.workflow.model.WorkflowConstants
 import me.rerere.rikkahub.workflow.repository.WorkflowRepository
 import me.rerere.rikkahub.data.model.ConversationConfig
+import me.rerere.rikkahub.data.ai.tools.local.deviceToolFailureReason
+import kotlinx.coroutines.CancellationException
 
 /**
  * Phase 12 — the seven `workflow_*` tools the LLM uses to author and manage workflows.
@@ -136,7 +139,10 @@ fun workflowCreateTool(
                             put("name", def.name)
                         }.toString()))
                     },
-                    onFailure = { errorResponse("persist_failed", it.message ?: "save failed") }
+                    onFailure = {
+                        if (it is CancellationException) throw it
+                        errorResponse("persist_failed", deviceToolFailureReason(it))
+                    }
                 )
             }
         }
@@ -176,6 +182,7 @@ fun workflowListTool(repository: WorkflowRepository): Tool = Tool(
                         put("trigger_type", triggerTypeKey(def))
                         put("last_run_at_ms", JsonPrimitive(e.lastRunAtMs?.toString()))
                         put("last_run_status", JsonPrimitive(e.lastRunStatus))
+                        e.lastRunStatus?.takeIf { it != "SUCCESS" }?.let { put("last_run_message", workflowRunMessage(it, e.lastRunError)) }
                     })
                 }
             })
@@ -216,6 +223,7 @@ fun workflowGetTool(repository: WorkflowRepository): Tool = Tool(
             put("last_run_at_ms", JsonPrimitive(loaded.entity.lastRunAtMs?.toString()))
             put("last_run_status", JsonPrimitive(loaded.entity.lastRunStatus))
             put("last_run_error", JsonPrimitive(loaded.entity.lastRunError))
+            loaded.entity.lastRunStatus?.takeIf { it != "SUCCESS" }?.let { put("last_run_message", workflowRunMessage(it, loaded.entity.lastRunError)) }
             put("runs_today_count", loaded.entity.runsTodayCount)
             put("runs_today_date", loaded.entity.runsTodayDate)
             put("history", buildJsonArray {
@@ -225,6 +233,7 @@ fun workflowGetTool(repository: WorkflowRepository): Tool = Tool(
                         put("status", r.status.name)
                         put("duration_ms", JsonPrimitive(r.durationMs.toString()))
                         put("error", JsonPrimitive(r.errorMessage))
+                        if (r.status.name != "SUCCESS") put("message", workflowRunMessage(r.status.name, r.errorMessage))
                     })
                 }
             })
@@ -288,7 +297,10 @@ fun workflowUpdateTool(
                             put("name", def.name)
                         }.toString()))
                     },
-                    onFailure = { errorResponse("persist_failed", it.message ?: "save failed") }
+                    onFailure = {
+                        if (it is CancellationException) throw it
+                        errorResponse("persist_failed", deviceToolFailureReason(it))
+                    }
                 )
             }
         }
@@ -364,9 +376,9 @@ fun workflowSetEnabledTool(repository: WorkflowRepository, callerAssistantId: St
         if (callerAssistantId == null || existing.definition.authoringAssistantId != callerAssistantId)
             return@Tool errorResponse("owner_mismatch", "Переключать сценарий может только ассистент, создавший его.")
         try { repository.setEnabled(id, enabled) } catch (e: IllegalArgumentException) {
-            return@Tool errorResponse("trigger_unavailable", e.message.orEmpty())
+            return@Tool errorResponse("trigger_unavailable", deviceToolFailureReason(e))
         } catch (e: IllegalStateException) {
-            return@Tool errorResponse("trigger_unavailable", e.message.orEmpty())
+            return@Tool errorResponse("trigger_unavailable", deviceToolFailureReason(e))
         }
         listOf(UIMessagePart.Text(buildJsonObject {
             put("ok", true); put("id", id); put("enabled", enabled)
@@ -410,6 +422,7 @@ fun workflowRunTool(
             put("ok", outcome.status.name == "SUCCESS")
             put("status", outcome.status.name)
             put("error", JsonPrimitive(outcome.error))
+            if (outcome.status.name != "SUCCESS") put("message", workflowRunMessage(outcome.status.name, outcome.error))
             put("output_summary", outcome.summary.take(2000))
         }.toString()))
     }
@@ -428,4 +441,37 @@ private fun errorResponse(code: String, detail: String): List<UIMessagePart> =
         put("ok", false)
         put("error", code)
         put("detail", detail)
+        put("message", when (code) {
+            "missing_definition", "not_an_object", "invalid_json" -> "Описание сценария отсутствует или неверно. Укажите definition как JSON-объект с name, trigger и actions."
+            "missing_id" -> "Не указан ID сценария. Вызовите workflow_list и укажите id нужного сценария."
+            "missing_name", "invalid_name" -> "Имя сценария отсутствует или неверно. Укажите name длиной 1–${WorkflowConstants.MAX_NAME_LENGTH} символов."
+            "missing_trigger", "missing_trigger_type", "unknown_trigger_type", "invalid_trigger" -> "Условие запуска сценария неверно. Проверьте trigger.type и параметры запуска по схеме workflow_create."
+            "missing_condition_type", "unknown_condition_type", "bad_condition_shape", "invalid_condition" -> "Условие сценария неверно. Проверьте conditions и параметры каждого условия."
+            "missing_actions", "empty_actions", "too_many_actions", "bad_action_shape", "missing_tool" -> "Действия сценария отсутствуют или неверны. Укажите от 1 до ${WorkflowConstants.MAX_ACTIONS} действий в actions с tool и args."
+            "unknown_tool", "workflow_chaining_disabled" -> "Инструмент действия недоступен. Выберите зарегистрированный инструмент; workflow_run внутри сценария запрещён."
+            "invalid_timeout" -> "Время действия неверно. Укажите timeout_seconds от ${WorkflowConstants.MIN_ACTION_TIMEOUT_S} до ${WorkflowConstants.MAX_ACTION_TIMEOUT_S} секунд."
+            "invalid_cooldown" -> "Пауза между запусками неверна. Укажите cooldown_seconds от 0 до ${WorkflowConstants.MAX_COOLDOWN_S} секунд."
+            "invalid_daily_cap" -> "Суточный лимит неверен. Укажите max_runs_per_day от ${WorkflowConstants.MAX_RUNS_PER_DAY_FLOOR} до ${WorkflowConstants.MAX_RUNS_PER_DAY_CEIL}."
+            "missing_enabled", "invalid_enabled" -> "Не указано допустимое состояние сценария. Укажите enabled: true или false."
+            "not_found" -> "Сценарий не найден. Вызовите workflow_list и выберите существующий id."
+            "already_exists" -> "Сценарий уже существует. Используйте workflow_update для изменения."
+            "missing_owner" -> "Не удалось определить ассистента текущего чата. Откройте чат и повторите создание сценария."
+            "owner_mismatch" -> "Текущий ассистент не может управлять сценарием. Откройте чат ассистента, создавшего его."
+            "persist_failed" -> "Не удалось сохранить сценарий. Проверьте доступность хранилища и повторите вызов."
+            "trigger_unavailable" -> "Запуск сценария недоступен на устройстве. Проверьте trigger и conditions; неподдерживаемый сценарий сохраняйте выключенным."
+            else -> "Не удалось выполнить операцию со сценарием. Проверьте его параметры и повторите вызов."
+        })
     }.toString()))
+
+private fun workflowRunMessage(status: String, error: String?): String {
+    if (error != null && listOf("root_cleanup_unconfirmed", "root_execution_indeterminate", "tool_result_indeterminate").any { it in error }) {
+        return "Часть действий могла выполниться; результат неизвестен. Проверьте состояние перед новым запуском; автоматически не повторяйте действия."
+    }
+    return when (status) {
+        "SKIPPED_CONDITIONS" -> "Условия сценария не выполнены. Проверьте conditions и состояние устройства."
+        "SKIPPED_COOLDOWN" -> "С момента прошлого запуска прошло мало времени. Дождитесь окончания cooldown_seconds."
+        "SKIPPED_DAILY_CAP" -> "Достигнут суточный лимит сценария. Дождитесь следующего дня или проверьте max_runs_per_day."
+        "SKIPPED_DISABLED" -> "Сценарий выключен. Включите его через workflow_set_enabled перед запуском."
+        else -> "Сценарий завершился с ошибкой. Проверьте историю, разрешения и параметры действий перед повторным запуском."
+    }
+}

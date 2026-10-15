@@ -74,7 +74,7 @@ internal class ToolPlaybackState {
 
     fun seekTarget(positionMs: Long): Long {
         require(positionMs >= 0) { "Позиция не может быть отрицательной." }
-        require(source != null && phase in setOf("playing", "paused", "completed")) { "Нет готового медиасеанса." }
+        require(source != null && phase in setOf("playing", "paused", "completed")) { "Нет готового медиасеанса. Запустите play_media и дождитесь подготовки." }
         return clamp(positionMs)
     }
 
@@ -134,7 +134,7 @@ class ToolMediaPlaybackService : Service() {
             try {
                 withContext(Dispatchers.Main.immediate) {
                     if (action != ACTION_PLAY && instance == null) {
-                        deferred.complete(ToolMediaStatus(error = "Нет активного медиасеанса."))
+                        deferred.complete(ToolMediaStatus(error = "Нет активного медиасеанса. Сначала запустите play_media с источником медиа."))
                         return@withContext
                     }
                     val intent = Intent(context, ToolMediaPlaybackService::class.java).apply {
@@ -257,7 +257,7 @@ class ToolMediaPlaybackService : Service() {
                 else -> { if (player == null) stopSelf(startId) }
             }
         } catch (_: Exception) {
-            lastError = "Android не смог выполнить медиакоманду."
+            lastError = "Android не смог выполнить медиакоманду. Проверьте источник и состояние сеанса через get_media_status."
             finish(id, snapshot().copy(error = lastError))
             if (intent?.action == ACTION_PLAY) stopPlayback(saveSnapshot = false)
         }
@@ -266,7 +266,7 @@ class ToolMediaPlaybackService : Service() {
     }
 
     private fun startPlayback(source: String, uri: String, title: String?, artist: String?, album: String?, position: Long, id: String?) {
-        releasePlayer("Медиасеанс заменён.")
+        releasePlayer("Медиасеанс заменён. Проверьте текущий сеанс через get_media_status.")
         stopped = null
         currentTitle = title?.take(200); currentArtist = artist?.take(200); currentAlbum = album?.take(200)
         lastError = null
@@ -302,7 +302,7 @@ class ToolMediaPlaybackService : Service() {
         created.setDataSource(this, Uri.parse(uri))
         created.prepareAsync()
         publishState()
-        preparationTimeout = Runnable { if (player === created && (state.phase == "preparing" || initialSeek)) failPlayback("Подготовка медиа превысила 30 секунд.") }
+        preparationTimeout = Runnable { if (player === created && (state.phase == "preparing" || initialSeek)) failPlayback("Подготовка медиа превысила 30 секунд. Проверьте источник, доступ к файлу или соединение с интернетом.") }
         handler.postDelayed(preparationTimeout!!, 30_000)
     }
 
@@ -319,7 +319,7 @@ class ToolMediaPlaybackService : Service() {
             if (focusHeld) abandonFocus()
             focusGranted = audioManager.requestAudioFocus(focusRequest) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
             focusHeld = focusGranted
-            if (!focusGranted) { state.pause(); lastError = "Android не предоставил аудиофокус."; publishState(); finish(preparingRequest, snapshot()); preparingRequest = null; return false }
+            if (!focusGranted) { state.pause(); lastError = "Android не предоставил аудиофокус. Завершите звонок или другое воспроизведение и вызовите resume_media."; publishState(); finish(preparingRequest, snapshot()); preparingRequest = null; return false }
         }
         player?.start()
         state.resume()
@@ -335,7 +335,7 @@ class ToolMediaPlaybackService : Service() {
 
     private fun resumePlayback() {
         lastError = null
-        if (player == null) { lastError = "Нет активного медиасеанса."; return }
+        if (player == null) { lastError = "Нет активного медиасеанса. Сначала запустите play_media с источником медиа."; return }
         if (state.phase == "preparing") state.resume()
         else if (state.phase == "completed") {
             state.resume(); seekPlayback(0, null); startReadyPlayer()
@@ -344,18 +344,18 @@ class ToolMediaPlaybackService : Service() {
     }
 
     private fun seekPlayback(position: Long, id: String?) {
-        if (seekInProgress || initialSeek) { finish(id, snapshot().copy(error = "Предыдущая перемотка ещё не завершена.")); return }
+        if (seekInProgress || initialSeek) { finish(id, snapshot().copy(error = "Предыдущая перемотка ещё не завершена. Дождитесь её окончания перед новым seek_media.")); return }
         try {
             seekPosition = state.seekTarget(position)
             seekingRequest = id
             seekInProgress = true
             player?.seekTo(seekPosition, MediaPlayer.SEEK_CLOSEST) ?: error("Нет медиасеанса.")
-            seekTimeout = Runnable { if (seekInProgress) failPlayback("Android не завершил перемотку за 15 секунд.") }
+            seekTimeout = Runnable { if (seekInProgress) failPlayback("Android не завершил перемотку за 15 секунд. Проверьте источник и состояние сеанса через get_media_status.") }
             handler.postDelayed(seekTimeout!!, 15_000)
-        } catch (_: Exception) { seekInProgress = false; seekingRequest = null; finish(id, snapshot().copy(error = "Не удалось перемотать медиа.")) }
+        } catch (_: Exception) { seekInProgress = false; seekingRequest = null; finish(id, snapshot().copy(error = "Не удалось перемотать медиа. Проверьте готовность сеанса через get_media_status и укажите неотрицательный position_ms.")) }
     }
 
-    private fun failPlayback(message: String = "Не удалось прочитать или воспроизвести медиа.") {
+    private fun failPlayback(message: String = "Не удалось прочитать или воспроизвести медиа. Проверьте формат, доступ к файлу или интернет-соединение.") {
         lastError = message
         val result = snapshot().copy(error = message)
         finish(preparingRequest, result); preparingRequest = null
@@ -388,7 +388,7 @@ class ToolMediaPlaybackService : Service() {
         val result = snapshot().copy(state = "stopped")
         if (saveSnapshot && result.source != null) stopped = result
         state.stop(result.positionMs)
-        releasePlayer("Медиасеанс остановлен.")
+        releasePlayer("Медиасеанс остановлен. Для продолжения вызовите resume_media.")
         session.isActive = false
         stopForeground(STOP_FOREGROUND_REMOVE)
         if (instance === this) instance = null
@@ -438,7 +438,7 @@ class ToolMediaPlaybackService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
-        releasePlayer("Медиаслужба завершена.")
+        releasePlayer("Медиаслужба завершена. Для нового воспроизведения вызовите play_media.")
         if (noisyReceiverRegistered) unregisterReceiver(noisyReceiver)
         session.release()
         if (instance === this) instance = null

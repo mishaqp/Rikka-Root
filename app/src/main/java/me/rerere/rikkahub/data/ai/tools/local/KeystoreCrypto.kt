@@ -37,7 +37,7 @@ internal fun validateToolKeySpec(type: String?, purposes: List<String>): ToolKey
         ?: throw IllegalArgumentException("type должен быть rsa_2048 или aes_256_gcm.")
     require(purposes.isNotEmpty() && purposes.size <= 2 && purposes.distinct().size == purposes.size) { "purposes должен содержать 1–2 разных назначения." }
     val allowed = if (kind == ToolKeyType.RSA) setOf("sign", "verify") else setOf("encrypt", "decrypt")
-    require(purposes.all { it in allowed }) { "Назначения не соответствуют типу ключа." }
+    require(purposes.all { it in allowed }) { "Назначения не соответствуют типу ключа. Для RSA укажите sign/verify, для AES — encrypt/decrypt." }
     return ToolKeySpec(kind, purposes.map { name -> ToolKeyPurpose.entries.single { it.wire == name } }.toSet())
 }
 internal fun decodeToolBase64(value: String?, maxBytes: Int, name: String): ByteArray {
@@ -71,26 +71,26 @@ internal class KeystoreCrypto(private val store: ToolKeyStore) {
         return ToolKeyDescription(alias, store.generate(name, spec))
     }
     private fun key(alias: String, type: ToolKeyType, purpose: ToolKeyPurpose): ToolKeyMaterial {
-        val key = store.entry(physical(alias)) ?: throw ToolKeyFailure("Ключ '$alias' не найден среди ключей этих инструментов.")
-        if (key.metadata.type != type || purpose !in key.metadata.purposes) throw ToolKeyFailure("Ключ '$alias' не разрешает операцию ${purpose.wire} для этого типа ключа.")
+        val key = store.entry(physical(alias)) ?: throw ToolKeyFailure("Ключ '$alias' не найден среди ключей этих инструментов. Проверьте alias через keystore_list_keys.")
+        if (key.metadata.type != type || purpose !in key.metadata.purposes) throw ToolKeyFailure("Ключ '$alias' не разрешает операцию ${purpose.wire} для этого типа ключа. Выберите ключ нужного типа и назначения через keystore_list_keys.")
         return key
     }
     @Synchronized fun check(alias: String, type: ToolKeyType, purpose: ToolKeyPurpose) { key(alias, type, purpose) }
     @Synchronized fun sign(alias: String, data: ByteArray): ByteArray {
         require(data.size <= 65536) { "Данные подписи превышают 64 КиБ." }
         val key = key(alias, ToolKeyType.RSA, ToolKeyPurpose.SIGN)
-        return Signature.getInstance("SHA256withRSA").apply { initSign(key.privateKey ?: throw ToolKeyFailure("Закрытый RSA-ключ недоступен.")); update(data) }.sign()
+        return Signature.getInstance("SHA256withRSA").apply { initSign(key.privateKey ?: throw ToolKeyFailure("Закрытый RSA-ключ недоступен. Выберите доступный RSA-ключ через keystore_list_keys.")); update(data) }.sign()
     }
     @Synchronized fun verify(alias: String, data: ByteArray, signature: ByteArray): Boolean {
         require(data.size <= 65536) { "Данные подписи превышают 64 КиБ." }
         val key = key(alias, ToolKeyType.RSA, ToolKeyPurpose.VERIFY)
         if (signature.size != 256) return false
-        return Signature.getInstance("SHA256withRSA").apply { initVerify(key.publicKey ?: throw ToolKeyFailure("Открытый RSA-ключ недоступен.")); update(data) }.verify(signature)
+        return Signature.getInstance("SHA256withRSA").apply { initVerify(key.publicKey ?: throw ToolKeyFailure("Открытый RSA-ключ недоступен. Выберите доступный RSA-ключ через keystore_list_keys.")); update(data) }.verify(signature)
     }
     @Synchronized fun encrypt(alias: String, plaintext: ByteArray): ToolCiphertext {
         require(plaintext.size <= 65536) { "Данные шифрования превышают 64 КиБ." }
         val key = key(alias, ToolKeyType.AES, ToolKeyPurpose.ENCRYPT)
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key.secretKey ?: throw ToolKeyFailure("AES-ключ недоступен.")) }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key.secretKey ?: throw ToolKeyFailure("AES-ключ недоступен. Выберите доступный AES-ключ через keystore_list_keys.")) }
         validateToolIv(cipher.iv)
         return ToolCiphertext(cipher.doFinal(plaintext), cipher.iv)
     }
@@ -98,14 +98,14 @@ internal class KeystoreCrypto(private val store: ToolKeyStore) {
         validateToolIv(iv); require(ciphertext.size in 16..65552) { "Шифротекст должен содержать от 16 до 65552 байт, включая тег GCM." }
         val key = key(alias, ToolKeyType.AES, ToolKeyPurpose.DECRYPT)
         return try {
-            Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE, key.secretKey ?: throw ToolKeyFailure("AES-ключ недоступен."), GCMParameterSpec(128, iv)) }.doFinal(ciphertext)
+            Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE, key.secretKey ?: throw ToolKeyFailure("AES-ключ недоступен. Выберите доступный AES-ключ через keystore_list_keys."), GCMParameterSpec(128, iv)) }.doFinal(ciphertext)
         } catch (_: javax.crypto.AEADBadTagException) {
             throw ToolKeyFailure("Целостность шифротекста не подтверждена. Проверьте ключ, IV и данные; результат не показан.")
         }
     }
     @Synchronized fun delete(alias: String) {
         val name = physical(alias)
-        if (!store.contains(name)) throw ToolKeyFailure("Ключ '$alias' не найден среди ключей этих инструментов.")
+        if (!store.contains(name)) throw ToolKeyFailure("Ключ '$alias' не найден среди ключей этих инструментов. Проверьте alias через keystore_list_keys.")
         store.delete(name)
     }
     @Synchronized fun list(): List<ToolKeyDescription> = ownedAliases().sorted().mapNotNull { name ->

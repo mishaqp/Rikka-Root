@@ -26,8 +26,8 @@ class WorkspaceFileSystem(
 
     fun readText(root: File, path: String, charset: Charset = StandardCharsets.UTF_8): String {
         val file = resolvePath(root, path)
-        require(file.exists()) { "File does not exist: $path" }
-        require(file.isFile) { "Path is not a file: $path" }
+        require(file.exists()) { "Файл не найден. Проверьте путь: $path" }
+        require(file.isFile) { "Это папка, а нужен файл. Укажите путь к файлу: $path" }
         require(file.length() <= config.maxReadBytes) {
             "File is too large to read: ${file.length()} bytes"
         }
@@ -47,7 +47,7 @@ class WorkspaceFileSystem(
         }
         val file = resolvePath(root, path)
         require(!file.exists() || overwrite) { "File already exists: $path" }
-        require(!file.exists() || file.isFile) { "Path is not a file: $path" }
+        require(!file.exists() || file.isFile) { "Это папка, а нужен файл. Укажите путь к файлу: $path" }
         file.parentFile?.mkdirs()
         file.writeBytes(bytes)
         return file.toEntry(root)
@@ -178,14 +178,14 @@ class WorkspaceFileSystem(
             .trim()
             .trimStart('/')
             .ifBlank { "." }
-        require(!normalized.contains('\u0000')) { "Path contains invalid character" }
+        require(!normalized.contains('\u0000')) { "Путь содержит недопустимый символ. Укажите другой путь." }
 
         val rootFile = root.canonicalFile
         val target = if (normalized == ".") rootFile else File(rootFile, normalized).canonicalFile
         val rootPath = rootFile.path
         val targetPath = target.path
         require(targetPath == rootPath || targetPath.startsWith(rootPath + File.separator)) {
-            "Path escapes workspace root: $path"
+            "Путь выходит за границы рабочей папки. Укажите путь внутри неё: $path"
         }
         return target
     }

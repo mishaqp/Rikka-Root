@@ -26,7 +26,7 @@ internal fun readBoundedImage(input: InputStream, maxBytes: Int = 16_777_216): B
     while (true) {
         val count = input.read(buffer)
         if (count < 0) break
-        require(output.size().toLong() + count <= maxBytes)
+        require(output.size().toLong() + count <= maxBytes) { "Изображение превышает допустимый размер $maxBytes байт. Выберите изображение меньшего размера." }
         output.write(buffer, 0, count)
     }
     return output.toByteArray()
@@ -60,34 +60,34 @@ fun setWallpaperTool(context: Context, sources: LocalImageSources = LocalImageSo
             return@withContext deviceToolError("Не удалось найти или разрешить изображение «$source». Нужен локальный путь в выбранном workspace, file://, content:// с доступом Android или attachment:1 из последнего сообщения с изображениями.")
         }
         if (resolved is LocalImageSource.LocalFile) {
-            if (!resolved.file.isFile || !resolved.file.canRead()) return@withContext deviceToolError(resolved.unavailableMessage())
-            if (resolved.file.length() !in 1..16_777_216L) return@withContext deviceToolError("Изображение «$source» пустое или превышает 16 МиБ.")
+            if (!resolved.file.isFile || !resolved.file.canRead()) return@withContext deviceToolError(resolved.unavailableMessage() + " Прикрепите изображение в чат или выберите файл снова через системное меню Android.")
+            if (resolved.file.length() !in 1..16_777_216L) return@withContext deviceToolError("Изображение «$source» пустое или превышает 16 МиБ. Выберите непустое изображение меньшего размера.")
         }
         val manager = WallpaperManager.getInstance(context)
-        if (!manager.isWallpaperSupported || !manager.isSetWallpaperAllowed) return@withContext deviceToolError("Android запретил смену обоев на этом устройстве или в этом профиле.")
+        if (!manager.isWallpaperSupported || !manager.isSetWallpaperAllowed) return@withContext deviceToolError("Android запретил смену обоев на этом устройстве или в этом профиле. Проверьте ограничения профиля в настройках Android.")
         try {
             val bytes = try {
                 val stream = when (resolved) {
                     is LocalImageSource.LocalFile -> resolved.file.inputStream()
                     is LocalImageSource.ContentUri -> context.contentResolver.openInputStream(Uri.parse(resolved.uri))
-                } ?: return@withContext deviceToolError(resolved.unavailableMessage())
+                } ?: return@withContext deviceToolError(resolved.unavailableMessage() + " Прикрепите изображение в чат или выберите файл снова через системное меню Android.")
                 stream.use { readBoundedImage(it) }
             } catch (_: IllegalArgumentException) {
-                return@withContext deviceToolError("Изображение «$source» недопустимо или превышает 16 МиБ.")
+                return@withContext deviceToolError("Изображение «$source» недопустимо или превышает 16 МиБ. Выберите другое изображение меньшего размера.")
             } catch (_: IOException) {
-                return@withContext deviceToolError(resolved.unavailableMessage())
+                return@withContext deviceToolError(resolved.unavailableMessage() + " Прикрепите изображение в чат или выберите файл снова через системное меню Android.")
             } catch (_: SecurityException) {
                 return@withContext deviceToolError("Нет доступа к изображению «$source». Прикрепите его в чат или выберите снова через системное меню Android.")
             }
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@withContext deviceToolError("Файл «$source» не является читаемым изображением.")
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@withContext deviceToolError("Файл «$source» не является читаемым изображением. Выберите исправное изображение JPEG, PNG или другого поддерживаемого Android формата.")
             val options = BitmapFactory.Options().apply { inSampleSize = wallpaperSampleSize(bounds.outWidth, bounds.outHeight); inScaled = false }
             val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-                ?: return@withContext deviceToolError("Не удалось прочитать изображение.")
+                ?: return@withContext deviceToolError("Не удалось прочитать изображение. Выберите другое изображение или прикрепите его в чат заново.")
             try {
                 val id = manager.setBitmap(bitmap, null, true, flags)
-                if (id <= 0) deviceToolError("Android не применил обои.")
+                if (id <= 0) deviceToolError("Android не применил обои. Проверьте ограничения профиля и выберите другое изображение.")
                 else buildJsonObject { put("success", true); put("target", target); put("wallpaper_id", id) }
             } finally {
                 bitmap.recycle()

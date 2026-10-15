@@ -18,6 +18,7 @@ class RootShellManagerTest {
         val (su, log) = fakeSu()
         val result = RootShellManager(suExecutable = su.path).exec("printf should-not-run", 2_000) { false }
         assertEquals("root_approval_required", result.error)
+        assertEquals("Автоматический доступ Root отключён до запуска. Подтвердите новый вызов команды.", result.reason)
         assertEquals(listOf("called"), log.readLines())
         assertEquals("", result.stdout)
     }

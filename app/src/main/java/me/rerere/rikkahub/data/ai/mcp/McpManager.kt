@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.oauth.CustomTabsOAuthAuthorizationLauncher
 import me.rerere.oauth.OAuthHttpClient
@@ -29,7 +31,9 @@ import me.rerere.rikkahub.data.files.saveUploadFromBytes
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.runtime.SettingsDashboardRuntimeStatusStore
 import me.rerere.rikkahub.data.ai.mcp.control.McpControlSecretStore
+import me.rerere.rikkahub.data.ai.mcp.control.classifyMcpError
 import me.rerere.rikkahub.data.ai.mcp.control.guardedMcpHttpClient
+import me.rerere.rikkahub.reliability.SecretRedactor
 import me.rerere.rikkahub.utils.JsonInstant
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
@@ -140,15 +144,46 @@ class McpManager(
         } catch (e: CancellationException) {
             throw e
         } catch (e: McpClientUnavailableException) {
-            return listOf(UIMessagePart.Text("Failed to execute MCP tool: ${e.message ?: e.javaClass.name}"))
+            return listOf(UIMessagePart.Text(buildJsonObject {
+                put("error", "mcp_client_unavailable")
+                put("detail", SecretRedactor.redact("Не удалось выполнить инструмент MCP. ${e.message}"))
+            }.toString()))
+        } catch (e: Exception) {
+            val rawError = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
+            val (error, hint) = classifyMcpError(rawError)
+            val startsInRussian = rawError.trimStart().firstOrNull()?.let {
+                it in 'А'..'я' || it == 'Ё' || it == 'ё'
+            } == true
+            val detail = when {
+                error == "request_timeout" ->
+                    "Сервер MCP не ответил вовремя. Проверьте работу сервера и повторите запрос."
+                error == "connect_failed" && !startsInRussian ->
+                    "Не удалось выполнить инструмент MCP. Проверьте адрес, порт и доступность сервера, затем повторите вызов."
+                else -> hint
+            }
+            return listOf(UIMessagePart.Text(buildJsonObject {
+                put("error", error)
+                put("detail", SecretRedactor.redact(detail))
+                put("raw_error", SecretRedactor.redact(rawError))
+            }.toString()))
         }
-        return result.content.map { content ->
+        val contentParts = result.content.map { content ->
             when (content) {
                 is TextContent -> UIMessagePart.Text(content.text)
                 is ImageContent -> convertImageContentToFilePart(content)
                 else -> UIMessagePart.Text(JsonInstant.encodeToString(content))
             }
         }
+        if (result.isError == true) {
+            val rawError = result.content.filterIsInstance<TextContent>().joinToString("\n") { it.text }
+            val explanation = UIMessagePart.Text(buildJsonObject {
+                put("error", "mcp_tool_error")
+                put("detail", "Сервер MCP сообщил об ошибке инструмента. Проверьте параметры вызова и повторите запрос.")
+                put("raw_error", SecretRedactor.redact(rawError))
+            }.toString())
+            return listOf(explanation) + contentParts
+        }
+        return contentParts
     }
 
     suspend fun addClient(config: McpServerConfig) = sessionRegistry.addClient(config)

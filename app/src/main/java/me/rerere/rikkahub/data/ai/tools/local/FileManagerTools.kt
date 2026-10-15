@@ -194,7 +194,10 @@ fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCan
         val from = source(obj, write = true)
         val count = if (access.isDirectory(from)) access.walk(from).size + 1 else 1
         val deleted = access.delete(from, fileBoolean(obj, "recursive"))
-        buildJsonObject { put("success", deleted); put("path", from.reference); put("deleted_count", if (deleted) count else 0) }
+        buildJsonObject {
+            put("success", deleted); put("path", from.reference); put("deleted_count", if (deleted) count else 0)
+            if (!deleted) put("message", "Файл или папка не удалены. Проверьте, существует ли путь, и доступ к папке.")
+        }
     }
     for (operation in listOf("copy", "move")) tools += fileJsonTool("${operation}_file", "${operation.replaceFirstChar(Char::uppercase)} a file or directory from src to dst. overwrite=false. Copies are limited to512MiB." + scope,
         fileSchema(listOf("src", "dst"), "src" to "string", "dst" to "string", "overwrite" to "boolean")) { obj ->
@@ -209,7 +212,10 @@ fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCan
         val existing = access.exists(parent)
         val destination = if (parent is LocalFileSource.Content) access.child(parent, fileArgument(obj, "name"), true) else parent
         val created = access.createDirectory(destination)
-        buildJsonObject { put("success", created); put("path", destination.reference); put("created", !existing || destination != parent) }
+        buildJsonObject {
+            put("success", created); put("path", destination.reference); put("created", !existing || destination != parent)
+            if (!created) put("message", "Не удалось создать папку. Проверьте, не занят ли путь файлом; укажите другое имя или проверьте доступ к родительской папке.")
+        }
     }
     tools += fileJsonTool("file_info", "Get file metadata. include_hash=true computes SHA256 up to512MiB." + scope,
         fileSchema(listOf("path"), "path" to "string", "include_hash" to "boolean")) { obj ->

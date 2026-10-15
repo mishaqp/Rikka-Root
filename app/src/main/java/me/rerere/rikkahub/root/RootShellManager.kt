@@ -129,7 +129,7 @@ class RootShellManager(
                     RootStatus.TIMED_OUT -> "root_verification_timeout"
                     else -> "root_not_granted"
                 },
-                reason = "Root verification: ${verified.name.lowercase()}. Check the device root manager and verify root again.",
+                reason = "Root не подтверждён. Разрешите доступ Rikka-Root в менеджере root и повторите проверку Root в настройках.",
             )
         }
         if (!mayExecute()) return approvalRequired()
@@ -145,9 +145,9 @@ class RootShellManager(
                         beforeStop = { session.cancel() },
                     )
                     if (session.rootDenied()) {
-                        result.copy(error = "root_not_granted", reason = "The new su execution did not have UID 0. The command was not executed; verify root again.")
+                        result.copy(error = "root_not_granted", reason = "Команда не получила права root и не выполнена. Повторите проверку Root в настройках.")
                     } else if (session.capabilityUnavailable()) {
-                        result.copy(error = "root_cleanup_unavailable", reason = "setsid is required for root command cancellation. The command was not executed.")
+                        result.copy(error = "root_cleanup_unavailable", reason = "Команда не выполнена: на устройстве нет setsid для безопасной остановки. Проверьте набор системных команд root.")
                     } else {
                         result.copy(reason = session.cleanupError ?: result.reason)
                     }
@@ -180,7 +180,7 @@ class RootShellManager(
 
     private fun approvalRequired() = RootProcessResult(
         error = "root_approval_required",
-        reason = "Automatic root access was disabled before launch. Request approval for a new call.",
+        reason = "Автоматический доступ Root отключён до запуска. Подтвердите новый вызов команды.",
     )
 }
 
@@ -229,7 +229,8 @@ private class HeadlessRootSession private constructor(
             }
             val outcome = acknowledgement(result, nonce) ?: return quarantine()
             return when (outcome) {
-                "timeout", "cancelled" -> RootProcessResult(error = "command_timeout", stdout = output(request, "stdout", 8_000), stderr = output(request, "stderr", 2_000))
+                "timeout", "cancelled" -> RootProcessResult(error = "command_timeout", stdout = output(request, "stdout", 8_000), stderr = output(request, "stderr", 2_000),
+                    reason = "Время root-команды истекло. Проверьте, что успело выполниться, перед новым вызовом; команда автоматически не повторяется.")
                 "not_root", "failed" -> { close(); interactionRequired() }
                 else -> outcome.toIntOrNull()?.takeIf { it in 0..255 }?.let { code ->
                     RootProcessResult(exitCode = code, stdout = output(request, "stdout", 8_000), stderr = output(request, "stderr", 2_000))

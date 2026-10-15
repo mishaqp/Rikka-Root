@@ -153,7 +153,7 @@ class WorkspaceRepository(
         id: String,
         path: String,
     ): String = withContext(Dispatchers.IO) {
-        val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        val workspace = dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
         manager.ensureWorkspace(workspace.root)
         manager.readText(workspace.root, path)
     }
@@ -164,7 +164,7 @@ class WorkspaceRepository(
         text: String,
         overwrite: Boolean,
     ): WorkspaceFileEntry = withContext(Dispatchers.IO) {
-        val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        val workspace = dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
         manager.ensureWorkspace(workspace.root)
         manager.writeText(workspace.root, path, text, overwrite)
     }
@@ -179,7 +179,7 @@ class WorkspaceRepository(
         area: WorkspaceStorageArea,
         path: String,
     ): String = withContext(Dispatchers.IO) {
-        val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        val workspace = dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
         manager.ensureWorkspace(workspace.root)
         when (area) {
             WorkspaceStorageArea.FILES -> manager.readText(workspace.root, path)
@@ -203,7 +203,7 @@ class WorkspaceRepository(
         fileName: String,
         inputStream: InputStream,
     ): WorkspaceFileEntry = withContext(Dispatchers.IO) {
-        val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        val workspace = dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
         manager.ensureWorkspace(workspace.root)
         manager.importFile(workspace.root, destinationPath, area, fileName, inputStream)
     }
@@ -213,7 +213,7 @@ class WorkspaceRepository(
         area: WorkspaceStorageArea,
         path: String,
     ): Long = withContext(Dispatchers.IO) {
-        val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        val workspace = dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
         manager.fileSize(workspace.root, path, area)
     }
 
@@ -222,7 +222,7 @@ class WorkspaceRepository(
         area: WorkspaceStorageArea,
         path: String,
     ) = withContext(Dispatchers.IO) {
-        val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        val workspace = dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
         manager.ensureWorkspace(workspace.root)
         manager.resolveFile(workspace.root, path, area)
     }
@@ -233,13 +233,13 @@ class WorkspaceRepository(
         path: String,
         outputStream: OutputStream,
     ) = withContext(Dispatchers.IO) {
-        val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        val workspace = dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
         manager.exportFile(workspace.root, path, area, outputStream)
     }
 
     /** Resolve through the same mount table used by workspace tools and PRoot. */
     suspend fun resolveRootfsFile(id: String, path: String): java.io.File = withContext(Dispatchers.IO) {
-        val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        val workspace = dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
         manager.resolveRootfsFile(workspace.root, path)
     }
 
@@ -248,14 +248,14 @@ class WorkspaceRepository(
         id: String,
         path: String,
     ): Long = withContext(Dispatchers.IO) {
-        val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        val workspace = dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
         manager.ensureWorkspace(workspace.root)
         manager.rootfsFileSize(workspace.root, path)
     }
 
     /** Rootfs 内执行命令实际使用的 shell 路径 (/bin/bash 或 /bin/sh) */
     suspend fun rootfsShell(id: String): String = withContext(Dispatchers.IO) {
-        val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        val workspace = dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
         manager.rootfsShell(workspace.root)
     }
 
@@ -265,7 +265,7 @@ class WorkspaceRepository(
         path: String,
         outputStream: OutputStream,
     ) = withContext(Dispatchers.IO) {
-        val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        val workspace = dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
         manager.ensureWorkspace(workspace.root)
         manager.exportRootfsFile(workspace.root, path, outputStream)
     }
@@ -289,7 +289,7 @@ class WorkspaceRepository(
         target: String,
         overwrite: Boolean,
     ): WorkspaceFileEntry = withContext(Dispatchers.IO) {
-        val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        val workspace = dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
         manager.ensureWorkspace(workspace.root)
         manager.moveFile(workspace.root, source, target, overwrite)
     }
@@ -301,7 +301,7 @@ class WorkspaceRepository(
         timeoutMillis: Long = WorkspaceManager.DEFAULT_COMMAND_TIMEOUT_MS,
         stdin: ByteArray? = null,
     ): WorkspaceCommandResult {
-        val workspace = dao.getById(id) ?: error("Workspace not found: $id")
+        val workspace = dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
         // runInterruptible 让协程取消转化为线程中断，从而打断阻塞的 Process.waitFor 并杀掉进程
         return runInterruptible(Dispatchers.IO) {
             manager.ensureWorkspace(workspace.root)
@@ -313,7 +313,7 @@ class WorkspaceRepository(
     }
 
     suspend fun startBackground(id: String, command: String, cwd: String = ""): BackgroundStatus {
-        val workspace = dao.getById(id) ?: error("Workspace not found")
+        val workspace = dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
         return runInterruptible(Dispatchers.IO) {
             manager.ensureWorkspace(workspace.root)
             manager.startBackgroundCommand(workspace.root, command, cwd, workspace.shellCompatibilityMode)
@@ -321,17 +321,17 @@ class WorkspaceRepository(
     }
 
     suspend fun backgroundProcesses(id: String): List<BackgroundStatus> {
-        val workspace = dao.getById(id) ?: error("Workspace not found")
+        val workspace = dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
         return withContext(Dispatchers.IO) { manager.backgroundProcesses(workspace.root) }
     }
 
     suspend fun backgroundOutput(id: String, processId: String): BackgroundStatus {
-        val workspace = dao.getById(id) ?: error("Workspace not found")
-        return withContext(Dispatchers.IO) { manager.backgroundOutput(workspace.root, processId) ?: error("Process not found in this workspace") }
+        val workspace = dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
+        return withContext(Dispatchers.IO) { manager.backgroundOutput(workspace.root, processId) ?: error("Процесс не найден в этой рабочей папке. Проверьте process_id через workspace_background_list.") }
     }
 
     suspend fun stopBackground(id: String, processId: String): Boolean {
-        val workspace = dao.getById(id) ?: error("Workspace not found")
+        val workspace = dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
         return runInterruptible(Dispatchers.IO) { manager.stopBackgroundProcess(workspace.root, processId) }
     }
 

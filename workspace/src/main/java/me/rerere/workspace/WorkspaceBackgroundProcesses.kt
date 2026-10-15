@@ -39,7 +39,7 @@ internal class BackgroundTail(private val capacity: Int = MAX_BG_OUTPUT_CHARS) {
 /** An app-held pipe controls lifetime; the host-side file stores only the exit code. */
 class WorkspaceProcessSupervisor(tempDir: File) : AutoCloseable {
     private val directory = File(tempDir, "bg-${UUID.randomUUID()}").apply {
-        check(mkdirs()) { "Cannot create process control directory" }
+        check(mkdirs()) { "Не удалось создать папку фоновых процессов. Проверьте свободное место и доступ к рабочей папке." }
         setReadable(false, false); setWritable(false, false); setExecutable(false, false)
         setReadable(true, true); setWritable(true, true); setExecutable(true, true)
     }
@@ -135,7 +135,7 @@ class WorkspaceBackgroundProcesses : AutoCloseable {
     private val entries = linkedMapOf<String, Entry>()
 
     @Synchronized fun start(context: WorkspaceShellContext, launch: (WorkspaceProcessSupervisor) -> Process): BackgroundStatus {
-        check(entries.values.count { it.process.isAlive } < MAX_BG_PROCESSES) { "Maximum $MAX_BG_PROCESSES background processes; stop one first" }
+        check(entries.values.count { it.process.isAlive } < MAX_BG_PROCESSES) { "Достигнут лимит: $MAX_BG_PROCESSES фоновых процессов. Сначала остановите один из них." }
         val supervisor = WorkspaceProcessSupervisor(context.tempDir)
         val process = try { launch(supervisor) } catch (error: Throwable) { supervisor.close(); throw error }
         val entry = Entry(context, supervisor, process)
@@ -152,7 +152,7 @@ class WorkspaceBackgroundProcesses : AutoCloseable {
     @Synchronized fun stop(root: String, id: String): Boolean {
         val entry = entries[id]?.takeIf { it.root == root } ?: return false
         entry.supervisor.requestStop()
-        check(entry.process.waitFor(3, TimeUnit.SECONDS)) { "Process shutdown could not be confirmed; retry stop" }
+        check(entry.process.waitFor(3, TimeUnit.SECONDS)) { "Остановка процесса не подтверждена. Проверьте процесс и повторите остановку." }
         return true
     }
     @Synchronized fun stopAll(root: String) = stopEntries(entries.values.filter { it.root == root })
@@ -160,7 +160,7 @@ class WorkspaceBackgroundProcesses : AutoCloseable {
 
     private fun stopEntries(selected: List<Entry>) {
         selected.forEach { it.supervisor.requestStop() }
-        selected.forEach { check(it.process.waitFor(3, TimeUnit.SECONDS)) { "Process shutdown could not be confirmed" } }
+        selected.forEach { check(it.process.waitFor(3, TimeUnit.SECONDS)) { "Остановка процесса не подтверждена. Проверьте список фоновых процессов." } }
     }
 
     private class Entry(context: WorkspaceShellContext, val supervisor: WorkspaceProcessSupervisor, val process: Process) {

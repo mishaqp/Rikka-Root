@@ -7,6 +7,11 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.ui.UIMessagePart
 
+internal fun commandExitFailureReason(exitCode: Int?): String? =
+    exitCode?.takeIf { it != 0 }?.let {
+        "Команда завершилась с ошибкой (код $it). Проверьте вывод и результат перед новым запуском."
+    }
+
 internal fun deviceToolError(message: String, permission: String? = null): JsonObject = buildJsonObject {
     put("error", message)
     permission?.let { put("required_permission", it) }
@@ -38,29 +43,44 @@ internal suspend fun deviceToolParts(
     return listOf(UIMessagePart.Text(error.toString()))
 }
 
-private val authoredReason = Regex("[А-Яа-яЁё]")
+private val authoredReason = Regex("^(?:[A-Za-z_][A-Za-z0-9_]*\\s+)?[А-Яа-яЁё]+(?:\\s|[.!?]$)")
 
 /**
  * Reasons written in Russian by this app's own checks (for example "Нет записи в выбранной
  * папке. Сначала вызовите grant_directory_access.") are shown as is. Android and Java exception
- * texts are never exposed, since they may carry private input or device details; only their
- * kind is reported.
+ * texts may carry private input or device details. Known platform failures are classified
+ * before considering an app-authored reason; Cyrillic inside a pathname is not a reason.
  */
 internal fun deviceToolFailureReason(error: Throwable, fileOperation: FileToolOperation? = null): String {
     safFileCause(error)?.let { return safFileFailureReason(it, fileOperation) }
     val message = error.message?.trim()
+    val platformReason = when (error) {
+        is SecurityException -> "Android запретил доступ. Проверьте разрешения этой функции в настройках ассистента."
+        is java.nio.file.AccessDeniedException -> "Нет доступа к файлу или папке. Проверьте разрешения и выбранную папку."
+        is java.io.FileNotFoundException ->
+            if (message?.contains("EACCES") == true || message?.contains("Permission denied", ignoreCase = true) == true)
+                "Нет доступа к файлу или папке. Проверьте разрешения и выбранную папку."
+            else "Файл или папка не найдены. Проверьте путь."
+        is java.nio.file.NoSuchFileException -> "Файл или папка не найдены. Проверьте путь."
+        is java.nio.file.FileAlreadyExistsException -> "Файл уже существует. Укажите другое имя или разрешите перезапись."
+        is java.net.UnknownHostException -> "Сервер не найден. Проверьте адрес и подключение к интернету."
+        is java.net.ConnectException -> "Не удалось подключиться к серверу. Проверьте адрес и подключение к интернету."
+        is java.net.SocketTimeoutException -> "Сервер не ответил вовремя. Повторите попытку."
+        is javax.net.ssl.SSLException -> "Не удалось установить защищённое соединение. Проверьте дату и время устройства и сертификат сервера."
+        is kotlinx.serialization.SerializationException -> "Некорректный JSON. Проверьте формат и типы значений."
+        is java.net.URISyntaxException -> "Некорректный адрес. Проверьте формат URI."
+        is javax.crypto.BadPaddingException -> "Не удалось расшифровать данные. Проверьте ключ, входные данные и параметры шифрования."
+        is java.security.InvalidKeyException -> "Ключ не подходит для этой операции. Проверьте ключ и его разрешённые назначения."
+        is UnsupportedOperationException -> "Функция не поддерживается на этом устройстве. Выберите другой способ."
+        else -> null
+    }
+    if (platformReason != null) return platformReason
     if (message != null && message.length <= 300 && authoredReason.containsMatchIn(message) &&
         message.none(Char::isISOControl)) return message
     return when (error) {
-        is java.nio.file.AccessDeniedException -> "Нет доступа к файлу или папке."
-        is java.io.FileNotFoundException ->
-            if (message?.contains("EACCES") == true || message?.contains("Permission denied", ignoreCase = true) == true)
-                "Нет доступа к файлу или папке." else "Файл или папка не найдены."
-        is java.nio.file.NoSuchFileException -> "Файл или папка не найдены."
-        is java.nio.file.FileAlreadyExistsException -> "Файл уже существует."
-        is UnsupportedOperationException -> "Функция не поддерживается на этом устройстве."
-        is java.io.IOException -> "Ошибка чтения или записи."
-        else -> "Функция недоступна на устройстве или Android отклонил запрос."
+        is IllegalArgumentException -> "Некорректные параметры. Проверьте названия, типы и значения параметров."
+        is java.io.IOException -> "Ошибка чтения или записи. Проверьте доступ и свободное место."
+        else -> "Функция недоступна на устройстве или Android отклонил запрос. Проверьте настройки функции."
     }
 }
 

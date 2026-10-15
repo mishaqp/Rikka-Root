@@ -81,17 +81,16 @@ internal fun buildCalendarQueryTool(context: Context): Tool = Tool(
             }
         )
     },
-    execute = { args ->
+    execute = { args -> deviceToolParts {
         if (!hasCalendarReadPermission(context)) {
             val payload = buildJsonObject {
                 put("error", "NO_PERMISSION")
                 put(
                     "message",
-                    "Calendar read permission is not granted. Please ask the user to enable " +
-                        "the calendar permission in the assistant's local tools settings."
+                    "Нет разрешения на чтение календаря. Включите доступ к календарю в настройках инструментов ассистента."
                 )
             }
-            return@Tool listOf(UIMessagePart.Text(payload.toString()))
+            return@deviceToolParts listOf(UIMessagePart.Text(payload.toString()))
         }
 
         val params = args.jsonObject
@@ -121,20 +120,20 @@ internal fun buildCalendarQueryTool(context: Context): Tool = Tool(
                 "month" -> startTime.plusMonths(1)
                 else -> now.toLocalDate().plusDays(1).atStartOfDay(zone)
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             val payload = buildJsonObject {
                 put("error", "INVALID_TIME")
-                put("message", e.message ?: "Invalid time format for begin/end.")
+                put("message", "Укажите begin и end как дату ISO-8601, дату со временем или число миллисекунд Unix.")
             }
-            return@Tool listOf(UIMessagePart.Text(payload.toString()))
+            return@deviceToolParts listOf(UIMessagePart.Text(payload.toString()))
         }
 
         if (!startTime.isBefore(endTime)) {
             val payload = buildJsonObject {
                 put("error", "INVALID_RANGE")
-                put("message", "begin must be earlier than end.")
+                put("message", "Укажите begin раньше end.")
             }
-            return@Tool listOf(UIMessagePart.Text(payload.toString()))
+            return@deviceToolParts listOf(UIMessagePart.Text(payload.toString()))
         }
 
         val startMs = startTime.toInstant().toEpochMilli()
@@ -217,7 +216,7 @@ internal fun buildCalendarQueryTool(context: Context): Tool = Tool(
             put("events", events)
         }
         listOf(UIMessagePart.Text(payload.toString()))
-    }
+    } }
 )
 
 internal fun buildCalendarCreateTool(context: Context): Tool = Tool(
@@ -269,17 +268,16 @@ internal fun buildCalendarCreateTool(context: Context): Tool = Tool(
             required = listOf("title", "start")
         )
     },
-    execute = { args ->
+    execute = { args -> deviceToolParts {
         if (!hasCalendarWritePermission(context)) {
             val payload = buildJsonObject {
                 put("error", "NO_PERMISSION")
                 put(
                     "message",
-                    "Calendar write permission is not granted. Please ask the user to enable " +
-                        "the calendar permission in the assistant's local tools settings."
+                    "Нет разрешения на запись в календарь. Включите доступ к календарю в настройках инструментов ассистента."
                 )
             }
-            return@Tool listOf(UIMessagePart.Text(payload.toString()))
+            return@deviceToolParts listOf(UIMessagePart.Text(payload.toString()))
         }
 
         val params = args.jsonObject
@@ -291,9 +289,9 @@ internal fun buildCalendarCreateTool(context: Context): Tool = Tool(
         if (title.isNullOrBlank() || startRaw.isNullOrBlank()) {
             val payload = buildJsonObject {
                 put("error", "MISSING_REQUIRED")
-                put("message", "Both 'title' and 'start' are required.")
+                put("message", "Укажите title — название события, и start — время начала.")
             }
-            return@Tool listOf(UIMessagePart.Text(payload.toString()))
+            return@deviceToolParts listOf(UIMessagePart.Text(payload.toString()))
         }
 
         val zone = ZoneId.systemDefault()
@@ -308,20 +306,20 @@ internal fun buildCalendarCreateTool(context: Context): Tool = Tool(
             } else {
                 startTime.plusHours(1)
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             val payload = buildJsonObject {
                 put("error", "INVALID_TIME")
-                put("message", e.message ?: "Invalid time format.")
+                put("message", "Укажите start и end как дату ISO-8601, дату со временем или число миллисекунд Unix.")
             }
-            return@Tool listOf(UIMessagePart.Text(payload.toString()))
+            return@deviceToolParts listOf(UIMessagePart.Text(payload.toString()))
         }
 
         if (!startTime.isBefore(endTime)) {
             val payload = buildJsonObject {
                 put("error", "INVALID_RANGE")
-                put("message", "end must be later than start.")
+                put("message", "Укажите end позже start.")
             }
-            return@Tool listOf(UIMessagePart.Text(payload.toString()))
+            return@deviceToolParts listOf(UIMessagePart.Text(payload.toString()))
         }
 
         val description = params["description"]?.jsonPrimitive?.contentOrNull ?: ""
@@ -336,9 +334,9 @@ internal fun buildCalendarCreateTool(context: Context): Tool = Tool(
             if (!startDate.isBefore(endDate)) {
                 val payload = buildJsonObject {
                     put("error", "INVALID_RANGE")
-                    put("message", "all-day event end date must be later than start date.")
+                    put("message", "Для события на весь день укажите дату end позже даты start.")
                 }
-                return@Tool listOf(UIMessagePart.Text(payload.toString()))
+                return@deviceToolParts listOf(UIMessagePart.Text(payload.toString()))
             }
             eventStartMillis = startDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
             eventEndMillis = endDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
@@ -353,9 +351,9 @@ internal fun buildCalendarCreateTool(context: Context): Tool = Tool(
         if (calendarId == null) {
             val payload = buildJsonObject {
                 put("error", "NO_CALENDAR")
-                put("message", "No calendar account found on this device. Please add a calendar account first.")
+                put("message", "На устройстве нет доступного календаря для записи. Добавьте учётную запись календаря в настройках Android.")
             }
-            return@Tool listOf(UIMessagePart.Text(payload.toString()))
+            return@deviceToolParts listOf(UIMessagePart.Text(payload.toString()))
         }
 
         val values = ContentValues().apply {
@@ -375,9 +373,9 @@ internal fun buildCalendarCreateTool(context: Context): Tool = Tool(
         if (uri == null) {
             val payload = buildJsonObject {
                 put("error", "INSERT_FAILED")
-                put("message", "Failed to insert calendar event.")
+                put("message", "Android не сохранил событие. Проверьте доступ к календарю и наличие календаря для записи.")
             }
-            return@Tool listOf(UIMessagePart.Text(payload.toString()))
+            return@deviceToolParts listOf(UIMessagePart.Text(payload.toString()))
         }
 
         val eventId = ContentUris.parseId(uri)
@@ -391,7 +389,7 @@ internal fun buildCalendarCreateTool(context: Context): Tool = Tool(
             put("location", location)
         }
         listOf(UIMessagePart.Text(payload.toString()))
-    }
+    } }
 )
 
 private fun hasCalendarReadPermission(context: Context): Boolean =
@@ -434,5 +432,5 @@ private fun parseCalendarTime(raw: String, zone: ZoneId): ZonedDateTime {
     runCatching { return Instant.parse(text).atZone(zone) }
     runCatching { return LocalDateTime.parse(text).atZone(zone) }
     runCatching { return LocalDate.parse(text).atStartOfDay(zone) }
-    error("Invalid time format: '$raw'. Use ISO-8601 date/date-time or epoch milliseconds.")
+    error("Укажите дату ISO-8601, дату со временем или число миллисекунд Unix.")
 }

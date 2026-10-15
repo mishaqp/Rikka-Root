@@ -29,7 +29,14 @@ fun checkTokenUsageTool(callerAssistant: Assistant, conversationId: Uuid?,
         })
     }, emptyList()) },
     execute = execute@{ args ->
-        fun error(code: String) = listOf(UIMessagePart.Text(buildJsonObject { put("error", code) }.toString()))
+        fun error(code: String) = listOf(UIMessagePart.Text(buildJsonObject {
+            put("error", code)
+            put("message", when (code) {
+                "invalid_arguments" -> "Параметры проверки токенов неверны. Укажите объект аргументов или вызовите инструмент без conversation_id."
+                "conversation_not_allowed" -> "Этот диалог недоступен для проверки. Используйте ID текущего диалога или уберите conversation_id."
+                else -> "Текущий диалог недоступен. Откройте сохранённый чат и повторите проверку токенов."
+            })
+        }.toString()))
         val params = args as? JsonObject ?: return@execute error("invalid_arguments")
         val supplied = params["conversation_id"]
         val raw = (supplied as? JsonPrimitive)?.contentOrNull
@@ -73,6 +80,12 @@ fun checkTokenUsageTool(callerAssistant: Assistant, conversationId: Uuid?,
                 it.remainingTokens?.let { remaining -> put("remaining_tokens", remaining) }
             }
             put("status", status.name)
+            when (status) {
+                TokenBudgetTracker.BudgetStatus.NO_BUDGET -> put("message", "Лимит токенов не задан. При необходимости задайте его в настройках ассистента.")
+                TokenBudgetTracker.BudgetStatus.WARN -> put("message", "Расход токенов приблизился к лимиту. Завершите задачу или проверьте бюджет в настройках.")
+                TokenBudgetTracker.BudgetStatus.OVER_HARD -> put("message", "Лимит токенов исчерпан. Проверьте бюджет в настройках перед продолжением задачи.")
+                else -> Unit
+            }
             put("usage_is_exact_billing", false)
         }
         listOf(UIMessagePart.Text(payload.toString()))

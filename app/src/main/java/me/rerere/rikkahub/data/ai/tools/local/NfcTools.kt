@@ -31,7 +31,7 @@ internal fun nfcStatusPayload(available: Boolean, enabled: Boolean, foreground: 
     put("session_active", busy)
     put("ready_to_read", available && enabled && foreground && !busy)
     put("status", when {
-        !available -> "На устройстве нет NFC."
+        !available -> "На устройстве нет NFC. Используйте устройство с поддержкой NFC."
         !enabled -> "NFC выключен. Включите его в настройках Android."
         !foreground -> "Для чтения метки откройте Rikka-Root."
         busy -> "Уже открыт сеанс NFC. Завершите или отмените его."
@@ -58,7 +58,7 @@ private suspend fun runNfcSession(context: Context, write: Boolean, timeout: Int
         } else {
             val adapter = context.getSystemService(NfcManager::class.java)?.defaultAdapter
             when {
-                adapter == null -> "На устройстве нет NFC."
+                adapter == null -> "На устройстве нет NFC. Используйте устройство с поддержкой NFC."
                 !adapter.isEnabled -> "NFC выключен. Включите его в настройках Android."
                 else -> null
             }
@@ -81,9 +81,11 @@ private suspend fun runNfcSession(context: Context, write: Boolean, timeout: Int
         return when (val result = withTimeoutOrNull(timeout * 1000L + 5000L) { session.await() }) {
             is NfcResult.ReadOk -> buildJsonObject { put("records", Json.parseToJsonElement(result.recordsJson)); put("tag_id_hex", result.tagIdHex); put("ndef_supported", result.ndefSupported) }
             is NfcResult.WriteOk -> buildJsonObject { put("success", true); put("tag_id_hex", result.tagIdHex) }
-            is NfcResult.Error -> deviceToolError(result.message)
-            NfcResult.Cancelled -> deviceToolError(if (write) "Сеанс NFC отменён. Если запись уже началась, проверьте содержимое метки." else "Чтение NFC отменено.")
-            NfcResult.Timeout, null -> deviceToolError("Время сеанса NFC истекло.")
+            is NfcResult.Error -> deviceToolError(result.message + if (write)
+                " Выберите доступную для записи NDEF-метку с достаточным объёмом и удерживайте её у NFC-антенны."
+                else " Проверьте совместимость метки и удерживайте её у NFC-антенны до завершения чтения.")
+            NfcResult.Cancelled -> deviceToolError(if (write) "Сеанс NFC отменён. Если запись уже началась, проверьте содержимое метки." else "Чтение NFC отменено. При необходимости запустите nfc_read_tag снова и поднесите метку.")
+            NfcResult.Timeout, null -> deviceToolError("Время сеанса NFC истекло. Проверьте NFC в настройках Android и поднесите метку после запуска нового сеанса.")
         }
     } finally {
         sharedNfcSessions.cancel(id)

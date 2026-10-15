@@ -27,6 +27,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.json.JSONObject
+import me.rerere.rikkahub.data.ai.tools.local.deviceToolFailureReason
 import java.io.File
 import java.net.URI
 import java.util.UUID
@@ -278,7 +279,7 @@ class JsSkillRunner(private val context: Context) {
                 throw cancelled
             } catch (t: Throwable) {
                 Log.w(TAG, "JS skill execution failed: ${t::class.simpleName}")
-                Result.Err("script_failed", redactSkillSecret("${t::class.simpleName}: ${t.message.orEmpty()}", secret))
+                Result.Err("script_failed", redactSkillSecret(deviceToolFailureReason(t), secret))
             } finally {
                 runCatching { webView?.destroy() }
                     .onFailure { Log.w(TAG, "WebView.destroy failed: ${it::class.simpleName}") }

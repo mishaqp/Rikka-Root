@@ -58,7 +58,7 @@ internal fun keystoreTools(context: Context, crypto: KeystoreCrypto): List<Tool>
         }, read = { (alias, encoding) -> cryptoResult {
             crypto.check(alias, ToolKeyType.AES, ToolKeyPurpose.ENCRYPT)
             val result = awaitPersonalToolUi(context, PersonalUiRequest.Encrypt(alias, encoding), 300000)
-            if (result !is PersonalUiResult.Secret) return@cryptoResult personalUiError(result)
+            if (result !is PersonalUiResult.Secret) return@cryptoResult personalUiError(result, "Откройте Rikka-Root и введите данные на защищённом экране, если хотите повторить шифрование.")
             try {
                 val sealed = crypto.encrypt(alias, result.bytes)
                 buildJsonObject { put("ciphertext_b64", Base64.getEncoder().encodeToString(sealed.ciphertext)); put("iv_b64", Base64.getEncoder().encodeToString(sealed.iv)) }
@@ -76,7 +76,7 @@ internal fun keystoreTools(context: Context, crypto: KeystoreCrypto): List<Tool>
             val plaintext = crypto.decrypt(alias, ciphertext, iv)
             try {
                 val result = awaitPersonalToolUi(context, PersonalUiRequest.Reveal(plaintext), 300000)
-                if (result != PersonalUiResult.Acknowledged) return@cryptoResult personalUiError(result)
+                if (result != PersonalUiResult.Acknowledged) return@cryptoResult personalUiError(result, "Откройте Rikka-Root, если хотите повторить показ расшифрованных данных на защищённом экране.")
                 buildJsonObject { put("success", true); put("shown_to_user", true) }
             } finally { plaintext.fill(0) }
         } }),

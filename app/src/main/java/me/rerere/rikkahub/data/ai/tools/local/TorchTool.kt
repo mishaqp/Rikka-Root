@@ -30,12 +30,12 @@ fun torchTool(context: Context): Tool = Tool(
             return@deviceToolResult deviceToolError("Разрешите доступ к камере при включении «Фонарик» в настройках ассистента.", Manifest.permission.CAMERA)
         }
         val manager = context.getSystemService(CameraManager::class.java)
-            ?: return@deviceToolResult deviceToolError("Служба камеры недоступна.")
+            ?: return@deviceToolResult deviceToolError("Служба камеры недоступна. Закройте приложение камеры и проверьте разрешение камеры в настройках функции.")
         val cameras = manager.cameraIdList.map { it to manager.getCameraCharacteristics(it) }
             .filter { (_, info) -> info.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true }
         val camera = cameras.firstOrNull { (_, info) -> info.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK }
             ?: cameras.firstOrNull()
-            ?: return@deviceToolResult deviceToolError("На устройстве нет вспышки для фонарика.")
+            ?: return@deviceToolResult deviceToolError("На устройстве нет вспышки для фонарика. Используйте устройство со вспышкой.")
         manager.setTorchMode(camera.first, on)
         buildJsonObject { put("success", true); put("on", on) }
     } },

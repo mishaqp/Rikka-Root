@@ -43,8 +43,8 @@ fun getVolumeTool(context: Context): Tool = Tool(
     execute = { input -> deviceToolResult {
         val obj = input as? JsonObject ?: return@deviceToolResult deviceToolError("Параметры должны быть объектом.")
         val name = if (obj.containsKey("stream")) obj.textArgument("stream") else "media"
-        val stream = audioStreams[name] ?: return@deviceToolResult deviceToolError("Неизвестный поток. Доступны media, ring, notification, alarm, voice_call, system.")
-        val manager = context.getSystemService(AudioManager::class.java) ?: return@deviceToolResult deviceToolError("Служба звука недоступна.")
+        val stream = audioStreams[name] ?: return@deviceToolResult deviceToolError("Укажите stream: media, ring, notification, alarm, voice_call или system.")
+        val manager = context.getSystemService(AudioManager::class.java) ?: return@deviceToolResult deviceToolError("Служба звука недоступна. Проверьте настройки звука Android и повторите запрос.")
         volumePayload(manager, name!!, stream)
     } },
 )
@@ -60,14 +60,14 @@ fun setVolumeTool(context: Context): Tool = Tool(
     execute = { input -> deviceToolResult {
         val obj = input as? JsonObject ?: return@deviceToolResult deviceToolError("Параметры должны быть объектом.")
         val name = obj.textArgument("stream")
-        val stream = audioStreams[name] ?: return@deviceToolResult deviceToolError("Неизвестный поток. Доступны media, ring, notification, alarm, voice_call, system.")
+        val stream = audioStreams[name] ?: return@deviceToolResult deviceToolError("Укажите stream: media, ring, notification, alarm, voice_call или system.")
         val percent = obj.integerArgument("percent")?.takeIf { it in 0..100 }
             ?: return@deviceToolResult deviceToolError("Укажите целое число percent от 0 до 100.")
         if (volumeNeedsDndAccess(name) && context.getSystemService(NotificationManager::class.java)?.isNotificationPolicyAccessGranted != true) {
             return@deviceToolResult deviceToolError("Для громкости звонка, уведомлений и системного звука разрешите доступ к «Не беспокоить» в настройках функции «Громкость». На телефонах системный звук связан со звонком; медиагромкость доступна без этого доступа.", "android.permission.ACCESS_NOTIFICATION_POLICY")
         }
-        val manager = context.getSystemService(AudioManager::class.java) ?: return@deviceToolResult deviceToolError("Служба звука недоступна.")
-        if (manager.isVolumeFixed) return@deviceToolResult deviceToolError("Android использует фиксированную громкость на этом устройстве.")
+        val manager = context.getSystemService(AudioManager::class.java) ?: return@deviceToolResult deviceToolError("Служба звука недоступна. Проверьте настройки звука Android и повторите запрос.")
+        if (manager.isVolumeFixed) return@deviceToolResult deviceToolError("Android использует фиксированную громкость. Измените уровень на подключённом аудиоустройстве.")
         val min = if (Build.VERSION.SDK_INT >= 28) manager.getStreamMinVolume(stream) else 0
         val target = volumeStep(percent, min, manager.getStreamMaxVolume(stream))
         manager.setStreamVolume(stream, target, 0)
@@ -76,7 +76,7 @@ fun setVolumeTool(context: Context): Tool = Tool(
             actual.forEach { (key, value) -> put(key, value) }
             put("requested_percent", percent)
             put("success", manager.getStreamVolume(stream) == target)
-            if (manager.getStreamVolume(stream) != target) put("note", "Android применил другой уровень громкости из-за системных ограничений или безопасного уровня звука.")
+            if (manager.getStreamVolume(stream) != target) put("note", "Android применил другой уровень громкости из-за системных ограничений или безопасного уровня звука. Проверьте фактический уровень в результате и настройки звука Android.")
         }
     } },
 )

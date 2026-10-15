@@ -23,7 +23,7 @@ class ProotShellRunner(
             return WorkspaceCommandResult(
                 exitCode = 127,
                 stdout = "",
-                stderr = "Rootfs is not installed",
+                stderr = "Среда Rootfs не установлена. Установите её в настройках рабочей папки.",
             )
         }
 
@@ -48,10 +48,10 @@ class ProotShellRunner(
     }
 
     private fun processBuilder(context: WorkspaceShellContext, supervisor: WorkspaceProcessSupervisor? = null): ProcessBuilder {
-        check(WorkspaceManager.isUsableRootfs(context.linuxDir)) { "Rootfs is not installed" }
+        check(WorkspaceManager.isUsableRootfs(context.linuxDir)) { "Среда Rootfs не установлена. Установите её в настройках рабочей папки." }
         val proot = File(nativeLibraryDir, PROOT_EXEC)
         val loader = File(nativeLibraryDir, PROOT_LOADER)
-        check(proot.isFile && loader.isFile) { "PRoot executable or loader is missing" }
+        check(proot.isFile && loader.isFile) { "Не найдены файлы PRoot. Переустановите среду Rootfs в настройках рабочей папки." }
         context.tempDir.mkdirs()
         patcher.patch(context.linuxDir)
         val command = buildCommand(context, proot)

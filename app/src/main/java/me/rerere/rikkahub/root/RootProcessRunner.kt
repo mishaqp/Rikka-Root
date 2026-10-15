@@ -25,8 +25,8 @@ internal object RootProcessRunner {
         require(maxStdoutBytes >= 0 && maxStderrBytes >= 0)
         val process = try {
             ProcessBuilder(argv).start()
-        } catch (error: IOException) {
-            return RootProcessResult(error = "exec_failed", reason = error.message)
+        } catch (_: IOException) {
+            return RootProcessResult(error = "exec_failed", reason = "Не удалось запустить root-команду. Проверьте Root в настройках приложения.")
         }
         // Non-interactive tool: prompts/readers must receive EOF rather than wait indefinitely.
         runCatching { process.outputStream.close() }
@@ -48,6 +48,7 @@ internal object RootProcessRunner {
                 stdout = stdout.snapshot(),
                 stderr = stderr.snapshot(),
                 error = if (finished) null else "command_timeout",
+                reason = if (finished) null else "Время root-команды истекло. Проверьте, что успело выполниться, перед новым вызовом; команда автоматически не повторяется.",
             )
         } catch (error: InterruptedException) {
             // runInterruptible maps coroutine cancellation to this interruption.

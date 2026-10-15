@@ -92,7 +92,7 @@ class RootfsPathResolutionTest {
         val error = assertThrows(IllegalArgumentException::class.java) {
             manager.rootfsFileSize(root, "/skills/../secret.txt")
         }
-        assertTrue(error.message!!.contains("escapes workspace root"))
+        assertEquals("Путь выходит за границы рабочей папки. Укажите путь внутри неё: ../secret.txt", error.message)
     }
 
     @Test
@@ -112,7 +112,7 @@ class RootfsPathResolutionTest {
         val error = assertThrows(IllegalArgumentException::class.java) {
             manager.rootfsFileSize(root, "/skills/missing/SKILL.md")
         }
-        assertEquals("File does not exist: /skills/missing/SKILL.md", error.message)
+        assertEquals("Файл не найден. Проверьте путь: /skills/missing/SKILL.md", error.message)
     }
 
     @Test
@@ -123,6 +123,6 @@ class RootfsPathResolutionTest {
         val error = assertThrows(IllegalArgumentException::class.java) {
             manager.rootfsFileSize(root, "/skills/issue-1561")
         }
-        assertEquals("Path is not a file: /skills/issue-1561", error.message)
+        assertEquals("Это папка, а нужен файл. Укажите путь к файлу: /skills/issue-1561", error.message)
     }
 }

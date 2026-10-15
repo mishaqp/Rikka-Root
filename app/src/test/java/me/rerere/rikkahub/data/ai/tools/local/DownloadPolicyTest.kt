@@ -1,6 +1,10 @@
 package me.rerere.rikkahub.data.ai.tools.local
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.runBlocking
+import io.mockk.mockk
+import kotlinx.serialization.json.*
+import me.rerere.ai.ui.UIMessagePart
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.ByteArrayInputStream
@@ -8,6 +12,16 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 
 class DownloadPolicyTest {
+    @Test fun missingOrInvalidDownloadParametersExplainRecovery() = runBlocking {
+        val tool = downloadTool(mockk(), mockk())
+        listOf("{}" to "Укажите адрес файла в url.",
+            """{"url":"https://example.com/file","max_bytes":"invalid"}""" to "Укажите max_bytes целым числом.")
+            .forEach { (input, expected) ->
+                val output = (tool.execute(Json.parseToJsonElement(input)).single() as UIMessagePart.Text).text
+                assertEquals(expected, Json.parseToJsonElement(output).jsonObject["error"]!!.jsonPrimitive.content)
+            }
+    }
+
     @Test fun rejectsLocalSourcesCredentialsAndMissingHosts() {
         listOf("file:///etc/passwd", "content://docs/file", "https://user:password@example.com/x", "https:///x").forEach {
             try { validatedDownloadUrl(it); fail("accepted forbidden URL") }

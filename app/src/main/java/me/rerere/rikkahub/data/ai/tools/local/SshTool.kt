@@ -10,6 +10,7 @@ import com.jcraft.jsch.ChannelExec
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.Session
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -102,12 +103,12 @@ internal class BoundedOutputStream(private val cap: Int) : java.io.OutputStream(
     /** Total bytes the remote process wrote, including the ones we discarded. */
     private var total: Long = 0L
 
-    override fun write(b: Int) {
+    @Synchronized override fun write(b: Int) {
         total += 1
         if (buf.size() < cap + SLACK) buf.write(b)
     }
 
-    override fun write(b: ByteArray, off: Int, len: Int) {
+    @Synchronized override fun write(b: ByteArray, off: Int, len: Int) {
         total += len
         val remaining = (cap + SLACK) - buf.size()
         if (remaining > 0) buf.write(b, off, minOf(len, remaining))
@@ -123,7 +124,7 @@ internal class BoundedOutputStream(private val cap: Int) : java.io.OutputStream(
      * remainder as (total bytes written minus bytes kept). When nothing exceeded [cap] there is no
      * marker, even for multibyte text whose byte count outruns its char count.
      */
-    fun snapshot(): String {
+    @Synchronized fun snapshot(): String {
         val bytes = buf.toByteArray()
         if (total <= cap.toLong()) return String(bytes, Charsets.UTF_8)
         // Keep up to [cap] bytes, backing off to a code-point boundary so we don't slice a
@@ -140,6 +141,44 @@ internal class BoundedOutputStream(private val cap: Int) : java.io.OutputStream(
         const val SLACK = 4_096
     }
 }
+
+/** Shared with the overall timeout so a cancelled command keeps everything already read. */
+internal class SshCommandOutput {
+    val stdout = BoundedOutputStream(MAX_RETURNED_STDOUT)
+    val stderr = BoundedOutputStream(MAX_RETURNED_STDERR)
+
+    fun partial(): JsonObject = buildJsonObject {
+        put("partial_stdout", stdout.snapshot())
+        put("partial_stderr", stderr.snapshot())
+    }
+}
+
+internal fun sshFailureEnvelope(
+    error: Throwable,
+    message: String = "Не удалось выполнить операцию SSH/SFTP.",
+    recovery: String = "Проверьте подключение, настройки SSH и доступ к файлам, затем повторите вызов.",
+): JsonObject {
+    if (error is CancellationException) throw error
+    return buildJsonObject {
+        put("error", message)
+        // Java file/keystore exceptions have safe Russian descriptions; JSch failures
+        // concern the remote host and must not be explained as an Android rejection.
+        if (error !is com.jcraft.jsch.JSchException && error !is com.jcraft.jsch.SftpException) {
+            put("reason", deviceToolFailureReason(error))
+        }
+        put("recovery", recovery)
+        put("raw", SecretRedactor.redact(error.message ?: error.javaClass.simpleName))
+        if (error is com.jcraft.jsch.SftpException) put("sftp_status", error.id)
+    }
+}
+
+internal fun sshFailureParts(
+    error: Throwable,
+    recovery: String,
+    fields: JsonObject = JsonObject(emptyMap()),
+): List<UIMessagePart> = listOf(UIMessagePart.Text(
+    JsonObject(sshFailureEnvelope(error, recovery = recovery) + fields).toString()
+))
 
 /**
  * Single-quote [s] for safe embedding in a POSIX shell command. Wraps the whole string in
@@ -421,13 +460,19 @@ internal fun unreachableEnvelope(host: String, port: Int, outcome: ProbeOutcome)
     }
 
 /** Run a single command on an open session. Returns a JSON object with exit_code/stdout/stderr. */
-internal fun runOnSession(session: Session, command: String, timeoutMs: Int, stdin: String? = null): JsonObject {
+internal fun runOnSession(
+    session: Session,
+    command: String,
+    timeoutMs: Int,
+    stdin: String? = null,
+    output: SshCommandOutput = SshCommandOutput(),
+): JsonObject {
     blockedSshCommand(command, stdin)?.let { return it }
     // Bounded sinks: cap peak memory at a few KB regardless of how much the remote command
     // emits, so a high-throughput command can't OOM the app before we truncate. See
     // [BoundedOutputStream].
-    val stdout = BoundedOutputStream(MAX_RETURNED_STDOUT)
-    val stderr = BoundedOutputStream(MAX_RETURNED_STDERR)
+    val stdout = output.stdout
+    val stderr = output.stderr
     val channel = session.openChannel("exec") as ChannelExec
     var hitDeadline = false
     try {
@@ -471,7 +516,13 @@ internal fun runOnSession(session: Session, command: String, timeoutMs: Int, std
             put("exit_code", exitCode)
             put("stdout", stdout.snapshot())
             put("stderr", stderr.snapshot())
+            commandExitFailureReason(exitCode)?.let { put("message", it) }
         }
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        return JsonObject(sshFailureEnvelope(error, "Ошибка выполнения SSH.",
+            "Проверьте соединение и состояние команды на сервере перед повтором; частичные stdout/stderr сохранены.") + output.partial())
     } finally {
         try { channel.disconnect() } catch (_: Throwable) {}
     }
@@ -513,9 +564,9 @@ fun sshExecTool(context: Context, toolSecrets: SshToolSecretSanitizer = SshToolS
     needsApproval = { true },
     execute = {
         val p = toolSecrets.resolveArgs("ssh_exec", it).jsonObject
-        val host = p["host"]?.jsonPrimitive?.contentOrNull ?: error("Обязательный параметр: host")
-        val user = p["user"]?.jsonPrimitive?.contentOrNull ?: error("Обязательный параметр: user")
-        val command = p["command"]?.jsonPrimitive?.contentOrNull ?: error("Обязательный параметр: command")
+        val host = p["host"]?.jsonPrimitive?.contentOrNull ?: error("Укажите обязательный параметр: host")
+        val user = p["user"]?.jsonPrimitive?.contentOrNull ?: error("Укажите обязательный параметр: user")
+        val command = p["command"]?.jsonPrimitive?.contentOrNull ?: error("Укажите обязательный параметр: command")
         val port = p["port"]?.jsonPrimitive?.intOrNull ?: 22
         val stdin = p["stdin"]?.jsonPrimitive?.contentOrNull
         blockedSshCommand(command, stdin)?.let { blocked -> return@Tool listOf(UIMessagePart.Text(blocked.toString())) }
@@ -537,8 +588,9 @@ fun sshExecTool(context: Context, toolSecrets: SshToolSecretSanitizer = SshToolS
             ))
         }
         val effectiveCommand = if (background) wrapDetachedCommand(command) else command
-        val payload = runCancellableSshOp(timeoutSec * 1000L) { sessionRef ->
-            execOneShot(context, host, port, user, auth, effectiveCommand, timeoutSec * 1000, sessionRef, stdin)
+        val output = SshCommandOutput()
+        val payload = runCancellableSshOp(timeoutSec * 1000L, output) { sessionRef ->
+            execOneShot(context, host, port, user, auth, effectiveCommand, timeoutSec * 1000, sessionRef, stdin, output)
         }
         listOf(UIMessagePart.Text(payload.toString()))
     }
@@ -557,12 +609,21 @@ fun sshExecTool(context: Context, toolSecrets: SshToolSecretSanitizer = SshToolS
  */
 internal suspend fun runCancellableSshOp(
     timeoutMs: Long,
+    output: SshCommandOutput? = null,
     block: suspend (sessionRef: AtomicReference<Session?>) -> JsonObject,
 ): JsonObject {
     val sessionRef = AtomicReference<Session?>(null)
     return try {
         withTimeoutOrNull(timeoutMs) { block(sessionRef) }
-            ?: buildJsonObject { put("error", "timeout") }
+            ?: buildJsonObject {
+                put("error", "timeout")
+                put("recovery", "Операция SSH/SFTP не завершилась за ${timeoutMs / 1000} с. Проверьте состояние операции на сервере перед повтором; при необходимости увеличьте timeout_seconds.")
+                output?.partial()?.forEach { (key, value) -> put(key, value) }
+            }
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        JsonObject(sshFailureEnvelope(error) + output?.partial().orEmpty())
     } finally {
         // Forcibly disconnect the session if it's still open. Safe to call on an already-
         // disconnected session — JSch's Session.disconnect is idempotent.
@@ -589,6 +650,7 @@ internal suspend fun execOneShot(
     timeoutMs: Int,
     sessionRef: AtomicReference<Session?>,
     stdin: String? = null,
+    output: SshCommandOutput = SshCommandOutput(),
 ): JsonObject {
     // Stage 1 (suspend): low-level reachability probe in parallel across every transport.
     // JSch's connect timeout fires at the END of the SSH handshake, so when the network is
@@ -613,9 +675,10 @@ internal suspend fun execOneShot(
         sessionRef.set(session)
         Log.i(TAG_SSH, "ssh session up via ${outcome.winningLabel ?: "default"} in ${System.currentTimeMillis() - handshakeStart}ms")
         try {
-            runOnSession(session, command, timeoutMs, stdin)
+            runOnSession(session, command, timeoutMs, stdin, output)
         } catch (e: Throwable) {
-            buildJsonObject { put("error", "Ошибка выполнения SSH: ${SecretRedactor.redact(e.message ?: "неизвестная ошибка")}") }
+            JsonObject(sshFailureEnvelope(e, "Ошибка выполнения SSH.",
+                "Проверьте соединение и состояние команды на сервере перед повтором; частичные stdout/stderr сохранены.") + output.partial())
         } finally {
             sessionRef.set(null)
             try { session.disconnect() } catch (_: Throwable) {}
@@ -668,7 +731,9 @@ internal fun wrapConnectError(host: String, e: Throwable): JsonObject {
     return buildJsonObject {
         put("error", "connect_failed")
         put("host", host)
-        put("reason", msg.ifBlank { e::class.simpleName ?: "unknown" })
+        put("reason", "Не удалось подключиться к серверу SSH.")
+        put("recovery", "Проверьте host, port, сетевое подключение и доступность SSH на сервере, затем повторите вызов.")
+        put("raw", msg.ifBlank { e::class.simpleName ?: "unknown" })
     }
 }
 

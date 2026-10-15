@@ -17,5 +17,5 @@ fun fingerprintTool(context: Context): Tool = personalJsonTool(context,"verify_f
         PersonalUiRequest.Biometric(title,subtitle,personalBoolean(it,"allow_device_credential",false))
     }, read={ request -> when (val result=awaitPersonalToolUi(context,request,180000)) {
         is PersonalUiResult.Authentication -> buildJsonObject { put("success",true); put("method",result.method) }
-        else -> personalUiError(result)
+        else -> personalUiError(result, "Проверьте биометрию и способ блокировки экрана в настройках безопасности Android.")
     } })

@@ -43,13 +43,13 @@ internal fun buildTextToSpeechTool(
             required = listOf("text")
         )
     },
-    execute = {
+    execute = { deviceToolParts {
         val text = it.jsonObject["text"]?.jsonPrimitive?.contentOrNull
-            ?: error("text is required")
+            ?: error("Укажите text — текст для озвучивания.")
         eventBus.emit(AppEvent.Speak(text))
         val payload = buildJsonObject {
             put("success", true)
         }
         listOf(UIMessagePart.Text(payload.toString()))
-    }
+    } }
 )

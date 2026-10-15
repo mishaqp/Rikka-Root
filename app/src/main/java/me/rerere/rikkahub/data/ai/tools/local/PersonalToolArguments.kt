@@ -56,7 +56,7 @@ internal fun speechTimeout(input: JsonObject): Int = personalInt(input, "timeout
 internal fun speechLanguage(value: String?): String {
     if (value == null) return Locale.getDefault().toLanguageTag()
     require(value.length <= 80 && Regex("[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*").matches(value)) { "language должен быть корректным тегом языка, например ru-RU." }
-    return Locale.forLanguageTag(value).toLanguageTag().also { require(it != "und") { "Неизвестный тег языка." } }
+    return Locale.forLanguageTag(value).toLanguageTag().also { require(it != "und") { "Неизвестный тег языка. Укажите поддерживаемый тег, например ru-RU." } }
 }
 internal data class LocationArguments(val accuracy: String, val timeoutMs: Int)
 internal fun locationProviders(accuracy: String, precise: Boolean, sdkInt: Int, enabled: (String) -> Boolean): List<String> {
@@ -80,7 +80,7 @@ internal fun <T> personalJsonTool(
     deviceToolResult {
         val obj = input as? JsonObject ?: return@deviceToolResult deviceToolError("Параметры должны быть объектом.")
         val args = try { validate(obj) } catch (error: IllegalArgumentException) {
-            return@deviceToolResult deviceToolError(error.message ?: "Некорректные параметры.")
+            return@deviceToolResult deviceToolError(deviceToolFailureReason(error))
         }
         val missing = missingLocalToolPermissions(context, option)
         if (missing.isNotEmpty()) return@deviceToolResult deviceToolError("Доступ не предоставлен или отозван. Включите разрешение этой функции в настройках ассистента.", missing.first())

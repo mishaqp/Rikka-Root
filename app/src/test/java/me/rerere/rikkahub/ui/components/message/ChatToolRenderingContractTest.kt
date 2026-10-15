@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.components.message
 
 import me.rerere.rikkahub.ui.components.message.tools.ToolUIRegistry
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -39,5 +40,29 @@ class ChatToolRenderingContractTest {
             "renderer.Summary(context)", "webviewParts.forEach { SkillWebviewCardOrNull(it) }",
             "val outputUnparsable = tool.isExecuted && outputJson == null", "DefaultToolPreview(", "renderer.Preview(",
         ).forEach { fragment -> assertTrue("Tool rendering lost $fragment", body.contains(ChatProductionSource.canonical(fragment))) }
+    }
+
+    @Test fun expandedGenericAndServerCardsNeverDumpJsonEnvelopes() {
+        val generic = ChatProductionSource.canonical(ChatProductionSource.function("ui/components/message/tools/ToolUI.kt", "DefaultToolPreview"))
+        val server = ChatProductionSource.canonical(ChatProductionSource.function("ui/components/message/ChatMessageTools.kt", "ChatMessageServerToolStep"))
+        listOf("JsonInstantPretty.encodeToString", "language = \"json\"").forEach { raw ->
+            assertFalse("Generic details still display raw JSON", generic.contains(ChatProductionSource.canonical(raw)))
+            assertFalse("Server details still display raw JSON", server.contains(ChatProductionSource.canonical(raw)))
+        }
+    }
+
+    @Test fun expandedErrorsUseTheReadablePreviewWithoutEllipsis() {
+        val tools = ChatProductionSource.canonical(ChatProductionSource.function("ui/components/message/ChatMessageTools.kt", "ChatMessageToolStep"))
+        assertTrue("Failed results must bypass specialized JSON details", tools.contains(ChatProductionSource.canonical("if (resultPreview is ToolResultPreview.Error)")))
+        val preview = ChatProductionSource.canonical(ChatProductionSource.function("ui/components/message/ChatMessageTools.kt", "ToolResultPreviewText"))
+        val errorBranch = preview.substringAfter("isToolResultPreview.Error->").substringBefore("isToolResultPreview.Summary->")
+        assertFalse("Partial failure warnings must not be ellipsized", errorBranch.contains("maxLines="))
+        assertFalse("Partial failure warnings must not be ellipsized", errorBranch.contains("overflow="))
+    }
+
+    @Test fun mcpFailureDoesNotSuppressAllOriginalTextParts() {
+        val generic = ChatProductionSource.canonical(ChatProductionSource.function("ui/components/message/tools/ToolUI.kt", "DefaultToolPreview"))
+        assertFalse("Partial effects reported by the server must remain visible", generic.contains(
+            ChatProductionSource.canonical("is UIMessagePart.Text -> if (resultPreview !is ToolResultPreview.Error)")))
     }
 }

@@ -90,8 +90,8 @@ class WorkspaceManager(
         area: WorkspaceStorageArea = WorkspaceStorageArea.FILES,
     ): Long {
         val file = fileSystem.resolve(areaDir(root, area), path)
-        require(file.exists()) { "File does not exist: $path" }
-        require(file.isFile) { "Path is not a file: $path" }
+        require(file.exists()) { "Файл не найден. Проверьте путь: $path" }
+        require(file.isFile) { "Это папка, а нужен файл. Укажите путь к файлу: $path" }
         return file.length()
     }
 
@@ -101,8 +101,8 @@ class WorkspaceManager(
         area: WorkspaceStorageArea = WorkspaceStorageArea.FILES,
     ): File {
         val file = fileSystem.resolve(areaDir(root, area), path)
-        require(file.exists()) { "File does not exist: $path" }
-        require(file.isFile) { "Path is not a file: $path" }
+        require(file.exists()) { "Файл не найден. Проверьте путь: $path" }
+        require(file.isFile) { "Это папка, а нужен файл. Укажите путь к файлу: $path" }
         return file
     }
 
@@ -113,8 +113,8 @@ class WorkspaceManager(
         outputStream: OutputStream,
     ) {
         val file = fileSystem.resolve(areaDir(root, area), path)
-        require(file.exists()) { "File does not exist: $path" }
-        require(file.isFile) { "Path is not a file: $path" }
+        require(file.exists()) { "Файл не найден. Проверьте путь: $path" }
+        require(file.isFile) { "Это папка, а нужен файл. Укажите путь к файлу: $path" }
         outputStream.use { out -> file.inputStream().use { it.copyTo(out) } }
     }
 
@@ -127,7 +127,7 @@ class WorkspaceManager(
      */
     fun resolveRootfsPath(root: String, path: String): RootfsLocation {
         val trimmed = path.trim().trimEnd('/').ifBlank { "/" }
-        require(trimmed.startsWith("/")) { "Rootfs path must be absolute: $path" }
+        require(trimmed.startsWith("/")) { "Укажите полный путь внутри Rootfs, начиная с /: $path" }
 
         sortedBindMounts.forEach { mount ->
             val target = mount.target.trimEnd('/')
@@ -146,7 +146,7 @@ class WorkspaceManager(
 
         // 内核伪文件系统: 显式拒绝, 而不是回落到一个必然读不到的物理路径
         KERNEL_FS_MOUNTS.firstOrNull { trimmed == it || trimmed.startsWith("$it/") }?.let {
-            error("$it is a kernel filesystem and cannot be read as a file, use workspace_shell instead")
+            error("Это системная папка ядра. Для чтения $it используйте workspace_shell.")
         }
 
         return RootfsLocation(linuxDir(root), trimmed.trimStart('/'))
@@ -167,8 +167,8 @@ class WorkspaceManager(
     }
 
     private fun File.requireReadableFile(path: String) {
-        require(exists()) { "File does not exist: $path" }
-        require(isFile) { "Path is not a file: $path" }
+        require(exists()) { "Файл не найден. Проверьте путь: $path" }
+        require(isFile) { "Это папка, а нужен файл. Укажите путь к файлу: $path" }
     }
 
     fun deleteFile(
@@ -217,10 +217,10 @@ class WorkspaceManager(
 
     private fun commandContext(root: String, command: String, cwd: String, timeoutMillis: Long,
         stdin: ByteArray?, shellCompatibilityMode: Boolean): WorkspaceShellContext {
-        require(command.isNotBlank()) { "Command is required" }
+        require(command.isNotBlank()) { "Укажите непустую команду." }
         val workingDir = fileSystem.resolve(filesDir(root), cwd)
-        require(workingDir.exists()) { "Working directory does not exist: $cwd" }
-        require(workingDir.isDirectory) { "Working path is not a directory: $cwd" }
+        require(workingDir.exists()) { "Рабочая папка не найдена. Проверьте cwd: $cwd" }
+        require(workingDir.isDirectory) { "В cwd указан файл. Укажите рабочую папку: $cwd" }
 
         return WorkspaceShellContext(
             root = root,
@@ -239,7 +239,7 @@ class WorkspaceManager(
 
     private fun requireValidRoot(root: String) {
         require(root.matches(ROOT_NAME_REGEX)) {
-            "Invalid workspace root name: $root"
+            "Недопустимое имя рабочей папки. Выберите рабочую папку заново."
         }
     }
 

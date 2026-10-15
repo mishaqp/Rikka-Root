@@ -8,8 +8,10 @@ import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.add
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -23,7 +25,9 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.preferences.TermuxDefaults
 import me.rerere.rikkahub.data.preferences.TermuxRuntime
+import me.rerere.rikkahub.reliability.SecretRedactor
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
 
 private const val TERMUX_PACKAGE = "com.termux"
 private const val TERMUX_RUN_COMMAND_SERVICE = "com.termux.app.RunCommandService"
@@ -147,9 +151,53 @@ internal sealed class CaptureResult {
         val stderr: String,
         val exitCode: Int,
     ) : CaptureResult()
-    data object Timeout : CaptureResult()
-    data object Denied : CaptureResult()
-    data class OtherError(val message: String) : CaptureResult()
+    data class Timeout(val details: CaptureFailureDetails = CaptureFailureDetails()) : CaptureResult()
+    data class Denied(val details: CaptureFailureDetails = CaptureFailureDetails()) : CaptureResult()
+    data class OtherError(val message: String, val details: CaptureFailureDetails = CaptureFailureDetails()) : CaptureResult()
+}
+
+/** Preserve Termux's own diagnostic fields without using errmsg as the human explanation. */
+internal data class CaptureFailureDetails(
+    val rawError: String? = null,
+    val errorCode: Int? = null,
+    val stdout: String = "",
+    val stderr: String = "",
+    val exitCode: Int? = null,
+) {
+    fun json(): JsonObject = buildJsonObject {
+        rawError?.let { put("raw", SecretRedactor.redact(it)) }
+        errorCode?.let { put("err", it) }
+        exitCode?.let { put("exit_code", it) }
+        if (stdout.isNotEmpty()) put("partial_stdout", boundedFailureOutput(stdout, TermuxRuntime.maxStdoutBytes))
+        if (stderr.isNotEmpty()) put("partial_stderr", boundedFailureOutput(stderr, TermuxRuntime.maxStderrBytes))
+    }
+}
+
+private fun boundedFailureOutput(text: String, limit: Int): String {
+    val kept = takeFirstUtf8Bytes(text, limit)
+    return if (kept.length == text.length) text else kept +
+        "\n…[вывод сокращён; ещё ${text.toByteArray(Charsets.UTF_8).size - kept.toByteArray(Charsets.UTF_8).size} байт]"
+}
+
+internal fun CaptureResult.failureDiagnostics(): JsonObject = when (this) {
+    is CaptureResult.OtherError -> details.json()
+    is CaptureResult.Denied -> details.json()
+    is CaptureResult.Timeout -> details.json()
+    is CaptureResult.Success -> CaptureFailureDetails(stdout = stdout, stderr = stderr, exitCode = exitCode).json()
+    else -> JsonObject(emptyMap())
+}
+
+private fun captureFailure(error: Throwable, action: String): CaptureResult.OtherError {
+    if (error is CancellationException) throw error
+    val raw = error.message.orEmpty()
+    val reason = if (raw.contains("not allowed to start service", ignoreCase = true) ||
+        raw.contains("background", ignoreCase = true) && raw.contains("start", ignoreCase = true)) {
+        "Android запретил запуск Termux из фона. Откройте Termux и разрешите ему «Поверх других приложений» в настройках Android, затем повторите вызов."
+    } else "${deviceToolFailureReason(error)} Проверьте Termux и повторите попытку."
+    return CaptureResult.OtherError(
+        "$action $reason",
+        CaptureFailureDetails(rawError = error.message ?: error.javaClass.simpleName),
+    )
 }
 
 /**
@@ -217,9 +265,11 @@ internal suspend fun runCommandCapture(
     timeoutMs: Long = TermuxRuntime.commandTimeoutMs,
 ): CaptureResult {
     checkTermuxCommand(executable, arguments)?.let {
-        return CaptureResult.OtherError("blocked_by_safety_floor: $it")
+        return CaptureResult.OtherError("Команда Termux запрещена защитой root. $it",
+            CaptureFailureDetails(rawError = "blocked_by_safety_floor: $it"))
     }
     val resultDeferred = CompletableDeferred<Bundle>()
+    val partialOutput = AtomicReference(CaptureFailureDetails())
     val resultAction = "${ctx.packageName}.TERMUX_RESULT_${UUID.randomUUID()}"
     // Per-call completion marker (see buildMarkerWrappedArgv / isTerminalResult). Termux's
     // start-ACK broadcast is byte-identical to a successful empty run (err=-1, exitCode=0,
@@ -262,16 +312,28 @@ internal suspend fun runCommandCapture(
                     stdout = effective.getString(RESULT_KEY_STDOUT).orEmpty(),
                     marker = marker,
                 )
-            ) return
+            ) {
+                val stdout = effective.getString(RESULT_KEY_STDOUT).orEmpty()
+                val stderr = effective.getString(RESULT_KEY_STDERR).orEmpty()
+                partialOutput.updateAndGet { previous -> previous.copy(
+                    stdout = stdout.ifEmpty { previous.stdout },
+                    stderr = stderr.ifEmpty { previous.stderr },
+                ) }
+                return
+            }
             if (resultDeferred.isActive) resultDeferred.complete(effective)
         }
     }
     val filter = IntentFilter(resultAction)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        ctx.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
-    } else {
-        @Suppress("UnspecifiedRegisterReceiverFlag")
-        ctx.registerReceiver(receiver, filter)
+    try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ctx.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            ctx.registerReceiver(receiver, filter)
+        }
+    } catch (error: Exception) {
+        return captureFailure(error, "Не удалось подготовить получение результата Termux.")
     }
 
     val pi = try {
@@ -287,7 +349,7 @@ internal suspend fun runCommandCapture(
         )
     } catch (t: Throwable) {
         try { ctx.unregisterReceiver(receiver) } catch (_: Throwable) {}
-        return CaptureResult.OtherError("Не удалось создать PendingIntent: ${t.message}")
+        return captureFailure(t, "Не удалось подготовить получение результата Termux.")
     }
 
     // Always dispatch through bash so the marker print above is reachable, regardless of what
@@ -315,7 +377,7 @@ internal suspend fun runCommandCapture(
         ctx.startService(intent)
         val bundle = withTimeoutOrNull(timeoutMs) { resultDeferred.await() }
         if (bundle == null) {
-            CaptureResult.Timeout
+            CaptureResult.Timeout(partialOutput.get())
         } else {
             // Per the Termux RUN_COMMAND wiki: `err = -1` (= Activity.RESULT_OK) means
             // "no internal error" — i.e. the success sentinel. Any value other than -1
@@ -325,25 +387,34 @@ internal suspend fun runCommandCapture(
             val errCode = bundle.getInt(RESULT_KEY_ERR, -1)
             if (errCode != -1) {
                 val errMsg = bundle.getString(RESULT_KEY_ERRMSG).orEmpty()
+                val details = CaptureFailureDetails(
+                    rawError = errMsg,
+                    errorCode = errCode,
+                    stdout = stripTerminationMarker(bundle.getString(RESULT_KEY_STDOUT).orEmpty(), marker)
+                        .ifEmpty { partialOutput.get().stdout },
+                    stderr = bundle.getString(RESULT_KEY_STDERR).orEmpty().ifEmpty { partialOutput.get().stderr },
+                    exitCode = bundle.getInt(RESULT_KEY_EXIT_CODE, -1),
+                )
                 if (errMsg.contains("PermissionDenied", ignoreCase = true) ||
                     errMsg.contains("not allowed", ignoreCase = true)
                 ) {
-                    CaptureResult.Denied
+                    CaptureResult.Denied(details)
                 } else {
-                    CaptureResult.OtherError("err=$errCode: $errMsg")
+                    CaptureResult.OtherError("Termux не выполнил команду. Проверьте Termux и параметры command/executable, затем повторите попытку.", details)
                 }
             } else {
                 CaptureResult.Success(
-                    stdout = stripTerminationMarker(bundle.getString(RESULT_KEY_STDOUT).orEmpty(), marker),
-                    stderr = bundle.getString(RESULT_KEY_STDERR).orEmpty(),
+                    stdout = stripTerminationMarker(bundle.getString(RESULT_KEY_STDOUT).orEmpty(), marker)
+                        .ifEmpty { partialOutput.get().stdout },
+                    stderr = bundle.getString(RESULT_KEY_STDERR).orEmpty().ifEmpty { partialOutput.get().stderr },
                     exitCode = bundle.getInt(RESULT_KEY_EXIT_CODE, -1),
                 )
             }
         }
     } catch (t: SecurityException) {
-        CaptureResult.Denied
+        CaptureResult.Denied(CaptureFailureDetails(rawError = t.message ?: t.javaClass.simpleName))
     } catch (t: Throwable) {
-        CaptureResult.OtherError(t.message ?: t::class.java.simpleName)
+        captureFailure(t, "Не удалось запустить команду Termux.")
     } finally {
         try { ctx.unregisterReceiver(receiver) } catch (_: Throwable) {}
         try { pi.cancel() } catch (_: Throwable) {}
@@ -532,11 +603,13 @@ fun termuxRunCommandTool(context: Context): Tool = Tool(
                     )
                 )
             } catch (t: Throwable) {
+                val failure = captureFailure(t, "Не удалось открыть сессию Termux.")
                 listOf(
                     UIMessagePart.Text(
                         buildJsonObject {
                             put("error", "dispatch_failed")
-                            put("reason", t.message ?: t::class.java.simpleName)
+                            put("reason", failure.message)
+                            failure.failureDiagnostics().forEach { (key, value) -> put(key, value) }
                         }.toString()
                     )
                 )
@@ -575,21 +648,22 @@ fun termuxRunCommandTool(context: Context): Tool = Tool(
                         }
                     )
                 }
-                if (res.exitCode != 0) {
-                    put("note", "Команда завершилась с ненулевым кодом. Проверьте stderr.")
-                }
+                commandExitFailureReason(res.exitCode)?.let { put("note", it) }
             }
             is CaptureResult.Timeout -> buildJsonObject {
                 put("error", "timeout")
                 put("recovery", "Команда не вернула результат за ${timeoutMs / 1000} с. Увеличьте timeout_seconds или проверьте allow-external-apps=true в ~/.termux/termux.properties. После изменения принудительно остановите Termux и откройте снова.")
+                res.failureDiagnostics().forEach { (key, value) -> put(key, value) }
             }
             is CaptureResult.Denied -> buildJsonObject {
                 put("error", "termux_permission_denied")
                 put("recovery", "Откройте Termux и выполните: mkdir -p ~/.termux && echo 'allow-external-apps=true' >> ~/.termux/termux.properties. Принудительно остановите Termux в настройках Android, откройте снова и повторите команду.")
+                res.failureDiagnostics().forEach { (key, value) -> put(key, value) }
             }
             is CaptureResult.OtherError -> buildJsonObject {
                 put("error", "termux_run_failed")
                 put("reason", res.message)
+                res.failureDiagnostics().forEach { (key, value) -> put(key, value) }
             }
         }
         listOf(UIMessagePart.Text(payload.toString()))

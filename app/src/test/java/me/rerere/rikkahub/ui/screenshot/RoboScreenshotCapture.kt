@@ -14,6 +14,7 @@ internal fun captureRoboFrame(
     artifact: File,
     baseline: File,
     options: RoborazziOptions,
+    afterWarmup: () -> Unit = {},
     captureUi: (File, RoborazziOptions) -> Unit,
 ) {
     // Publishing an actual frame must never overwrite the expected pixels
@@ -34,8 +35,11 @@ internal fun captureRoboFrame(
     )
     try {
         // The first native draw after an offscreen layer changes size can omit
-        // its text. Discard that draw; no test or Android clock advances here.
+        // its text. The draw can also start a native ripple for the first time.
         captureUi(warmup, warmupOptions)
+        // Steady-state callers may drain the real animation clocks after that first draw;
+        // frozen fixtures keep their chosen phase by using the default no-op callback.
+        afterWarmup()
     } finally {
         warmup.delete()
     }

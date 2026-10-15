@@ -62,6 +62,6 @@ internal class AndroidToolKeyStore(private val context: Context) : ToolKeyStore 
             try { builder.setIsStrongBoxBacked(true); create() }
             catch (_: StrongBoxUnavailableException) { builder.setIsStrongBoxBacked(false); create() }
         } else create()
-        return entry(alias)?.metadata ?: throw ToolKeyFailure("Android не подтвердил создание ключа.")
+        return entry(alias)?.metadata ?: throw ToolKeyFailure("Android не подтвердил создание ключа. Проверьте результат через keystore_list_keys перед новой попыткой.")
     }
 }
