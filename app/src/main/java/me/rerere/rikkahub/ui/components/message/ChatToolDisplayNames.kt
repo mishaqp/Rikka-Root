@@ -99,6 +99,7 @@ private val nativeTimelineToolNames = mapOf(
     "download_file" to R.string.chat_timeline_tool_download_file,
     "grant_directory_access" to R.string.chat_timeline_tool_grant_directory_access,
     "list_granted_directories" to R.string.chat_timeline_tool_list_granted_directories,
+    "revoke_directory_access" to R.string.chat_timeline_tool_revoke_directory_access,
     "list_storage_volumes" to R.string.chat_timeline_tool_list_storage_volumes,
     "batch_copy" to R.string.chat_timeline_tool_batch_copy,
     "batch_delete" to R.string.chat_timeline_tool_batch_delete,

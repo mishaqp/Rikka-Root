@@ -205,7 +205,7 @@ class LocalToolMetadata(context: Context) {
                 LocalToolOption.Reliability -> listOf(generateBugReportTool(context, BugReportBuilder(context)))
                 LocalToolOption.Files -> fileManagerTools(access, context, canReadImages)
                 LocalToolOption.ExternalStorage -> listOf(listStorageVolumesTool(context), listGrantedDirectoriesTool(context),
-                    grantDirectoryAccessTool(context))
+                    grantDirectoryAccessTool(context), revokeDirectoryAccessTool(context))
                 LocalToolOption.Archive -> listOf(zipFilesTool(context, access), unzipFileTool(context, access),
                     listZipContentsTool(context, access))
                 LocalToolOption.MediaPlayer -> listOf(playMediaTool(context, access), stopMediaTool(context),

@@ -170,7 +170,7 @@ class LocalTools(
                 loadConversation = { id -> get().get<ConversationRepository>().getConversationById(id) }))
         }
         tools.addAll(scopedFileTools(context, options, workspaceCwd, chatImages, resolveWorkspacePath, modelCanReadImages))
-        if (LocalToolOption.ExternalStorage in options) tools.addAll(listOf(listStorageVolumesTool(context), listGrantedDirectoriesTool(context), grantDirectoryAccessTool(context)))
+        if (LocalToolOption.ExternalStorage in options) tools.addAll(listOf(listStorageVolumesTool(context), listGrantedDirectoriesTool(context), grantDirectoryAccessTool(context), revokeDirectoryAccessTool(context)))
         if (LocalToolOption.SystemIntents in options) tools.addAll(systemIntentTools(context))
         if (LocalToolOption.AppLauncher in options) tools.addAll(appLauncherTools(context))
         if (LocalToolOption.Location in options) tools.add(locationTool(context))

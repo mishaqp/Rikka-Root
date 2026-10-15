@@ -118,6 +118,7 @@ object ToolPermissionPolicy {
         "list_storage_volumes" to "список накопителей",
         "list_granted_directories" to "список папок SAF",
         "grant_directory_access" to "выбор папки SAF",
+        "revoke_directory_access" to "отзыв доступа к папке SAF",
         "zip_files" to "создание ZIP",
         "unzip_file" to "распаковка ZIP",
         "list_zip_contents" to "содержимое ZIP",

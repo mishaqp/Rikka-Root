@@ -170,6 +170,21 @@ class SafAbsolutePathRoutingTest {
         assertFalse(File(primary, "Download/a.txt").exists())
     }
 
+    @Test fun revokeDirectoryAccessReleasesOnlyTheNamedGrant(): Unit = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val root = Uri.parse("content://com.android.externalstorage.documents/tree/primary%3A")
+        val both = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        context.contentResolver.takePersistableUriPermission(tree, both)
+        context.contentResolver.takePersistableUriPermission(root, both)
+        val tool = revokeDirectoryAccessTool(context)
+        val unknown = body(tool.execute(buildJsonObject { put("content_uri", "content://com.android.externalstorage.documents/tree/primary%3ADCIM") }))
+        assertTrue(unknown.toString(), unknown["error"]!!.jsonPrimitive.content.contains("list_granted_directories"))
+        assertNotNull(body(tool.execute(buildJsonObject { }))["error"])
+        val revoked = body(tool.execute(buildJsonObject { put("content_uri", root.toString()) }))
+        assertEquals("true", revoked["revoked"]?.jsonPrimitive?.content)
+        assertEquals(listOf(tree), context.contentResolver.persistedUriPermissions.map { it.uri })
+    }
+
     @Test fun downloadsProviderSuppliesOpaqueIdsForEachSelectedDescendant(): Unit = runBlocking {
         val context = RuntimeEnvironment.getApplication()
         val primary = primary(context)
@@ -279,6 +294,16 @@ class SafAbsolutePathRoutingTest {
         val downloads = DocumentsContract.buildTreeDocumentUri("com.android.providers.downloads.documents", "downloads")
         assertDirectoryCopyIntoGrantedRoot(downloads, "downloads")
     }
+
+    @Test fun readingAMissingGrantedDocumentSaysTheFileIsMissing(): Unit = runBlocking { withNewFileFixture { context, access, _, path ->
+        // Real providers reject a missing document with assorted exception types, not only FileNotFoundException.
+        val missing = access.resolve(path("missing.txt")) as LocalFileSource.Content
+        shadowOf(context.contentResolver).registerInputStreamSupplier(missing.uri) { throw IllegalStateException("provider refused") }
+        val result = body(fileManagerTools(access).single { it.name == "read_file" }.execute(buildJsonObject { put("path", path("missing.txt")) }))
+        val text = result.toString()
+        assertTrue(text, text.contains("не найден"))
+        assertFalse(text, text.contains("отклонил"))
+    } }
 
     @Test fun createsNewTextDocumentAtAbsoluteSafPath(): Unit = runBlocking { withNewFileFixture { _, access, provider, path ->
         val result = body(writeTextFileTool(access).execute(buildJsonObject { put("path", path("new.txt")); put("content", "Новый") }))

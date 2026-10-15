@@ -183,7 +183,7 @@ private val exactToolIcons: Map<String, ImageVector> = buildMap {
     listOf("read_file", "write_text_file", "write_binary_file", "delete_file", "copy_file", "move_file",
         "batch_copy", "batch_move", "batch_delete", "file_info", "find_files", "list_files", "create_directory",
         "open_file").forEach { put(it, HugeIcons.Files02) }
-    listOf("list_storage_volumes", "grant_directory_access", "list_granted_directories")
+    listOf("list_storage_volumes", "grant_directory_access", "list_granted_directories", "revoke_directory_access")
         .forEach { put(it, HugeIcons.Folder01) }
     listOf("zip_files", "unzip_file", "list_zip_contents").forEach { put(it, HugeIcons.Package01) }
     listOf("play_media", "pause_media", "resume_media", "stop_media", "seek_media", "get_media_status")

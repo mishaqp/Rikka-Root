@@ -28,7 +28,7 @@ class ChatToolDisplayNamesTest {
             literalRegistration.findAll(ChatProductionSource.read("data/ai/tools/$path.kt"))
                 .forEach { names.add(it.groupValues[1]) }
         }
-        assertEquals("The audited native catalog changed; review display coverage", 182, names.size)
+        assertEquals("The audited native catalog changed; review display coverage", 183, names.size)
         val resources = russianResources()
         names.forEach { name ->
             assertNotNull("Missing display name for $name", timelineToolNameResource(name))

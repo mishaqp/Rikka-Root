@@ -195,7 +195,7 @@ internal fun localOptionForHeadlessTool(name: String): LocalToolOption? = when (
     "external_automation_remove_trusted_package" -> LocalToolOption.ExternalAutomation
     "list_files", "read_file", "write_binary_file", "delete_file", "move_file", "copy_file", "create_directory",
     "file_info", "find_files", "show_image", "open_file", "batch_copy", "batch_move", "batch_delete" -> LocalToolOption.Files
-    "list_storage_volumes", "list_granted_directories", "grant_directory_access" -> LocalToolOption.ExternalStorage
+    "list_storage_volumes", "list_granted_directories", "grant_directory_access", "revoke_directory_access" -> LocalToolOption.ExternalStorage
     "zip_files", "unzip_file", "list_zip_contents" -> LocalToolOption.Archive
     "play_media", "stop_media", "pause_media", "resume_media", "seek_media", "get_media_status" -> LocalToolOption.MediaPlayer
     "scan_media" -> LocalToolOption.MediaScanner

@@ -324,7 +324,15 @@ class LocalFileAccess internal constructor(
             is LocalFileSource.Local -> checkFile(source.file).inputStream()
             is LocalFileSource.Content -> {
                 checkGrant(source, false)
-                SafInputStream(requireNotNull(safProviderCall { androidContext.contentResolver.openInputStream(source.uri) }) { "Не удалось открыть файл." })
+                val input = try { safProviderCall { androidContext.contentResolver.openInputStream(source.uri) } }
+                catch (failure: SafFileOperationException) {
+                    // Providers report a missing document with assorted exception types; name the real cause.
+                    val missing = try { !exists(source) } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { false }
+                    if (missing) throw SafFileOperationException(java.nio.file.NoSuchFileException("document"))
+                    throw failure
+                }
+                SafInputStream(requireNotNull(input) { "Не удалось открыть файл." })
             }
         }
     }

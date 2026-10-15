@@ -2,6 +2,7 @@
 package me.rerere.rikkahub.data.ai.tools.local
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -143,6 +144,32 @@ fun listGrantedDirectoriesTool(context: Context): Tool = Tool(
                 storageParts(buildJsonObject { put("directories", directories) })
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { storageError("Не удалось прочитать сохранённые разрешения Android.") }
+        }
+    },
+)
+
+/** Releases only a grant Android actually holds for this app; the picker can grant it again later. */
+fun revokeDirectoryAccessTool(context: Context): Tool = Tool(
+    name = "revoke_directory_access",
+    description = "Отозвать постоянный доступ к папке, выданный через grant_directory_access. content_uri берите из list_granted_directories.",
+    parameters = { InputSchema.Obj(buildJsonObject {
+        put("content_uri", buildJsonObject { put("type", "string"); put("description", "content:// URI папки из list_granted_directories") })
+    }, required = listOf("content_uri")) },
+    needsApproval = { true },
+    execute = { input ->
+        withContext(Dispatchers.IO) {
+            try {
+                val requested = input.jsonObject["content_uri"]?.jsonPrimitive?.contentOrNull?.trim()
+                if (requested.isNullOrEmpty()) return@withContext storageError("Укажите content_uri папки из list_granted_directories.")
+                val grant = context.contentResolver.persistedUriPermissions.firstOrNull {
+                    it.uri.toString() == requested && DocumentsContract.isTreeUri(it.uri)
+                } ?: return@withContext storageError("Доступа к такой папке нет. Посмотрите список через list_granted_directories.")
+                val flags = (if (grant.isReadPermission) Intent.FLAG_GRANT_READ_URI_PERMISSION else 0) or
+                    (if (grant.isWritePermission) Intent.FLAG_GRANT_WRITE_URI_PERMISSION else 0)
+                context.contentResolver.releasePersistableUriPermission(grant.uri, flags)
+                storageParts(buildJsonObject { put("revoked", true); put("content_uri", requested) })
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { storageError("Android не отозвал доступ к папке. Повторите попытку.") }
         }
     },
 )

@@ -73,6 +73,7 @@
     <string name="chat_timeline_tool_download_file" translatable="false">Загрузка файлов</string>
     <string name="chat_timeline_tool_grant_directory_access" translatable="false">Предоставление доступа к папке</string>
     <string name="chat_timeline_tool_list_granted_directories" translatable="false">Папки с предоставленным доступом</string>
+    <string name="chat_timeline_tool_revoke_directory_access" translatable="false">Отзыв доступа к папке</string>
     <string name="chat_timeline_tool_list_storage_volumes" translatable="false">Список накопителей</string>
     <string name="chat_timeline_tool_batch_copy" translatable="false">Копирование файлов</string>
     <string name="chat_timeline_tool_batch_delete" translatable="false">Удаление файлов</string>
