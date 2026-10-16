@@ -28,6 +28,36 @@ class RootToolTest {
             assertEquals(RootStatus.UNCHECKED, manager.status.value)
         }
     }
+    @Test fun `foreground automatic root blocks destruction before probing`() = runBlocking {
+        val manager = RootShellManager(suExecutable = "/nonexistent/root-su")
+        val output = withContext(RootInvocation(automatic = true, automaticAllowed = { true })) {
+            buildRootTool(manager).execute(buildJsonObject { put("command", "rm -rf /system") })
+        }
+        val response = Json.parseToJsonElement((output.single() as UIMessagePart.Text).text).jsonObject
+        assertEquals("root_command_blocked", response["error"]!!.jsonPrimitive.content)
+        assertEquals(RootStatus.UNCHECKED, manager.status.value)
+    }
+
+    @Test fun `foreground automatic root blocks reboot before probing`() = runBlocking {
+        val manager = RootShellManager(suExecutable = "/nonexistent/root-su")
+        val output = withContext(RootInvocation(automatic = true, automaticAllowed = { true })) {
+            buildRootTool(manager).execute(buildJsonObject { put("command", "reboot") })
+        }
+        val response = Json.parseToJsonElement((output.single() as UIMessagePart.Text).text).jsonObject
+        assertEquals("root_command_blocked", response["error"]!!.jsonPrimitive.content)
+        assertEquals(RootStatus.UNCHECKED, manager.status.value)
+    }
+
+    @Test fun `foreground explicitly approved root retains manual execution path`() = runBlocking {
+        val manager = RootShellManager(suExecutable = "/nonexistent/root-su")
+        val output = withContext(RootInvocation(automatic = false, automaticAllowed = { error("manual approval cannot consult automatic grant") })) {
+            buildRootTool(manager).execute(buildJsonObject { put("command", "rm -rf /system") })
+        }
+        val response = Json.parseToJsonElement((output.single() as UIMessagePart.Text).text).jsonObject
+        assertEquals("su_not_available", response["error"]!!.jsonPrimitive.content)
+        assertEquals(RootStatus.UNAVAILABLE, manager.status.value)
+    }
+
     @Test fun `requires approval directly for every argument set`() {
         val tool = buildRootTool(RootShellManager(suExecutable = "/nonexistent/root-su"))
         assertEquals("root_exec", tool.name)

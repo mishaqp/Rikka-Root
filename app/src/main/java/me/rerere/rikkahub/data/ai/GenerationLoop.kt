@@ -7,6 +7,7 @@ import me.rerere.rikkahub.data.ai.limits.ToolRuntimeLimits
 import android.util.Log
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -21,6 +22,7 @@ import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -50,6 +52,7 @@ import me.rerere.rikkahub.root.executeRootToolOnce
 import me.rerere.rikkahub.root.awaitRootCheckpoint
 import me.rerere.rikkahub.data.ai.tools.ToolPermissionPolicy.canResumeAutomatic
 import me.rerere.rikkahub.data.ai.tools.ToolPermissionPolicy
+import me.rerere.rikkahub.data.ai.tools.HardlineCommandGuard
 import me.rerere.rikkahub.data.ai.tools.WebContentGuard
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.MessageTransformer
@@ -121,6 +124,8 @@ class GenerationLoop(
         tokenBudget: TokenBudgetLedger? = null,
         prepareToolApproval: (String, JsonElement) -> JsonElement = { _, input -> input },
         beforeModelRequest: suspend () -> Unit = {},
+        onStepStarted: suspend () -> Unit = {},
+        onLimitReached: suspend (String) -> Unit = {},
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
@@ -142,13 +147,40 @@ class GenerationLoop(
             return definition.needsApproval(args) && !isToolAutoApproved(tool.toolName, args)
         }
 
+        fun toolError(code: String, message: String): List<UIMessagePart> = listOf(
+            UIMessagePart.Text(buildJsonObject { put("error", code); put("message", message) }.toString())
+        )
+        fun validateArguments(tool: UIMessagePart.Tool): UIMessagePart.Tool {
+            if (tool.isExecuted) return tool
+            val arguments = runCatching { json.parseToJsonElement(tool.input.ifBlank { "{}" }) }.getOrNull()
+            return if (arguments is JsonObject) tool else tool.copy(output = toolError(
+                "invalid_tool_arguments", "Некорректные аргументы инструмента: ожидается корректный JSON-объект. Исправьте параметры и повторите вызов."
+            ))
+        }
+
         val turnStartMs = SystemClock.elapsedRealtime()
         val turnBudgetMs = ToolRuntimeLimits.turnBudgetMs
+        var responseFinished = false
+        var waitingForApproval = false
+        var limitReason: String? = null
         for (stepIndex in 0 until minOf(maxSteps, ToolRuntimeLimits.maxToolSteps)) {
-            if (SystemClock.elapsedRealtime() - turnStartMs >= turnBudgetMs) break
+            if (SystemClock.elapsedRealtime() - turnStartMs >= turnBudgetMs) {
+                limitReason = "time_limit"
+                break
+            }
             budget?.ensureCanContinue()
             Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
 
+            // Also repair malformed calls restored from older versions before any approval check.
+            messages.lastOrNull()?.let { last ->
+                val checked = last.copy(parts = last.parts.map { part ->
+                    if (part is UIMessagePart.Tool) validateArguments(part) else part
+                })
+                if (checked != last) {
+                    messages = messages.dropLast(1) + checked
+                    emit(GenerationChunk.Messages(messages))
+                }
+            }
             // Check if we have tool calls ready to continue after user interaction.
             val pendingTools = messages.lastOrNull()?.getTools()?.filter {
                 it.canResumeExecution || canResumeAutomatic(it)
@@ -156,7 +188,11 @@ class GenerationLoop(
 
             val toolsToProcess: List<UIMessagePart.Tool>
 
-            if (pendingTools.isEmpty() && messages.lastOrNull()?.getTools()?.any { it.isPending } == true) break
+            if (pendingTools.isEmpty() && messages.lastOrNull()?.getTools()?.any { it.isPending } == true) {
+                waitingForApproval = true
+                break
+            }
+            onStepStarted()
 
             // Skip generation if we have approved/denied tool calls to handle
             if (pendingTools.isEmpty()) {
@@ -246,6 +282,7 @@ class GenerationLoop(
                 val toolCalls = messages.last().getTools().filter { !it.isExecuted }
                 if (toolCalls.isEmpty()) {
                     // no tool calls, break
+                    responseFinished = true
                     break
                 }
 
@@ -254,17 +291,14 @@ class GenerationLoop(
                 val updatedTools = ArrayList<UIMessagePart.Tool>(toolCalls.size)
                 for (tool in toolCalls) {
                     val toolDef = tools.find { it.name == tool.toolName }
-                    val hardlineReason = if (tool.toolName == "browser_eval_js")
-                        me.rerere.rikkahub.data.ai.tools.HardlineCommandGuard.checkTool(tool.toolName, tool.input)
-                    else null
+                    val checked = validateArguments(tool)
+                    val hardlineReason = HardlineCommandGuard.checkTool(tool.toolName, tool.input)
                     val updated = when {
-                        hardlineReason != null && tool.approvalState is ToolApprovalState.Auto -> {
+                        checked.isExecuted -> checked
+                        hardlineReason != null -> {
                             Log.w(TAG, "hardline-blocked ${tool.toolName}: $hardlineReason")
-                            tool.copy(approvalState = ToolApprovalState.Denied(
-                                "blocked by safety floor (hardline): $hardlineReason. " +
-                                    "This command cannot run via the agent under any " +
-                                    "circumstances. If the user genuinely needs it, they " +
-                                    "should run it themselves in a terminal outside the agent."
+                            tool.copy(output = toolError("hardline_blocked",
+                                "Команда заблокирована защитой (hardline: $hardlineReason). Выберите безопасное действие."
                             ))
                         }
                         // Tool needs approval and state is Auto -> set to Pending
@@ -304,11 +338,14 @@ class GenerationLoop(
                 // If there are pending approvals, break and wait for user
                 if (hasPendingApproval && updatedTools.none(::canResumeAutomatic)) {
                     Log.i(TAG, "generateText: waiting for tool approval")
+                    waitingForApproval = true
                     break
                 }
 
                 // Automatic permission-controlled siblings may run while another tool waits for approval.
-                toolsToProcess = if (hasPendingApproval) updatedTools.filter(::canResumeAutomatic) else updatedTools
+                toolsToProcess = updatedTools.filter { !it.isExecuted && (!hasPendingApproval || canResumeAutomatic(it)) }
+                // Invalid arguments and safety blocks are already tool results for the next request.
+                if (toolsToProcess.isEmpty() && updatedTools.any { it.isExecuted }) continue
             } else {
                 // Resuming after user interaction - use the resumable tools directly.
                 Log.i(TAG, "generateText: resuming with ${pendingTools.size} resumable tools")
@@ -356,14 +393,12 @@ class GenerationLoop(
 
                     else -> {
                         // Auto or Approved - execute the tool
-                        val resumeHardlineReason = if (tool.toolName == "browser_eval_js")
-                            me.rerere.rikkahub.data.ai.tools.HardlineCommandGuard.checkTool(tool.toolName, tool.input)
-                        else null
+                        val resumeHardlineReason = HardlineCommandGuard.checkTool(tool.toolName, tool.input)
                         if (resumeHardlineReason != null) {
                             executedTools += tool.copy(output = listOf(UIMessagePart.Text(
                                 json.encodeToString(buildJsonObject {
                                     put("error", JsonPrimitive(
-                                        "Команда заблокирована защитой ($resumeHardlineReason). Выберите безопасное действие."
+                                        "Команда заблокирована защитой (hardline: $resumeHardlineReason). Выберите безопасное действие."
                                     ))
                                 })
                             )))
@@ -383,7 +418,7 @@ class GenerationLoop(
                             val args = runCatching {
                                 json.parseToJsonElement(tool.input.ifBlank { "{}" })
                             }.getOrElse {
-                                error("Некорректный JSON параметров инструмента. Проверьте формат и типы значений.")
+                                error("Некорректные аргументы инструмента. Проверьте формат JSON и типы значений.")
                             }
                             if (tool.approvalState == ToolApprovalState.Auto && needsApproval(tool, toolDef)
                             ) {
@@ -447,7 +482,9 @@ class GenerationLoop(
                             )
                         }.onFailure {
                             // 取消必须向上传播，否则停止生成会被误报为工具执行错误
-                            if (it is CancellationException || it is TokenBudgetExceededException || it is TokenBudgetPersistenceException) throw it
+                            if (it is TimeoutCancellationException) currentCoroutineContext().ensureActive()
+                            else if (it is CancellationException) throw it
+                            if (it is TokenBudgetExceededException || it is TokenBudgetPersistenceException) throw it
                             // Root input may contain credentials; neither exception details nor arguments belong in logs.
                             if (tool.toolName != "root_exec") it.printStackTrace()
                             executedTools += tool.copy(
@@ -458,6 +495,9 @@ class GenerationLoop(
                                                 if (tool.toolName == "root_exec") {
                                                     put("error", "root_execution_indeterminate")
                                                     put("reason", "Не удалось подтвердить результат root-команды. Проверьте устройство перед новым вызовом. Эта команда автоматически не повторяется.")
+                                                } else if (it is TimeoutCancellationException) {
+                                                    put("error", "tool_timeout")
+                                                    put("message", "Превышено время ожидания инструмента. Проверьте результат перед повторным вызовом.")
                                                 } else {
                                                     put("error", me.rerere.rikkahub.data.ai.tools.local.deviceToolFailureReason(it))
                                                     put("raw_error", SecretRedactor.redact(it.message ?: it.javaClass.name))
@@ -475,6 +515,7 @@ class GenerationLoop(
 
             if (executedTools.isEmpty()) {
                 // No results to add (all tools were pending)
+                waitingForApproval = true
                 break
             }
 
@@ -498,8 +539,22 @@ class GenerationLoop(
                 )
             )
             if (messages.last().getTools().any { it.isPending }) {
+                waitingForApproval = true
                 break
             }
+        }
+        if (!responseFinished && !waitingForApproval) {
+            val reason = limitReason ?: if (SystemClock.elapsedRealtime() - turnStartMs >= turnBudgetMs)
+                "time_limit" else "step_limit"
+            onLimitReached(reason)
+            val notice = UIMessagePart.Text(if (reason == "time_limit")
+                "Достигнут лимит времени ответа. Выполнение остановлено. Проверьте результаты инструментов перед продолжением."
+            else "Достигнут лимит шагов ответа. Выполнение остановлено. Проверьте результаты инструментов перед продолжением.")
+            val last = messages.lastOrNull()
+            messages = if (last?.role == MessageRole.ASSISTANT)
+                messages.dropLast(1) + last.copy(parts = last.parts + notice)
+            else messages + UIMessage.assistant("").copy(parts = listOf(notice))
+            emit(GenerationChunk.Messages(messages))
         }
 
     }.flowOn(Dispatchers.IO)
@@ -776,14 +831,25 @@ class GenerationLoop(
         output: List<UIMessagePart>,
         hasShellAccess: Boolean,
     ): List<UIMessagePart> {
-        if (tool.toolName in TOOLS_WITHOUT_OUTPUT_TRUNCATION) return output
+        if (hasShellAccess && tool.toolName in TOOLS_WITHOUT_OUTPUT_TRUNCATION) return output
 
         val toolCallId = tool.toolCallId
         val textParts = output.filterIsInstance<UIMessagePart.Text>()
         val nonTextParts = output.filter { it !is UIMessagePart.Text }
         val totalChars = textParts.sumOf { it.text.length }
 
-        if (totalChars <= MAX_TOOL_OUTPUT_CHARS || !hasShellAccess) return output
+        if (totalChars <= MAX_TOOL_OUTPUT_CHARS) return output
+        if (!hasShellAccess) {
+            if (tool.toolName == "search_web") {
+                boundedSearchOutput(textParts.joinToString("\n") { it.text }, MAX_TOOL_OUTPUT_CHARS)?.let {
+                    return listOf(UIMessagePart.Text(it)) + nonTextParts
+                }
+            }
+            val marker = "\n[Вывод инструмента сокращён: всего $totalChars символов.]"
+            val text = textParts.joinToString("\n") { it.text }
+                .take(MAX_TOOL_OUTPUT_CHARS - marker.length) + marker
+            return listOf(UIMessagePart.Text(text)) + nonTextParts
+        }
 
         Log.i(TAG, "maybeTruncateToolOutput: truncating tool $toolCallId output ($totalChars chars)")
 

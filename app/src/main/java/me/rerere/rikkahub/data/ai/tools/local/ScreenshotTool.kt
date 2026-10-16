@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
@@ -36,7 +37,7 @@ private fun pruneOldCacheScreenshots(dir: File) {
 
 fun takeScreenshotTool(context: Context, service: RootScreenService): Tool = Tool(
     name = "take_screenshot",
-    description = "Capture the current display via root screencap and return it as a vision attachment. PNG also saved to Pictures/RikkaHub/Screenshots/ — gallery_path in the result is the on-device absolute path. Secure surfaces (banking, DRM, password fields) may be blank under Android capture restrictions. Root capture is bounded by a timeout. The result includes screen_state (foreground package, shade_open, display size). For \"did my action work\" checks prefer the \"after\" object that action tools already return; screenshot only when you need visual detail.",
+    description = "Capture the current display via root screencap and return it as a vision attachment. PNG is stored in private cache by default. Set save_to_gallery=true only when the user requests a public copy in Pictures/RikkaHub/Screenshots/; gallery_path then gives its on-device path. Secure surfaces (banking, DRM, password fields) may be blank under Android capture restrictions. Root capture is bounded by a timeout. The result includes screen_state (foreground package, shade_open, display size). For \"did my action work\" checks prefer the \"after\" object that action tools already return; screenshot only when you need visual detail.",
     needsApproval = { true },
     parameters = {
         InputSchema.Obj(
@@ -45,11 +46,17 @@ fun takeScreenshotTool(context: Context, service: RootScreenService): Tool = Too
                     put("type", "integer")
                     put("description", "Display id to capture (default 0)")
                 })
+                put("save_to_gallery", buildJsonObject {
+                    put("type", "boolean")
+                    put("description", "Save a public copy to the device gallery only when requested by the user (default false)")
+                    put("default", false)
+                })
             }
         )
     },
     execute = { input ->
         val displayId = input.jsonObject["display_id"]?.jsonPrimitive?.intOrNull ?: 0
+        val shouldSaveToGallery = input.jsonObject["save_to_gallery"]?.jsonPrimitive?.booleanOrNull ?: false
 
         val outcome = service.withService(treeRequired = false) { svc ->
             val cacheDir = File(context.cacheDir, SCREENSHOT_CACHE_DIR).apply { mkdirs() }
@@ -74,7 +81,9 @@ fun takeScreenshotTool(context: Context, service: RootScreenService): Tool = Too
                     val cacheFile = File(File(context.cacheDir, SCREENSHOT_CACHE_DIR), "screen-$ts.png")
                     try {
                         FileOutputStream(cacheFile).use { os ->
-                            res.bitmap.compress(Bitmap.CompressFormat.PNG, 100, os)
+                            check(res.bitmap.compress(Bitmap.CompressFormat.PNG, 100, os)) {
+                                "Не удалось записать снимок. Проверьте свободное место."
+                            }
                         }
                     } catch (t: Throwable) {
                         res.bitmap.recycle()
@@ -84,18 +93,19 @@ fun takeScreenshotTool(context: Context, service: RootScreenService): Tool = Too
                         }
                     }
 
-                    // 2) Save a user-visible copy to Pictures/RikkaHub/Screenshots — visible in
-                    //    Gallery, the Files app, and the list_files / find_files tools.
-                    val galleryPath: String? = saveToGallery(context, res.bitmap, displayName)
+                    // Public storage is an explicit opt-in; normal tool captures stay private.
+                    val galleryPath = if (shouldSaveToGallery) saveToGallery(context, res.bitmap, displayName) else null
                     res.bitmap.recycle()
 
 
                     buildJsonObject {
                         put("success", true)
                         put("file_path", cacheFile.absolutePath)
-                        put("gallery_path", galleryPath ?: "(gallery_save_failed)")
-                        if (galleryPath == null) put("warning", "Снимок получен, но копию в галерею сохранить не удалось. Проверьте свободное место и доступ к фото; сам снимок доступен в чате.")
-                        put("saved_to", "Pictures/$PICTURES_SUBDIR")
+                        if (shouldSaveToGallery) {
+                            put("gallery_path", galleryPath ?: "(gallery_save_failed)")
+                            if (galleryPath == null) put("warning", "Снимок получен, но копию в галерею сохранить не удалось. Проверьте свободное место и доступ к фото; сам снимок доступен в чате.")
+                            else put("saved_to", "Pictures/$PICTURES_SUBDIR")
+                        }
                         put("screen_state", screenStateJson(svc, screenChanged = null))
                     }
                 }
@@ -140,29 +150,40 @@ private fun saveToGallery(context: Context, bitmap: Bitmap, displayName: String)
                 values
             ) ?: return null
 
-            context.contentResolver.openOutputStream(uri)?.use { os ->
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, os)
-            } ?: run {
-                context.contentResolver.delete(uri, null, null)
-                return null
+            try {
+                val stream = context.contentResolver.openOutputStream(uri)
+                    ?: error("Не удалось открыть файл снимка в галерее.")
+                stream.use { os ->
+                    check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, os)) {
+                        "Не удалось записать снимок в галерею."
+                    }
+                }
+
+                val finalize = ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }
+                check(context.contentResolver.update(uri, finalize, null, null) > 0) {
+                    "Не удалось опубликовать снимок в галерее."
+                }
+
+                // Resolve the public on-device path for the JSON envelope and ActionLog.
+                context.contentResolver.query(
+                    uri,
+                    arrayOf(MediaStore.Images.Media.DATA),
+                    null, null, null
+                )?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                    ?: "Pictures/$PICTURES_SUBDIR/$displayName"
+            } catch (error: Throwable) {
+                // Failed writes/finalization must not leave a hidden IS_PENDING row behind.
+                runCatching { context.contentResolver.delete(uri, null, null) }
+                throw error
             }
-
-            val finalize = ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }
-            context.contentResolver.update(uri, finalize, null, null)
-
-            // Resolve the public on-device path for the JSON envelope and ActionLog.
-            context.contentResolver.query(
-                uri,
-                arrayOf(MediaStore.Images.Media.DATA),
-                null, null, null
-            )?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
-                ?: "Pictures/$PICTURES_SUBDIR/$displayName"
         } else {
             val pictures = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
             val targetDir = File(pictures, PICTURES_SUBDIR).apply { mkdirs() }
             val out = File(targetDir, displayName)
             FileOutputStream(out).use { os ->
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, os)
+                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, os)) {
+                    "Не удалось записать снимок в галерею."
+                }
             }
             // Tell MediaScanner so the gallery picks it up promptly.
             android.media.MediaScannerConnection.scanFile(

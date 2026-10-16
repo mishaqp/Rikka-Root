@@ -28,6 +28,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import me.rerere.ai.core.MessageRole
+import me.rerere.ai.core.parametersOrEmpty
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.core.merge
@@ -513,7 +514,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                         add(buildJsonObject {
                             put("name", tool.name)
                             put("description", tool.description)
-                            put("input_schema", json.encodeToJsonElement(tool.parameters()))
+                            put("input_schema", json.encodeToJsonElement(tool.parametersOrEmpty()))
                         })
                     }
                 }

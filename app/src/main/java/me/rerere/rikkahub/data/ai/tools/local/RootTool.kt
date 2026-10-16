@@ -61,7 +61,7 @@ fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = nul
                 put("reason", "Укажите непустую команду в command, а timeout_ms — целым числом.")
             }
             // An Approved invocation has already passed the explicit confirmation in the loop.
-            (headless || invocation == null && !automaticAtStart && !automaticInvocation) && RootCommandGuard.check(command) != null -> buildJsonObject {
+            (headless || invocation?.automatic == true || invocation == null && !automaticAtStart && !automaticInvocation) && RootCommandGuard.check(command) != null -> buildJsonObject {
                 put("error", "root_command_blocked")
                 put("reason", RootCommandGuard.check(command))
             }

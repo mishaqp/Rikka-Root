@@ -22,6 +22,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import me.rerere.ai.core.MessageRole
+import me.rerere.ai.core.parametersOrEmpty
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.ProviderLog
@@ -254,7 +255,7 @@ internal class InteractionsAPI(
                             put("type", "function")
                             put("name", tool.name)
                             put("description", tool.description)
-                            put("parameters", json.encodeToJsonElement(tool.parameters()))
+                            put("parameters", json.encodeToJsonElement(tool.parametersOrEmpty()))
                         })
                     }
                 }

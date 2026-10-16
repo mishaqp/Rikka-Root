@@ -335,7 +335,7 @@ class RootScreenServiceTest {
         assertToolWorks(globalActionTool(service()), "{\"action\":\"home\"}", "input keyevent 3")
     }
     @Test fun `root executor reaches screenshot and returns image attachment`() {
-        val result = assertToolWorks(takeScreenshotTool(context, service()), commandPrefix = "screencap -p")
+        val result = assertToolWorks(takeScreenshotTool(context, service()), "{\"save_to_gallery\":true}", commandPrefix = "screencap -p")
         assertTrue(result, result.contains("file://"))
         assertTrue(result, result.contains("gallery_path"))
     }

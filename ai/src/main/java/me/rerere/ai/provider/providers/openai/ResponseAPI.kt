@@ -24,6 +24,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import me.rerere.ai.core.MessageRole
+import me.rerere.ai.core.parametersOrEmpty
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.ProviderLog
@@ -275,7 +276,7 @@ class ResponseAPI(
                                 put(
                                     "parameters",
                                     json.encodeToJsonElement(
-                                        tool.parameters()
+                                        tool.parametersOrEmpty()
                                     )
                                 )
                                 // Response API 不传 strict 时默认按严格模式处理, 会把 schema 里的可选字段全部变成必填,

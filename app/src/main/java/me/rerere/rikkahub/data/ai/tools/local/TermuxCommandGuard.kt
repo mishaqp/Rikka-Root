@@ -3,11 +3,13 @@ package me.rerere.rikkahub.data.ai.tools.local
 import me.rerere.rikkahub.root.RootCommandGuard
 import me.rerere.rikkahub.root.RootApprovalPolicy
 
+private val SHELL_COMMAND_FLAGS = Regex("-[a-zA-Z]*c[a-zA-Z]*")
+
 /** The same accidental-destruction floor applies to every Termux dispatch, including headless calls. */
 internal fun checkTermuxCommand(executable: String, arguments: Array<String>): String? =
     RootCommandGuard.check((listOf(executable) + arguments).joinToString(" "))
         ?: arguments.withIndex().firstNotNullOfOrNull { (index, argument) ->
-            if (argument == "-c") arguments.getOrNull(index + 1)?.let(RootCommandGuard::check) else null
+            if (argument.startsWith('-') && argument.endsWith('c') || SHELL_COMMAND_FLAGS.matches(argument)) arguments.getOrNull(index + 1)?.let(RootCommandGuard::check) else null
         }
 
 /** Keep trailing input whitespace: removing it would turn `setenforce ` + `0` into a different word. */

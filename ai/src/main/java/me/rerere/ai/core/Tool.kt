@@ -18,6 +18,10 @@ data class Tool(
     val execute: suspend (JsonElement) -> List<UIMessagePart>
 )
 
+/** Провайдерам всегда нужна object schema, в том числе для инструментов без параметров. */
+fun Tool.parametersOrEmpty(): InputSchema =
+    parameters() ?: InputSchema.Obj(properties = JsonObject(emptyMap()))
+
 @Serializable
 sealed class InputSchema {
     @Serializable

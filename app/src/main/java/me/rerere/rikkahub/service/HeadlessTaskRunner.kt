@@ -2,6 +2,7 @@ package me.rerere.rikkahub.service
 
 import android.util.AtomicFile
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -133,6 +134,7 @@ class HeadlessTaskRunner internal constructor(
         }
         var latest = emptyList<UIMessage>()
         var steps = 0
+        var generationLimit: String? = null
         try {
             val result = runHeadlessDeadline(execution.timeoutMillis) {
                 ensureEnabled(execution)
@@ -183,6 +185,8 @@ class HeadlessTaskRunner internal constructor(
                                 },
                                 onWebContentRead = { markWeb(execution) },
                                 beforeModelRequest = { ensureEnabled(execution) },
+                                onStepStarted = { steps++ },
+                                onLimitReached = { generationLimit = it },
                             ).collect { chunk ->
                                 ensureEnabled(execution)
                                 when (chunk) {
@@ -199,10 +203,16 @@ class HeadlessTaskRunner internal constructor(
                                     }
                                 }
                             }
-                            steps = latest.count { it.role == MessageRole.ASSISTANT }
                             if (latest.any { message -> message.getTools().any { it.isPending } }) stop(HeadlessTaskStatus.BLOCKED, "approval_required")
-                            if (latest.lastOrNull()?.getTools()?.isNotEmpty() == true) stop(HeadlessTaskStatus.FAILED, "step_limit")
-                            if (latest.lastOrNull()?.role != MessageRole.ASSISTANT) stop(HeadlessTaskStatus.FAILED, "no_response")
+                            if (generationLimit == "time_limit") stop(HeadlessTaskStatus.TIMED_OUT, "deadline_exceeded")
+                            if (generationLimit == "step_limit") stop(HeadlessTaskStatus.FAILED, "step_limit")
+                            val last = latest.lastOrNull()
+                            if (last?.role != MessageRole.ASSISTANT) stop(HeadlessTaskStatus.FAILED, "no_response")
+                            val lastToolIndex = last.parts.indexOfLast { it is UIMessagePart.Tool }
+                            if (last.getTools().any { !it.isExecuted } || lastToolIndex >= 0 &&
+                                last.parts.drop(lastToolIndex + 1).none { it is UIMessagePart.Text && it.text.isNotBlank() }) {
+                                stop(HeadlessTaskStatus.FAILED, "step_limit")
+                            }
                             HeadlessTaskResult(HeadlessTaskStatus.SUCCEEDED,
                                 output = latest.last().parts.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text },
                                 imageUrls = latest.last().parts.filterIsInstance<UIMessagePart.Image>().map { it.url })
@@ -243,6 +253,11 @@ class HeadlessTaskRunner internal constructor(
                 result.copy(status = HeadlessTaskStatus.INDETERMINATE, errorCode = "execution_interrupted") else result, execution, latest, steps)
         } catch (stop: HeadlessStop) {
             return decorate(HeadlessTaskResult(stop.outcome, errorCode = stop.code), execution, latest, steps)
+        } catch (_: TimeoutCancellationException) {
+            currentCoroutineContext().ensureActive()
+            return decorate(HeadlessTaskResult(HeadlessTaskStatus.INDETERMINATE,
+                output = "Превышено время ожидания инструмента. Проверьте результат перед повторным запуском.",
+                errorCode = "tool_timeout"), execution, latest, steps)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: TokenBudgetExceededException) {
@@ -257,7 +272,11 @@ class HeadlessTaskRunner internal constructor(
         checkTool(tool, args, context)
         currentCoroutineContext().ensureActive()
         context.executionState.effectsInFlight = true
-        val output = try { tool.execute(args) } catch (cancelled: CancellationException) {
+        val output = try { tool.execute(args) } catch (timeout: TimeoutCancellationException) {
+            currentCoroutineContext().ensureActive()
+            context.executionState.effectsInFlight = false
+            throw timeout
+        } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
             stop(HeadlessTaskStatus.INDETERMINATE, "tool_execution_failed")
@@ -283,7 +302,7 @@ class HeadlessTaskRunner internal constructor(
     private fun decorate(result: HeadlessTaskResult, context: RunExecutionContext, messages: List<UIMessage>, steps: Int) = result.copy(
         tokensIn = messages.sumOf { (it.usage?.promptTokens ?: 0).coerceAtLeast(0).toLong() },
         tokensOut = messages.sumOf { (it.usage?.completionTokens ?: 0).coerceAtLeast(0).toLong() },
-        steps = maxOf(steps, messages.count { it.role == MessageRole.ASSISTANT }), webTainted = context.webTaint.isTainted(),
+        steps = steps, webTainted = context.webTaint.isTainted(),
     )
 }
 

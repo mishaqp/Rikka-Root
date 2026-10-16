@@ -3,6 +3,8 @@ package me.rerere.ai.util
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import me.rerere.ai.provider.CustomBody
 import me.rerere.ai.provider.CustomHeader
 import me.rerere.ai.provider.ProviderSetting
@@ -125,10 +127,22 @@ fun JsonElement.removeElements(keys: List<String>, keepOnly: Boolean = false): J
                 toMap().filterKeys { key -> key !in keys }
             }
 
-            // 递归处理嵌套的 JsonElement
-            JsonObject(newContent.mapValues { (_, value) ->
-                value.removeElements(keys, keepOnly)
-            })
+            val filtered = newContent.mapValues { (key, value) ->
+                if (key in setOf("properties", "patternProperties", "definitions", "\$defs", "dependentSchemas") && value is JsonObject) {
+                    // Имена пользовательских свойств не являются ключевыми словами схемы.
+                    JsonObject(value.mapValues { (_, schema) -> schema.removeElements(keys, keepOnly) })
+                } else {
+                    value.removeElements(keys, keepOnly)
+                }
+            }.toMutableMap()
+            val properties = filtered["properties"] as? JsonObject
+            val required = filtered["required"] as? JsonArray
+            if (properties != null && required != null) {
+                filtered["required"] = JsonArray(required.filter { name ->
+                    (name as? JsonPrimitive)?.contentOrNull?.let { it in properties } == true
+                })
+            }
+            JsonObject(filtered)
         }
 
         is JsonArray -> {

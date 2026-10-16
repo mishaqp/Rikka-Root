@@ -29,8 +29,8 @@ import me.rerere.rikkahub.data.ai.mcp.McpStatus
 import me.rerere.rikkahub.data.ai.mcp.McpTool
 import me.rerere.rikkahub.data.ai.mcp.buildMcpToolName
 import me.rerere.rikkahub.data.ai.mcp.secureMcpConfigForPersistence
+import me.rerere.rikkahub.data.ai.mcp.serverUrl
 import me.rerere.rikkahub.data.datastore.SettingsStore
-import me.rerere.rikkahub.reliability.SecretRedactor
 import me.rerere.rikkahub.data.model.Assistant
 import kotlin.uuid.Uuid
 
@@ -57,8 +57,8 @@ private const val MAX_CONNECT_TIMEOUT_SECONDS = 60
 private fun errEnv(error: String, detail: String, extra: Map<String, JsonElement> = emptyMap()): List<UIMessagePart> {
     val obj = buildJsonObject {
         put("error", error)
-        put("detail", SecretRedactor.redact(detail))
-        for ((k, v) in extra) put(k, if (v is kotlinx.serialization.json.JsonPrimitive && v.isString) kotlinx.serialization.json.JsonPrimitive(SecretRedactor.redact(v.content)) else v)
+        put("detail", redactedMcpText(detail))
+        for ((k, v) in extra) put(k, if (v is kotlinx.serialization.json.JsonPrimitive && v.isString) kotlinx.serialization.json.JsonPrimitive(redactedMcpText(v.content)) else v)
     }
     return listOf(UIMessagePart.Text(obj.toString()))
 }
@@ -81,15 +81,15 @@ private fun serverViewEnvelope(
     put("id", config.id.toString())
     put("name", config.commonOptions.name)
     put("transport", transportLabel(config))
-    put("url", urlOf(config))
+    put("url", redactedMcpUrl(urlOf(config)))
     put("enabled", config.commonOptions.enable)
     val (statusLabel, errorMessage) = renderStatus(config.commonOptions.enable, status)
     put("status", statusLabel)
     put("tool_count", config.commonOptions.tools.size)
-    if (errorMessage != null) put("error", SecretRedactor.redact(errorMessage))
+    if (errorMessage != null) put("error", redactedMcpText(errorMessage))
     if (errorMessage != null && status is McpStatus.Error) {
-        put("raw_error", SecretRedactor.redact(status.message))
-        status.detail?.let { put("error_detail", SecretRedactor.redact(it)) }
+        put("raw_error", redactedMcpText(status.message))
+        status.detail?.let { put("error_detail", redactedMcpText(it)) }
     }
     putJsonArray("headers") {
         McpHeaderRedactor.redactHeaders(config.commonOptions.headers).forEach { (n, v) ->
@@ -455,12 +455,14 @@ fun mcpAddTool(settingsStore: SettingsStore, manager: McpManager, caller: McpCon
         if (headerCheck is McpControlValidation.Result.Reject) {
             return@Tool errEnv(headerCheck.error, headerCheck.detail)
         }
-        val secretCheck = withContext(Dispatchers.IO) { runCatching {
-            headers.filter { McpControlSecretStore.isReference(it.second) }.forEach { secretStore.resolve(it.second) }
-        } }
-        if (secretCheck.isFailure) return@Tool errEnv("missing_mcp_secret", "Секрет MCP недоступен. Введите его на экране настроек MCP этого устройства.")
-        val name = (nameCheck as McpControlValidation.Result.Ok).value
         val newId = Uuid.random()
+        val secretCheck = withContext(Dispatchers.IO) { runCatching {
+            headers.filter { McpControlSecretStore.isReference(it.second) }.forEach {
+                secretStore.resolve(it.second, newId, rawUrl.trim())
+            }
+        } }
+        if (secretCheck.isFailure) return@Tool errEnv("missing_mcp_secret", "Секрет MCP недоступен или принадлежит другому серверу. Сначала добавьте сервер без секрета, затем введите его в настройках MCP этого устройства.")
+        val name = (nameCheck as McpControlValidation.Result.Ok).value
         val config = buildConfig(
             id = newId,
             transport = transport,
@@ -505,7 +507,7 @@ fun mcpAddTool(settingsStore: SettingsStore, manager: McpManager, caller: McpCon
                 extra = mapOf(
                     "raw_error" to kotlinx.serialization.json.JsonPrimitive(finalStatus.message),
                     "name" to kotlinx.serialization.json.JsonPrimitive(name),
-                    "url" to kotlinx.serialization.json.JsonPrimitive(rawUrl.trim()),
+                    "url" to kotlinx.serialization.json.JsonPrimitive(redactedMcpUrl(rawUrl.trim())),
                 ),
             )
         }
@@ -518,7 +520,7 @@ fun mcpAddTool(settingsStore: SettingsStore, manager: McpManager, caller: McpCon
 fun mcpUpdateTool(settingsStore: SettingsStore, manager: McpManager, secretStore: McpControlSecretStore): Tool = Tool(
     name = "mcp_update",
     description = """
-        Заменить конфигурацию сервера MCP. Аргументы как у mcp_add плюс id. Старый клиент отключается, новый подключается: изменения transport, URL и headers применяются. Список известных инструментов сохраняется; синхронизация запускается автоматически. Секретные значения — только ссылки AndroidKeyStore из настроек MCP. Публичные адреса, без редиректов. Требуется одобрение изменения конфигурации.
+        Изменить конфигурацию сервера MCP. Аргументы как у mcp_add плюс id; пропущенные enabled и headers сохраняются. При смене адреса OAuth и секретные заголовки сбрасываются, потребуется повторная авторизация. Старый клиент отключается, новый подключается: изменения transport, URL и headers применяются. Список известных инструментов сохраняется; синхронизация запускается автоматически. Секретные значения — только ссылки AndroidKeyStore из настроек MCP. Публичные адреса, без редиректов. Требуется одобрение изменения конфигурации.
     """.trimIndent(),
     parameters = {
         InputSchema.Obj(
@@ -557,8 +559,7 @@ fun mcpUpdateTool(settingsStore: SettingsStore, manager: McpManager, secretStore
         }
         val rawName = params["name"]?.jsonPrimitive?.contentOrNull ?: ""
         val rawUrl = params["url"]?.jsonPrimitive?.contentOrNull ?: ""
-        val enabled = params["enabled"]?.jsonPrimitive?.booleanOrNull ?: true
-        val headers = parseHeaders(params["headers"])
+        val enabledArg = params["enabled"]?.jsonPrimitive?.booleanOrNull
         val timeoutSec = (params["connect_timeout_seconds"]?.jsonPrimitive?.intOrNull ?: DEFAULT_CONNECT_TIMEOUT_SECONDS)
             .coerceIn(1, MAX_CONNECT_TIMEOUT_SECONDS)
 
@@ -569,6 +570,13 @@ fun mcpUpdateTool(settingsStore: SettingsStore, manager: McpManager, secretStore
         if (urlCheck is McpUrlGuard.Result.Reject) {
             return@Tool errEnv(urlCheck.error, urlCheck.detail)
         }
+        val originChanged = mcpCredentialOrigin(old.serverUrl) != mcpCredentialOrigin(rawUrl.trim())
+        val enabled = enabledArg ?: old.commonOptions.enable
+        val requestedHeaders = if (params.containsKey("headers")) parseHeaders(params["headers"]) else old.commonOptions.headers
+        // Never carry credentials to a new origin, including explicitly repeated old references.
+        val headers = if (originChanged) requestedHeaders.filterNot { (name, value) ->
+            McpHeaderRedactor.isSensitive(name) || value.contains(McpControlSecretStore.REFERENCE_PREFIX)
+        } else requestedHeaders
         val nameCheck = McpControlValidation.validateName(rawName, all, excludingId = serverId.toString())
         if (nameCheck is McpControlValidation.Result.Reject) {
             return@Tool errEnv(nameCheck.error, nameCheck.detail)
@@ -578,7 +586,13 @@ fun mcpUpdateTool(settingsStore: SettingsStore, manager: McpManager, secretStore
             return@Tool errEnv(headerCheck.error, headerCheck.detail)
         }
         val secretCheck = withContext(Dispatchers.IO) { runCatching {
-            headers.filter { McpControlSecretStore.isReference(it.second) }.forEach { secretStore.resolve(it.second) }
+            headers.filter { McpControlSecretStore.isReference(it.second) }.forEach { (_, reference) ->
+                // Only references already in the trusted saved config may claim a legacy owner.
+                if (old.commonOptions.headers.any { it.second == reference }) {
+                    secretStore.bind(reference, old.id, old.serverUrl)
+                }
+                secretStore.resolve(reference, serverId, rawUrl.trim())
+            }
         } }
         if (secretCheck.isFailure) return@Tool errEnv("missing_mcp_secret", "Секрет MCP недоступен. Введите его на экране настроек MCP этого устройства.")
         val name = (nameCheck as McpControlValidation.Result.Ok).value
@@ -595,7 +609,8 @@ fun mcpUpdateTool(settingsStore: SettingsStore, manager: McpManager, secretStore
         val committed = settingsStore.update { s ->
             s.copy(mcpServers = s.mcpServers.map { row ->
                 if (row.id == serverId) newConfig.clone(commonOptions = newConfig.commonOptions.copy(
-                    tools = row.commonOptions.tools, oauth = row.commonOptions.oauth,
+                    tools = row.commonOptions.tools,
+                    oauth = if (originChanged || mcpCredentialOrigin(row.serverUrl) != mcpCredentialOrigin(newConfig.serverUrl)) null else row.commonOptions.oauth,
                 )) else row
             })
         }

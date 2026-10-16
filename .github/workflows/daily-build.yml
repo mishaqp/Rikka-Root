@@ -5,6 +5,11 @@ on:
     branches: [ccr-e93188a6-grrqko, main]
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      audit_baseline:
+        description: 'Проверить RED регрессий аудита на исходном 9b74e541'
+        type: boolean
+        default: false
 
 # Serialize updates of the fixed nightly tag and its assets.
 concurrency:
@@ -24,7 +29,8 @@ jobs:
       github.repository == 'mishaqp/Rikka-Root' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Audit mode compiles both the original and fixed source before the single APK.
+    timeout-minutes: 90
     permissions:
       contents: write
 
@@ -75,6 +81,10 @@ jobs:
       - name: Test CI build checks
         run: python -m unittest discover -s .github/scripts -p 'test_*.py'
 
+      - name: Audit regression tests on baseline
+        if: ${{ inputs.audit_baseline == true || contains(github.event.head_commit.message, '[audit-baseline]') }}
+        run: python .github/scripts/audit_baseline.py
+
       - name: Unit tests
         run: ./gradlew test --no-configuration-cache -Proborazzi.test.record=true
 
@@ -106,6 +116,7 @@ jobs:
             **/build/reports/lint-results-debug.*
             **/build/reports/tests/**
             **/build/test-results/test*/TEST-*.xml
+            build/audit-baseline/**
           if-no-files-found: warn
           retention-days: 14
 

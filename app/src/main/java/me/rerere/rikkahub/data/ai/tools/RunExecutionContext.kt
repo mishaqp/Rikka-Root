@@ -48,7 +48,7 @@ object HeadlessToolPolicy {
     private val trustMutations = setOf(
         "external_automation_set_enabled", "external_automation_add_trusted_package",
         "external_automation_remove_trusted_package",
-        "mcp_set_tool_approval",
+        "mcp_add", "mcp_update", "mcp_set_tool_approval",
         "skill_install_from_url", "skill_install_from_text",
         "workflow_create", "workflow_update", "workflow_delete", "workflow_set_enabled", "workflow_run",
     )
@@ -57,13 +57,11 @@ object HeadlessToolPolicy {
         "speech_to_text", "share", "open_file", "open_url", "launch_app", "launch_activity",
         "create_calendar_event", "create_contact", "send_email_intent", "send_sms_intent",
         "open_wifi_settings", "show_location_on_map", "nfc_read_tag", "nfc_write_tag", "subagent_dispatch",
-        "get_screen_time", "keystore_encrypt", "keystore_decrypt",
+        "get_screen_time", "keystore_encrypt", "keystore_decrypt", "send_sms",
     )
     fun blockReason(name: String, arguments: JsonElement): String? {
-        if (name == "browser_eval_js") {
-            (arguments as? JsonObject)?.let { HardlineCommandGuard.checkToolParsed(name, it) }
-                ?.let { return "hardline:$it" }
-        }
+        (arguments as? JsonObject)?.let { HardlineCommandGuard.checkToolParsed(name, it) }
+            ?.let { return "hardline:$it" }
         if (name in trustMutations) return "mandatory_confirmation"
         if (name in interactive) return "interactive_tool"
         val obj = arguments as? JsonObject

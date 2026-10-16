@@ -46,6 +46,50 @@ class TermuxCommandGuardTest {
     }
 
     @Test
+    fun executableModeChecksEveryShellFlagEndingInC() {
+        listOf("-c", "-lc", "-ec", "-xec", "-ilc").forEach { flag ->
+            assertNotNull("must block payload after $flag", checkTermuxCommand(
+                "/data/data/com.termux/files/usr/bin/bash", arrayOf(flag, "reboot")))
+            assertNotNull("must inspect complete payload after $flag", checkTermuxCommand(
+                "/data/data/com.termux/files/usr/bin/bash", arrayOf(flag, "  svc power reboot")))
+        }
+        assertNotNull(checkTermuxCommand("/data/data/com.termux/files/usr/bin/bash",
+            arrayOf("-e", "-lc", "setprop sys.powerctl shutdown")))
+        assertNull(checkTermuxCommand("/data/data/com.termux/files/usr/bin/bash", arrayOf("-lc", "echo reboot")))
+    }
+
+    @Test
+    fun executableModeInspectsCombinedFlagsForCustomShellExecutables() {
+        listOf("-lc", "-ec", "-xec", "-ilc").forEach { flag ->
+            assertNotNull("must inspect command argument after $flag", checkTermuxCommand(
+                "/data/data/com.termux/files/usr/bin/custom-shell", arrayOf(flag, "reboot")))
+        }
+    }
+
+    @Test
+    fun customShellExecutableChecksCommandFlagInsideShortFlagGroups() {
+        listOf("-ce", "-lce").forEach { flag ->
+            assertNotNull("must inspect command argument after $flag", checkTermuxCommand(
+                "/data/data/com.termux/files/usr/bin/custom-shell", arrayOf(flag, "reboot")))
+            assertNull("must allow diagnostic argument after $flag", checkTermuxCommand(
+                "/data/data/com.termux/files/usr/bin/custom-shell", arrayOf(flag, "echo reboot")))
+        }
+        assertNotNull(checkTermuxCommand("custom-shell", arrayOf("--arbitrary-c", "reboot")))
+    }
+
+    @Test
+    fun terminalSessionRejectsWrappedPowerCommandsBeforeEnter() {
+        listOf("sh -c reboot", "bash -lc reboot", "busybox reboot", "toybox reboot", "env reboot",
+            "nohup reboot", "timeout 5 reboot", "exec reboot", "su 0 reboot", "(reboot)",
+            "{ reboot; }", "if true; then reboot; fi", "for x in 1; do reboot; done",
+            "echo ok; reboot", "true && reboot", "false || reboot", "echo ok\nreboot",
+            "svc power reboot", "svc power shutdown", "setprop sys.powerctl reboot").forEach { command ->
+            assertNotNull("must reject session input: $command",
+                TermuxSessionInputGuard().check("power", command, emptyList(), true))
+        }
+    }
+
+    @Test
     fun partialInputAndLiteralKeysCannotSplitAForbiddenCommand() {
         val pending = TermuxSessionInputGuard()
         assertNull(pending.check("rk_a", "rm -", emptyList(), false))

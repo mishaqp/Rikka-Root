@@ -109,6 +109,10 @@ import me.rerere.rikkahub.data.ai.mcp.McpStatus
 import me.rerere.rikkahub.data.ai.mcp.McpTool
 import me.rerere.rikkahub.data.ai.mcp.secureMcpConfigForPersistence
 import me.rerere.rikkahub.data.ai.mcp.control.McpControlSecretStore
+import me.rerere.rikkahub.data.ai.mcp.control.McpHeaderRedactor
+import me.rerere.rikkahub.data.ai.mcp.control.mcpCredentialOrigin
+import me.rerere.rikkahub.data.ai.mcp.control.redactedMcpUrl
+import me.rerere.rikkahub.data.ai.mcp.serverUrl
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.ItemAction
 import me.rerere.rikkahub.ui.components.ui.ItemActionMenu
@@ -132,11 +136,22 @@ internal fun protectMcpSettingsSecrets(
     config: McpServerConfig,
     headerDrafts: Map<Int, String>,
     secretStore: McpControlSecretStore,
-): McpServerConfig = secureMcpConfigForPersistence(config.clone(commonOptions = config.commonOptions.copy(
-    headers = config.commonOptions.headers.mapIndexed { index, (name, value) ->
-        name to (headerDrafts[index]?.trim() ?: value)
-    },
-)), secretStore)
+    beforeConfig: McpServerConfig? = null,
+): McpServerConfig {
+    val originChanged = beforeConfig != null && runCatching {
+        mcpCredentialOrigin(beforeConfig.serverUrl) != mcpCredentialOrigin(config.serverUrl)
+    }.getOrDefault(true)
+    return secureMcpConfigForPersistence(config.clone(commonOptions = config.commonOptions.copy(
+        headers = config.commonOptions.headers.mapIndexedNotNull { index, (name, value) ->
+            val draft = headerDrafts[index]
+            val previousValue = beforeConfig?.commonOptions?.headers?.any { it.second == value } == true
+            if (originChanged && draft == null && previousValue &&
+                (McpControlSecretStore.isReference(value) || McpHeaderRedactor.isSensitive(name))) null
+            else name to (draft?.trim() ?: value)
+        },
+        oauth = if (originChanged) null else config.commonOptions.oauth,
+    )), secretStore)
+}
 
 private fun Context.mcpSettingsActivity(): Activity? = when (this) {
     is Activity -> this
@@ -164,9 +179,11 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
             ) }
     }
     val editState = useDraftEditState<McpServerConfig> { before, requested ->
-        val protected = protectMcpSettingsSecrets(requested, emptyMap(), secretStore)
+        val protected = protectMcpSettingsSecrets(requested, emptyMap(), secretStore, before)
         vm.updateSettings { current -> current.copy(mcpServers = current.mcpServers.map { row ->
-            if (row.id == before.id) applyMcpDraft(row, before, protected) else row
+            if (row.id == before.id) protectMcpSettingsSecrets(
+                applyMcpDraft(row, before, protected), emptyMap(), secretStore, row,
+            ) else row
         }) }
     }
     var showImportDialog by remember { mutableStateOf(false) }
@@ -480,6 +497,10 @@ private fun McpServerItem(
 private fun McpServerConfigModal(state: EditState<McpServerConfig>) {
     state.EditStateContent { config, updateValue ->
         val secretStore = koinInject<McpControlSecretStore>()
+        val beforeConfig = remember(config.id) { config }
+        val originChanged = runCatching {
+            mcpCredentialOrigin(beforeConfig.serverUrl) != mcpCredentialOrigin(config.serverUrl)
+        }.getOrDefault(beforeConfig.serverUrl != config.serverUrl)
         // Drafts are never included in EditState config or Android saved-instance state.
         val headerDrafts = remember(config.id) { mutableStateMapOf<Int, String>() }
         var saving by remember(config.id) { mutableStateOf(false) }
@@ -570,7 +591,7 @@ private fun McpServerConfigModal(state: EditState<McpServerConfig>) {
                                     saving = true
                                     saveError = null
                                     try {
-                                        val protected = withContext(Dispatchers.IO) { protectMcpSettingsSecrets(config, drafts, secretStore) }
+                                        val protected = withContext(Dispatchers.IO) { protectMcpSettingsSecrets(config, drafts, secretStore, beforeConfig) }
                                         updateValue(protected)
                                         headerDrafts.clear()
                                         state.confirm()
@@ -587,6 +608,11 @@ private fun McpServerConfigModal(state: EditState<McpServerConfig>) {
                     ) {
                         Text(stringResource(R.string.setting_mcp_page_save))
                     }
+                }
+                if (originChanged) {
+                    Text("URL: ${redactedMcpUrl(beforeConfig.serverUrl)} → ${redactedMcpUrl(config.serverUrl)}")
+                    Text("При смене адреса OAuth и прежние секретные заголовки будут сброшены. Введите новые секреты и повторите авторизацию.",
+                        color = MaterialTheme.colorScheme.error)
                 }
                 saveError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }

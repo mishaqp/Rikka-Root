@@ -98,8 +98,8 @@ class ChatToolFactory(
                 buildMemoryTools(
                     json = json,
                     onCreation = { content -> memoryRepository.addMemory(memoryAssistantId, content) },
-                    onUpdate = { id, content -> memoryRepository.updateContent(id, content) },
-                    onDelete = { id -> memoryRepository.deleteMemory(id) },
+                    onUpdate = { id, content -> memoryRepository.updateContent(id, content, memoryAssistantId) },
+                    onDelete = { id -> memoryRepository.deleteMemory(id, memoryAssistantId) },
                 )
             )
         }
@@ -159,13 +159,6 @@ class ChatToolFactory(
         }
 
         val mcpTools = mcpManager.getAllAvailableTools(assistant)
-        val invalidNames = mcpTools
-            .map { it.second }
-            .distinct()
-            .filter { name -> name.isEmpty() || !name.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' } }
-        if (invalidNames.isNotEmpty()) {
-            throw InvalidMcpServerNamesException(invalidNames)
-        }
         mcpTools.forEach { (serverId, serverName, tool) ->
             add(
                 Tool(

@@ -6,6 +6,8 @@ import me.rerere.rikkahub.data.db.dao.MemoryDAO
 import me.rerere.rikkahub.data.db.entity.MemoryEntity
 import me.rerere.rikkahub.data.model.AssistantMemory
 
+class MemoryNotFoundException : IllegalStateException("Запись памяти не найдена. Проверьте id в памяти текущего ассистента.")
+
 class MemoryRepository(private val memoryDAO: MemoryDAO) {
     companion object {
         const val GLOBAL_MEMORY_ID = "__global__"
@@ -49,6 +51,12 @@ class MemoryRepository(private val memoryDAO: MemoryDAO) {
         )
     }
 
+    /** Ownership is checked by the mutation itself, without a read/write race. */
+    suspend fun updateContent(id: Int, content: String, assistantId: String): AssistantMemory {
+        if (memoryDAO.updateContentOfAssistant(id, assistantId, content) == 0) throw MemoryNotFoundException()
+        return AssistantMemory(id, content)
+    }
+
     suspend fun addMemory(assistantId: String, content: String): AssistantMemory {
         val memory = AssistantMemory(
             id = 0,
@@ -75,5 +83,9 @@ class MemoryRepository(private val memoryDAO: MemoryDAO) {
 
     suspend fun deleteMemory(id: Int) {
         memoryDAO.deleteMemory(id)
+    }
+
+    suspend fun deleteMemory(id: Int, assistantId: String) {
+        if (memoryDAO.deleteMemoryOfAssistant(id, assistantId) == 0) throw MemoryNotFoundException()
     }
 }

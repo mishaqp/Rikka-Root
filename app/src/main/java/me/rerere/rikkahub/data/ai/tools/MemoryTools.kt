@@ -15,6 +15,7 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.tools.local.deviceToolParts
 import me.rerere.rikkahub.data.model.AssistantMemory
+import me.rerere.rikkahub.data.repository.MemoryNotFoundException
 import me.rerere.rikkahub.utils.toLocalString
 import java.time.LocalDate
 
@@ -74,28 +75,35 @@ fun buildMemoryTools(
         execute = { deviceToolParts {
             val params = it.jsonObject
             val action = params["action"]?.jsonPrimitive?.contentOrNull ?: error("Укажите action: create, edit или delete для работы с памятью.")
-            val payload = when (action) {
-                "create" -> {
-                    val content = params["content"]?.jsonPrimitive?.contentOrNull ?: error("Укажите content — текст записи памяти.")
-                    json.encodeToJsonElement(AssistantMemory.serializer(), onCreation(content))
-                }
-
-                "edit" -> {
-                    val id = params["id"]?.jsonPrimitive?.intOrNull ?: error("Укажите id существующей записи памяти.")
-                    val content = params["content"]?.jsonPrimitive?.contentOrNull ?: error("Укажите content — текст записи памяти.")
-                    json.encodeToJsonElement(AssistantMemory.serializer(), onUpdate(id, content))
-                }
-
-                "delete" -> {
-                    val id = params["id"]?.jsonPrimitive?.intOrNull ?: error("Укажите id существующей записи памяти.")
-                    onDelete(id)
-                    buildJsonObject {
-                        put("success", true)
-                        put("id", id)
+            val payload = try {
+                when (action) {
+                    "create" -> {
+                        val content = params["content"]?.jsonPrimitive?.contentOrNull ?: error("Укажите content — текст записи памяти.")
+                        json.encodeToJsonElement(AssistantMemory.serializer(), onCreation(content))
                     }
-                }
 
-                else -> error("Укажите action: create, edit или delete для работы с памятью.")
+                    "edit" -> {
+                        val id = params["id"]?.jsonPrimitive?.intOrNull ?: error("Укажите id существующей записи памяти.")
+                        val content = params["content"]?.jsonPrimitive?.contentOrNull ?: error("Укажите content — текст записи памяти.")
+                        json.encodeToJsonElement(AssistantMemory.serializer(), onUpdate(id, content))
+                    }
+
+                    "delete" -> {
+                        val id = params["id"]?.jsonPrimitive?.intOrNull ?: error("Укажите id существующей записи памяти.")
+                        onDelete(id)
+                        buildJsonObject {
+                            put("success", true)
+                            put("id", id)
+                        }
+                    }
+
+                    else -> error("Укажите action: create, edit или delete для работы с памятью.")
+                }
+            } catch (notFound: MemoryNotFoundException) {
+                buildJsonObject {
+                    put("code", "not_found")
+                    put("error", notFound.message)
+                }
             }
             listOf(UIMessagePart.Text(payload.toString()))
         } }

@@ -25,7 +25,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
-import me.rerere.ai.core.InputSchema
+import me.rerere.ai.core.parametersOrEmpty
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
@@ -70,6 +70,7 @@ import okhttp3.sse.EventSource
 import okhttp3.sse.EventSourceListener
 import okhttp3.sse.EventSources
 import kotlin.time.Clock
+import kotlin.uuid.Uuid
 
 class ChatCompletionsAPI(
     private val client: OkHttpClient,
@@ -111,7 +112,8 @@ class ChatCompletionsAPI(
             val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
 
             // 从 JsonObject 中提取必要的信息
-            val id = bodyJson["id"]?.jsonPrimitive?.contentOrNull ?: ""
+            val id = bodyJson["id"]?.jsonPrimitive?.contentOrNull?.takeIf(String::isNotBlank)
+                ?: Uuid.random().toString()
             val model = bodyJson["model"]?.jsonPrimitive?.contentOrNull ?: ""
             val choice = bodyJson["choices"]?.jsonArray?.get(0)?.jsonObject ?: error("choices is null")
 
@@ -429,8 +431,7 @@ class ChatCompletionsAPI(
                                 put(
                                     "parameters",
                                     json.encodeToJsonElement(
-                                        tool.parameters()
-                                            ?: InputSchema.Obj(properties = JsonObject(emptyMap()))
+                                        tool.parametersOrEmpty()
                                     )
                                 )
                             })
@@ -747,10 +748,12 @@ class ChatCompletionsAPI(
                     val toolName =
                         toolCalls.jsonObject["function"]?.jsonObject?.get("name")?.jsonPrimitive?.contentOrNull
                     val arguments =
-                        toolCalls.jsonObject["function"]?.jsonObject?.get("arguments")?.jsonPrimitive?.contentOrNull
+                        toolCalls.jsonObject["function"]?.jsonObject?.get("arguments")?.let {
+                            if (it is JsonPrimitive) it.contentOrNull.orEmpty() else it.toString()
+                        }
                     add(
                         UIMessagePart.Tool(
-                            toolCallId = toolCallId ?: "",
+                            toolCallId = toolCallId?.takeIf(String::isNotBlank) ?: Uuid.random().toString(),
                             toolName = toolName ?: "",
                             input = arguments ?: "",
                             output = emptyList()

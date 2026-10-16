@@ -378,7 +378,14 @@ fun Route.conversationRoutes(
         post("/{id}/tool-approval") {
             val uuid = call.parameters["id"].toUuid("conversation id")
             val request = call.receive<ToolApprovalRequest>()
-            chatService.requireWritableConversation(uuid)
+            val conversation = chatService.requireWritableConversation(uuid)
+            if (request.answer != null && conversation.currentMessages.none { message ->
+                    message.getTools().any {
+                        it.toolCallId == request.toolCallId && it.toolName == "ask_user" && it.isPending
+                    }
+                }) {
+                throw BadRequestException("Ответ можно отправить только на ожидающий вопрос пользователю.")
+            }
             chatService.handleToolApproval(uuid, request.toolCallId, request.approved, request.reason, request.answer)
             call.respond(HttpStatusCode.Accepted, mapOf("status" to "accepted"))
         }

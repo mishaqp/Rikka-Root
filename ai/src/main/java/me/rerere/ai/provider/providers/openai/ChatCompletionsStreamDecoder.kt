@@ -26,12 +26,13 @@ import me.rerere.common.http.jsonArrayOrNull
 import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.common.http.jsonPrimitiveOrNull
 import kotlin.time.Clock
+import kotlin.uuid.Uuid
 
 internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
     private val streamState = ChatCompletionsStreamState()
     private val toolIdsByIndex = mutableMapOf<Int, String>()
     private val reasoningDetailsByIndex = linkedMapOf<Int, JsonObject>()
-    private var responseId: String? = null
+    private var responseId: String = Uuid.random().toString()
     private var responseModel: String? = null
     private var finishReason: String? = null
     private var finished = false
@@ -44,7 +45,8 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
             event.data.trim().split("\n").filter(String::isNotBlank).forEach { line ->
                 val payload = json.parseToJsonElement(line).jsonObject
                 payload["error"]?.let { throw it.parseErrorDetail() }
-                responseId = payload["id"]?.jsonPrimitive?.contentOrNull ?: responseId
+                responseId = payload["id"]?.jsonPrimitive?.contentOrNull
+                    ?.takeIf(String::isNotBlank) ?: responseId
                 responseModel = payload["model"]?.jsonPrimitive?.contentOrNull ?: responseModel
 
                 payload["choices"]?.jsonArrayOrNull?.firstOrNull()?.jsonObjectOrNull?.let { choice ->
@@ -56,9 +58,10 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
                             val toolCall = element.jsonObjectOrNull ?: return@forEachIndexed
                             val index = toolCall["index"]?.jsonPrimitive?.intOrNull ?: fallbackIndex
                             val toolId = toolCall["id"]?.jsonPrimitive?.contentOrNull
+                                ?.takeIf(String::isNotBlank)
                                 ?.also { toolIdsByIndex[index] = it }
                                 ?: toolIdsByIndex.getOrPut(index) {
-                                    "${responseId ?: "response"}:tool-$index"
+                                    Uuid.random().toString()
                                 }
                             val function = toolCall["function"]?.jsonObjectOrNull
                             addAll(streamState.append(
@@ -67,7 +70,9 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
                                     parts = listOf(UIMessagePart.Tool(
                                         toolCallId = toolId,
                                         toolName = function?.get("name")?.jsonPrimitive?.contentOrNull ?: "",
-                                        input = function?.get("arguments")?.jsonPrimitive?.contentOrNull ?: "",
+                                        input = function?.get("arguments")?.let {
+                                            if (it is JsonPrimitive) it.contentOrNull.orEmpty() else it.toString()
+                                        }.orEmpty(),
                                         output = emptyList(),
                                     )),
                                 ),

@@ -59,7 +59,7 @@ suspend fun createWorkspaceTools(
     val approvalOverrides = workspaceRepository.getById(workspaceId)?.toolApprovalOverrides().orEmpty()
     fun needsApproval(name: String) = resolveWorkspaceToolApproval(name, approvalOverrides)
 
-    val shellCwd = cwd?.removePrefix("/workspace/")?.removePrefix("/workspace")
+    val shellCwd = cwd
 
     return (listOf(
         createReadFileTool(workspaceId, ::needsApproval, workspaceRepository),
@@ -82,7 +82,7 @@ private fun createBackgroundTools(id: String, repository: WorkspaceRepository, d
         needsApproval = { true },
         execute = { args ->
             val params = args.jsonObject
-            val cwd = (params.string("cwd") ?: defaultCwd.orEmpty()).removePrefix("/workspace/").removePrefix("/workspace")
+            val cwd = (params.string("cwd") ?: defaultCwd.orEmpty()).workspaceRelativeCwd()
             listOf(UIMessagePart.Text(repository.startBackground(id, params.string("command") ?: error("Укажите команду в command."), cwd).toBackgroundJson(false).toString()))
         },
     ),
@@ -316,8 +316,7 @@ private fun createShellTool(
     execute = {
         val params = it.jsonObject
         val command = params.string("command") ?: error("Укажите команду в command.")
-        val cwd = (params.string("cwd") ?: defaultCwd.orEmpty())
-            .removePrefix("/workspace/").removePrefix("/workspace")
+        val cwd = (params.string("cwd") ?: defaultCwd.orEmpty()).workspaceRelativeCwd()
         val timeoutMillis = params.string("timeout")?.toLongOrNull()
             ?.coerceIn(1L, SHELL_TIMEOUT_MAX_SECONDS)
             ?.times(1_000L)
@@ -475,7 +474,29 @@ private fun kotlinx.serialization.json.JsonObject.absolutePath(name: String): St
     require(path.isNotBlank()) { "Укажите путь в $name." }
     require(path.startsWith("/")) { "Укажите в $name полный путь внутри Rootfs, начиная с /." }
     require(!path.contains('\u0000')) { "Путь в $name содержит недопустимый символ. Укажите другой путь." }
+    path.requireNoDotSegments(name)
     return path
+}
+
+/** Reject traversal before selecting a mount or checking writable path prefixes. */
+private fun String.requireNoDotSegments(name: String) {
+    require(split('/').none { it == "." || it == ".." }) {
+        "Путь в $name содержит сегменты «.» или «..». Укажите путь без этих сегментов."
+    }
+}
+
+private fun String.workspaceRelativeCwd(): String {
+    val path = replace('\\', '/').trim()
+    require(!path.contains('\u0000')) { "Путь в cwd содержит недопустимый символ. Укажите другой путь." }
+    path.requireNoDotSegments("cwd")
+    return when {
+        path == "/workspace" -> ""
+        path.startsWith("/workspace/") -> path.removePrefix("/workspace/")
+        else -> {
+            require(!path.startsWith('/')) { "Укажите в cwd путь относительно рабочей папки или внутри /workspace." }
+            path
+        }
+    }
 }
 
 // 免强制审批的可写安全区: 工作区文件目录、临时目录和技能目录

@@ -1,6 +1,8 @@
 // Adapted from ExTV/rikkahub-agent (AGPL v3); API 2.5.6, approvals, secure storage and Russian UI.
 package me.rerere.rikkahub.data.ai.mcp.control
 
+import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
+import me.rerere.rikkahub.data.ai.mcp.serverUrl
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
@@ -26,9 +28,9 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 object McpApprovalRenderer {
 
-    fun render(toolName: String, args: JsonObject): String? = when (toolName) {
+    fun render(toolName: String, args: JsonObject, existingConfig: McpServerConfig? = null): String? = when (toolName) {
         "mcp_add" -> renderAdd(args)
-        "mcp_update" -> renderUpdate(args)
+        "mcp_update" -> renderUpdate(args, existingConfig)
         "mcp_delete" -> renderDelete(args)
         "mcp_set_enabled" -> renderSetEnabled(args)
         "mcp_set_tool_approval" -> renderSetToolApproval(args)
@@ -38,7 +40,7 @@ object McpApprovalRenderer {
     private fun renderAdd(args: JsonObject): String {
         val name = args["name"]?.jsonPrimitive?.contentOrNull ?: "(без названия)"
         val transport = args["transport"]?.jsonPrimitive?.contentOrNull ?: "(неизвестно)"
-        val url = args["url"]?.jsonPrimitive?.contentOrNull ?: "(нет URL)"
+        val url = args["url"]?.jsonPrimitive?.contentOrNull?.let(::redactedMcpUrl) ?: "(нет URL)"
         val enabled = args["enabled"]?.jsonPrimitive?.booleanOrNull ?: true
         val headers = parseHeadersForDisplay(args)
         return buildString {
@@ -50,18 +52,26 @@ object McpApprovalRenderer {
         }
     }
 
-    private fun renderUpdate(args: JsonObject): String {
-        val name = args["name"]?.jsonPrimitive?.contentOrNull ?: "(без названия)"
+    private fun renderUpdate(args: JsonObject, existingConfig: McpServerConfig?): String {
+        val name = args["name"]?.jsonPrimitive?.contentOrNull ?: existingConfig?.commonOptions?.name ?: "(без названия)"
         val transport = args["transport"]?.jsonPrimitive?.contentOrNull ?: "(неизвестно)"
-        val url = args["url"]?.jsonPrimitive?.contentOrNull ?: "(нет URL)"
-        val enabled = args["enabled"]?.jsonPrimitive?.booleanOrNull ?: true
-        val headers = parseHeadersForDisplay(args)
+        val rawUrl = args["url"]?.jsonPrimitive?.contentOrNull
+        val url = rawUrl?.let(::redactedMcpUrl) ?: "(нет URL)"
+        val previousUrl = existingConfig?.serverUrl?.let(::redactedMcpUrl) ?: "(текущий адрес недоступен)"
+        val enabled = args["enabled"]?.jsonPrimitive?.booleanOrNull ?: existingConfig?.commonOptions?.enable
+        val headers = if (args.containsKey("headers")) parseHeadersForDisplay(args) else existingConfig?.commonOptions?.headers.orEmpty()
+        val originChanged = existingConfig == null || rawUrl == null || runCatching {
+            mcpCredentialOrigin(existingConfig.serverUrl) != mcpCredentialOrigin(rawUrl)
+        }.getOrDefault(true)
         return buildString {
             append("Изменить сервер MCP \"$name\"\n\n")
             append("Транспорт: $transport\n")
-            append("URL: $url\n")
+            append("URL: $previousUrl → $url\n")
+            if (originChanged) {
+                append("Внимание: при смене адреса OAuth и секретные заголовки будут сброшены. Повторно авторизуйтесь и введите секреты в настройках MCP.\n")
+            }
             appendHeadersBlock(this, headers)
-            append("\nВключён: ${if (enabled) "да" else "нет"}")
+            append("\nВключён: ${when (enabled) { true -> "да"; false -> "нет"; null -> "без изменений" }}")
         }
     }
 

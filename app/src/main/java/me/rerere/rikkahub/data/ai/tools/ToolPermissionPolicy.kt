@@ -152,6 +152,8 @@ object ToolPermissionPolicy {
         "workspace_edit_file" to "редактирование файлов workspace",
         "clipboard_tool" to "запись в буфер обмена",
         "calendar_create" to "создание событий календаря",
+        "calendar_query" to "чтение событий календаря",
+        "get_screen_time" to "статистика использования приложений",
         "memory_tool" to "создание, изменение и удаление памяти",
         "text_to_speech" to "озвучивание текста",
         "show_toast" to "всплывающие сообщения",
@@ -190,6 +192,7 @@ object ToolPermissionPolicy {
     fun mandatoryConfirmation(name: String, input: JsonElement): Boolean {
         if (isManagementTool(name)) return managementToolNeedsApproval(name, input)
         if (name in setOf("skill_install_from_url", "skill_install_from_text")) return true
+        if (name in setOf("mcp_add", "mcp_update", "send_sms")) return true
         if (name == "ssh_forget_host_key") return true
         val args = input as? JsonObject
         fun text(key: String): String? = (args?.get(key) as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
@@ -243,6 +246,7 @@ object ToolPermissionPolicy {
             "Автоодобрение и «Всегда разрешать» не обходят подтверждение массового удаления защищённых каталогов, форматирования, записи в разделы, " +
             "изменения загрузчика, сброса устройства, отключения SELinux/проверки загрузки и remount рабочих разделов. " +
             "Сброс доверенного ключа SSH-сервера также всегда требует явного подтверждения. " +
+            "Отправка SMS, добавление и изменение серверов MCP также всегда требуют отдельного подтверждения. " +
             "Создание, изменение, копирование, выбор и удаление ассистентов, а также изменение настроек приложения всегда требуют отдельного одобрения. " +
             "Подтверждения после веб-поиска возвращаются только при включённом переключателе «Спрашивать после веб-контента». " +
             "Запретный список не разбирает shell-обёртки (sh -c, eval) и содержимое скриптов.\n\n" +

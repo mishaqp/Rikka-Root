@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentWidth
@@ -213,9 +214,14 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         ToolPermissionPolicy.canGrantForChat(tool.toolName, tool.inputAsJson())
     }
     val useCustomMcpPreview = tool.toolName in MCP_CUSTOM_APPROVAL_TOOL_NAMES
+    val currentMcpConfig = if (isPending && tool.toolName == "mcp_update") {
+        val mcpSettings by me.rerere.rikkahub.ui.hooks.rememberUserSettingsState()
+        val serverId = runCatching { tool.inputAsJson().jsonObject["id"]?.jsonPrimitive?.contentOrNull }.getOrNull()
+        mcpSettings.mcpServers.firstOrNull { it.id.toString() == serverId }
+    } else null
     val redactedMcpPreview = if (isPending && useCustomMcpPreview) runCatching {
         (tool.inputAsJson() as? JsonObject)?.let {
-            me.rerere.rikkahub.data.ai.mcp.control.McpApprovalRenderer.render(tool.toolName, it)
+            me.rerere.rikkahub.data.ai.mcp.control.McpApprovalRenderer.render(tool.toolName, it, currentMcpConfig)
         }
     }.getOrNull() else null
     val workflowPreview = if (isPending &&
@@ -281,7 +287,11 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             )
                         }
                     }
-                    if (!workflowPreview.isNullOrBlank()) Text(workflowPreview, style = MaterialTheme.typography.labelSmall)
+                    if (!workflowPreview.isNullOrBlank()) Column(
+                        modifier = Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState()),
+                    ) {
+                        Text(workflowPreview, style = MaterialTheme.typography.labelSmall)
+                    }
                     if (!managementPreview.isNullOrBlank()) Text(
                         managementPreview,
                         modifier = Modifier.testTag("chat_management_approval:${tool.toolCallId}"),
@@ -425,10 +435,12 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             redactedMcpPreview, modifier = Modifier.padding(horizontal = 16.dp),
                             style = MaterialTheme.typography.bodySmall,
                         )
-                        if (!workflowPreview.isNullOrBlank()) Text(
-                            workflowPreview, modifier = Modifier.padding(horizontal = 16.dp),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
+                        if (!workflowPreview.isNullOrBlank()) Column(
+                            modifier = Modifier.padding(horizontal = 16.dp).heightIn(max = 320.dp)
+                                .verticalScroll(rememberScrollState()),
+                        ) {
+                            Text(workflowPreview, style = MaterialTheme.typography.bodySmall)
+                        }
                         if (!managementPreview.isNullOrBlank()) Text(
                             managementPreview, modifier = Modifier.padding(horizontal = 16.dp),
                             style = MaterialTheme.typography.bodySmall,

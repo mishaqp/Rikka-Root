@@ -1,6 +1,9 @@
 package me.rerere.rikkahub.data.ai.tools.local
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -59,6 +62,11 @@ internal suspend fun deviceToolParts(
 ): List<UIMessagePart> {
     val error = try {
         return read()
+    } catch (error: TimeoutCancellationException) {
+        // A nested timeout may expire while the tool's caller is still active.
+        currentCoroutineContext().ensureActive()
+        fileOperation?.let { FileOperationDiagnostics.record(it, error) }
+        deviceToolError(deviceToolFailureReason(error, fileOperation))
     } catch (error: CancellationException) {
         throw error
     } catch (error: Exception) {
@@ -80,6 +88,7 @@ private val authoredReason = Regex("^(?:[A-Za-z_][A-Za-z0-9_]*\\s+)?[А-Яа-я�
  * before considering an app-authored reason; Cyrillic inside a pathname is not a reason.
  */
 internal fun deviceToolFailureReason(error: Throwable, fileOperation: FileToolOperation? = null): String {
+    if (error is TimeoutCancellationException) return "Операция не завершилась вовремя. Повторите попытку."
     safFileCause(error)?.let { return safFileFailureReason(it, fileOperation) }
     val message = error.message?.trim()
     val platformReason = when (error) {

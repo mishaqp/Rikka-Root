@@ -37,6 +37,7 @@ import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.ai.mcp.control.McpControlSecretStore
 import me.rerere.rikkahub.data.ai.mcp.control.McpUrlGuard
+import me.rerere.rikkahub.data.ai.mcp.control.mcpCredentialOrigin
 import me.rerere.rikkahub.reliability.SecretRedactor
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration.Companion.seconds
@@ -459,8 +460,21 @@ internal class McpSessionRegistry(
     }
 
     private fun HttpRequestBuilder.appendResolvedHeaders(config: McpServerConfig) {
+        // SSE may supply an absolute POST endpoint. Validate the actual URL before any
+        // vault access or header mutation, including HTTPS downgrades and port changes.
+        val hasCredentials = config.commonOptions.headers.any { it.first.isNotBlank() && it.second.isNotEmpty() } ||
+            config.commonOptions.oauth?.let { it.enabled && !it.accessToken.isNullOrBlank() } == true
+        if (hasCredentials) {
+            check(mcpCredentialOrigin(url.build().toString()) == mcpCredentialOrigin(config.serverUrl)) {
+                "Сервер MCP запросил отправку секретных заголовков на другой адрес. Запрос заблокирован."
+            }
+        }
         headers.appendAll(StringValues.build {
-            config.resolvedHeaders(secretStore::resolve).forEach { (name, value) -> append(name, value) }
+            config.resolvedHeaders { reference ->
+                // This config came from trusted settings; claim legacy references once.
+                secretStore.bind(reference, config.id, config.serverUrl)
+                secretStore.resolve(reference, config.id, config.serverUrl)
+            }.forEach { (name, value) -> append(name, value) }
         })
     }
 

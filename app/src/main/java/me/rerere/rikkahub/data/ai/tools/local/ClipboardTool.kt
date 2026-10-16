@@ -49,8 +49,14 @@ internal fun buildClipboardTool(context: Context): Tool = Tool(
         val action = params["action"]?.jsonPrimitive?.contentOrNull ?: error("Укажите action: read для чтения или write для записи в буфер обмена.")
         when (action) {
             "read" -> {
+                val text = context.readClipboardText()
+                val sensitiveCategories = SensitiveContentDetector.scan(text)
                 val payload = buildJsonObject {
-                    put("text", context.readClipboardText())
+                    put("text", text)
+                    if (sensitiveCategories.isNotEmpty()) {
+                        put("sensitive_content_detected", true)
+                        put("warning", "В буфере обмена обнаружены возможные конфиденциальные данные (${sensitiveCategories.joinToString { category -> category.name.lowercase() }}). Не повторяйте их в ответе и не включайте в сводки; используйте только для запрошенного пользователем действия.")
+                    }
                 }
                 listOf(UIMessagePart.Text(payload.toString()))
             }

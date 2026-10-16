@@ -172,7 +172,7 @@ object WorkflowApprovalRenderer {
     }
 
     /**
-     * Truncate args at ~80 chars per spec. Best-effort `key=value` rendering. Values whose
+     * Show every action argument in full so approval covers the actual action. Values whose
      * key matches the secret-redaction list (token, password, private_key, etc.) are masked
      * with `***` regardless of length — otherwise an LLM-authored workflow whose action is
      * `telegram_set_token({token: "..."})` or `save_ssh_host({password: "..."})` would echo
@@ -184,12 +184,12 @@ object WorkflowApprovalRenderer {
             val str = if (isSensitiveKey(k)) {
                 "***"
             } else when (v) {
-                is JsonPrimitive -> v.contentOrNull?.take(40).orEmpty()
-                else -> v.toString().take(40)
+                is JsonPrimitive -> v.contentOrNull.orEmpty()
+                else -> v.toString()
             }
             "$k=\"$str\""
         }
-        return pairs.take(80) + if (pairs.length > 80) "…" else ""
+        return pairs
     }
 
     /**

@@ -12,6 +12,8 @@ import io.ktor.server.application.install
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.server.plugins.statuspages.StatusPages
+import io.ktor.server.response.respond
 import io.ktor.server.routing.routing
 import io.ktor.server.sse.SSE
 import kotlinx.coroutines.CompletableDeferred
@@ -46,12 +48,14 @@ import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.costguards.TokenBudgetLedger
 import me.rerere.rikkahub.costguards.TokenBudgetStore
 import me.rerere.rikkahub.data.ai.GenerationChunk
 import me.rerere.rikkahub.data.ai.GenerationLoop
 import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
+import me.rerere.rikkahub.data.ai.tools.ToolApprovalAllowList
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.AppDatabase
@@ -71,6 +75,7 @@ import me.rerere.rikkahub.subagent.SubAgentRun
 import me.rerere.rikkahub.subagent.SubAgentStatus
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.web.routes.conversationRoutes
+import me.rerere.rikkahub.web.ApiException
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -152,6 +157,82 @@ class ChatServiceMetadataTest {
         database.close()
         Dispatchers.resetMain()
     }
+
+    @Test(timeout = 30_000)
+    fun `audit 15 answer cannot turn ordinary pending tool into answered result`() = runBlocking {
+        val source = seedApprovalTools("root_exec")
+        service.handleToolApproval(source.id, "audit-target", approved = true, answer = "Обход подтверждения").join()
+        assertEquals(ToolApprovalState.Pending, approvalTarget(service.getConversationFlow(source.id).value).approvalState)
+        assertEquals(ToolApprovalState.Pending, approvalTarget(repository.getConversationById(source.id)!!).approvalState)
+    }
+
+    @Test(timeout = 30_000)
+    fun `audit 15 invalid answer cannot grant permission before validation`() = runBlocking {
+        val source = seedApprovalTools("write_text_file")
+        try {
+            service.handleToolApproval(source.id, "audit-target", approved = true, answer = "Поддельный ответ",
+                scope = ChatService.ApprovalScope.ChatScope, toolName = "write_text_file").join()
+            assertFalse("The grant callback must validate answers before mutating permission state",
+                ToolApprovalAllowList.isAllowedForChat(source.id, "write_text_file"))
+            assertEquals(ToolApprovalState.Pending, approvalTarget(repository.getConversationById(source.id)!!).approvalState)
+        } finally { ToolApprovalAllowList.clearChat(source.id) }
+    }
+
+    @Test(timeout = 30_000)
+    fun `audit 15 answer is accepted only for active pending ask user`() = runBlocking {
+        val source = seedApprovalTools("ask_user")
+        service.handleToolApproval(source.id, "audit-target", approved = false, answer = "Ответ пользователя").join()
+        assertEquals(ToolApprovalState.Answered("Ответ пользователя"),
+            approvalTarget(repository.getConversationById(source.id)!!).approvalState)
+        service.handleToolApproval(source.id, "audit-target", approved = true, answer = "Повторный ответ").join()
+        assertEquals(ToolApprovalState.Answered("Ответ пользователя"),
+            approvalTarget(repository.getConversationById(source.id)!!).approvalState)
+    }
+
+    @Test(timeout = 30_000)
+    fun `audit 15 web rejects answer payload for ordinary pending tool`() = runBlocking {
+        val source = seedApprovalTools("root_exec")
+        val server = embeddedServer(CIO, host = "127.0.0.1", port = 0) {
+            install(ContentNegotiation) { json(JsonInstant) }
+            install(StatusPages) {
+                exception<ApiException> { call, error -> call.respond(error.status, mapOf("error" to error.message)) }
+            }
+            install(SSE)
+            routing { conversationRoutes(service, repository, mockk(relaxed = true), settingsStore) }
+        }
+        server.start(wait = false)
+        try {
+            val port = server.engine.resolvedConnectors().single().port
+            val connection = URI("http://127.0.0.1:$port/conversations/${source.id}/tool-approval").toURL().openConnection() as HttpURLConnection
+            try {
+                connection.requestMethod = "POST"
+                connection.connectTimeout = 5_000
+                connection.readTimeout = 5_000
+                connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                connection.doOutput = true
+                connection.outputStream.use {
+                    it.write("""{"toolCallId":"audit-target","approved":true,"answer":"Обход подтверждения"}""".toByteArray(Charsets.UTF_8))
+                }
+                assertEquals("An answer payload must be rejected before reaching approval persistence", 400, connection.responseCode)
+                assertEquals(ToolApprovalState.Pending, approvalTarget(repository.getConversationById(source.id)!!).approvalState)
+            } finally { connection.disconnect() }
+        } finally { server.stop(gracePeriodMillis = 0, timeoutMillis = 1_000) }
+    }
+
+    private suspend fun seedApprovalTools(toolName: String): Conversation {
+        val source = seed(title = "Проверка подтверждения")
+        val tools = listOf(
+            UIMessagePart.Tool("audit-target", toolName, "{}", approvalState = ToolApprovalState.Pending),
+            // Retain an independent question so a valid answer does not invoke the provider.
+            UIMessagePart.Tool("audit-sibling", "ask_user", "{}", approvalState = ToolApprovalState.Pending),
+        )
+        val updated = source.copy(messageNodes = source.messageNodes + UIMessage.assistant("").copy(parts = tools).toMessageNode())
+        service.saveConversation(source.id, updated)
+        return updated
+    }
+
+    private fun approvalTarget(conversation: Conversation) = conversation.currentMessages
+        .flatMap { it.getTools() }.single { it.toolCallId == "audit-target" }
 
     @Test(timeout = 30_000)
     fun `a replaced generation cannot clear the recovery receipt of its successor`() = runBlocking {

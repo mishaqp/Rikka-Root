@@ -5,9 +5,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * The "hardline" tier — unconditional command blocklist.
@@ -50,21 +48,21 @@ object HardlineCommandGuard {
      * shutdown / reboot / mkfs rules by wrapping them in a shell-eval invocation.
      */
     private const val CMD_POS_BARE = "(?:^|[;&|\\n`]|\\\$\\()"
-    // `busybox sh -c "…"` is a common Android invocation form, hence the optional
-    // busybox prefix. `ash` is BusyBox's default shell.
+    // Shell -c may occur anywhere in combined flags (`-lc`, `-ce`, `-lce`).
     private const val SHELL_EVAL_OPEN =
-        "\\b(?:busybox\\s+)?(?:bash|sh|zsh|dash|ksh|csh|tcsh|ash)\\s+(?:-[a-zA-Z]+\\s+)*-c\\s+[\"']"
+        "\\b(?:(?:busybox|toybox)\\s+)?(?:bash|sh|zsh|dash|ksh|csh|tcsh|ash)\\s+(?:-[a-zA-Z]+\\s+)*-[a-zA-Z]*c[a-zA-Z]*\\s+[\"']?"
 
-    private const val CMD_POS =
+    // Reuse this position in the Android root floor. Groups are recognized only in
+    // a command prefix, so ordinary data such as `echo '(reboot)'` stays untouched.
+    internal const val CMD_POS =
         "(?:(?:" + CMD_POS_BARE + ")|(?:" + SHELL_EVAL_OPEN + "))" +
         "\\s*" +
-        "(?:sudo\\s+(?:-[^\\s]+\\s+)*)?" +
-        "(?:env\\s+(?:\\w+=\\S*\\s+)*)?" +
-        "(?:(?:exec|nohup|setsid|time)\\s+)*" +
-        "\\s*" +
-        // Optional absolute-path prefix so /usr/sbin/shutdown matches the same way bare
-        // 'shutdown' does. The greedy `[\w./_-]*/` consumes everything up to the last
-        // slash so the trailing command name is what's matched by the (cmd1|cmd2) group.
+        "(?:[({]\\s*|[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+|(?:[\\w./_-]*/)?(?:" +
+        "(?:sudo|su)\\s+(?:-[^\\s]+\\s+)*(?:0\\s+)?|" +
+        "env\\s+(?:(?:-u|--unset)\\s+\\w+\\s+|--unset=\\w+\\s+|-[^\\s]+\\s+|\\w+=\\S*\\s+)*|" +
+        "(?:busybox|toybox|exec|nohup|setsid|time|then|do|else|if|while|until|command|!)\\s+|" +
+        "timeout\\s+(?:-[^\\s]+\\s+)*[0-9]+(?:\\.[0-9]+)?[smhd]?\\s+" +
+        "))*" +
         "(?:[\\w./_-]*/)?"
 
     /** End-of-path anchor — whitespace, end-of-string, or shell-eval closing quote. */
@@ -157,22 +155,25 @@ object HardlineCommandGuard {
      * paths). Mirrors [checkTool] but skips the parse step.
      */
     fun checkToolParsed(toolName: String, input: JsonObject): String? {
+        // Malformed argument types belong to tool validation, never to a guard exception.
+        fun string(name: String): String? =
+            (input[name] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
         return when {
             toolName == "termux_run_command" -> {
-                val cmd = input["command"]?.jsonPrimitive?.contentOrNull
+                val cmd = string("command")
                 checkCommand(cmd)?.let { return it }
-                val exe = input["executable"]?.jsonPrimitive?.contentOrNull
-                val args = input["arguments"]?.jsonArray
-                    ?.mapNotNull { it.jsonPrimitive.contentOrNull }
+                val exe = string("executable")
+                val args = (input["arguments"] as? JsonArray)
+                    ?.mapNotNull { (it as? JsonPrimitive)?.takeIf { value -> value.isString }?.contentOrNull }
                     ?.joinToString(" ")
                 if (exe != null || args != null) {
                     checkCommand("${exe.orEmpty()} ${args.orEmpty()}")
                 } else null
             }
             toolName == "ssh_exec" || toolName == "ssh_exec_saved" ->
-                checkCommand(input["command"]?.jsonPrimitive?.contentOrNull)
+                checkCommand(string("command"))
             toolName == "shizuku_exec" ->
-                checkCommand(input["command"]?.jsonPrimitive?.contentOrNull)
+                checkCommand(string("command"))
             // Sub-agent dispatch — the spawned LLM gets the parent's full tool surface
             // headlessly, so a `task` / `prompt` containing a literal hardline-blocked
             // command (e.g. `rm -rf /`) shouldn't be authorised even if the parent
@@ -192,7 +193,7 @@ object HardlineCommandGuard {
             //   (b) JS-specific exfiltration / privilege patterns (cookie writes, eval,
             //       Function constructor, string-form setTimeout, data: script injection).
             toolName == "browser_eval_js" -> {
-                val code = input["code"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                val code = string("code").orEmpty()
                 checkCommand(code)?.let { return it }
                 val matched = JS_HARDLINE_PATTERNS.firstOrNull { (rx, _) -> rx.containsMatchIn(code) }
                 matched?.second

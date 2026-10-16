@@ -13,19 +13,19 @@ import kotlin.uuid.Uuid
 class McpToolNameTest {
 
     @Test
-    fun `builds the mcp__slug_name__tool shape with the first 8 hex chars of the id`() {
+    fun `builds a readable mcp name with a stable full identity hash suffix`() {
         val id = Uuid.parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
         val name = buildMcpToolName(id, "my-server", "do_thing")
 
-        assertEquals("mcp__aaaaaaaa_my-server__do_thing", name)
+        assertEquals("mcp__aaaaaaaa_my-server__do_thing_be34b7081f31f5e6", name)
     }
 
     @Test
-    fun `dashes are stripped from the slug`() {
+    fun `UUID slug is followed by the complete identity hash`() {
         val id = Uuid.parse("12345678-9999-cccc-dddd-eeeeeeeeeeee")
         val name = buildMcpToolName(id, "s", "t")
 
-        assertEquals("mcp__12345678_s__t", name)
+        assertEquals("mcp__12345678_s__t_bf1cb35c7495c04f", name)
     }
 
     @Test

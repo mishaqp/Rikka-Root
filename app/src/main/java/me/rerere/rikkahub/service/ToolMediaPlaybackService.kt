@@ -29,6 +29,9 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.util.UUID
@@ -149,6 +152,9 @@ class ToolMediaPlaybackService : Service() {
                 val result = withTimeout(30_000) { deferred.await() }
                 delivered = true
                 return result
+            } catch (error: TimeoutCancellationException) {
+                currentCoroutineContext().ensureActive()
+                return ToolMediaStatus(error = "Медиакоманда не завершилась вовремя. Повторите попытку.")
             } finally {
                 requests.remove(id)
                 if (!delivered) withContext(NonCancellable + Dispatchers.Main.immediate) {

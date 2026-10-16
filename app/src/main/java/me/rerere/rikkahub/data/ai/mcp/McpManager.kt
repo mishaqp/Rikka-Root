@@ -63,11 +63,14 @@ class McpManager(
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.MINUTES)
         .writeTimeout(120, TimeUnit.SECONDS)
-        .followSslRedirects(true)
-        .followRedirects(true)
+        .followSslRedirects(false)
+        .followRedirects(false)
         .build()
 
     private val httpClient = HttpClient(OkHttp) {
+        // Every endpoint change must pass the request-origin credential check again.
+        // Neither engine nor Ktor may replay custom headers on a redirected request.
+        followRedirects = false
         engine {
             preconfigured = okHttpClient
         }
@@ -232,8 +235,14 @@ class McpManager(
     }
 }
 
-// Copied from ExTV/rikkahub-agent McpManager.kt (AGPL v3), shared with mcp_list_tools.
+// Adapted from ExTV/rikkahub-agent McpManager.kt (AGPL v3), shared with mcp_list_tools.
+// Registration retains the exact remote name in its execute closure, never decodes this name.
 fun buildMcpToolName(serverId: Uuid, serverName: String, toolName: String): String {
-    val serverSlug = serverId.toString().take(8).replace("-", "")
-    return "mcp__" + serverSlug + "_" + serverName + "__" + toolName
+    val serverSlug = serverId.toString().take(8)
+    val readable = ("mcp__" + serverSlug + "_" + serverName + "__" + toolName)
+        .replace(Regex("[^a-zA-Z0-9_-]"), "_")
+    val identity = "$serverId\u0000$serverName\u0000$toolName"
+    val suffix = java.security.MessageDigest.getInstance("SHA-256")
+        .digest(identity.toByteArray(Charsets.UTF_8)).take(8).joinToString("") { "%02x".format(it) }
+    return readable.take(47) + "_" + suffix
 }

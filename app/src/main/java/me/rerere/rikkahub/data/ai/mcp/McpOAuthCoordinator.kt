@@ -17,6 +17,7 @@ import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.ai.mcp.control.McpControlSecretStore
 import me.rerere.rikkahub.data.ai.mcp.control.McpUrlGuard
+import me.rerere.rikkahub.data.ai.mcp.control.mcpCredentialOrigin
 import me.rerere.rikkahub.reliability.SecretRedactor
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration.Companion.minutes
@@ -33,16 +34,27 @@ internal const val MCP_OAUTH_CLIENT_METADATA_URL = "https://rikkahub.github.io/o
 private val OAUTH_CALLBACK_TIMEOUT = 5.minutes
 
 /** Plain tokens exist only for an OAuth request; Settings and backups contain opaque refs. */
-internal fun McpOAuthState.protectedSecrets(secretStore: McpControlSecretStore): McpOAuthState {
+internal fun McpOAuthState.protectedSecrets(secretStore: McpControlSecretStore, owner: McpServerConfig? = null): McpOAuthState {
     fun protect(value: String?): String? = value?.let {
-        if (it.isBlank() || McpControlSecretStore.isReference(it)) it else secretStore.put(it)
+        if (it.isBlank()) it
+        else if (owner == null) {
+            if (McpControlSecretStore.isReference(it)) it else secretStore.put(it)
+        } else {
+            val reference = if (McpControlSecretStore.isReference(it)) it else secretStore.put(it)
+            secretStore.bind(reference, owner.id, owner.serverUrl)
+        }
     }
     return copy(clientSecret = protect(clientSecret), accessToken = protect(accessToken), refreshToken = protect(refreshToken))
 }
 
-internal fun McpOAuthState.resolvedSecrets(secretStore: McpControlSecretStore): McpOAuthState {
+internal fun McpOAuthState.resolvedSecrets(secretStore: McpControlSecretStore, owner: McpServerConfig? = null): McpOAuthState {
     fun resolve(value: String?): String? = value?.let {
-        if (McpControlSecretStore.isReference(it)) secretStore.resolve(it) else it
+        if (!McpControlSecretStore.isReference(it)) it
+        else if (owner == null) secretStore.resolve(it)
+        else {
+            secretStore.bind(it, owner.id, owner.serverUrl)
+            secretStore.resolve(it, owner.id, owner.serverUrl)
+        }
     }
     return copy(clientSecret = resolve(clientSecret), accessToken = resolve(accessToken), refreshToken = resolve(refreshToken))
 }
@@ -52,9 +64,12 @@ internal fun secureMcpConfigForPersistence(
     secretStore: McpControlSecretStore,
 ): McpServerConfig = config.clone(commonOptions = config.commonOptions.copy(
     headers = config.commonOptions.headers.map { (name, value) ->
-        name to if (value.isBlank() || McpControlSecretStore.isReference(value)) value else secretStore.put(value)
+        name to if (value.isBlank()) value else {
+            val reference = if (McpControlSecretStore.isReference(value)) value else secretStore.put(value)
+            secretStore.bind(reference, config.id, config.serverUrl)
+        }
     },
-    oauth = config.commonOptions.oauth?.protectedSecrets(secretStore),
+    oauth = config.commonOptions.oauth?.protectedSecrets(secretStore, config),
 ))
 
 /**
@@ -106,7 +121,7 @@ internal class McpOAuthCoordinator(
     }
 
     suspend fun clearAuthorization(config: McpServerConfig): McpServerConfig {
-        persistOAuthState(config.id, null)
+        persistOAuthState(config, null)
         return settingsStore.settingsFlow.value.mcpServers.find { it.id == config.id }
             ?: config.clone(commonOptions = config.commonOptions.copy(oauth = null))
     }
@@ -119,7 +134,7 @@ internal class McpOAuthCoordinator(
         return lock.withLock {
             val config = settingsStore.settingsFlow.value.mcpServers.find { it.id == configInput.id }
                 ?: configInput
-            val oauth = config.commonOptions.oauth?.resolvedSecrets(secretStore) ?: return@withLock config
+            val oauth = config.commonOptions.oauth?.resolvedSecrets(secretStore, config) ?: return@withLock config
             if (!oauth.enabled || oauth.refreshToken.isNullOrBlank()) return@withLock config
 
             val expired = oauth.expiresAt > 0 &&
@@ -145,7 +160,7 @@ internal class McpOAuthCoordinator(
                     expiresAt = computeExpiry(token.expiresIn),
                     scope = token.scope ?: oauth.scope,
                 )
-                val protected = persistOAuthState(config.id, updated)
+                val protected = persistOAuthState(config, updated)
                 config.clone(commonOptions = config.commonOptions.copy(oauth = protected))
             }.getOrElse {
                 if (it is CancellationException) throw it
@@ -198,7 +213,7 @@ internal class McpOAuthCoordinator(
             check(redirectUri == MCP_OAUTH_REDIRECT_URI) {
                 "Адрес обратного вызова OAuth не совпадает с ожидаемым: $redirectUri"
             }
-            val existing = config.commonOptions.oauth?.resolvedSecrets(secretStore)
+            val existing = config.commonOptions.oauth?.resolvedSecrets(secretStore, config)
             val canReuseClient = existing?.redirectUri == redirectUri && !existing.clientId.isNullOrBlank()
             var clientId = existing?.clientId.takeIf { canReuseClient }
             var clientSecret = existing?.clientSecret.takeIf { canReuseClient }
@@ -225,7 +240,7 @@ internal class McpOAuthCoordinator(
             }
 
             persistOAuthState(
-                config.id,
+                config,
                 (existing ?: McpOAuthState()).copy(
                     enabled = true,
                     clientId = clientId,
@@ -271,7 +286,7 @@ internal class McpOAuthCoordinator(
                 )
             )
             persistOAuthState(
-                config.id,
+                config,
                 McpOAuthState(
                     enabled = true,
                     clientId = clientId,
@@ -302,13 +317,18 @@ internal class McpOAuthCoordinator(
     private fun discoveryClientFor(config: McpServerConfig): McpOAuthDiscoveryClient =
         if (config.commonOptions.publicAddressOnly) publicDiscoveryClient else discoveryClient
 
-    private suspend fun persistOAuthState(configId: Uuid, oauth: McpOAuthState?): McpOAuthState? {
-        val protected = oauth?.protectedSecrets(secretStore)
+    private suspend fun persistOAuthState(config: McpServerConfig, oauth: McpOAuthState?): McpOAuthState? {
+        val protected = oauth?.protectedSecrets(secretStore, config)
         settingsStore.update { old ->
             old.copy(
                 mcpServers = old.mcpServers.map { server ->
-                    if (server.id != configId) server
-                    else server.clone(commonOptions = server.commonOptions.copy(oauth = protected))
+                    if (server.id != config.id) server
+                    else {
+                        check(mcpCredentialOrigin(server.serverUrl) == mcpCredentialOrigin(config.serverUrl)) {
+                            "Адрес MCP изменился во время авторизации. Повторите вход для нового адреса."
+                        }
+                        server.clone(commonOptions = server.commonOptions.copy(oauth = protected))
+                    }
                 }
             )
         }

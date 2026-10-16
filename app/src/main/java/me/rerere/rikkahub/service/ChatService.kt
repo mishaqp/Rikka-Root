@@ -883,7 +883,7 @@ class ChatService(
         session.launchToolApproval(
             appScope = appScope,
             grant = {
-                if (approved && toolName != null && scope != ApprovalScope.Once) {
+                if (answer == null && approved && toolName != null && scope != ApprovalScope.Once) {
                     ensureInitialized(session)
                     requireWritableSession(session)
                     val tool = session.state.value.currentMessages.flatMap { it.getTools() }
@@ -917,9 +917,10 @@ class ChatService(
                 ensureInitialized(session)
                 val conversation = requireWritableSession(session)
                 // Ignore double taps and stale approvals for completed or inactive tools.
-                if (conversation.currentMessages.none { message ->
-                        message.getTools().any { it.toolCallId == toolCallId && it.isPending }
-                    }) return@launchToolApproval
+                val pendingTool = conversation.currentMessages.asSequence().flatMap { it.getTools() }
+                    .firstOrNull { it.toolCallId == toolCallId && it.isPending }
+                    ?: return@launchToolApproval
+                if (answer != null && pendingTool.toolName != "ask_user") return@launchToolApproval
                 val newApprovalState = when {
                     answer != null -> ToolApprovalState.Answered(answer)
                     approved -> ToolApprovalState.Approved
@@ -933,7 +934,8 @@ class ChatService(
                             msg.copy(
                                 parts = msg.parts.map { part ->
                                     when {
-                                        part is UIMessagePart.Tool && part.toolCallId == toolCallId -> {
+                                        part is UIMessagePart.Tool && part.toolCallId == toolCallId && part.isPending &&
+                                            (answer == null || part.toolName == "ask_user") -> {
                                             part.copy(approvalState = newApprovalState)
                                         }
 

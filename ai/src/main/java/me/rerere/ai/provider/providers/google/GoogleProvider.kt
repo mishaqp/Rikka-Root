@@ -26,6 +26,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import me.rerere.ai.core.MessageRole
+import me.rerere.ai.core.parametersOrEmpty
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.ProviderLog
@@ -445,7 +446,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                                     put("description", JsonPrimitive(tool.description))
                                     put(
                                         key = "parameters",
-                                        element = json.encodeToJsonElement(tool.parameters())
+                                        element = json.encodeToJsonElement(tool.parametersOrEmpty())
                                             .removeElements(
                                                 listOf(
                                                     "const",

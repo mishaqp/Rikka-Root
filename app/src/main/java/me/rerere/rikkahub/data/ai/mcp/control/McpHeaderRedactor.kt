@@ -38,7 +38,7 @@ object McpHeaderRedactor {
 
     fun isSensitive(headerName: String): Boolean =
         headerName.trim().lowercase().let { name ->
-            name in SENSITIVE_HEADER_NAMES || name == "api-key" || name == "x-goog-api-key" ||
+            name in SENSITIVE_HEADER_NAMES || name == "apikey" || name == "x-auth" || name == "api-key" || name == "x-goog-api-key" ||
                 name == "xi-api-key" || name == "x-subscription-token" || name == "ocp-apim-subscription-key" ||
                 name.contains("token") || name.contains("secret") || name.contains("password") ||
                 name.endsWith("-key")
@@ -51,6 +51,7 @@ object McpHeaderRedactor {
      * application/json` plainly.
      */
     fun redactHeaderValue(name: String, value: String): String {
+        if (value.contains(McpControlSecretStore.REFERENCE_PREFIX)) return "…"
         if (!isSensitive(name)) return value
         return if (value.length >= 4) "…${value.takeLast(4)}" else "…"
     }
@@ -66,8 +67,8 @@ object McpHeaderRedactor {
     fun classify(headers: List<Pair<String, String>>): Pair<Int, Int> {
         var sensitive = 0
         var plain = 0
-        for ((name, _) in headers) {
-            if (isSensitive(name)) sensitive++ else plain++
+        for ((name, value) in headers) {
+            if (isSensitive(name) || value.contains(McpControlSecretStore.REFERENCE_PREFIX)) sensitive++ else plain++
         }
         return sensitive to plain
     }
