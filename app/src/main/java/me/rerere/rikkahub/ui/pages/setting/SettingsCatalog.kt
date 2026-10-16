@@ -20,6 +20,7 @@ import me.rerere.hugeicons.stroke.Globe02
 import me.rerere.hugeicons.stroke.GlobalSearch
 import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.Internet
+import me.rerere.hugeicons.stroke.Key01
 import me.rerere.hugeicons.stroke.LookTop
 import me.rerere.hugeicons.stroke.McpServer
 import me.rerere.hugeicons.stroke.Megaphone01
@@ -138,6 +139,11 @@ object SettingsCatalog {
             "media", "Изображения и видео", "Сервисы генерации медиа",
             HugeIcons.Image02, SettingsSection.Ai, SettingsTarget.Route(Screen.SettingMedia),
             "media image video картинки",
+        ),
+        SettingsCatalogItem(
+            "permissions_access", "Разрешения и доступ", "Разрешения Android, доступ к файлам и выбранные папки",
+            HugeIcons.Key01, SettingsSection.Tools, SettingsTarget.Route(Screen.SettingPermissionsAccess),
+            "permissions доступ sms контакты камера микрофон геолокация папки saf вся память",
         ),
         SettingsCatalogItem(
             "approvals", "Разрешения инструментов", "Автоодобрение, постоянный доступ и отзыв разрешений",

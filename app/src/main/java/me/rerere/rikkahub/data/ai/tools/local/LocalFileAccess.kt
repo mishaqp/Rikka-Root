@@ -23,6 +23,8 @@ import java.io.OutputStream
 import java.net.URI
 import java.net.URLDecoder
 import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.StandardOpenOption
 import java.nio.file.StandardCopyOption
 
 sealed interface LocalFileSource {
@@ -31,7 +33,7 @@ sealed interface LocalFileSource {
     data class Content(val uri: Uri) : LocalFileSource { override val reference: String get() = uri.toString() }
 }
 
-/** Only scratch, uploads, the selected workspace and persisted SAF trees are reachable. */
+/** Local scopes and SAF stay unchanged; direct shared storage requires two live, explicit switches. */
 class LocalFileAccess internal constructor(
     private val scratchDir: File,
     private val uploadDir: File,
@@ -40,6 +42,7 @@ class LocalFileAccess internal constructor(
     private val resolveWorkspacePath: (suspend (String) -> File)? = null,
     private val context: Context? = null,
     private val primaryStorageAliases: List<File> = listOf(File("/sdcard"), File("/mnt/sdcard"), File("/storage/self/primary")),
+    private val sharedStorageAccess: SharedStorageAccess? = context?.let { SharedStorageAccess.forContext(it) },
 ) {
     constructor(context: Context, workspaceCwd: String? = null, chatImages: List<String> = emptyList(),
         resolveWorkspacePath: (suspend (String) -> File)? = null) : this(
@@ -52,6 +55,17 @@ class LocalFileAccess internal constructor(
     @Volatile private var workspaceRoot: File? = null
     init { require(scratchRoot.mkdirs() || scratchRoot.isDirectory) { "Не удалось создать scratch." } }
     val androidContext: Context get() = requireNotNull(context) { "Нужен Android Context." }
+
+    internal fun isDirectSharedStorage(file: File): Boolean = sharedStorageAccess?.resolve(file.absolutePath) != null
+
+    /** Classification survives revocation: a shared pathname can be replaced by another app. */
+    internal fun permitsAutomaticRollback(source: LocalFileSource): Boolean = when (source) {
+        is LocalFileSource.Content -> true // Preserve the existing SAF provider transaction.
+        is LocalFileSource.Local -> {
+            val path = source.file.absoluteFile.toPath().normalize()
+            listOfNotNull(scratchRoot, uploadRoot, workspaceRoot).any { path.startsWith(it.toPath()) }
+        }
+    }
 
     suspend fun resolve(reference: String, write: Boolean = false): LocalFileSource = withContext(Dispatchers.IO) {
         currentCoroutineContext().ensureActive()
@@ -107,12 +121,12 @@ class LocalFileAccess internal constructor(
             path == "/upload" || path.startsWith("/upload/") ||
             path == "/workspace" || path.startsWith("/workspace/")
         if (File(path).isAbsolute && !virtual && !localScope) {
+            sharedStorageAccess?.resolve(path, write)?.let { return@withContext LocalFileSource.Local(it) }
             @Suppress("DEPRECATION")
             val primary = runCatching { Environment.getExternalStorageDirectory() }.getOrNull()
             if (sharedStoragePathCandidate(path, primary, primaryStorageAliases)) {
                 resolveGrantedStoragePath(path, write)?.let { return@withContext it }
-                // Shared storage is never reachable by raw File I/O; explain the grant instead of
-                // reporting the /sdcard alias symlink or the scratch/workspace boundary.
+                // With direct access disabled/denied, retain the original SAF-only path.
                 throw IllegalArgumentException(NO_STORAGE_GRANT_MESSAGE)
             }
         }
@@ -205,6 +219,11 @@ class LocalFileAccess internal constructor(
 
     /** Failed provider cleanup must remain visible, including when the operation was cancelled. */
     internal suspend fun cleanupOwnedTarget(created: LocalFileSource, failure: Exception, recursive: Boolean = false) {
+        if (!permitsAutomaticRollback(created)) {
+            val partial = FileCreationCleanupFailedException(created, failure, sharedPathMayBePartial = true)
+            if (failure is CancellationException) { failure.addSuppressed(partial); throw failure }
+            throw partial
+        }
         val cleaned = withContext(NonCancellable) {
             runCatching { !exists(created) || delete(created, recursive) }.getOrDefault(false)
         }
@@ -243,6 +262,8 @@ class LocalFileAccess internal constructor(
 
     fun checkFile(file: File, write: Boolean = false): File {
         val absolute = file.absoluteFile.toPath().normalize()
+        val localScope = listOfNotNull(scratchRoot, uploadRoot, workspaceRoot).any { absolute.startsWith(it.toPath()) }
+        if (!localScope) sharedStorageAccess?.resolve(file.absolutePath, write)?.let { return it }
         var parent = absolute
         while (parent.parent != null) {
             require(!Files.isSymbolicLink(parent)) { "Символические ссылки недоступны файловым инструментам." }
@@ -251,7 +272,7 @@ class LocalFileAccess internal constructor(
         val canonical = file.canonicalFile
         val roots = listOfNotNull(scratchRoot, uploadRoot, workspaceRoot)
         val root = roots.firstOrNull { canonical.toPath().startsWith(it.toPath()) }
-        require(root != null) { "Путь вне scratch, upload или выбранного workspace. Для внешних файлов выберите папку через SAF." }
+        require(root != null) { "Путь вне scratch, upload или выбранного workspace. $NO_STORAGE_GRANT_MESSAGE" }
         if (write) require(canonical != root) { "Изменение корня разрешённой области запрещено." }
         return canonical
     }
@@ -321,7 +342,11 @@ class LocalFileAccess internal constructor(
     suspend fun openInput(source: LocalFileSource): InputStream = run {
         currentCoroutineContext().ensureActive()
         when (source) {
-            is LocalFileSource.Local -> checkFile(source.file).inputStream()
+            is LocalFileSource.Local -> {
+                val file = checkFile(source.file)
+                if (permitsAutomaticRollback(source)) file.inputStream()
+                else GuardedSharedInputStream(Files.newInputStream(file.toPath(), StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) { checkFile(file) }
+            }
             is LocalFileSource.Content -> {
                 checkGrant(source, false)
                 val input = try { safProviderCall { androidContext.contentResolver.openInputStream(source.uri) } }
@@ -340,7 +365,15 @@ class LocalFileAccess internal constructor(
     suspend fun openOutput(source: LocalFileSource, append: Boolean = false): OutputStream = run {
         currentCoroutineContext().ensureActive()
         when (source) {
-            is LocalFileSource.Local -> java.io.FileOutputStream(checkFile(source.file, true).also { it.parentFile?.mkdirs() }, append)
+            is LocalFileSource.Local -> {
+                val file = checkFile(source.file, true).also { it.parentFile?.mkdirs() }
+                if (permitsAutomaticRollback(source)) java.io.FileOutputStream(file, append)
+                else {
+                    val options: Array<java.nio.file.OpenOption> = if (append) arrayOf(StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.APPEND, LinkOption.NOFOLLOW_LINKS)
+                    else arrayOf(StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING, LinkOption.NOFOLLOW_LINKS)
+                    GuardedSharedOutputStream(Files.newOutputStream(file.toPath(), *options)) { checkFile(file, true) }
+                }
+            }
             is LocalFileSource.Content -> {
                 checkGrant(source, true)
                 require(!append) { "Добавление к SAF-файлу не поддерживается." }
@@ -385,7 +418,7 @@ class LocalFileAccess internal constructor(
         }
     } }
 
-    suspend fun list(source: LocalFileSource): List<LocalFileSource> = withContext(Dispatchers.IO) {
+    suspend fun list(source: LocalFileSource, onRestrictedPathSkipped: ((String) -> Unit)? = null): List<LocalFileSource> = withContext(Dispatchers.IO) {
         currentCoroutineContext().ensureActive()
         require(isDirectory(source)) { "Путь не является папкой." }
         val children = when (source) {
@@ -395,7 +428,13 @@ class LocalFileAccess internal constructor(
                     for (path in directory) {
                         currentCoroutineContext().ensureActive()
                         require(entries.size < MAX_ENTRIES) { "В папке слишком много файлов." }
-                        entries += LocalFileSource.Local(checkFile(path.toFile()))
+                        try { entries += LocalFileSource.Local(checkFile(path.toFile())) }
+                        catch (denied: SharedStoragePrivatePathException) {
+                            // Only read-only listings may omit private Android trees. Mutating
+                            // operations and archives keep their strict preflight by default.
+                            if (onRestrictedPathSkipped == null) throw denied
+                            onRestrictedPathSkipped(path.toString())
+                        }
                     }
                 }
                 entries
@@ -465,7 +504,7 @@ class LocalFileAccess internal constructor(
                     val file = checkFile(File(directory, name), true)
                     require(if (isDirectory) file.mkdir() else file.createNewFile()) { "Назначение уже существует." }
                     try { LocalFileSource.Local(checkFile(file, true)) }
-                    catch (failure: Exception) { if (!file.delete()) throw FileCreationCleanupFailedException(LocalFileSource.Local(file), failure); throw failure }
+                    catch (failure: Exception) { cleanupOwnedTarget(LocalFileSource.Local(file), failure); throw failure }
                 }
                 is LocalFileSource.Content -> createContentChild(parent, name, isDirectory)
             }
@@ -499,12 +538,12 @@ class LocalFileAccess internal constructor(
         }
     }
 
-    suspend fun walk(source: LocalFileSource, recursive: Boolean = true): List<LocalFileSource> {
+    suspend fun walk(source: LocalFileSource, recursive: Boolean = true, onRestrictedPathSkipped: ((String) -> Unit)? = null): List<LocalFileSource> {
         val result = mutableListOf<LocalFileSource>()
         suspend fun visit(current: LocalFileSource, depth: Int) {
             currentCoroutineContext().ensureActive()
             require(depth <= MAX_DEPTH) { "Слишком глубокая структура папок." }
-            for (entry in list(current)) {
+            for (entry in list(current, onRestrictedPathSkipped)) {
                 require(result.size < MAX_ENTRIES) { "Слишком много файлов." }
                 result += entry
                 if (recursive && isDirectory(entry)) visit(entry, depth + 1)
@@ -574,13 +613,16 @@ class LocalFileAccess internal constructor(
                     val previous = findChild(destination, entryName)
                     require(previous == null || overwrite) { "Назначение уже существует. Укажите overwrite=true." }
                     var owned: LocalFileSource? = null
-                    val target = if (previous != null) previous else withContext(NonCancellable) {
-                        createNewChild(destination, entryName, directory).also { owned = it }
-                    }
+                    val unpublishedShared = previous == null && !permitsAutomaticRollback(destination)
+                    val target = if (previous != null) previous else if (unpublishedShared) child(destination, entryName)
+                    else withContext(NonCancellable) { createNewChild(destination, entryName, directory).also { owned = it } }
                     try {
                         currentCoroutineContext().ensureActive()
                         if (owned != null) require(name(target) == entryName) { "Провайдер SAF изменил имя создаваемого файла." }
-                        if (directory) copyDirectory(entry, target, depth + 1)
+                        if (directory) {
+                            if (unpublishedShared) require(createDirectory(target)) { "Не удалось создать папку назначения." }
+                            copyDirectory(entry, target, depth + 1)
+                        }
                         else total += copy(entry, target, overwrite || owned != null, ownedDestination = owned != null)
                     } catch (failure: Exception) {
                         owned?.let { cleanupOwnedTarget(it, failure, recursive = true) }
@@ -631,11 +673,25 @@ class LocalFileAccess internal constructor(
 
     private suspend fun stagedWrite(source: LocalFileSource, overwrite: Boolean, append: Boolean, ownedDestination: Boolean = false, write: suspend (OutputStream) -> Long): Long {
         require(!append || source is LocalFileSource.Local) { "Добавление к SAF-файлу не поддерживается." }
-        val parent = if (source is LocalFileSource.Local) checkFile(source.file, true).parentFile else scratchRoot
+        val shared = source is LocalFileSource.Local && !permitsAutomaticRollback(source)
+        val destinationParent = if (source is LocalFileSource.Local) checkFile(source.file, true).parentFile else scratchRoot
+        // A new shared destination uses exclusive cross-filesystem installation, so its
+        // stage stays private. Replacements keep a same-volume stage for atomic rename.
+        val sharedStage = shared && overwrite
+        val parent = if (shared && !overwrite) scratchRoot else destinationParent
+        if (shared && !overwrite) {
+            val directory = checkFile(requireNotNull(destinationParent))
+            require(directory.mkdirs() || directory.isDirectory) { "Не удалось создать папку назначения. Проверьте доступ к памяти и свободное место." }
+        }
         requireNotNull(parent).mkdirs()
         val staging = File.createTempFile(".rk-write-", ".tmp", parent)
         try {
-            val count = staging.outputStream().use { output ->
+            val stagedOutput = if (sharedStage) {
+                checkFile(staging, true)
+                GuardedSharedOutputStream(Files.newOutputStream(staging.toPath(), StandardOpenOption.WRITE,
+                    StandardOpenOption.TRUNCATE_EXISTING, LinkOption.NOFOLLOW_LINKS)) { checkFile(staging, true) }
+            } else staging.outputStream()
+            val count = stagedOutput.use { output ->
                 if (append && exists(source)) openInput(source).use { copyBounded(it, output) }
                 write(output)
             }
@@ -643,12 +699,17 @@ class LocalFileAccess internal constructor(
             when (source) {
                 is LocalFileSource.Local -> {
                     val target = checkFile(source.file, true)
+                    if (sharedStage) checkFile(staging)
                     require(overwrite || !target.exists()) { "Файл уже существует." }
                     // ATOMIC_MOVE can replace a raced target without REPLACE_EXISTING.
                     // link(2) installs a complete same-filesystem inode exclusively;
                     // an existing target is preserved even under a creation race.
                     try { if (overwrite) Files.move(staging.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
-                        else Files.createLink(target.toPath(), staging.toPath()) }
+                        else if (shared) {
+                            // Android's emulated storage and FAT cards cannot create hard links.
+                            // CREATE_NEW still reserves the destination without replacing a raced file.
+                            installNewSharedStorageFile(staging, target, verifyAccess = { checkFile(staging); checkFile(target, true) })
+                        } else Files.createLink(target.toPath(), staging.toPath()) }
                     catch (_: java.nio.file.AtomicMoveNotSupportedException) {
                         if (overwrite) Files.move(staging.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
                         else throw IllegalStateException("Хранилище не поддерживает безопасное создание файла.")
@@ -670,7 +731,18 @@ class LocalFileAccess internal constructor(
                 }
             }
             return count
-        } finally { staging.delete() }
+        } catch (failure: Exception) {
+            if (sharedStage) {
+                val partial = FileCreationCleanupFailedException(LocalFileSource.Local(staging), failure, sharedPathMayBePartial = true)
+                if (failure is CancellationException) { failure.addSuppressed(partial); throw failure }
+                throw partial
+            }
+            throw failure
+        } finally {
+            // Same-volume shared stages can also be replaced by another application.
+            // A successful rename consumes ours; on failure the warning exposes its path.
+            if (!sharedStage) staging.delete()
+        }
     }
 
     private suspend fun copyBounded(input: InputStream, output: OutputStream): Long {
@@ -694,6 +766,89 @@ class LocalFileAccess internal constructor(
         const val MAX_WRITE_BYTES = 16 * 1024 * 1024
         const val MAX_COPY_BYTES = 512L * 1024 * 1024
     }
+}
+
+/** Exclusive installation for shared storage; never unlink a pathname another app may replace. */
+internal suspend fun installNewSharedStorageFile(
+    staging: File,
+    target: File,
+    verifyAccess: () -> Unit,
+    write: suspend (InputStream, OutputStream) -> Unit = { input, output ->
+        val buffer = ByteArray(8192)
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            verifyAccess()
+            val count = input.read(buffer)
+            if (count < 0) break
+            output.write(buffer, 0, count)
+        }
+    },
+) {
+    verifyAccess()
+    val path = target.toPath()
+    // Creation failure means no ownership, so it deliberately remains outside cleanup.
+    val output = Files.newOutputStream(path, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)
+    try {
+        output.use {
+            Files.newInputStream(staging.toPath(), StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS).use { input -> write(input, it) }
+            currentCoroutineContext().ensureActive()
+            verifyAccess()
+        }
+        verifySharedInstalledContents(staging, target, verifyAccess)
+    } catch (failure: Exception) {
+        // Even fstat(fd) followed by lstat(path) cannot make unlink(path) conditional
+        // on the inode: a different app may replace the shared pathname between them.
+        // Preserve the path and report the possible partial file instead of deleting it.
+        val partial = FileCreationCleanupFailedException(LocalFileSource.Local(target), failure, sharedPathMayBePartial = true)
+        if (failure is CancellationException) { failure.addSuppressed(partial); throw failure }
+        throw partial
+    }
+}
+
+/** A different app can replace the pathname while our exclusive output descriptor is open. */
+private suspend fun verifySharedInstalledContents(staging: File, target: File, verifyAccess: () -> Unit) {
+    verifyAccess()
+    Files.newInputStream(staging.toPath(), StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS).use { expected ->
+        Files.newInputStream(target.toPath(), StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS).use { actual ->
+            val left = ByteArray(8192)
+            val right = ByteArray(8192)
+            while (true) {
+                currentCoroutineContext().ensureActive()
+                verifyAccess()
+                val count = expected.read(left)
+                if (count < 0) {
+                    require(actual.read() < 0) { "Файл назначения изменён другим приложением. Проверьте его перед повтором." }
+                    break
+                }
+                var offset = 0
+                while (offset < count) {
+                    currentCoroutineContext().ensureActive()
+                    verifyAccess()
+                    val read = actual.read(right, offset, count - offset)
+                    require(read > 0) { "Файл назначения изменён другим приложением. Проверьте его перед повтором." }
+                    offset += read
+                }
+                require((0 until count).all { left[it] == right[it] }) { "Файл назначения изменён другим приложением. Проверьте его перед повтором." }
+            }
+        }
+    }
+}
+
+private class GuardedSharedInputStream(input: InputStream, private val verifyAccess: () -> Unit) : FilterInputStream(input) {
+    override fun read(): Int { verifyAccess(); return `in`.read() }
+    override fun read(buffer: ByteArray): Int { verifyAccess(); return `in`.read(buffer) }
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int { verifyAccess(); return `in`.read(buffer, offset, length) }
+    override fun skip(count: Long): Long { verifyAccess(); return `in`.skip(count) }
+    override fun available(): Int { verifyAccess(); return `in`.available() }
+    override fun reset() { verifyAccess(); `in`.reset() }
+}
+
+private class GuardedSharedOutputStream(output: OutputStream, private val verifyAccess: () -> Unit) : FilterOutputStream(output) {
+    override fun write(value: Int) { verifyAccess(); out.write(value) }
+    override fun write(buffer: ByteArray) { verifyAccess(); out.write(buffer) }
+    override fun write(buffer: ByteArray, offset: Int, length: Int) { verifyAccess(); out.write(buffer, offset, length) }
+    override fun flush() { verifyAccess(); out.flush() }
+    override fun close() = out.close()
 }
 
 /** Preserve the provider exception class without carrying its message into tool results. */
@@ -823,14 +978,19 @@ internal suspend fun boundedDocumentReachable(
 }
 
 internal const val NO_STORAGE_GRANT_MESSAGE =
-    "Нет доступа к этой папке. Выдайте его через grant_directory_access (выберите саму папку, например Download)."
+    "Нет доступа к этой папке. Включите доступ ко всем файлам в Настройки → Разрешения и доступ, или выдайте папку через grant_directory_access (например, Download/Rikka)."
 
 private class SafStoragePathNotFoundException : IllegalArgumentException("Файл или папка не найдены в выбранной папке SAF.")
 
 internal data class FileWritePlan(val existing: LocalFileSource?, val parent: LocalFileSource.Content? = null, val name: String = "")
 
-internal class FileCreationCleanupFailedException(val created: LocalFileSource, cause: Exception) :
-    java.io.IOException("Не удалось убрать созданный документ после ошибки доступа.", cause)
+internal class FileCreationCleanupFailedException(
+    val created: LocalFileSource,
+    cause: Exception,
+    val sharedPathMayBePartial: Boolean = false,
+) : java.io.IOException(if (sharedPathMayBePartial)
+    "Запись прервана. Файл мог сохраниться частично. Проверьте созданный файл перед повтором."
+else "Не удалось убрать созданный документ после ошибки доступа.", cause)
 
 internal class FileMoveSourceDeleteException(cause: Exception) :
     java.io.IOException("Копия сохранена, но источник не удалось полностью удалить.", cause)

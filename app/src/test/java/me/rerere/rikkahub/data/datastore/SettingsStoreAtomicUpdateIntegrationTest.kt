@@ -91,6 +91,27 @@ class SettingsStoreAtomicUpdateIntegrationTest {
         assertEquals(true, persisted()!!.data.first()[SettingsStore.DEVELOPER_MODE])
     }
 
+    @Test fun `all storage switch is disabled for old backups and survives save restore and reload`() = runBlocking {
+        assertFalse(JsonInstant.decodeFromString<Settings>("{}").fileToolsAllStorage)
+        val backup = JsonInstant.encodeToString(Settings(fileToolsAllStorage = true))
+        assertEquals(true, kotlinx.serialization.json.Json.parseToJsonElement(backup)
+            .let { it as kotlinx.serialization.json.JsonObject }["fileToolsAllStorage"]
+            .let { it as JsonPrimitive }.content.toBooleanStrict())
+        val restored = JsonInstant.decodeFromString<Settings>(backup)
+        assertTrue(restored.fileToolsAllStorage)
+        val store = seed(restored)
+        store.update { it.copy(developerMode = true) }
+        assertEquals(true, persisted()!!.data.first()[SettingsStore.FILE_TOOLS_ALL_STORAGE])
+        val loaded = SettingsStore(context, AppScope().apply { cancel() }).update { it }
+        assertTrue(loaded.fileToolsAllStorage)
+        store.update { it.copy(fileToolsAllStorage = false) }
+        val disabled = SettingsStore(context, AppScope().apply { cancel() }).update { it }
+        assertFalse(disabled.fileToolsAllStorage)
+        // Importing an old backup must not inherit a previous opt-in from the device.
+        SettingsStore.restoreBeforeInitialization(context, JsonInstant.decodeFromString("{}"))
+        assertEquals(false, persisted()!!.data.first()[SettingsStore.FILE_TOOLS_ALL_STORAGE])
+    }
+
     @Test fun `direct launch increment survives ordinary functional save`() = runBlocking {
         val store = seed(Settings(launchCount = 7))
         assertEquals(8, store.incrementLaunchCount())

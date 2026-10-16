@@ -10,6 +10,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.workspace.WorkspaceCommandResult
+import me.rerere.workspace.BackgroundStatus
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.IOException
@@ -93,6 +94,40 @@ class WorkspaceToolErrorsTest {
         val tool = createWorkspaceTools("w", repository).first { it.name == "workspace_shell" }
         val text = (tool.execute(Json.parseToJsonElement("""{"command":"true"}""")).single() as UIMessagePart.Text).text
         assertFalse(Json.parseToJsonElement(text).jsonObject.containsKey("message"))
+    }
+
+    @Test fun missingProgramExplainsWorkspacePackageManagerAndKeepsStreams() = runBlocking {
+        coEvery { repository.executeCommand(any(), any(), any(), any(), any()) } returns
+            WorkspaceCommandResult(127, "partial output", "/bin/sh: 1: jq: not found\n")
+        val tool = createWorkspaceTools("w", repository).first { it.name == "workspace_shell" }
+        val parts = tool.execute(Json.parseToJsonElement("""{"command":"jq . /workspace/input.json"}"""))
+        val result = Json.parseToJsonElement((parts.single() as UIMessagePart.Text).text).jsonObject
+        val message = result["message"]?.jsonPrimitive?.content.orEmpty()
+        assertEquals("127", result["exitCode"]?.jsonPrimitive?.content)
+        assertEquals("partial output", result["stdout"]?.jsonPrimitive?.content)
+        assertEquals("/bin/sh: 1: jq: not found\n", result["stderr"]?.jsonPrimitive?.content)
+        assertTrue(message, message.contains("Программа jq"))
+        assertTrue(message, message.contains("apt install jq"))
+        assertFalse(message, message.contains("pkg install"))
+    }
+
+    @Test fun missingProgramInFinishedBackgroundCommandAlsoExplainsHowToInstallIt() = runBlocking {
+        val status = BackgroundStatus("p", "jq . input.json", "", false, 127, 0,
+            "partial output", "sh: jq: not found", 0, 0)
+        coEvery { repository.backgroundOutput("w", "p") } returns status
+        coEvery { repository.backgroundProcesses("w") } returns listOf(status)
+        val tools = createWorkspaceTools("w", repository)
+        for (name in listOf("workspace_background_output", "workspace_background_list")) {
+            val parts = tools.first { it.name == name }.execute(Json.parseToJsonElement("""{"process_id":"p"}"""))
+            val parsed = Json.parseToJsonElement((parts.single() as UIMessagePart.Text).text)
+            val result = if (name.endsWith("_list")) (parsed as kotlinx.serialization.json.JsonArray).single().jsonObject else parsed.jsonObject
+            val message = result["message"]?.jsonPrimitive?.content.orEmpty()
+            assertEquals("127", result["exitCode"]?.jsonPrimitive?.content)
+            assertEquals("false", result["running"]?.jsonPrimitive?.content)
+            assertTrue(message, message.contains("Программа jq"))
+            assertTrue(message, message.contains("apt install jq"))
+            if (name.endsWith("_output")) assertEquals("partial output", result["stdout"]?.jsonPrimitive?.content)
+        }
     }
 
 }

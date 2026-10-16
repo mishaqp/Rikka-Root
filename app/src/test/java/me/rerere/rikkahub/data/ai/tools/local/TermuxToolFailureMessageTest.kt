@@ -49,8 +49,10 @@ class TermuxToolFailureMessageTest {
         assertEquals("127", result["exit_code"]?.jsonPrimitive?.content)
         assertEquals("original output\n", result["stdout"]?.jsonPrimitive?.content)
         assertEquals("missing_binary: command not found\n", result["stderr"]?.jsonPrimitive?.content)
-        assertEquals("Команда завершилась с ошибкой (код 127). Проверьте вывод и результат перед новым запуском.",
-            result["note"]?.jsonPrimitive?.content)
+        val note = result["note"]?.jsonPrimitive?.content.orEmpty()
+        assertTrue(note, note.contains("Программа missing_binary"))
+        assertTrue(note, note.contains("pkg install missing_binary"))
+        assertFalse(note, note.contains("apt install"))
     }
 
     @Test fun `capture startup exception has a Russian action`() = runBlocking {

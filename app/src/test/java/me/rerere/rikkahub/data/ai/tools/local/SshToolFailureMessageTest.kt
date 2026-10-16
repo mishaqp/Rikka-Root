@@ -25,6 +25,45 @@ import java.io.IOException
 import java.io.OutputStream
 
 class SshToolFailureMessageTest {
+    @Test fun `missing executable names come from known shell diagnostics rather than guessed command text`() {
+        listOf("bash: line 2: jq: command not found", "/bin/sh: 1: /usr/bin/jq: not found",
+            "zsh: command not found: jq").forEach { diagnostic ->
+            val session = mockk<Session>()
+            val channel = mockk<ChannelExec>(relaxed = true)
+            every { session.openChannel("exec") } returns channel
+            every { channel.setErrStream(any<OutputStream>()) } answers {
+                firstArg<OutputStream>().write(diagnostic.toByteArray())
+            }
+            every { channel.isClosed } returns true
+            every { channel.exitStatus } returns 127
+            val result = runOnSession(session, "env FOO=bar run-script", 100)
+            val message = result["message"]?.jsonPrimitive?.content.orEmpty()
+            assertTrue("$diagnostic: $message", message.contains("Программа jq"))
+            assertFalse(message, message.contains("run-script"))
+            assertFalse(message, message.contains("/usr/bin/"))
+        }
+    }
+
+    @Test fun `unknown or unsafe missing executable diagnostics never become installation commands`() {
+        listOf("sh: $(touch secret): not found", "sh: -unsafe: not found", "unknown failure").forEach { diagnostic ->
+            val session = mockk<Session>()
+            val channel = mockk<ChannelExec>(relaxed = true)
+            every { session.openChannel("exec") } returns channel
+            every { channel.setErrStream(any<OutputStream>()) } answers {
+                firstArg<OutputStream>().write(diagnostic.toByteArray())
+            }
+            every { channel.isClosed } returns true
+            every { channel.exitStatus } returns 127
+            val result = runOnSession(session, "curl private-url", 100)
+            val message = result["message"]?.jsonPrimitive?.content.orEmpty()
+            assertTrue(message, message.contains("Установите"))
+            assertFalse(message, message.contains("curl"))
+            assertFalse(message, message.contains("touch"))
+            assertFalse(message, message.contains("-unsafe"))
+            assertEquals(diagnostic, result["stderr"]?.jsonPrimitive?.content)
+        }
+    }
+
     @Test fun `nonzero SSH exit explains the code without changing command streams`() {
         val session = mockk<Session>()
         val channel = mockk<ChannelExec>(relaxed = true)
@@ -43,8 +82,11 @@ class SshToolFailureMessageTest {
         assertEquals("127", result["exit_code"]?.jsonPrimitive?.content)
         assertEquals("original output\n", result["stdout"]?.jsonPrimitive?.content)
         assertEquals("missing_binary: command not found\n", result["stderr"]?.jsonPrimitive?.content)
-        assertEquals("Команда завершилась с ошибкой (код 127). Проверьте вывод и результат перед новым запуском.",
-            result["message"]?.jsonPrimitive?.content)
+        val message = result["message"]?.jsonPrimitive?.content.orEmpty()
+        assertTrue(message, message.contains("Программа missing_binary"))
+        assertTrue(message, message.contains("сервер"))
+        assertTrue(message, message.contains("Установите"))
+        assertFalse(message, message.contains("pkg install"))
     }
 
     @Test fun `connection failure has Russian reason and recovery while retaining diagnostics`() {

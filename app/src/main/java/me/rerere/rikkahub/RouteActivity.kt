@@ -564,6 +564,10 @@ class RouteActivity : ComponentActivity() {
                                 me.rerere.rikkahub.ui.pages.setting.SettingUpdatePage()
                             }
 
+                            entry<Screen.SettingPermissionsAccess> {
+                                me.rerere.rikkahub.ui.pages.setting.SettingPermissionsAccessPage()
+                            }
+
                             entry<Screen.SettingRoot> {
                                 me.rerere.rikkahub.ui.pages.setting.SettingRootPage()
                             }
@@ -885,6 +889,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingUpdate : Screen
+
+    @Serializable
+    data object SettingPermissionsAccess : Screen
 
     @Serializable
     data object SettingRoot : Screen

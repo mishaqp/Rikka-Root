@@ -7,10 +7,38 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.ui.UIMessagePart
 
-internal fun commandExitFailureReason(exitCode: Int?): String? =
-    exitCode?.takeIf { it != 0 }?.let {
-        "Команда завершилась с ошибкой (код $it). Проверьте вывод и результат перед новым запуском."
+internal enum class CommandEnvironment { GENERIC, WORKSPACE, TERMUX, ANDROID_ROOT, SSH }
+
+private val missingCommandDiagnostic = Regex(
+    "(?:^|:\\s*)([A-Za-z0-9_./+-]+):\\s*(?:command not found|not found|inaccessible or not found)\\s*$",
+)
+private val reversedMissingCommandDiagnostic = Regex("(?:^|:\\s*)command not found:\\s*([A-Za-z0-9_./+-]+)\\s*$")
+private val installableCommandName = Regex("[A-Za-z0-9_][A-Za-z0-9_.+-]{0,79}")
+
+/** Only a known shell diagnostic supplies a name; a compound input command is never guessed. */
+internal fun commandExitFailureReason(
+    exitCode: Int?,
+    stderr: String = "",
+    environment: CommandEnvironment = CommandEnvironment.GENERIC,
+): String? {
+    if (exitCode == null || exitCode == 0) return null
+    if (exitCode != 127) return "Команда завершилась с ошибкой (код $exitCode). Проверьте вывод и результат перед новым запуском."
+    val name = stderr.take(8192).lineSequence().take(40).firstNotNullOfOrNull { line ->
+        (missingCommandDiagnostic.find(line)?.groupValues?.get(1)
+            ?: reversedMissingCommandDiagnostic.find(line)?.groupValues?.get(1))
+            ?.substringAfterLast('/')?.takeIf(installableCommandName::matches)
     }
+    val reason = if (name != null) "Программа $name не установлена или недоступна в PATH (код 127)."
+        else "Программа не найдена (код 127)."
+    val installation = when (environment) {
+        CommandEnvironment.WORKSPACE -> "Установите её в рабочем окружении${name?.let { ", например: apt install $it" } ?: " с помощью apt"}, или проверьте PATH."
+        CommandEnvironment.TERMUX -> "Установите её в Termux${name?.let { ", например: pkg install $it" } ?: " с помощью pkg"}, или проверьте PATH."
+        CommandEnvironment.ANDROID_ROOT -> "Установите версию для Android из доверенного источника или проверьте PATH root-оболочки."
+        CommandEnvironment.SSH -> "Установите её на SSH-сервере через его пакетный менеджер или проверьте PATH на сервере."
+        CommandEnvironment.GENERIC -> "Установите нужную программу в окружении команды или проверьте PATH."
+    }
+    return "$reason $installation"
+}
 
 internal fun deviceToolError(message: String, permission: String? = null): JsonObject = buildJsonObject {
     put("error", message)

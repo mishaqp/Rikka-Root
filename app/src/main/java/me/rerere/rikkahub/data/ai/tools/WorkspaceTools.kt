@@ -16,6 +16,7 @@ import me.rerere.ai.ui.toMetadata
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.ai.tools.local.deviceToolParts
 import me.rerere.rikkahub.data.ai.tools.local.commandExitFailureReason
+import me.rerere.rikkahub.data.ai.tools.local.CommandEnvironment
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.utils.generateUnifiedDiff
 import me.rerere.workspace.WorkspaceCommandResult
@@ -116,6 +117,7 @@ private fun BackgroundStatus.toBackgroundJson(includeOutput: Boolean) = buildJso
     put("id", id); put("command", command); put("cwd", cwd); put("running", running)
     put("exitCode", exitCode?.let(::JsonPrimitive) ?: kotlinx.serialization.json.JsonNull)
     put("startedAtMillis", startedAtMillis)
+    if (!running) commandExitFailureReason(exitCode, stderr, CommandEnvironment.WORKSPACE)?.let { put("message", it) }
     if (includeOutput) {
         put("stdout", stdout); put("stderr", stderr)
         put("droppedStdout", droppedStdout); put("droppedStderr", droppedStderr)
@@ -329,7 +331,7 @@ private fun createShellTool(
                     put("stderr", result.stderr)
                     put("timedOut", result.timedOut)
                     if (result.timedOut) put("message", "Время команды истекло. Проверьте, что успело выполниться, перед новым вызовом; команда автоматически не повторяется.")
-                    else commandExitFailureReason(result.exitCode)?.let { put("message", it) }
+                    else commandExitFailureReason(result.exitCode, result.stderr, CommandEnvironment.WORKSPACE)?.let { put("message", it) }
                     if (result.truncated) {
                         put("truncated", true)
                         put("warning", "Вывод команды получен не полностью. Для проверки прочитайте нужную часть вывода отдельно.")

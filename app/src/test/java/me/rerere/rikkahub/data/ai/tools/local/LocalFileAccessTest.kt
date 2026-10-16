@@ -16,6 +16,18 @@ import java.io.OutputStream
 class LocalFileAccessTest {
     @get:Rule val temporary = TemporaryFolder()
 
+    @Test fun missingSharedStorageGrantExplainsBothSettingsAndSafRoutes() = runBlocking {
+        val access = LocalFileAccess(temporary.newFolder("scratch"), temporary.newFolder("upload"))
+        try {
+            access.resolve("/sdcard/Download/Rikka/report.txt")
+            fail("Shared storage was opened without permission")
+        } catch (failure: IllegalArgumentException) {
+            val message = failure.message.orEmpty()
+            assertTrue(message, message.contains("Настройки → Разрешения и доступ"))
+            assertTrue(message, message.contains("grant_directory_access"))
+        }
+    }
+
     @Test fun scratchPathsResolveAndInternalAppFilesAreBlocked(): Unit = runBlocking {
         val scratch = temporary.newFolder("scratch")
         val upload = temporary.newFolder("upload")

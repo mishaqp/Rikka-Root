@@ -89,7 +89,16 @@ private suspend fun downloadToFile(url: String, staging: File, maxBytes: Long): 
         continuation.invokeOnCancellation { call.cancel() }
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                if (continuation.isActive) continuation.resumeWithException(IOException("Не удалось загрузить файл."))
+                if (continuation.isActive) {
+                    val reason = when (e) {
+                        is java.net.SocketTimeoutException, is java.io.InterruptedIOException ->
+                            "Сервер не ответил вовремя. Проверьте подключение к интернету и повторите загрузку."
+                        is java.net.UnknownHostException, is java.net.ConnectException, is javax.net.ssl.SSLException ->
+                            deviceToolFailureReason(e)
+                        else -> "Не удалось загрузить файл. Проверьте подключение к интернету и адрес, затем повторите попытку."
+                    }
+                    continuation.resumeWithException(IOException(reason, e))
+                }
             }
 
             override fun onResponse(call: Call, response: Response) {
@@ -97,7 +106,15 @@ private suspend fun downloadToFile(url: String, staging: File, maxBytes: Long): 
                 try {
                     response.use {
                         if (!continuation.isActive) return
-                        if (!response.isSuccessful) throw IOException("Сервер отклонил загрузку (HTTP ${response.code}).")
+                        if (!response.isSuccessful) throw IOException(when (response.code) {
+                            401 -> "Сервер требует авторизацию (HTTP 401). Проверьте адрес и доступ к файлу; этот инструмент не передаёт учётные данные."
+                            403 -> "Сервер запретил загрузку (HTTP 403). Проверьте доступ и ограничение частоты запросов GitHub API; попробуйте позже."
+                            404 -> "Файл не найден (HTTP 404). Проверьте адрес: у репозитория может не быть опубликованного релиза."
+                            429 -> "Слишком много запросов (HTTP 429). Подождите и повторите загрузку."
+                            in 500..599 -> "Сервер временно недоступен (HTTP ${response.code}). Повторите загрузку позже."
+                            in 300..399 -> "Сервер перенаправляет запрос (HTTP ${response.code}). Проверьте конечный адрес HTTPS и загрузите файл по нему."
+                            else -> "Сервер отклонил загрузку (HTTP ${response.code}). Проверьте адрес и доступ к файлу."
+                        })
                         val body = response.body
                         val expected = body.contentLength()
                         if (expected > maxBytes) throw IOException("Загрузка превышает ограничение размера.")
@@ -128,7 +145,10 @@ fun downloadTool(context: Context, access: LocalFileAccess = LocalFileAccess(con
     name = "download_file",
     description = "Download an HTTP(S) file and wait for completion (90-second timeout; at most 128 MiB). " +
         "By default save to public Downloads. Optional directory must be an allowed workspace/scratch directory " +
-        "or a user-granted SAF directory. Existing files are never overwritten. Returns destination and bytes; cancelled/failed downloads are removed.",
+        "or a user-granted SAF directory or explicitly enabled shared storage. Existing files are never overwritten. Returns destination and bytes; cancelled/failed downloads are removed where safe. Interrupted direct shared-storage writes may leave a partial file, reported in created_path." + ASSISTANT_FILE_DIRECTORY_HINT +
+        " Для проверки обновлений root-модулей используйте URL из updateJson в module.prop; " +
+        "при необходимости — https://api.github.com/repos/<владелец>/<репо>/releases/latest вместо HTML GitHub. " +
+        "Сохраните JSON в /scratch, например с именем module-update.json, и прочитайте через read_file; загрузка не устанавливает обновление.",
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {
             put("url", buildJsonObject { put("type", "string"); put("description", "HTTP(S) file URL") })
@@ -165,18 +185,37 @@ fun downloadTool(context: Context, access: LocalFileAccess = LocalFileAccess(con
                     require(access.findChild(directory, name) == null) { "Файл с таким именем уже существует." }
                     // Keep ownership of the newly created document even if cancellation occurs
                     // during provider IPC, before entering the cleanup-protected copy.
-                    val target = withContext(NonCancellable) { access.createFile(directory, name) }
-                    var completed = false
+                    val unpublishedShared = !access.permitsAutomaticRollback(directory)
+                    val target = if (unpublishedShared) access.child(directory, name)
+                        else withContext(NonCancellable) { access.createFile(directory, name) }
                     try {
                         val jobContext = coroutineContext
-                        access.openOutput(target).use { output ->
+                        if (unpublishedShared) {
+                            val local = target as? LocalFileSource.Local ?: error("Не удалось определить путь назначения.")
+                            installNewSharedStorageFile(staging, local.file, verifyAccess = { access.checkFile(local.file, true) })
+                        } else access.openOutput(target).use { output ->
                             staging.inputStream().use { input -> copyDownloadBounded(input, output, maxBytes) { jobContext.ensureActive() } }
                         }
                         coroutineContext.ensureActive()
-                        completed = true
                         target.reference
-                    } finally {
-                        if (!completed) withContext(NonCancellable) { access.delete(target) }
+                    } catch (failure: Exception) {
+                        if (unpublishedShared) {
+                            if (failure is FileCreationCleanupFailedException) return@withContext buildJsonObject {
+                                put("error", "creation_cleanup_failed")
+                                put("created_path", failure.created.reference)
+                                put("detail", failure.message.orEmpty())
+                            }
+                            throw failure
+                        }
+                        try { access.cleanupOwnedTarget(target, failure) }
+                        catch (partial: FileCreationCleanupFailedException) {
+                            return@withContext buildJsonObject {
+                                put("error", "creation_cleanup_failed")
+                                put("created_path", partial.created.reference)
+                                put("detail", partial.message.orEmpty())
+                            }
+                        }
+                        throw failure
                     }
                 } else publishPublicDownload(context, staging, name, mime, maxBytes)
                 buildJsonObject { put("success", true); put("filename", name); put("destination", destination); put("bytes", bytes) }

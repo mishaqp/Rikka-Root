@@ -648,7 +648,7 @@ fun termuxRunCommandTool(context: Context): Tool = Tool(
                         }
                     )
                 }
-                commandExitFailureReason(res.exitCode)?.let { put("note", it) }
+                commandExitFailureReason(res.exitCode, res.stderr, CommandEnvironment.TERMUX)?.let { put("note", it) }
             }
             is CaptureResult.Timeout -> buildJsonObject {
                 put("error", "timeout")

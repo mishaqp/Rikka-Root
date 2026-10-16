@@ -23,7 +23,10 @@ import me.rerere.rikkahub.data.ai.tools.RunExecutionContext
 /** Ordinary mode retains its consent gate; automatic permission is global on this device. */
 fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = null, assistantId: String? = null): Tool = Tool(
     name = "root_exec",
-    description = "Run a non-interactive shell command on the Android device using su, after verified UID 0. Requires a rooted device and a root-manager grant. User approval is required unless global auto-approval or Always Allow is enabled on this device; visible protected operations still require approval. Returns bounded stdout/stderr, exit_code, and errors. No Shizuku or Termux fallback. Commands are never retried after execution starts. timeout_ms defaults to 30000 and is limited to 1000–300000.",
+    description = "Run a non-interactive shell command on the Android device using su, after verified UID 0. Requires a rooted device and a root-manager grant. User approval is required unless global auto-approval or Always Allow is enabled on this device; visible protected operations still require approval. Returns bounded stdout/stderr, exit_code, and errors. No Shizuku or Termux fallback. Commands are never retried after execution starts. timeout_ms defaults to 30000 and is limited to 1000–300000. " +
+        "Для проверки обновлений root-модулей сначала прочитайте updateJson из /data/adb/modules/*/module.prop без изменений. " +
+        "Затем загрузите JSON по этому адресу через download_file в /scratch и прочитайте через read_file. " +
+        "При необходимости используйте https://api.github.com/repos/<владелец>/<репо>/releases/latest вместо разбора HTML GitHub. Проверка обновлений не означает разрешение на установку.",
     needsApproval = { input ->
         val command = ((input as? JsonObject)?.get("command") as? JsonPrimitive)
             ?.takeIf { it.isString }?.contentOrNull
@@ -100,7 +103,7 @@ fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = nul
                     executed.exitCode?.let { put("exit_code", it) }
                     executed.error?.let { put("error", it) }
                     val reason = executed.reason ?:
-                        if (executed.error == null) commandExitFailureReason(executed.exitCode) else null
+                        if (executed.error == null) commandExitFailureReason(executed.exitCode, executed.stderr, CommandEnvironment.ANDROID_ROOT) else null
                     reason?.let { put("reason", it) }
                     if (journalError) {
                         put("journal_error", "root_journal_save_failed")

@@ -52,7 +52,9 @@ internal fun fileJsonTool(name: String, description: String, schema: InputSchema
                 fileToolOperation(name)?.let { FileOperationDiagnostics.record(it, cleanup) }
                 buildJsonObject {
                     put("error", "creation_cleanup_failed"); put("created_path", cleanup.created.reference)
-                    put("detail", "Android не разрешил убрать созданный документ. Проверьте его в выбранной папке.")
+                    put("detail", if (cleanup.sharedPathMayBePartial)
+                        "Запись прервана. Файл мог сохраниться частично. Проверьте созданный файл перед повтором."
+                    else "Android не разрешил убрать созданный документ. Проверьте его в выбранной папке.")
                 }
             }
             catch (failure: FileMoveSourceDeleteException) {
@@ -74,7 +76,7 @@ internal fun fileJsonTool(name: String, description: String, schema: InputSchema
 
 /** Every tool uses this immutable conversation-scoped resolver; no operation invokes a shell. */
 fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCanReadImages: Boolean = false): List<Tool> {
-    val scope = " Paths: ${access.defaultPath}, /scratch, /upload, attachment:N for reads, and content:// under a persisted SAF tree. Absolute shared-storage paths inside that granted tree also use SAF. System paths and app settings are blocked."
+    val scope = " Paths: ${access.defaultPath}, /scratch, /upload, attachment:N for reads, and content:// under a persisted SAF tree. Absolute shared-storage paths inside that granted tree also use SAF. With the explicit all-files setting and Android grant, mounted shared storage can be used directly. System paths and app settings are blocked." + ASSISTANT_FILE_DIRECTORY_HINT
     suspend fun source(obj: JsonObject, key: String = "path", write: Boolean = false) = access.resolve(fileArgument(obj, key), write)
     suspend fun entry(source: LocalFileSource): JsonObject {
         val name = access.name(source)
@@ -89,11 +91,18 @@ fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCan
         val root = access.resolve(fileArgument(obj, if (find) "root" else "path"))
         val query = if (find) fileArgument(obj, "query") else obj.textArgument("pattern")
         val regex = query?.takeIf { !find || '*' in it || '?' in it }?.let(::fileGlobRegex)
-        val all = access.walk(root, fileBoolean(obj, "recursive", find))
+        var skippedPrivatePaths = 0
+        val all = access.walk(root, fileBoolean(obj, "recursive", find), onRestrictedPathSkipped = { skippedPrivatePaths++ })
         val limit = fileInteger(obj, "limit", 50, 1..500)
         val matches = all.filter { val name = access.name(it); if (regex != null) regex.matches(name) else query == null || name.contains(query, ignoreCase = true) }
         val selected = matches.take(limit).map { entry(it) }
-        return buildJsonObject { put("files", JsonArray(selected)); put("truncated", matches.size > limit) }
+        return buildJsonObject {
+            put("files", JsonArray(selected)); put("truncated", matches.size > limit)
+            if (skippedPrivatePaths > 0) {
+                put("skipped_restricted_count", skippedPrivatePaths)
+                put("warnings", buildJsonArray { add("Папки Android/data и Android/obb пропущены: доступ к личным данным других приложений запрещён.") })
+            }
+        }
     }
     suspend fun batch(obj: JsonObject, operation: String): JsonObject {
         val explicit = if ("paths" in obj) requireNotNull(obj["paths"] as? JsonArray) {
@@ -125,14 +134,15 @@ fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCan
                     require(previous == null || overwrite) { "Назначение уже существует." }
                     var owned: LocalFileSource? = null
                     val directory = access.isDirectory(from)
-                    val to = if (previous != null) previous else withContext(kotlinx.coroutines.NonCancellable) {
-                        access.createNewChild(destination, name, directory).also { owned = it }
-                    }
+                    val unpublishedShared = previous == null && !access.permitsAutomaticRollback(destination)
+                    val to = if (previous != null) previous else if (unpublishedShared) access.child(destination, name)
+                    else withContext(kotlinx.coroutines.NonCancellable) { access.createNewChild(destination, name, directory).also { owned = it } }
                     try {
                         currentCoroutineContext().ensureActive()
                         if (owned != null) require(access.name(to) == name) { "Провайдер SAF изменил имя создаваемого файла." }
-                        if (operation == "copy") access.copy(from, to, overwrite || previous == null, ownedDestination = owned != null)
-                        else access.move(from, to, overwrite || previous == null, ownedDestination = owned != null)
+                        val replace = overwrite || previous == null && !unpublishedShared
+                        if (operation == "copy") access.copy(from, to, replace, ownedDestination = owned != null)
+                        else access.move(from, to, replace, ownedDestination = owned != null)
                     } catch (error: Exception) {
                         if (owned != null && !isMoveCopyPreserved(error)) access.cleanupOwnedTarget(to, error, recursive = true)
                         throw error
@@ -147,6 +157,7 @@ fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCan
                 failures += buildJsonObject {
                     put("path", path)
                     put("error", if (isMoveCopyPreserved(error)) "Копия сохранена, но источник не удалось полностью удалить."
+                        else if (error is FileCreationCleanupFailedException && error.sharedPathMayBePartial) error.message.orEmpty()
                         else if (safFileCause(error) != null) deviceToolFailureReason(error, fileOperation)
                         else "Не удалось выполнить операцию. Проверьте путь, доступ и существующее назначение.")
                     if (error is FileRestoreFailedException) put("backup_path", "/scratch/${error.backup.name}")
@@ -291,7 +302,7 @@ private fun openFileTool(access: LocalFileAccess, suppliedContext: Context?): To
     val source = access.resolve(fileArgument(obj, "path"))
     require(access.exists(source) && !access.isDirectory(source)) { "Файл не найден." }
     val uri = when (source) {
-        is LocalFileSource.Local -> FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", access.checkFile(source.file))
+        is LocalFileSource.Local -> FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", localFileForAndroidViewer(context, access, source))
         is LocalFileSource.Content -> source.uri
     }
     val name = access.name(source)

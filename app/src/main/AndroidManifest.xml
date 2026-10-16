@@ -3,6 +3,8 @@
   xmlns:tools="http://schemas.android.com/tools">
 
   <uses-permission android:name="android.permission.INTERNET" />
+  <!-- Explicit user request: optional direct shared storage, separately disabled in app settings. -->
+  <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
   <!-- Package F: request only when enabling Termux for an assistant. -->
   <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
   <!-- Recovery restores exact alarms and durable WorkManager fallback requests. -->

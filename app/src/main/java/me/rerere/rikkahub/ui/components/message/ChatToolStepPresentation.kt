@@ -60,6 +60,7 @@ import me.rerere.hugeicons.stroke.Voice
 import me.rerere.hugeicons.stroke.VolumeHigh
 import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.data.ai.tools.local.commandExitFailureReason
+import me.rerere.rikkahub.data.ai.tools.local.CommandEnvironment
 
 /**
  * Presentation of one timeline step: a one-line title with the essence of the call and a short
@@ -298,7 +299,12 @@ private fun commandPreview(toolName: String, obj: JsonObject, fullScreen: Boolea
     val reason = nonZero?.let { code ->
         listOf("message", "reason", "note", "recovery").mapNotNull { obj.string(it)?.readableRussian() }
             .distinct().joinToString("\n").takeIf { it.isNotBlank() }
-            ?: if (toolName in foregroundExitReasonTools) commandExitFailureReason(code) else null
+            ?: if (toolName in foregroundExitReasonTools) commandExitFailureReason(code, stderr.orEmpty(), when (toolName) {
+                "workspace_shell" -> CommandEnvironment.WORKSPACE
+                "termux_run_command" -> CommandEnvironment.TERMUX
+                "root_exec" -> CommandEnvironment.ANDROID_ROOT
+                else -> CommandEnvironment.SSH
+            }) else null
     }
     if (stdout == null && stderr == null) {
         val pid = (obj["pid"] as? JsonPrimitive)?.longOrNull
@@ -496,6 +502,7 @@ private val knownErrors = mapOf(
     "root_approval_required" to "Нужно подтверждение команды",
     "root_execution_indeterminate" to "Исход неизвестен: выполнение было прервано",
     "tool_execution_indeterminate" to "Исход неизвестен: выполнение было прервано",
+    "process_interrupted" to "Прервано: приложение было закрыто. Часть действий могла выполниться. Проверьте результат и запустите действие вручную.",
     "root_cleanup_unconfirmed" to "Не удалось подтвердить завершение команды",
     "tool_not_found" to "Инструмент недоступен в этом ответе",
     "tool_cancelled_wall_clock" to "Истёк общий лимит времени на инструменты",

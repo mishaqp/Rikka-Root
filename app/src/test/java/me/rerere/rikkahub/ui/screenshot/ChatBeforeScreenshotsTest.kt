@@ -35,6 +35,7 @@ import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -685,6 +686,11 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         settleNativeRipple()
         assertEquals("The actual ChatPage callback persists the chosen message alternative", 1,
             fixture.conversationFlow.value.messageNodes.single().selectIndex)
+        // Markdown reparses a changed branch on Dispatchers.Default, outside
+        // Compose idleness. Wait for that text to be placed before asserting it.
+        compose.waitUntil(timeoutMillis = 2_000) {
+            compose.onNodeWithText("Вторая версия сообщения.").isDisplayed()
+        }
         compose.onNodeWithText("Вторая версия сообщения.").assertIsDisplayed()
         verify(exactly = 1) { fixture.vm.updateConversation(any()) }
         verify(exactly = 1) { fixture.vm.saveConversationAsync() }

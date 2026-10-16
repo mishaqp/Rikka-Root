@@ -50,6 +50,26 @@ class ChatToolStepPresentationTest {
         assertNull(toolErrorMessage("x", json("""{"error":false,"ok":1}""") as kotlinx.serialization.json.JsonObject))
     }
 
+    @Test fun closedApplicationHasARecognizableInterruptionReason() {
+        listOf("workspace_background_output", "workflow_run", "subagent_get").forEach { tool ->
+            val result = preview(tool, """{"error":"process_interrupted"}""")
+            assertEquals(ToolResultPreview.Error("Прервано: приложение было закрыто. Часть действий могла выполниться. Проверьте результат и запустите действие вручную."), result)
+        }
+    }
+
+    @Test fun historicalMissingProgramResultsExplainTheCorrectExecutionEnvironment() {
+        listOf("workspace_shell" to "apt install jq", "termux_run_command" to "pkg install jq",
+            "ssh_exec_saved" to "сервер", "root_exec" to "Android").forEach { (tool, hint) ->
+            val result = preview(tool, """{"exit_code":127,"stdout":"partial","stderr":"sh: jq: command not found"}""")
+                as ToolResultPreview.Command
+            val reason = result.reason.orEmpty()
+            assertTrue(reason, reason.contains("Программа jq"))
+            assertTrue(reason, reason.contains(hint))
+            assertEquals("partial", result.stdout)
+            assertEquals("sh: jq: command not found", result.stderr)
+        }
+    }
+
     @Test fun everyRegisteredToolShowsSafeRussianFallbackWithoutTechnicalPayload() {
         ToolPermissionPolicy.registry.keys.forEach { name ->
             val output = """{"error":"unexpected_backend_failure","detail":"java.io.IOException: file Отчёт.txt exploded","native_error_type":"IOException"}"""

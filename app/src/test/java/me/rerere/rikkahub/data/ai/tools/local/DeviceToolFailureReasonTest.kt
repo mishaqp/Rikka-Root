@@ -2,6 +2,12 @@ package me.rerere.rikkahub.data.ai.tools.local
 
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CancellationException
+import io.mockk.coEvery
+import io.mockk.mockk
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import kotlinx.serialization.json.buildJsonObject
 import me.rerere.ai.ui.UIMessagePart
 import org.junit.Assert.assertEquals
@@ -14,15 +20,42 @@ import java.io.IOException
 import java.nio.file.AccessDeniedException
 import java.nio.file.FileAlreadyExistsException
 import java.nio.file.NoSuchFileException
+import me.rerere.rikkahub.root.RootProcessResult
+import me.rerere.rikkahub.root.RootShellManager
 
 class DeviceToolFailureReasonTest {
     @Test fun commandExitFailuresExplainRecoveryWithoutTreatingSuccessOrUnknownExitAsFailure() {
         assertEquals(null, commandExitFailureReason(null))
         assertEquals(null, commandExitFailureReason(0))
-        listOf(1, 23, 127, -1).forEach { code ->
+        listOf(1, 23, -1).forEach { code ->
             assertEquals("Команда завершилась с ошибкой (код $code). Проверьте вывод и результат перед новым запуском.",
                 commandExitFailureReason(code))
         }
+    }
+
+    @Test fun missingProgramWithoutItsNameStillExplainsExit127() {
+        val reason = commandExitFailureReason(127).orEmpty()
+        assertTrue(reason, reason.contains("Программа"))
+        assertTrue(reason, reason.contains("Установите"))
+    }
+
+    @Test fun rootMissingProgramKeepsStreamsAndExplainsAndroidEnvironment() = runBlocking {
+        val manager = mockk<RootShellManager>()
+        coEvery { manager.exec(any(), any(), any(), any()) } returns RootProcessResult(
+            exitCode = 127, stdout = "partial output", stderr = "/system/bin/sh: gh: inaccessible or not found\n")
+        val tool = buildRootTool(manager)
+        val parts = tool.execute(buildJsonObject { put("command", "gh --version") })
+        val result = Json.parseToJsonElement((parts.single() as UIMessagePart.Text).text).jsonObject
+        val reason = result["reason"]?.jsonPrimitive?.content.orEmpty()
+        assertEquals("127", result["exit_code"]?.jsonPrimitive?.content)
+        assertEquals("partial output", result["stdout"]?.jsonPrimitive?.content)
+        assertEquals("/system/bin/sh: gh: inaccessible or not found\n", result["stderr"]?.jsonPrimitive?.content)
+        assertTrue(reason, reason.contains("Программа gh"))
+        assertTrue(reason, reason.contains("Android"))
+        assertFalse(reason, reason.contains("apt install"))
+        assertFalse(reason, reason.contains("pkg install"))
+        assertTrue(tool.description.contains("updateJson"))
+        assertTrue(tool.description.contains("api.github.com"))
     }
 
     @Test fun appAuthoredRussianReasonsAreShownAsIs() {

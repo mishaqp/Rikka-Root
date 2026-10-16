@@ -34,9 +34,10 @@ import me.rerere.rikkahub.browser.BrowserControllerHandle
 import me.rerere.rikkahub.browser.BrowserDiffHelper
 import me.rerere.rikkahub.browser.BrowserToolDefaults
 import me.rerere.rikkahub.browser.HeadlessBrowserSessionPool
-import me.rerere.rikkahub.browser.ReadabilityRunner.runReadability
+import me.rerere.rikkahub.browser.ReadabilityRunner.runReadabilityResult
 import me.rerere.rikkahub.browser.awaitReadyState
 import me.rerere.rikkahub.browser.evaluateJavascriptAsync
+import me.rerere.rikkahub.browser.loadUrlAndAwaitReady
 import kotlinx.coroutines.currentCoroutineContext
 import me.rerere.rikkahub.data.ai.tools.RunExecutionContext
 import me.rerere.rikkahub.browser.BrowserInvocationContext
@@ -237,8 +238,7 @@ fun browserOpenTool(context: Context, invocationContext: ToolInvocationContext? 
                     BrowserController.startTaskWindow()
                     val result = trackJsonAction(BrowserAiActionKind.OPEN, url) {
                         BrowserControllerHandle.withController {
-                            withContext(Dispatchers.Main) { webView.loadUrl(url) }
-                            webView.awaitReadyState(8_000L)
+                            webView.loadUrlAndAwaitReady(url, 8_000L)
                             buildJsonObject {
                                 put("success", true)
                                 put("current_url", webView.url ?: url)
@@ -308,9 +308,10 @@ fun browserOpenTool(context: Context, invocationContext: ToolInvocationContext? 
                             // before bind() returned. Skip a redundant second loadUrl — it
                             // would abort the in-flight load and restart from the top.
                             if (wasAlreadyBound) {
-                                withContext(Dispatchers.Main) { webView.loadUrl(url) }
+                                webView.loadUrlAndAwaitReady(url, 8_000L)
+                            } else {
+                                webView.awaitReadyState(8_000L, previousDocument = null, requestedUrl = url)
                             }
-                            webView.awaitReadyState(8_000L)
                             buildJsonObject {
                                 put("success", true)
                                 put("current_url", webView.url ?: url)
@@ -374,26 +375,23 @@ fun browserScreenshotTool(context: Context): Tool = Tool(
         val out = withTimeoutOrNull(toolTimeoutMs) {
             BrowserControllerHandle.withController {
                 trackJsonAction(BrowserAiActionKind.SCREENSHOT, null) {
-                    val (path, w, h) = withContext(Dispatchers.Main) {
-                        val width = webView.width.coerceAtLeast(1)
-                        val height = webView.height.coerceAtLeast(1).coerceAtMost(MAX_SCREENSHOT_HEIGHT_PX)
-                        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                        val canvas = Canvas(bitmap)
-                        webView.draw(canvas)
-                        val cacheDir = File(context.cacheDir, SCREENSHOT_CACHE_SUBDIR).apply { mkdirs() }
-                        val out = File(cacheDir, "screenshot-${System.currentTimeMillis()}.png")
-                        // Recycle unconditionally in a finally block so the bitmap is freed
-                        // exactly once regardless of whether compress() succeeds or throws.
-                        // The prior pattern called recycle() in onFailure AND then again
-                        // unconditionally — a double-recycle causes IllegalStateException.
-                        try {
+                    // withController runs on Main: WebView drawing must stay here.
+                    val w = webView.width.coerceAtLeast(1)
+                    val h = webView.height.coerceAtLeast(1).coerceAtMost(MAX_SCREENSHOT_HEIGHT_PX)
+                    val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                    val path = try {
+                        webView.draw(Canvas(bitmap))
+                        withContext(Dispatchers.IO) {
+                            val cacheDir = File(context.cacheDir, SCREENSHOT_CACHE_SUBDIR).apply { mkdirs() }
+                            val out = File(cacheDir, "screenshot-${System.currentTimeMillis()}.png")
                             FileOutputStream(out).use { os ->
                                 bitmap.compress(Bitmap.CompressFormat.PNG, 100, os)
                             }
-                        } finally {
-                            bitmap.recycle()
+                            out.absolutePath
                         }
-                        Triple(out.absolutePath, width, height)
+                    } finally {
+                        // Also covers drawing failure and cancellation before IO dispatch.
+                        bitmap.recycle()
                     }
                     buildJsonObject {
                         put("success", true)
@@ -432,9 +430,10 @@ fun browserGetDomTool(): Tool = Tool(
                 var clone = el.cloneNode(true);
                 clone.querySelectorAll('script,style,noscript').forEach(function(n){n.remove();});
                 var html = clone.outerHTML || '';
-                var truncated = false;
-                if (html.length > $maxChars) { html = html.substring(0, $maxChars); truncated = true; }
-                return JSON.stringify({html:html, truncated:truncated});
+                var total = html.length;
+                var truncated = total > $maxChars;
+                if (truncated) html = html.substring(0, $maxChars);
+                return JSON.stringify({html:html, truncated:truncated, total_chars:total});
             } catch(e) { return JSON.stringify({error:'js_failed', detail:String(e)}); }
         })()"""
     }) },
@@ -472,7 +471,8 @@ fun browserGetLinksTool(): Tool = Tool(
                         return JSON.stringify({links:out, count:out.length});
                     } catch(e) { return JSON.stringify({error:'js_failed', detail:String(e)}); }
                 })()"""
-                parseJsResult(webView.evaluateJavascriptAsync(js))
+                webView.awaitReadyState(8_000L)
+                evaluateReadResult(js)
             }
         } ?: timeoutEnvelope(BrowserToolDefaults.GET_LINKS)
         textPart(out)
@@ -1070,7 +1070,7 @@ fun browserClickAndReadTool(): Tool = Tool(
             withTimeoutOrNull(toolTimeoutMs) {
                 BrowserControllerHandle.withController {
                     trackJsonAction(BrowserAiActionKind.READ, selector) {
-                        val before = if (mode == "diff") captureBodyText() else ""
+                        val before = if (mode == "diff") captureBodyText() else null
                         val titleBefore = withContext(Dispatchers.Main) { webView.title.orEmpty() }
                         val clickJs = """(function(){
                             try {
@@ -1091,50 +1091,22 @@ fun browserClickAndReadTool(): Tool = Tool(
                         when (mode) {
                             "diff" -> {
                                 val after = captureBodyText()
+                                val diff = snapshotDiff(requireNotNull(before), after)
                                 buildJsonObject {
                                     put("success", true)
                                     put("post_click_url", postUrl)
                                     put("page_title", postTitle)
-                                    put("diff", BrowserDiffHelper.computeDiff(before, after))
+                                    put("diff", diff)
+                                    diff["message"]?.let { put("warning", it) }
                                 }
                             }
                             else -> {
-                                val text = when (mode) {
-                                    "readability" -> webView.runReadability()
-                                    "auto" -> webView.runReadability()?.takeIf { it.length >= READABILITY_MIN_CHARS }
-                                    else -> null
-                                }
-                                val (resolved, extractMode) = if (!text.isNullOrEmpty()) {
-                                    text to "readability"
-                                } else if (mode == "readability") {
-                                    // Forced mode + null result → surface the error envelope.
-                                    return@trackJsonAction buildJsonObject {
-                                        put("success", false)
-                                        put("post_click_url", postUrl)
-                                        put("page_title", postTitle)
-                                        put("error", "readability_failed")
-                                        put("message", "Не удалось извлечь статью. Используйте extract_mode: auto или raw.")
-                                    }
-                                } else {
-                                    // Fall back to selector-based body innerText.
-                                    val rawJs = """(function(){
-                                        try {
-                                            var t = (document.body.innerText || document.body.textContent || '').replace(/\s+/g,' ').trim();
-                                            return JSON.stringify({text:t});
-                                        } catch(e) { return JSON.stringify({error:'js_failed', detail:String(e)}); }
-                                    })()"""
-                                    val rawRes = parseJsResult(webView.evaluateJavascriptAsync(rawJs))
-                                    val rawText = rawRes["text"]?.jsonPrimitive?.contentOrNull.orEmpty()
-                                    rawText to (if (mode == "auto") "raw_fallback" else "raw")
-                                }
-                                val (clipped, truncated) = clipText(resolved, maxChars)
+                                val extracted = runExtractedText(mode, maxChars)
                                 buildJsonObject {
-                                    put("success", true)
+                                    put("success", !extracted.containsKey("error"))
                                     put("post_click_url", postUrl)
                                     put("page_title", postTitle)
-                                    put("text", clipped)
-                                    put("truncated", truncated)
-                                    put("extract_mode", extractMode)
+                                    extracted.forEach { (key, value) -> put(key, value) }
                                 }
                             }
                         }
@@ -1258,24 +1230,45 @@ private fun getTextSchema(defaultMax: Int): InputSchema = InputSchema.Obj(
 )
 
 
-/**
- * Snapshot the page's `document.body.innerText` for the diff-after-action path.
- * Whitespace is collapsed so that incidental layout reflows (e.g. an extra newline
- * inserted by a CSS animation that just landed) don't show up as "added" lines in
- * the diff. Returns the empty string on any JS failure — the diff helper will then
- * treat an empty before-snapshot as "everything is new", which is the conservative
- * call when we can't tell what was there.
- */
-private suspend fun BrowserControllerHandle.WithControllerScope.captureBodyText(): String {
-    val raw = webView.evaluateJavascriptAsync(
-        "(function(){try{return JSON.stringify(document.body.innerText||'');}catch(e){return JSON.stringify('');}})()",
-        4_000L,
-    ) ?: return ""
-    return runCatching {
-        val outer = Json.parseToJsonElement(raw)
-        val inner = if (outer is JsonPrimitive && outer.isString) outer.contentOrNull.orEmpty() else outer.toString()
-        Json.parseToJsonElement(inner).jsonPrimitive.contentOrNull.orEmpty()
-    }.getOrElse { "" }
+private const val MAX_DIFF_SNAPSHOT_CHARS = 64 * 1024
+
+private data class BrowserTextSnapshot(val text: String, val totalChars: Int, val available: Boolean)
+
+/** Never send the whole body over the native callback for a bounded diff. */
+private suspend fun BrowserControllerHandle.WithControllerScope.captureBodyText(): BrowserTextSnapshot {
+    val result = parseJsResult(webView.evaluateJavascriptAsync("""(function(){
+        try {
+            var text = document.body.innerText || '';
+            return JSON.stringify({text:text.substring(0, $MAX_DIFF_SNAPSHOT_CHARS),total_chars:text.length});
+        } catch(e) { return JSON.stringify({error:'js_failed'}); }
+    })()""", 4_000L))
+    if (result.containsKey("error")) return BrowserTextSnapshot("", 0, available = false)
+    val text = result["text"]?.jsonPrimitive?.contentOrNull
+        ?: return BrowserTextSnapshot("", 0, available = false)
+    return BrowserTextSnapshot(text,
+        result["total_chars"]?.jsonPrimitive?.intOrNull?.coerceAtLeast(text.length) ?: text.length,
+        available = true)
+}
+
+private fun snapshotDiff(before: BrowserTextSnapshot, after: BrowserTextSnapshot): JsonObject {
+    val diff = BrowserDiffHelper.computeDiff(before.text, after.text)
+    if (before.available && after.available && before.totalChars == before.text.length &&
+        after.totalChars == after.text.length) return diff
+    return buildJsonObject {
+        diff.forEach { (key, value) -> put(key, value) }
+        put("partial", true)
+        put("truncated", true)
+        put("shown_chars", after.text.length)
+        put("total_chars", after.totalChars)
+        put("before_shown_chars", before.text.length)
+        put("before_total_chars", before.totalChars)
+        put("message", if (!before.available || !after.available) {
+            "Не удалось сравнить страницу полностью. Действие выполнено; повторите browser_get_text, а не само действие."
+        } else {
+            "Показано ${after.text.length} из ${after.totalChars} символов. Сравнена только показанная часть; " +
+                "остальная страница не проверена. Для чтения нужного блока используйте browser_get_text с selector."
+        })
+    }
 }
 
 /**
@@ -1299,9 +1292,11 @@ private suspend fun BrowserControllerHandle.WithControllerScope.withDiff(
     val result = action()
     if (result.containsKey("error")) return result
     val after = captureBodyText()
+    val diff = snapshotDiff(before, after)
     return buildJsonObject {
         result.forEach { (k, v) -> put(k, v) }
-        put("diff", BrowserDiffHelper.computeDiff(before, after))
+        put("diff", diff)
+        diff["message"]?.let { put("warning", it) }
     }
 }
 
@@ -1322,7 +1317,8 @@ private fun parseFullArg(input: kotlinx.serialization.json.JsonElement): Boolean
  * value that can't be parsed — both surface to the LLM cleanly without throwing.
  */
 private fun parseJsResult(raw: String?): JsonObject {
-    val result = if (raw == null) buildJsonObject { put("error", "js_no_result") } else runCatching {
+    val result = if (raw == null || raw.trim() in setOf("null", "\"null\"", "undefined"))
+        buildJsonObject { put("error", "js_no_result") } else runCatching {
         // evaluateJavascript wraps a JS string return value in JSON-quoted form, so
         // raw is "\"{...}\"" — parse the outer quoted string into a Kotlin string,
         // then parse that string as JSON.
@@ -1337,7 +1333,7 @@ private fun parseJsResult(raw: String?): JsonObject {
             "selector_not_found" -> "Элемент страницы не найден. Проверьте selector или дождитесь загрузки страницы."
             "no_enclosing_form" -> "У элемента нет формы для отправки. Укажите selector формы или её поля."
             "not_a_select" -> "Элемент не является списком выбора. Укажите selector элемента select."
-            "js_no_result" -> "Страница не вернула результат. Повторите вызов после загрузки страницы."
+            "js_no_result" -> "Страница ещё загружается или её ответ был прерван переходом. Дождитесь загрузки и повторите чтение."
             "js_parse_failed" -> "Не удалось прочитать ответ страницы. Повторите вызов или откройте страницу заново."
             else -> "Не удалось выполнить действие на странице. Проверьте параметры и повторите вызов."
         })
@@ -1363,7 +1359,8 @@ private suspend fun runReadHelper(
         .coerceIn(100, 64 * 1024)
     return withTimeoutOrNull(toolTimeoutMs) {
         BrowserControllerHandle.withController {
-            parseJsResult(webView.evaluateJavascriptAsync(jsBuilder(selector, maxChars)))
+            webView.awaitReadyState(8_000L)
+            withContentSize(evaluateReadResult(jsBuilder(selector, maxChars)), "html")
         }
     } ?: timeoutEnvelope(toolName)
 }
@@ -1393,45 +1390,33 @@ private suspend fun runGetText(input: kotlinx.serialization.json.JsonElement): J
 
     return withTimeoutOrNull(toolTimeoutMs) {
         BrowserControllerHandle.withController {
-            // Selector arg trumps everything — the model is being explicit, honour it.
-            if (explicitSelector != null) {
-                return@withController runRawText(explicitSelector, maxChars, mode = "raw_selector")
-            }
-            when (mode) {
-                "raw" -> runRawText("body", maxChars, mode = "raw")
-                "readability" -> {
-                    val text = webView.runReadability()
-                    if (text.isNullOrEmpty()) {
-                        buildJsonObject {
-                            put("error", "readability_failed")
-                            put("recovery", "Не удалось извлечь статью. Используйте extract_mode: auto или укажите selector нужного элемента.")
-                        }
-                    } else {
-                        buildJsonObject {
-                            val (clipped, truncated) = clipText(text, maxChars)
-                            put("text", clipped)
-                            put("truncated", truncated)
-                            put("extract_mode", "readability")
-                        }
-                    }
-                }
-                else -> {
-                    // auto: Readability first, then selector fallback
-                    val text = webView.runReadability()
-                    if (!text.isNullOrEmpty() && text.length >= READABILITY_MIN_CHARS) {
-                        val (clipped, truncated) = clipText(text, maxChars)
-                        buildJsonObject {
-                            put("text", clipped)
-                            put("truncated", truncated)
-                            put("extract_mode", "readability")
-                        }
-                    } else {
-                        runRawText("body", maxChars, mode = "raw_fallback")
-                    }
-                }
-            }
+            webView.awaitReadyState(8_000L)
+            // Explicit selectors retain priority over Readability.
+            if (explicitSelector != null) runRawText(explicitSelector, maxChars, mode = "raw_selector")
+            else runExtractedText(mode, maxChars)
         }
     } ?: timeoutEnvelope(BrowserToolDefaults.GET_TEXT)
+}
+
+private suspend fun BrowserControllerHandle.WithControllerScope.runExtractedText(
+    mode: String,
+    maxChars: Int,
+): JsonObject {
+    val article = if (mode == "raw") null else webView.runReadabilityResult(maxChars = maxChars)
+    if (article != null && (mode == "readability" || article.totalChars >= READABILITY_MIN_CHARS)) {
+        return withContentSize(buildJsonObject {
+            put("text", article.text)
+            put("total_chars", article.totalChars)
+            put("truncated", article.totalChars > article.text.length)
+            put("extract_mode", "readability")
+        }, "text")
+    }
+    if (mode == "readability") return buildJsonObject {
+        put("error", "readability_failed")
+        put("message", "Не удалось извлечь статью. Используйте extract_mode: auto или укажите selector нужного элемента.")
+        put("recovery", "Не удалось извлечь статью. Используйте extract_mode: auto или укажите selector нужного элемента.")
+    }
+    return runRawText("body", maxChars, mode = if (mode == "raw") "raw" else "raw_fallback")
 }
 
 private suspend fun BrowserControllerHandle.WithControllerScope.runRawText(
@@ -1444,12 +1429,13 @@ private suspend fun BrowserControllerHandle.WithControllerScope.runRawText(
             var el = document.querySelector(${jsString(selector)});
             if (!el) return JSON.stringify({error:'selector_not_found', selector:${jsString(selector)}});
             var t = (el.innerText || el.textContent || '').replace(/\s+/g,' ').trim();
-            var truncated = false;
-            if (t.length > $maxChars) { t = t.substring(0, $maxChars); truncated = true; }
-            return JSON.stringify({text:t, truncated:truncated});
+            var total = t.length;
+            var truncated = total > $maxChars;
+            if (truncated) t = t.substring(0, $maxChars);
+            return JSON.stringify({text:t, truncated:truncated, total_chars:total});
         } catch(e) { return JSON.stringify({error:'js_failed', detail:String(e)}); }
     })()"""
-    val res = parseJsResult(webView.evaluateJavascriptAsync(js))
+    val res = withContentSize(evaluateReadResult(js), "text")
     return if (res.containsKey("error")) res else buildJsonObject {
         res.forEach { (k, v) -> put(k, v) }
         put("extract_mode", mode)
@@ -1459,6 +1445,27 @@ private suspend fun BrowserControllerHandle.WithControllerScope.runRawText(
 private fun clipText(text: String, maxChars: Int): Pair<String, Boolean> =
     if (text.length <= maxChars) text to false
     else text.substring(0, maxChars) to true
+
+private fun withContentSize(result: JsonObject, field: String): JsonObject {
+    if (result.containsKey("error")) return result
+    val shown = result[field]?.jsonPrimitive?.contentOrNull?.length ?: return result
+    val total = result["total_chars"]?.jsonPrimitive?.intOrNull?.coerceAtLeast(shown) ?: shown
+    return buildJsonObject {
+        result.forEach { (key, value) -> put(key, value) }
+        put("shown_chars", shown)
+        put("total_chars", total)
+        if (total > shown) put("message", "Показано $shown из $total символов.")
+    }
+}
+
+/** Only retry reads: a navigation can invalidate a callback after readyState was checked. */
+private suspend fun BrowserControllerHandle.WithControllerScope.evaluateReadResult(js: String): JsonObject {
+    val result = parseJsResult(webView.evaluateJavascriptAsync(js))
+    if (result["error"]?.jsonPrimitive?.contentOrNull !in setOf("js_no_result", "js_parse_failed")) return result
+    delay(200L)
+    webView.awaitReadyState(8_000L)
+    return parseJsResult(webView.evaluateJavascriptAsync(js))
+}
 
 /**
  * How [runHistoryNav] should carry out a back/forward request, decided from state read off

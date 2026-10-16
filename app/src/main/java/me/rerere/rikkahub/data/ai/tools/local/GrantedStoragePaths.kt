@@ -12,8 +12,8 @@ internal data class SafStoragePathPlan(
     val relativeNames: List<String>,
 )
 
-private data class StorageAddress(val volumeId: String, val root: File, val file: File)
-private fun storageAddress(value: String, volumeRoots: Map<String, File>, primaryAliases: List<File>): StorageAddress? {
+internal data class StorageAddress(val volumeId: String, val root: File, val file: File)
+internal fun storageAddress(value: String, volumeRoots: Map<String, File>, primaryAliases: List<File>): StorageAddress? {
     if (value.isBlank() || value.length > 8192 || value.any { it == '\\' || it.isISOControl() } ||
         value.split('/').any { it == ".." } || !File(value).isAbsolute) return null
     val requested = File(value).absoluteFile.toPath().normalize()

@@ -13,6 +13,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -646,26 +650,27 @@ object BrowserController {
         // because draw(canvas) ran before the renderer flushed.
         kotlinx.coroutines.delay(PAINT_SETTLE_MS)
         val capture = runCatching {
-            withContext(Dispatchers.Main) {
-                val w = webView.width.coerceAtLeast(1)
-                val h = webView.height.coerceAtLeast(1)
-                val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-                val canvas = Canvas(bitmap)
-                webView.draw(canvas)
-                val cacheDir = File(context.cacheDir, STREAM_CACHE_SUBDIR).apply { mkdirs() }
-                val out = File(cacheDir, "stream-${System.currentTimeMillis()}.png")
-                // Recycle in a finally block so a FileOutputStream failure doesn't leak
-                // the ~8 MB native backing. Without this, any IO error mid-capture leaves
-                // the bitmap alive until the next GC (the outer runCatching swallows
-                // the exception before the bitmap variable goes out of scope).
-                try {
-                    FileOutputStream(out).use { os ->
-                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, os)
-                    }
-                } finally {
-                    bitmap.recycle()
+            // Keep ownership outside withContext so cancellation while returning from
+            // Main cannot discard a newly allocated native bitmap without recycling it.
+            var bitmap: Bitmap? = null
+            try {
+                withContext(Dispatchers.Main) {
+                    val image = Bitmap.createBitmap(webView.width.coerceAtLeast(1),
+                        webView.height.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+                    bitmap = image
+                    webView.draw(Canvas(image))
                 }
-                Capture(out.absolutePath, currentUrl)
+                val image = requireNotNull(bitmap)
+                withContext(Dispatchers.IO) {
+                    val cacheDir = File(context.cacheDir, STREAM_CACHE_SUBDIR).apply { mkdirs() }
+                    val out = File(cacheDir, "stream-${System.currentTimeMillis()}.png")
+                    FileOutputStream(out).use { os ->
+                        image.compress(Bitmap.CompressFormat.PNG, 100, os)
+                    }
+                    Capture(out.absolutePath, currentUrl)
+                }
+            } finally {
+                bitmap?.recycle()
             }
         }.onFailure { android.util.Log.w(TAG, "streamScreenshotIfHeadless: capture failed type=${it.javaClass.simpleName}") }
             .getOrNull() ?: return
@@ -780,18 +785,71 @@ suspend fun WebView.evaluateJavascriptAsync(code: String, timeoutMs: Long = 8_00
  * Wait for `document.readyState === "complete"` for up to [timeoutMs] ms. Used after
  * state-changing tools (click, type, submit) so the next read tool sees the post-action
  * page rather than a half-rendered intermediate state. Polls every 200 ms, exits early
- * on first complete reading.
+ * after two consecutive complete readings, allowing queued navigation to begin.
  */
-suspend fun WebView.awaitReadyState(timeoutMs: Long = 8_000L): Boolean {
-    val deadline = System.currentTimeMillis() + timeoutMs
-    while (System.currentTimeMillis() < deadline) {
-        val raw = evaluateJavascriptAsync("(function(){return document.readyState;})()", 1_500L)
-        // evaluateJavascript wraps string returns in JSON quotes — `"complete"` comes
-        // back as the 10-char literal `"\"complete\""`. Match the exact form so a page
-        // that overrides document.readyState to a string merely containing "complete"
-        // (e.g. "incomplete", or some adversarial value) doesn't trip the early-exit.
-        if (raw != null && raw.trim() == "\"complete\"") return true
-        kotlinx.coroutines.delay(200)
-    }
-    return false
+internal data class BrowserDocumentIdentity(val url: String, val timeOrigin: String)
+
+/** A same-URL reload has a new timeOrigin; a redirect also changes document identity. */
+private suspend fun WebView.currentDocumentIdentity(): BrowserDocumentIdentity? {
+    val raw = evaluateJavascriptAsync("""(function(){
+        return JSON.stringify([document.URL || '', String(
+            performance.timeOrigin || (performance.timing && performance.timing.navigationStart) || 0)]);
+    })()""", 1_500L) ?: return null
+    return runCatching {
+        val outer = Json.parseToJsonElement(raw)
+        val inner = if (outer is JsonPrimitive && outer.isString) outer.content else outer.toString()
+        val fields = Json.parseToJsonElement(inner).jsonArray
+        BrowserDocumentIdentity(fields[0].jsonPrimitive.content, fields[1].jsonPrimitive.content)
+    }.getOrNull()
 }
+
+/** The old page can still report complete immediately after loadUrl returns. */
+internal suspend fun WebView.loadUrlAndAwaitReady(url: String, timeoutMs: Long = 8_000L): Boolean =
+    withTimeoutOrNull(timeoutMs) {
+        val previousUrl = withContext(Dispatchers.Main) { this@loadUrlAndAwaitReady.url.orEmpty() }
+        val previousDocument = currentDocumentIdentity() ?: BrowserDocumentIdentity(previousUrl, "")
+        withContext(Dispatchers.Main) { loadUrl(url) }
+        awaitReadyState(timeoutMs, previousDocument, url)
+    } ?: false
+
+suspend fun WebView.awaitReadyState(timeoutMs: Long = 8_000L): Boolean =
+    awaitReadyState(timeoutMs, previousDocument = null, requestedUrl = null)
+
+internal suspend fun WebView.awaitReadyState(
+    timeoutMs: Long,
+    previousDocument: BrowserDocumentIdentity?,
+    requestedUrl: String?,
+): Boolean = withTimeoutOrNull(timeoutMs) {
+    var observedComplete = false
+    var observedLoading = false
+    var completeDocument: BrowserDocumentIdentity? = null
+    while (true) {
+        val raw = evaluateJavascriptAsync("(function(){return document.readyState;})()", 1_500L)
+        // Match exactly: e.g. "incomplete" must never pass. The outer timeout also
+        // includes an individual stalled JS callback and the delay between probes.
+        if (raw?.trim() == "\"complete\"") {
+            val current = if (previousDocument == null && requestedUrl == null) null else currentDocumentIdentity()
+            val changed = if (previousDocument == null && requestedUrl == null) true else
+                current != null && when {
+                    previousDocument == null -> true
+                    // A lost preliminary callback leaves only the native URL. Do not
+                    // accept the old page; same-URL reload needs a loading transition.
+                    previousDocument.timeOrigin.isEmpty() -> observedLoading ||
+                        (previousDocument.url.isNotEmpty() && current.url != previousDocument.url)
+                    else -> current != previousDocument
+                } && (requestedUrl == "about:blank" || current.url != "about:blank")
+            if (changed && observedComplete && current == completeDocument) return@withTimeoutOrNull true
+            observedComplete = changed
+            completeDocument = current
+        } else {
+            if (raw?.trim() == "\"loading\"" || raw?.trim() == "\"interactive\"") observedLoading = true
+            observedComplete = false
+            completeDocument = null
+        }
+        // click/submit can return before their queued navigation begins. Confirm the
+        // document on the next probe instead of accepting the old complete immediately.
+        kotlinx.coroutines.delay(200L)
+    }
+    @Suppress("UNREACHABLE_CODE")
+    false
+} ?: false

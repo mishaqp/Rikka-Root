@@ -522,7 +522,7 @@ internal fun runOnSession(
             put("exit_code", exitCode)
             put("stdout", stdout.snapshot())
             put("stderr", stderr.snapshot())
-            commandExitFailureReason(exitCode)?.let { put("message", it) }
+            commandExitFailureReason(exitCode, stderr.snapshot(), CommandEnvironment.SSH)?.let { put("message", it) }
         }
     } catch (error: CancellationException) {
         throw error

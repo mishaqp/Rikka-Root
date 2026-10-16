@@ -22,15 +22,9 @@ import java.io.InputStreamReader
  * pinned to commit `08be6b4bdb204dd333c9b7a0cfbc0e730b257252` (mozilla/readability,
  * main branch, 2025-11-15). License header is preserved at the top of the asset.
  *
- * ## Why no JVM test
- *
- * Readability runs against a real DOM. The unit-test JVM has no WebView, no
- * `document`, no Element APIs — every meaningful behaviour of the runner depends
- * on a live WebView instance which Robolectric also can't synthesise without
- * pulling in the entire system WebView. Smoke-testing happens on-device during the
- * manual walk-through; the args-validation paths that DO run on JVM are exercised
- * by the existing [BrowserToolsTest] (browser_get_text envelope, missing-arg
- * envelope shape).
+ * The bundled Readability parser still needs a real browser DOM. The bounded
+ * result/bridge path is also exercised offline in BrowserReadReliabilityTest using
+ * the real extraction payload and a small DOM fixture in QuickJS.
  *
  * ## How injection works
  *
@@ -59,7 +53,17 @@ object ReadabilityRunner {
      * pathological DOM could OOM the script engine; we bound the wait so the
      * calling tool never exceeds its own 30-s tool budget.
      */
-    suspend fun WebView.runReadability(timeoutMs: Long = 4_000L): String? {
+    suspend fun WebView.runReadability(timeoutMs: Long = 4_000L): String? =
+        runReadabilityResult(timeoutMs = timeoutMs)?.text
+
+    data class Extraction(val text: String, val totalChars: Int)
+
+    /** Clip inside JavaScript: clipping after the callback cannot protect its native bridge. */
+    suspend fun WebView.runReadabilityResult(
+        maxChars: Int = 64 * 1024,
+        timeoutMs: Long = 4_000L,
+    ): Extraction? {
+        val limit = maxChars.coerceIn(100, 64 * 1024)
         val context = this.context.applicationContext ?: return null
         val library = loadLibrary(context) ?: return null
         return withTimeoutOrNull(timeoutMs) {
@@ -73,17 +77,19 @@ object ReadabilityRunner {
                     var doc = document.cloneNode(true);
                     var article = new Readability(doc).parse();
                     if (!article) return JSON.stringify(null);
+                    var text = (article.textContent || '').replace(/\s+/g,' ').trim();
                     return JSON.stringify({
-                        textContent: (article.textContent || '').replace(/\s+/g,' ').trim(),
-                        title: article.title || '',
-                        byline: article.byline || '',
-                        siteName: article.siteName || '',
+                        textContent: text.substring(0, $limit),
+                        total_chars: text.length,
+                        title: String(article.title || '').substring(0, 1024),
+                        byline: String(article.byline || '').substring(0, 1024),
+                        siteName: String(article.siteName || '').substring(0, 1024),
                         length: (article.textContent || '').length
                     });
                 } catch(e) { return JSON.stringify({error: String(e)}); }
             })()"""
-            val raw = this@runReadability.evaluateJavascriptAsync(payload, timeoutMs)
-            parseTextContent(raw)
+            val raw = this@runReadabilityResult.evaluateJavascriptAsync(payload, timeoutMs)
+            parseExtraction(raw)
         }
     }
 
@@ -117,7 +123,7 @@ object ReadabilityRunner {
      * `textContent` field. Returns null on `JSON.stringify(null)` (Readability
      * couldn't parse the page) and on any decode error.
      */
-    private fun parseTextContent(raw: String?): String? {
+    private fun parseExtraction(raw: String?): Extraction? {
         if (raw == null || raw == "null" || raw == "\"null\"") return null
         return runCatching {
             val outer = Json.parseToJsonElement(raw)
@@ -131,7 +137,11 @@ object ReadabilityRunner {
             // fall back to selector-based extraction. Logging the detail would be
             // noisy on every non-article page; skip.
             if (obj.containsKey("error")) return@runCatching null
-            obj["textContent"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotEmpty() }
+            val text = obj["textContent"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotEmpty() }
+                ?: return@runCatching null
+            val total = obj["total_chars"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                ?.coerceAtLeast(text.length) ?: text.length
+            Extraction(text, total)
         }.getOrNull()
     }
 }
