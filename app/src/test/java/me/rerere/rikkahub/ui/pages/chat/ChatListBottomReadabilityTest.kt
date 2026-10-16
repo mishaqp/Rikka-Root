@@ -49,6 +49,7 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.datastore.MessageNavButtonsMode
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalSharedTransitionScope
@@ -109,6 +110,7 @@ class ChatListBottomReadabilityTest internal constructor(
         val settings = ScreenshotFixtures.settings.copy(displaySetting = ScreenshotFixtures.settings.displaySetting.copy(
             enableAssistantMarkdown = false, showModelName = false, showModelIcon = false,
             showTokenUsage = false, showUserMessageActions = false, hapticsEnabled = false,
+            messageNavButtonsMode = MessageNavButtonsMode.ALWAYS,
         ))
         val tts = mockk<CustomTtsState>(relaxed = true)
         every { tts.isAvailable } returns MutableStateFlow(false)
@@ -169,14 +171,16 @@ class ChatListBottomReadabilityTest internal constructor(
             val root = compose.onNodeWithTag("readability_root").fetchSemanticsNode().boundsInRoot
             val overlay = compose.onNodeWithTag("readability_composer_overlay").fetchSemanticsNode().boundsInRoot
             val timeline = compose.onNodeWithTag("chat_list_timeline").fetchSemanticsNode().boundsInRoot
-            val navigation = compose.onNodeWithTag("chat_navigation_dock").fetchSemanticsNode().boundsInRoot
+            val navigation = compose.onNodeWithTag("chat_scroll_navigation").fetchSemanticsNode().boundsInRoot
             val textBounds = text.fetchSemanticsNode().boundsInRoot
             val actionBounds = actions.fetchSemanticsNode().boundsInRoot
             assertTrue("Last text stays above the $composer+$ime dp overlay", textBounds.bottom <= overlay.top)
             assertTrue("Last actions stay above the measured overlay", actionBounds.bottom <= overlay.top)
-            assertEquals("The 48dp navigation dock starts exactly where the message viewport ends", navigation.top, timeline.bottom, .5f)
-            assertEquals("The dock ends at the measured composer/IME boundary", overlay.top, navigation.bottom, .5f)
-            assertTrue("Readability must not require an extra 180dp spacer", timeline.bottom - actionBounds.bottom in 0f..80f)
+            assertEquals("The viewport reaches the composer without a separate navigation strip", overlay.top, timeline.bottom, .5f)
+            assertEquals("Floating navigation ends at the measured composer/IME boundary", overlay.top, navigation.bottom, .5f)
+            assertTrue("Navigation occupies only the corner", navigation.width < timeline.width / 2f)
+            assertTrue("Final actions scroll entirely above the fading region and navigation", actionBounds.bottom <= navigation.top)
+            assertTrue("Readability needs only the fade and ordinary message spacing", timeline.bottom - actionBounds.bottom in 48f..128f)
             val layouts = mutableListOf<TextLayoutResult>()
             text.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
             val layout = layouts.single()

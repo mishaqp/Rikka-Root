@@ -49,29 +49,45 @@ class ChatListEdgeFadeTest {
         }
         assertEquals("The middle keeps the original list colour", 1f, color(180).red, .02f)
         assertEquals(0f, color(180).blue, .02f)
-        assertEquals("The last visible content keeps its full contrast above the composer", 1f, color(490).red, .02f)
-        val soft = color(560)
-        assertTrue("The bottom fade mixes content and wallpaper underneath the composer", soft.red in .4f.. .6f && soft.blue in .4f.. .6f)
-        assertEquals("The bottom of the composer exposes the same wallpaper", 1f, color(599).blue, .02f)
+        assertEquals("Content keeps full contrast before the bottom fade", 1f, color(470).red, .02f)
+        val soft = color(496)
+        assertTrue("Text fades into the original wallpaper before the composer", soft.red in .4f.. .6f && soft.blue in .4f.. .6f)
+        (472..520).zipWithNext().forEach { (previous, next) ->
+            val delta = color(previous).red - color(next).red
+            assertTrue("The composer edge fades continuously at y=$next", delta in 0f.. .04f)
+        }
+        (520..599).forEach { y ->
+            assertEquals("List content never shows behind the composer at y=$y", 1f, color(y).blue, .02f)
+        }
         assertEquals("Offscreen compositing must not mask sibling controls", Color.Green, pixels[80, 20])
     }
 
     @Test fun fadeGeometryTracksHeaderAndImeComposerInsets() {
-        val regular = chatListEdgeFadeGeometry(800f, 102f, 120f, 24f, 180f)
+        val regular = chatListEdgeFadeGeometry(800f, 102f, 120f, 24f, 48f)
         assertEquals(0f, regular.alphaAt(102f), .001f)
         assertEquals(.5f, regular.alphaAt(114f), .001f)
         assertEquals(1f, regular.alphaAt(300f), .001f)
-        assertEquals(1f, regular.alphaAt(648f), .001f) // last actions, 32dp above input
-        assertEquals(1f, regular.alphaAt(680f), .001f) // input top
-        assertEquals(.5f, regular.alphaAt(740f), .001f)
+        assertEquals(1f, regular.alphaAt(632f), .001f)
+        assertEquals(.5f, regular.alphaAt(656f), .001f)
+        assertEquals(0f, regular.alphaAt(680f), .001f) // input top
+        assertEquals(0f, regular.alphaAt(740f), .001f)
         assertEquals(0f, regular.alphaAt(800f), .001f)
-        val expanded = chatListEdgeFadeGeometry(800f, 102f, 240f, 24f, 180f)
-        assertEquals(1f, expanded.alphaAt(528f), .001f)
-        val ime = chatListEdgeFadeGeometry(800f, 102f, 400f, 24f, 180f)
-        assertEquals(1f, ime.alphaAt(368f), .001f)
-        assertEquals(1f, ime.alphaAt(400f), .001f)
-        assertEquals(.5f, ime.alphaAt(710f), .001f)
+        val expanded = chatListEdgeFadeGeometry(800f, 102f, 240f, 24f, 48f)
+        assertEquals(1f, expanded.alphaAt(512f), .001f)
+        assertEquals(.5f, expanded.alphaAt(536f), .001f)
+        assertEquals(0f, expanded.alphaAt(560f), .001f)
+        val ime = chatListEdgeFadeGeometry(800f, 102f, 400f, 24f, 48f)
+        assertEquals(1f, ime.alphaAt(352f), .001f)
+        assertEquals(.5f, ime.alphaAt(376f), .001f)
+        assertEquals(0f, ime.alphaAt(400f), .001f)
         assertEquals(0f, ime.alphaAt(800f), .001f)
+    }
+
+    @Test fun viewportEndingAtComposerStillHasASmoothBottomFade() {
+        val mask = chatListEdgeFadeGeometry(600f, 78f, 0f, 24f, 48f)
+        assertEquals(1f, mask.alphaAt(552f), .001f)
+        assertEquals(.5f, mask.alphaAt(576f), .001f)
+        assertEquals(0f, mask.alphaAt(600f), .001f)
     }
 
     @Test fun shortViewportAndInvalidInsetsKeepMaskFiniteAndBounded() {

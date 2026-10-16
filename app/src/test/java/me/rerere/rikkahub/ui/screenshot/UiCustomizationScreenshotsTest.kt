@@ -50,6 +50,7 @@ import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.browser.BrowserActivity
 import me.rerere.rikkahub.data.datastore.ChatMessageBackgroundStyle
 import me.rerere.rikkahub.data.datastore.ChatFontFamily
+import me.rerere.rikkahub.data.datastore.MessageNavButtonsMode
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
@@ -406,9 +407,11 @@ class UiCustomizationScreenshotsTest internal constructor(
 
     private fun captureWallpaperChat() {
         val fixture = ChatBeforeFixture(boundaries.wallpaper).also { chat = it; it.install() }
+        val floatingNavigation = scene.name == "chat_wallpaper_navigation_scrolled"
         val settings = ScreenshotFixtures.settings.copy(displaySetting = ScreenshotFixtures.settings.displaySetting.copy(
             chatBackgroundEnabled = scene.name != "chat_header_scrolled", chatBackgroundImagePath = boundaries.wallpaper.toURI().toString(),
-            chatBackgroundMaskStrength = 1f, showMessageJumper = false,
+            chatBackgroundMaskStrength = 1f, showMessageJumper = floatingNavigation,
+            messageNavButtonsMode = MessageNavButtonsMode.ALWAYS,
         ))
         every { fixture.vm.settings } returns MutableStateFlow(settings)
         val template = fixture.conversation.messageNodes.first()
@@ -443,9 +446,14 @@ class UiCustomizationScreenshotsTest internal constructor(
         assertEquals("Conversation/model identity stays immediately below switcher", bar.bottom, identity.top, .5f)
         assertEquals("Identity keeps the compact separate 22dp row", 22f, identity.height, .5f)
         assertEquals("Messages scroll beneath header from viewport top", 0f, timeline.top, .5f)
-        // This scene disables navigation. The measured input panel, including its
-        // outer padding, is the exact lower edge of the scrollable message viewport.
-        compose.onNodeWithTag("chat_navigation_dock").assertDoesNotExist()
+        // Navigation floats over the fading edge; it never reserves a separate strip.
+        if (floatingNavigation) {
+            val navigation = compose.onNodeWithTag("chat_scroll_navigation").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            assertTrue("Floating arrows occupy only the right corner", navigation.left > root.center.x)
+            assertEquals("Floating arrows end at the composer edge", composerPanel.top, navigation.bottom, .5f)
+            compose.onNodeWithContentDescription("К началу чата").assertIsDisplayed()
+            compose.onNodeWithContentDescription("Прокрутить вниз").assertIsDisplayed()
+        } else compose.onNodeWithTag("chat_scroll_navigation").assertDoesNotExist()
         assertEquals("Messages stop exactly above the measured composer panel", composerPanel.top, timeline.bottom, .5f)
         assertEquals("The composer panel covers the full viewport width", root.left, composerPanel.left, .5f)
         assertEquals("The composer panel covers the full viewport width", root.right, composerPanel.right, .5f)
@@ -522,7 +530,9 @@ class UiCustomizationScreenshotsTest internal constructor(
             } + bottomPages.map { page ->
                 UiCustomizationScreenshotScene("${pageName(page)}_bottom", page = page, bottom = true)
             } + listOf(UiCustomizationScreenshotScene("chat_wallpaper_header_scrolled"),
-                UiCustomizationScreenshotScene("chat_header_scrolled"), UiCustomizationScreenshotScene("settings_search"))
+                UiCustomizationScreenshotScene("chat_header_scrolled"),
+                UiCustomizationScreenshotScene("chat_wallpaper_navigation_scrolled"),
+                UiCustomizationScreenshotScene("settings_search"))
             return scenes.flatMap { scene -> ScreenshotThemeMode.entries.flatMap { theme ->
                 listOf(1f, 1.3f).flatMap { fontScale ->
                     listOf(411, 320).map { width -> arrayOf(scene, theme, fontScale, width) }

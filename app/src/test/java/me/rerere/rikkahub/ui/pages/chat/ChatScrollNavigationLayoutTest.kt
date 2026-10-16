@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.pages.chat
 
 import android.app.Application
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -11,9 +12,13 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -37,14 +42,16 @@ class ChatScrollNavigationLayoutTest(private val width: Int, private val fontSca
     @get:Rule val compose = createComposeRule()
 
     @Test
-    fun `navigation stays in its bottom dock and never covers message text`() {
+    fun `navigation floats in a transparent corner above the composer`() {
         val enabled = mutableStateOf(true)
         compose.setContent {
             ScreenshotTheme(fontScale = fontScale) {
                 val state = rememberLazyListState()
                 val scope = rememberCoroutineScope()
-                Box(Modifier.requiredSize(width.dp, 240.dp)) {
-                    Box(Modifier.fillMaxSize().padding(bottom = 48.dp).padding(16.dp)) {
+                Box(Modifier.requiredSize(width.dp, 240.dp)
+                    .background(Brush.verticalGradient(listOf(Color.Red, Color.Blue)))
+                    .testTag("navigation_wallpaper")) {
+                    Box(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
                         LazyColumn(state = state, modifier = Modifier.fillMaxSize().testTag("scroll_message_content")) {
                             items(8) { Box(Modifier.height(80.dp)) }
                         }
@@ -62,13 +69,18 @@ class ChatScrollNavigationLayoutTest(private val width: Int, private val fontSca
             assertEquals("$label has a 32dp circle", 32f, node.boundsInRoot.width, .5f)
             assertEquals("$label has a 32dp circle", 32f, node.boundsInRoot.height, .5f)
             assertTrue("$label retains a minimum touch target", node.touchBoundsInRoot.width >= 48f)
-            assertTrue("$label must stay below the message viewport even on a narrow phone",
-                node.touchBoundsInRoot.top >= content.bottom)
+            assertTrue("$label floats over the bottom fade instead of reducing the message viewport",
+                node.touchBoundsInRoot.top >= content.bottom - 48f && node.touchBoundsInRoot.bottom <= content.bottom)
             assertTrue("$label must stay inside the screen", node.touchBoundsInRoot.left >= 0f && node.touchBoundsInRoot.right <= width)
         }
         val top = compose.onNodeWithContentDescription("К началу чата").fetchSemanticsNode().boundsInRoot
         val bottom = compose.onNodeWithContentDescription("Прокрутить вниз").fetchSemanticsNode().boundsInRoot
-        assertEquals("The two controls share a horizontal dock", top.top, bottom.top, .5f)
+        assertEquals("The two controls share a horizontal row", top.top, bottom.top, .5f)
+        val navigation = compose.onNodeWithTag("chat_scroll_navigation").fetchSemanticsNode().boundsInRoot
+        assertTrue("Navigation never creates a full-width strip", navigation.width < width / 2f)
+        val wallpaper = compose.onNodeWithTag("navigation_wallpaper").captureToImage().toPixelMap()
+        val clearX = if (onLeft) width - 8 else 8
+        assertTrue("The gradient stays visible beside the floating arrows", wallpaper[clearX, 216].blue > .85f)
 
         compose.runOnIdle { enabled.value = false }
         compose.onNodeWithContentDescription("К началу чата").assertDoesNotExist()

@@ -17,7 +17,6 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -230,8 +229,6 @@ private fun ChatListNormal(
     val captureProgress = LocalScrollCaptureInProgress.current
     val navigationEnabled = settings.displaySetting.showMessageJumper &&
         settings.displaySetting.messageNavButtonsMode != MessageNavButtonsMode.NEVER && !captureProgress
-    // Reserve the same dock while its controls auto-hide, so the timeline never jumps or sits underneath them.
-    val navigationHeight = if (navigationEnabled) 48.dp else 0.dp
 
     DisposableEffect(activity, state, density) {
         val listener: (Boolean) -> Boolean = { isVolumeUp ->
@@ -333,14 +330,15 @@ private fun ChatListNormal(
                 contentPadding = PaddingValues(
                     start = 16.dp, end = 16.dp,
                     top = 16.dp + innerPadding.calculateTopPadding(),
-                    bottom = 32.dp,
+                    // The final reply and its actions can scroll fully above the fade and floating arrows.
+                    bottom = 32.dp + ChatListBottomFadeHeight,
                 ),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier
                     .fillMaxSize()
                     // Scaffold measures queue, multi-line input and IME together. Clip at that exact edge.
-                    .padding(bottom = innerPadding.calculateBottomPadding() + navigationHeight)
+                    .padding(bottom = innerPadding.calculateBottomPadding())
                     .clipToBounds()
                     .testTag("chat_list_timeline")
                     .chatListEdgeFade(innerPadding.calculateTopPadding(), 0.dp)
@@ -475,7 +473,7 @@ private fun ChatListNormal(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(bottom = navigationHeight),
+                .padding(bottom = ChatListBottomFadeHeight),
         ) {
             // 错误消息卡片
             ErrorCardsDisplay(
@@ -784,42 +782,37 @@ internal fun BoxScope.MessageJumper(
     state: LazyListState,
     onInteraction: () -> Unit = {},
 ) {
-    Box(
-        modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(48.dp)
-            .background(MaterialTheme.colorScheme.background)
-            .testTag("chat_navigation_dock"),
-        contentAlignment = if (onLeft) Alignment.CenterStart else Alignment.CenterEnd,
+    AnimatedVisibility(
+        visible = show,
+        modifier = Modifier.align(if (onLeft) Alignment.BottomStart else Alignment.BottomEnd),
+        enter = fadeIn(),
+        exit = fadeOut(),
     ) {
-        AnimatedVisibility(
-            visible = show,
-            enter = fadeIn(),
-            exit = fadeOut(),
+        Row(
+            modifier = Modifier.testTag("chat_scroll_navigation")
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                MessageJumperButton(
-                    icon = HugeIcons.ArrowUp01,
-                    contentDescription = stringResource(R.string.chat_moru_scroll_to_top),
-                    onClick = {
-                        onInteraction()
-                        scope.launch {
-                            state.scrollToItem(0)
-                        }
-                    },
-                )
-                MessageJumperButton(
-                    icon = HugeIcons.ArrowDown01,
-                    contentDescription = stringResource(R.string.chat_page_scroll_to_bottom),
-                    onClick = {
-                        onInteraction()
-                        scope.launch {
-                            state.scrollToItem(state.layoutInfo.totalItemsCount - 1)
-                        }
-                    },
-                )
-            }
+            MessageJumperButton(
+                icon = HugeIcons.ArrowUp01,
+                contentDescription = stringResource(R.string.chat_moru_scroll_to_top),
+                onClick = {
+                    onInteraction()
+                    scope.launch {
+                        state.scrollToItem(0)
+                    }
+                },
+            )
+            MessageJumperButton(
+                icon = HugeIcons.ArrowDown01,
+                contentDescription = stringResource(R.string.chat_page_scroll_to_bottom),
+                onClick = {
+                    onInteraction()
+                    scope.launch {
+                        state.scrollToItem(state.layoutInfo.totalItemsCount - 1)
+                    }
+                },
+            )
         }
     }
 }
@@ -828,7 +821,7 @@ internal fun BoxScope.MessageJumper(
 private fun MessageJumperButton(icon: ImageVector, contentDescription: String, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val dark = LocalDarkMode.current
-    // Keep the Moru-sized circles and full touch targets inside their own dock.
+    // Keep Moru-sized circles and full touch targets over the fading edge.
     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
         Surface(
             onClick = onClick,

@@ -8,6 +8,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+
+internal val ChatListBottomFadeHeight = 48.dp
 
 internal data class ChatListEdgeFadeGeometry(
     val topStart: Float,
@@ -20,7 +23,7 @@ internal data class ChatListEdgeFadeGeometry(
             ((bottomEnd - y) / (bottomEnd - bottomStart)).coerceIn(0f, 1f)
 }
 
-/** Insets reserve content space, while the viewport itself continues behind both overlays. */
+/** The bottom fade finishes at the input edge, leaving no list pixels beneath the input. */
 internal fun chatListEdgeFadeGeometry(
     height: Float,
     topInset: Float,
@@ -28,16 +31,12 @@ internal fun chatListEdgeFadeGeometry(
     topTail: Float,
     bottomTail: Float,
 ): ChatListEdgeFadeGeometry {
-    // Moru's bottom overlay ends at the viewport bottom, including the composer.
-    // Keep its fade inside the measured overlay so the last visible reply/actions
-    // retain full contrast, even when the compact composer is shorter than 180dp.
-    val overlayHeight = bottomInset.coerceIn(0f, height.coerceAtLeast(0f))
-    val bottomFadeHeight = minOf(bottomTail.coerceAtLeast(1f), overlayHeight.coerceAtLeast(1f))
+    val bottomEdge = height.coerceAtLeast(0f) - bottomInset.coerceIn(0f, height.coerceAtLeast(0f))
     return ChatListEdgeFadeGeometry(
         topStart = topInset.coerceIn(0f, height.coerceAtLeast(0f)),
         topEnd = topInset.coerceIn(0f, height.coerceAtLeast(0f)) + topTail.coerceAtLeast(1f),
-        bottomStart = height - bottomFadeHeight,
-        bottomEnd = height,
+        bottomStart = bottomEdge - bottomTail.coerceAtLeast(1f),
+        bottomEnd = bottomEdge,
     )
 }
 
@@ -45,7 +44,9 @@ internal fun chatListEdgeFadeGeometry(
 internal fun Modifier.chatListEdgeFade(topInset: Dp, bottomInset: Dp): Modifier =
     graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
         .drawWithCache {
-            val geometry = chatListEdgeFadeGeometry(size.height, topInset.toPx(), bottomInset.toPx(), 24 * density, 180 * density)
+            val geometry = chatListEdgeFadeGeometry(
+                size.height, topInset.toPx(), bottomInset.toPx(), 24 * density, ChatListBottomFadeHeight.toPx(),
+            )
             val top = Brush.verticalGradient(
                 colors = listOf(Color.Transparent, Color.White),
                 startY = geometry.topStart, endY = geometry.topEnd,
