@@ -149,12 +149,33 @@ class BugReportBuilderTest {
             fileJsonTool("copy_file", "test", fileSchema()) { throw IOException("private original") }
                 .execute(buildJsonObject {})
             val cancelled = CancellationException("private cancellation")
-            try {
-                fileJsonTool("move_file", "test", fileSchema()) { throw cancelled }.execute(buildJsonObject {})
-                fail("Cancellation must propagate")
-            } catch (actual: CancellationException) {
-                assertTrue(actual === cancelled || actual.cause === cancelled)
+            val started = CompletableDeferred<Unit>()
+            var cleaned = false
+            var resultReturned = false
+            var observedCancellation: CancellationException? = null
+            val operation = launch {
+                try {
+                    fileJsonTool("move_file", "test", fileSchema()) {
+                        try {
+                            started.complete(Unit)
+                            awaitCancellation()
+                        } finally { cleaned = true }
+                    }.execute(buildJsonObject {})
+                    resultReturned = true
+                } catch (actual: CancellationException) {
+                    observedCancellation = actual
+                    throw actual
+                }
             }
+            withTimeout(1_000) { started.await() }
+            operation.cancel(cancelled)
+            withTimeout(1_000) { operation.join() }
+            assertTrue(operation.isCancelled)
+            assertTrue("Cancelled file operation must finish its cleanup", cleaned)
+            assertFalse("Cancellation must propagate without a tool result", resultReturned)
+            val actual = requireNotNull(observedCancellation)
+            assertTrue(actual === cancelled || actual.cause === cancelled)
+            assertTrue(currentCoroutineContext().isActive)
             val diagnostics = fileDiagnostics(entries(builder(ReportContext(root)).build()))
             assertTrue(diagnostics.contains("COPY"))
             assertTrue(diagnostics.contains("java.io.IOException"))

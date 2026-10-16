@@ -3,7 +3,13 @@ package me.rerere.rikkahub.data.ai.tools
 import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -43,12 +49,51 @@ class WorkspaceToolErrorsTest {
 
     @Test fun cancellationStillPropagatesInsteadOfReturningFailure() = runBlocking {
         val cancelled = CancellationException("stop")
-        coEvery { repository.executeCommand(any(), any(), any(), any(), any()) } throws cancelled
+        val started = CompletableDeferred<Unit>()
+        var cleaned = false
+        var returned = false
+        var propagated: CancellationException? = null
+        coEvery { repository.executeCommand(any(), any(), any(), any(), any()) } coAnswers {
+            try { started.complete(Unit); awaitCancellation() }
+            finally { cleaned = true }
+        }
         val tool = createWorkspaceTools("w", repository).first { it.name == "workspace_shell" }
-        try {
-            tool.execute(Json.parseToJsonElement("""{"command":"pwd"}"""))
-            fail("Cancellation must propagate")
-        } catch (actual: CancellationException) { assertSame(cancelled, actual) }
+        val job = launch {
+            try {
+                tool.execute(Json.parseToJsonElement("""{"command":"pwd"}"""))
+                returned = true
+            } catch (actual: CancellationException) {
+                propagated = actual
+                throw actual
+            }
+        }
+        withTimeout(5_000) { started.await() }
+        job.cancel(cancelled)
+        job.join()
+        assertTrue(job.isCancelled)
+        assertTrue(cleaned)
+        assertFalse(returned)
+        assertSame(cancelled, propagated)
+        assertTrue(currentCoroutineContext().isActive)
+    }
+
+    @Test fun cancelledCommandChildReturnsAnActionableErrorWithoutCancellingCaller() = runBlocking {
+        var executions = 0
+        coEvery { repository.executeCommand(any(), any(), any(), any(), any()) } coAnswers {
+            executions++
+            CompletableDeferred<WorkspaceCommandResult>().apply {
+                cancel(CancellationException("private command cancellation"))
+            }.await()
+        }
+        val tool = createWorkspaceTools("w", repository).first { it.name == "workspace_shell" }
+        val outcome = runCatching { tool.execute(Json.parseToJsonElement("""{"command":"pwd"}""")) }
+        assertNull("A cancelled child command must not cancel an active tool caller", outcome.exceptionOrNull())
+        val text = (outcome.getOrThrow().single() as UIMessagePart.Text).text
+        val error = Json.parseToJsonElement(text).jsonObject.getValue("error").jsonPrimitive.content
+        assertEquals("Выполнение инструмента отменено. Проверьте результат перед повторным вызовом.", error)
+        assertFalse(text, text.contains("private command cancellation"))
+        assertEquals(1, executions)
+        assertTrue(currentCoroutineContext().isActive)
     }
 
     @Test fun writeFailureKeepsSpecificAuthoredRecoveryInsteadOfGenericDiskError() = runBlocking {
