@@ -19,7 +19,7 @@ class HardlineCommandGuardShellTest {
     }
 
     @Test fun `shared command position retains ordinary diagnostic arguments`() {
-        listOf("echo reboot", "printf '%s' reboot", "echo '(reboot)'", "busybox echo reboot", "env PATH=/system/bin echo reboot").forEach {
+        listOf("rm -rf /etc-backup; true", "rm -rf /tmp/root-test; true", "echo reboot", "printf '%s' reboot", "echo '(reboot)'", "busybox echo reboot", "env PATH=/system/bin echo reboot").forEach {
             assertNull("must allow: $it", HardlineCommandGuard.checkCommand(it))
         }
     }

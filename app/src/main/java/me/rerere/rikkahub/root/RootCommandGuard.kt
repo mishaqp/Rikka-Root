@@ -5,7 +5,7 @@ import me.rerere.rikkahub.data.ai.tools.HardlineCommandGuard.CMD_POS
 /** Accidental-destruction floor, not a sandbox or an adversarial shell parser. Approval remains mandatory. */
 internal object RootCommandGuard {
     private val rules = listOf(
-        Regex("\\brm\\s+(?:-[^\\s]+\\s+)*(?:/|/\\*|/system(?:/\\S*)?|/vendor(?:/\\S*)?|/product(?:/\\S*)?|/boot(?:/\\S*)?|/etc(?:/\\S*)?|/usr(?:/\\S*)?|/bin(?:/\\S*)?|/sbin(?:/\\S*)?|/lib(?:/\\S*)?|/data(?:/system(?:/\\S*)?|/\\*?)?)(?=\\s|[\"']|$)", RegexOption.IGNORE_CASE) to "Удаление защищённых системных файлов запрещено. Выберите конкретные пользовательские файлы.",
+        Regex("\\brm\\s+(?:-[^\\s]+\\s+)*(?:/|/\\*|/system(?:/\\S*)?|/vendor(?:/\\S*)?|/product(?:/\\S*)?|/boot(?:/\\S*)?|/etc(?:/\\S*)?|/usr(?:/\\S*)?|/bin(?:/\\S*)?|/sbin(?:/\\S*)?|/lib(?:/\\S*)?|/data(?:/system(?:/\\S*)?|/\\*?)?)(?=\\s|[\"';&|)}]|$)", RegexOption.IGNORE_CASE) to "Удаление защищённых системных файлов запрещено. Выберите конкретные пользовательские файлы.",
         Regex("\\bdd\\b[^\\n]*\\bof=/dev/(?:block/\\S*|(?:sd|nvme|mmcblk|vd|hd)\\S*)", RegexOption.IGNORE_CASE) to "Запись напрямую в раздел устройства запрещена. Используйте обычный файл.",
         Regex(">\\s*/dev/(?:block/\\S*|(?:sd|nvme|mmcblk|vd|hd)\\S*)", RegexOption.IGNORE_CASE) to "Запись напрямую в раздел устройства запрещена. Используйте обычный файл.",
         Regex(CMD_POS + "(?:mkfs(?:\\.[\\w]+)?|reboot|shutdown|halt|poweroff)\\b", RegexOption.IGNORE_CASE) to "Форматирование или остановка устройства запрещены. Выполните это вручную, если необходимо.",

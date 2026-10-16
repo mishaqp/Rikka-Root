@@ -65,8 +65,8 @@ object HardlineCommandGuard {
         "))*" +
         "(?:[\\w./_-]*/)?"
 
-    /** End-of-path anchor — whitespace, end-of-string, or shell-eval closing quote. */
-    private const val PATH_END = "(?:\\s|[\"']|\$)"
+    /** End-of-path anchor — whitespace, shell delimiters, a closing quote, or end-of-string. */
+    private const val PATH_END = "(?:\\s|[\"';&|)}]|\$)"
 
     private val IGNORE_CASE = setOf(RegexOption.IGNORE_CASE)
 

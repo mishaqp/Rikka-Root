@@ -49,7 +49,7 @@ class RootCommandGuardTest {
     }
 
     @Test fun `allows ordinary diagnostics and targeted work`() {
-        listOf("id -u", "getprop ro.build.version.release", "pm list packages", "dumpsys battery", "echo reboot", "rm -f /data/local/tmp/root-test.txt").forEach {
+        listOf("id -u", "getprop ro.build.version.release", "pm list packages", "dumpsys battery", "echo reboot", "rm -f /data/local/tmp/root-test.txt", "rm -rf /system-backup; true", "rm -rf /data/local/tmp/root-test; true").forEach {
             assertNull("must allow: $it", RootCommandGuard.check(it))
         }
     }
