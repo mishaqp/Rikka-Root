@@ -124,8 +124,8 @@ class GenerationLoop(
         tokenBudget: TokenBudgetLedger? = null,
         prepareToolApproval: (String, JsonElement) -> JsonElement = { _, input -> input },
         beforeModelRequest: suspend () -> Unit = {},
-        onStepStarted: suspend () -> Unit = {},
-        onLimitReached: suspend (String) -> Unit = {},
+        onStepStarted: (suspend () -> Unit)? = null,
+        onLimitReached: (suspend (String) -> Unit)? = null,
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
@@ -192,7 +192,7 @@ class GenerationLoop(
                 waitingForApproval = true
                 break
             }
-            onStepStarted()
+            onStepStarted?.invoke()
 
             // Skip generation if we have approved/denied tool calls to handle
             if (pendingTools.isEmpty()) {
@@ -546,7 +546,7 @@ class GenerationLoop(
         if (!responseFinished && !waitingForApproval) {
             val reason = limitReason ?: if (SystemClock.elapsedRealtime() - turnStartMs >= turnBudgetMs)
                 "time_limit" else "step_limit"
-            onLimitReached(reason)
+            onLimitReached?.invoke(reason)
             val notice = UIMessagePart.Text(if (reason == "time_limit")
                 "Достигнут лимит времени ответа. Выполнение остановлено. Проверьте результаты инструментов перед продолжением."
             else "Достигнут лимит шагов ответа. Выполнение остановлено. Проверьте результаты инструментов перед продолжением.")
