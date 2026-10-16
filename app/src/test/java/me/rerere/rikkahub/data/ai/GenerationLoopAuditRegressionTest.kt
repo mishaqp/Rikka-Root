@@ -5,6 +5,8 @@ import java.io.Closeable
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
@@ -107,6 +109,71 @@ class GenerationLoopAuditRegressionTest {
                 assertEquals(name, 0, effects)
                 assertTrue(fixture.latest.last().getTools().single().output.toString().contains("hardline"))
             }
+        }
+    }
+
+    @Test fun `16 cancelled child deferred returns a tool error and generation continues`() = runBlocking {
+        Fixture(folder.newFolder(), call("cancelled_tool")).use { fixture ->
+            var effects = 0
+            val failure = runCatching { fixture.collect(listOf(Tool("cancelled_tool", "test", execute = {
+                effects++
+                CompletableDeferred<List<UIMessagePart>>().apply {
+                    cancel(CancellationException("private child cancellation"))
+                }.await()
+            }))) }.exceptionOrNull()
+            assertNull("An active caller must receive a tool error instead of cancellation", failure)
+            val output = fixture.latest.last().getTools().single().output
+                .filterIsInstance<UIMessagePart.Text>().single().text
+            assertTrue(output, output.contains("tool_cancelled"))
+            assertTrue(output, output.contains("Проверьте результат"))
+            assertFalse(output, output.contains("private child cancellation"))
+            assertEquals(1, effects)
+            assertEquals(2, fixture.requests.get())
+            assertTrue(currentCoroutineContext().isActive)
+            assertTrue(fixture.latest.last().toText().contains("Готово"))
+        }
+    }
+
+    @Test fun `16 cancelled child deferred in headless prompt produces final model text`() = runBlocking {
+        Fixture(folder.newFolder(), call("cancelled_tool")).use { fixture ->
+            val result = runCatching { fixture.headless(listOf(Tool("cancelled_tool", "test", execute = {
+                CompletableDeferred<List<UIMessagePart>>().apply { cancel() }.await()
+            }))) }
+            assertNull("A cancelled child must not cancel the headless caller", result.exceptionOrNull())
+            val outcome = result.getOrThrow()
+            assertEquals(HeadlessTaskStatus.SUCCEEDED, outcome.status)
+            assertTrue(outcome.output.orEmpty().contains("Готово"))
+            assertEquals(2, fixture.requests.get())
+            assertTrue(currentCoroutineContext().isActive)
+        }
+    }
+
+    @Test fun `16 cancelled child deferred in direct actions returns indeterminate`() = runBlocking {
+        Fixture(folder.newFolder()).use { fixture ->
+            val result = runCatching { fixture.direct(Tool("cancelled_tool", "test", execute = {
+                CompletableDeferred<List<UIMessagePart>>().apply { cancel() }.await()
+            })) }
+            assertNull("A cancelled child must become an indeterminate direct result", result.exceptionOrNull())
+            val outcome = result.getOrThrow()
+            assertEquals(HeadlessTaskStatus.INDETERMINATE, outcome.status)
+            assertEquals("tool_cancelled", outcome.errorCode)
+            assertTrue(outcome.output.orEmpty().contains("Проверьте результат"))
+            assertEquals(0, fixture.requests.get())
+            assertTrue(currentCoroutineContext().isActive)
+        }
+    }
+
+    @Test fun `16 headless policy abort stays blocked without another model request`() = runBlocking {
+        Fixture(folder.newFolder(), call("policy_tool")).use { fixture ->
+            var effects = 0
+            val outcome = fixture.headless(listOf(Tool("policy_tool", "test", execute = {
+                effects++; listOf(UIMessagePart.Text("must not execute"))
+            })), preflight = { _, _ -> "root_command_blocked" })
+            assertEquals(HeadlessTaskStatus.BLOCKED, outcome.status)
+            assertEquals("root_command_blocked", outcome.errorCode)
+            assertEquals(0, effects)
+            assertEquals(1, fixture.requests.get())
+            assertTrue(currentCoroutineContext().isActive)
         }
     }
 
@@ -288,17 +355,19 @@ class GenerationLoopAuditRegressionTest {
                 is GenerationChunk.RootExecutionCheckpoint -> { latest = chunk.messages; chunk.ack.complete(Unit) }
             } }
         }
-        private fun runner(tools: List<Tool>) =
+        private fun runner(tools: List<Tool>,
+            preflight: suspend (RunExecutionContext, String) -> String? = { _, _ -> null }) =
             HeadlessTaskRunner(loop, { _, _, _, _ -> tools }, { settings }, object : HeadlessRunJournal {
                 override suspend fun claim(runId: String) = true
                 override suspend fun checkpoint(runId: String, toolCallIds: Set<String>) {}
-            }, { _, _, _ -> true }, { _, _ -> null }, { true })
+            }, { _, _, _ -> true }, preflight, { true })
         suspend fun direct(tool: Tool) = runner(listOf(tool)).run(
             HeadlessTaskRequest.DirectActions(listOf(me.rerere.rikkahub.service.HeadlessToolAction(tool.name, buildJsonObject {}))),
             RunExecutionContext(Uuid.random(), owner.id, RunOrigin.WORKFLOW, modelId = model.id.toString()),
         )
-        suspend fun headless(tools: List<Tool>, maxSteps: Int = 3, origin: RunOrigin = RunOrigin.SUB_AGENT) =
-            runner(tools).run(
+        suspend fun headless(tools: List<Tool>, maxSteps: Int = 3, origin: RunOrigin = RunOrigin.SUB_AGENT,
+            preflight: suspend (RunExecutionContext, String) -> String? = { _, _ -> null }) =
+            runner(tools, preflight).run(
                 HeadlessTaskRequest.Prompt("Вызови инструмент и ответь текстом"),
                 RunExecutionContext(Uuid.random(), owner.id, origin, modelId = model.id.toString(), maxSteps = maxSteps),
             )

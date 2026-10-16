@@ -34,6 +34,9 @@ data class RunExecutionContext(
 ) : AbstractCoroutineContextElement(Key) {
     companion object Key : CoroutineContext.Key<RunExecutionContext>
 }
+/** Intentional run-control signal, distinct from cancellation of a coroutine. */
+internal open class ToolExecutionAbortedException(message: String) : RuntimeException(message)
+
 enum class RunOrigin { SUB_AGENT, CRON, EXTERNAL_AUTOMATION, WORKFLOW, SKILL_TEST }
 class RunExecutionState {
     @Volatile var effectsInFlight: Boolean = false

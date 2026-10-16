@@ -9,6 +9,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
@@ -151,7 +153,7 @@ class GenerationLoopRootApprovalTest {
                     isToolAutoApproved = { name, _ -> resolveToolAutoApproval(approvals.preferences, id, name, webSeen) },
                 )
                 val mandatory = setOf("ask_user", "ssh_forget_host_key", "skill_install_from_url", "skill_install_from_text",
-                    "manage_assistants", "manage_app_settings")
+                    "manage_assistants", "manage_app_settings", "mcp_add", "mcp_update", "send_sms")
                 assertEquals(names - mandatory, runs)
                 assertEquals(listOf("id -u"), fixture.commands)
                 val result = fixture.latest.last().getTools()
@@ -166,6 +168,11 @@ class GenerationLoopRootApprovalTest {
                 )
                 assertEquals("Only explicit confirmation can run the protected command", listOf("id -u", "setenforce 0"), fixture.commands)
                 assertTrue(fixture.latest.last().getTools().single { it.toolName == "ask_user" }.isPending)
+                for (name in listOf("mcp_add", "mcp_update", "send_sms")) {
+                    assertTrue("$name must still require its own confirmation after a sibling is approved",
+                        fixture.latest.last().getTools().single { it.toolName == name }.isPending)
+                    assertFalse("$name must not dispatch through the resumed YOLO turn", name in runs)
+                }
             }
         }
     }
@@ -202,13 +209,17 @@ class GenerationLoopRootApprovalTest {
     }
 
     @Test(timeout = 15_000)
-    fun `model browser cookie write is denied before ordinary approval or dispatch`() = runBlocking {
+    fun `model browser cookie write returns a blocked tool error before ordinary approval or dispatch`() = runBlocking {
         val call = browserEvalCall("cookie-write", "document.cookie='x'")
         Fixture(folder.newFolder(), toolResponse(listOf(call))).use { fixture ->
             val effects = AtomicInteger()
             fixture.collect(listOf(UIMessage.user("Evaluate the page script")), extraTools = listOf(browserEvalFixture(effects)), maxSteps = 1)
             val result = fixture.latest.last().getTools().single()
-            assertTrue(result.approvalState is ToolApprovalState.Denied)
+            assertEquals(ToolApprovalState.Auto, result.approvalState)
+            val blocked = Json.parseToJsonElement(result.output.filterIsInstance<UIMessagePart.Text>().single().text).jsonObject
+            assertEquals("hardline_blocked", blocked.getValue("error").jsonPrimitive.content)
+            val message = blocked.getValue("message").jsonPrimitive.content
+            assertEquals("Команда заблокирована защитой (hardline:js_cookie_write). Выберите безопасное действие.", message)
             assertFalse(result.isPending)
             assertTrue(result.isExecuted)
             assertEquals(0, effects.get())
@@ -291,16 +302,25 @@ class GenerationLoopRootApprovalTest {
         for (state in listOf(ToolApprovalState.Auto, ToolApprovalState.Approved)) {
             Fixture(folder.newFolder()).use { fixture ->
                 val runs = AtomicInteger()
+                val started = CompletableDeferred<Unit>()
+                var cleaned = false
+                var returned = false
                 val write = Tool("workspace_write_file", "test", execute = {
                     runs.incrementAndGet()
-                    throw CancellationException("Simulated process loss after side effect")
+                    try { started.complete(Unit); awaitCancellation() }
+                    finally { cleaned = true }
                 })
-                try {
+                val job = launch {
                     fixture.collect(listOf(UIMessage.assistant("").copy(parts = listOf(
                         UIMessagePart.Tool("write", write.name, "{}", approvalState = state),
                     ))), extraTools = listOf(write))
-                    fail("Interrupted execution must propagate cancellation")
-                } catch (_: CancellationException) { }
+                    returned = true
+                }
+                withTimeout(5_000) { started.await() }
+                job.cancelAndJoin()
+                assertTrue(job.isCancelled)
+                assertTrue(cleaned)
+                assertFalse(returned)
                 assertEquals(1, runs.get())
                 assertTrue("Start marker must be durable before execute", fixture.checkpointFile.exists())
                 val saved = fixture.readCheckpoint()

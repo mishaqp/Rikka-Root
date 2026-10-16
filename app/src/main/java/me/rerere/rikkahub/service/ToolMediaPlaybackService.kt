@@ -26,6 +26,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -152,9 +153,11 @@ class ToolMediaPlaybackService : Service() {
                 val result = withTimeout(30_000) { deferred.await() }
                 delivered = true
                 return result
-            } catch (error: TimeoutCancellationException) {
+            } catch (error: CancellationException) {
                 currentCoroutineContext().ensureActive()
-                return ToolMediaStatus(error = "Медиакоманда не завершилась вовремя. Повторите попытку.")
+                return ToolMediaStatus(error = if (error is TimeoutCancellationException)
+                    "Медиакоманда не завершилась вовремя. Повторите попытку."
+                else "Выполнение медиакоманды отменено. Проверьте результат перед повторным запуском.")
             } finally {
                 requests.remove(id)
                 if (!delivered) withContext(NonCancellable + Dispatchers.Main.immediate) {

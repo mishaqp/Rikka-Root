@@ -35,11 +35,11 @@
 Files: `service/HeadlessTaskRunner.kt`, `data/ai/GenerationLoop.kt`.
 Tests: `GenerationLoopAuditRegressionTest` (новый).
 
-- [ ] RED: Prompt tool → text даёт SUCCEEDED, steps=2; настоящий step limit остаётся FAILED.
-- [ ] RED: MCP/subagent HARDLINE до approval и после resume не допускает эффект.
-- [ ] RED: локальный timeout даёт ошибку tool и финальный ответ; родительская отмена пробрасывается.
-- [ ] RED: большой вывод без workspace сокращается с пометкой, нетекстовые части сохранены.
-- [ ] RED: битый JSON не создаёт Pending; предел времени/шагов виден пользователю.
+- [x] RED: Prompt tool → text даёт SUCCEEDED, steps=2; настоящий step limit остаётся FAILED.
+- [x] RED: MCP/subagent HARDLINE до approval и после resume не допускает эффект.
+- [x] RED: локальный timeout даёт ошибку tool и финальный ответ; родительская отмена пробрасывается.
+- [x] RED: большой вывод без workspace сокращается с пометкой, нетекстовые части сохранены.
+- [x] RED: битый JSON не создаёт Pending; предел времени/шагов виден пользователю.
 - [x] GREEN (реализация готова; полный runtime-прогон ниже): счётчик через callback реального шага; проверка незавершённых Tool и текста после последнего Tool; общая проверка HARDLINE; ensureActive при обработке cancellation; ограничение вывода; ранняя проверка JSON и видимый limit.
 
 ### 2. MCP — пункты 3,9,18
@@ -47,10 +47,10 @@ Tests: `GenerationLoopAuditRegressionTest` (новый).
 Files: `data/ai/mcp/control/*`, `data/ai/mcp/McpManager.kt`, необходимые места вызова approval renderer.
 Tests: `McpAuditRegressionTest`, `McpToolNameAuditTest`, дополнительные тесты контекста approval.
 
-- [ ] RED: host change удаляет OAuth и секретные ссылки; omitted headers/enabled сохраняются.
-- [ ] RED: approval содержит старый и новый URL и предупреждение.
-- [ ] RED: URL и ссылки с любыми именами заголовков редактируются; чужая ссылка не разрешается.
-- [ ] RED: имена соответствуют `[a-zA-Z0-9_-]`, <=64, уникальны; mapping сохраняет original.
+- [x] RED: host change удаляет OAuth и секретные ссылки; omitted headers/enabled сохраняются.
+- [x] RED: approval содержит старый и новый URL и предупреждение.
+- [x] RED: URL и ссылки с любыми именами заголовков редактируются; чужая ссылка не разрешается.
+- [x] RED: имена соответствуют `[a-zA-Z0-9_-]`, <=64, уникальны; mapping сохраняет original.
 - [x] GREEN (реализация готова; полный runtime-прогон ниже): исправить границы update/secret resolution и единое построение имён.
 
 ### 3. Провайдеры — пункты 2,19,20
@@ -58,9 +58,9 @@ Tests: `McpAuditRegressionTest`, `McpToolNameAuditTest`, дополнитель�
 Files: `ai/core/Tool.kt`, provider request/decoder builders, `ai/util/Json.kt`, `ProviderConnectionTester.kt` при необходимости.
 Tests: `EmptyToolParametersRegressionTest`, `SchemaFilteringRegressionTest`, `ChatCompletionsToolIdentityRegressionTest`.
 
-- [ ] RED: все API сериализуют пустую object-schema для default и explicit null.
-- [ ] RED: свойства format/enum/const сохраняются; required содержит только существующие имена.
-- [ ] RED: отсутствующие id уникальны, пустой id не стирает прежний, object arguments принимаются.
+- [x] RED: все API сериализуют пустую object-schema для default и explicit null.
+- [x] RED: свойства format/enum/const сохраняются; required содержит только существующие имена.
+- [x] RED: отсутствующие id уникальны, пустой id не стирает прежний, object arguments принимаются.
 - [x] GREEN (реализация готова; полный runtime-прогон ниже): единый fallback schema, контекстная фильтрация схем и устойчивое декодирование.
 
 ### 4. Командные защиты — пункты 5,7
@@ -68,8 +68,8 @@ Tests: `EmptyToolParametersRegressionTest`, `SchemaFilteringRegressionTest`, `Ch
 Files: `RootTool.kt`, `RootCommandGuard.kt`, `TermuxCommandGuard.kt`, `HardlineCommandGuard.kt`.
 Tests: `RootToolTest`, `RootCommandGuardTest`, `TermuxCommandGuardTest`, `HardlineCommandGuardShellTest`.
 
-- [ ] RED: automatic root блокируется до probing; manual Approved сохраняется.
-- [ ] RED: каждый shell flag, wrapper, command separator/group, svc power и setprop sys.powerctl блокируется.
+- [x] RED: automatic root блокируется до probing; manual Approved сохраняется.
+- [x] RED: каждый shell flag, wrapper, command separator/group, svc power и setprop sys.powerctl блокируется.
 - [x] GREEN (реализация готова; полный runtime-прогон ниже): общий CMD_POS, обработка executable+arguments и automatic invocation.
 
 ### 5. Изоляция данных — пункты 8,10,11
@@ -77,9 +77,9 @@ Tests: `RootToolTest`, `RootCommandGuardTest`, `TermuxCommandGuardTest`, `Hardli
 Files: `WorkspaceTools.kt`, `ChatToolFactory.kt`, `MemoryTools.kt`, `MemoryRepository.kt`, `MemoryDAO.kt`, `ConversationTools.kt`.
 Tests: регрессии workspace paths, memory ownership, conversation assistant scope.
 
-- [ ] RED: . и .. не обходят writable prefix во всех инструментах с путями.
-- [ ] RED: чужая/несуществующая память не изменяется, ответ not_found.
-- [ ] RED: search передаёт владельца и не возвращает чужие чаты.
+- [x] RED: . и .. не обходят writable prefix во всех инструментах с путями.
+- [x] RED: чужая/несуществующая память не изменяется, ответ not_found.
+- [x] RED: search передаёт владельца и не возвращает чужие чаты.
 - [x] GREEN (реализация готова; полный runtime-прогон ниже): нормализация до доступа, scoped repository/DAO, передача assistantId.
 
 ### 6. Устройство — пункты 13,14,16
@@ -87,9 +87,9 @@ Tests: регрессии workspace paths, memory ownership, conversation assist
 Files: `ClipboardTool.kt`, `ScreenshotTool.kt`, `DeviceToolSupport.kt`, `ToolMediaPlaybackService.kt`.
 Tests: `ClipboardSensitiveContentTest`, `ScreenshotStoragePrivacyTest`, `DeviceToolTimeoutTest`, `ToolMediaCommandTimeoutTest`.
 
-- [ ] RED: clipboard sensitive data обрабатывается detector.
-- [ ] RED: screenshot private default; явный gallery opt-in; pending row удаляется при ошибке.
-- [ ] RED: локальные таймауты не становятся Stop; отмена родителя сохраняется.
+- [x] RED: clipboard sensitive data обрабатывается detector.
+- [x] RED: screenshot private default; явный gallery opt-in; pending row удаляется при ошибке.
+- [x] RED: локальные таймауты не становятся Stop; отмена родителя сохраняется.
 - [x] GREEN (реализация готова; полный runtime-прогон ниже): detector, private cache default и cleanup, корректная cancellation.
 
 ### 7. Одобрения — пункты 3,4,6,12,13,15
@@ -97,10 +97,10 @@ Tests: `ClipboardSensitiveContentTest`, `ScreenshotStoragePrivacyTest`, `DeviceT
 Files: `ToolPermissionPolicy.kt`, `RunExecutionContext.kt`, `WorkflowApprovalRenderer.kt`, workflow preview в `ChatMessageTools.kt`, `ChatService.kt`, `ConversationRoutes.kt`.
 Tests: `ApprovalAuditPolicyTest`, `WorkflowApprovalRendererAuditTest`, регрессии ChatService/HTTP.
 
-- [ ] RED: MCP mutations и SMS не обходятся Always/YOLO/headless; calendar_query/get_screen_time registered.
-- [ ] RED: HARDLINE проверяет также прямые headless MCP.
-- [ ] RED: полные аргументы workflow доступны без усечения.
-- [ ] RED: answer принимает только Pending ask_user.
+- [x] RED: MCP mutations и SMS не обходятся Always/YOLO/headless; calendar_query/get_screen_time registered.
+- [x] RED: HARDLINE проверяет также прямые headless MCP.
+- [x] RED: полные аргументы workflow доступны без усечения.
+- [x] RED: answer принимает только Pending ask_user.
 - [x] GREEN (реализация готова; полный runtime-прогон ниже): policy, scrollable preview, gate answer.
 
 ## Итоговая проверка и публикация
@@ -126,3 +126,14 @@ Tests: `ApprovalAuditPolicyTest`, `WorkflowApprovalRendererAuditTest`, регр�
 Повторный локальный прогон после восстановления сети скомпилировал весь app test source и выявил таймауты неизменённых ChatService-тестов: default suspend callbacks создавали новые экземпляры и не совпадали с MockK stubs. `javap` подтвердил `new` в default bridge. Callback-параметры сделаны nullable с default `null` и безопасным вызовом; HeadlessTaskRunner по-прежнему передаёт явные обработчики. Тестовые условия, stubs и таймауты не менялись. Последующий прогон должен подтвердить восстановление старых сценариев вместе с новыми регрессиями; предыдущие Actions остановлены до APK.
 
 Итоговый локальный targeted GREEN после nullable-default исправления: **app — 34 suites, 327 tests; ai — 4 suites, 14 tests; failures=0, errors=0, skipped=0**. Включены новые регрессии и неизменённые ChatServiceMetadataTest, ChatProcessDeathTest, ChatDurableQueueIntegrationTest, ChatDisplayBehaviorServiceRuntimeTest. Комбинированный Gradle-процесс вернул exit 1 только из-за загрузки lint/metadata-зависимостей HTTP 503; свежий app lint XML отсутствовал, gate корректно отказал в принятии неполного анализа. Окончательный lint и полные suites остаются обязательными в Actions до APK. Исходный XML lint скачан: 45 ошибок (3 NonObservableLocale, 1 ContextCastToActivity, 41 LocalContextGetResourceValueCall); итог следует сравнить по самим issue, а не только с лимитом 51.
+
+
+## Исправления после полного прогона CI
+
+Прогон `38969821934` подтвердил RED всех 21 пунктов, затем выполнил **4790 unit-тестов**: 37 падений, без errors/skips. APK не собирался. Три старых ожидания GenerationLoop приведены к обязательным подтверждениям `mcp_add`/`mcp_update`/`send_sms` и исполняемой ошибке HARDLINE; проверки отсутствия побочных эффектов сохранены и расширены. Убрано удвоение `hardline:` в русском сообщении. Тест MCP сравнивает точное стабильное имя с hash, ASCII и лимит 64; checklist проверяет актуальный renderer с текущей конфигурацией сервера.
+
+32 падения UI вызваны новым обязательным предупреждением и недоступностью «Для этого чата»/«Всегда» для `mcp_add`. Добавлены соответствующие функциональные утверждения, прежняя проверка сокрытия секрета сохранена. После визуальной проверки всех 16 сочетаний темы/масштаба/ширины обновлены только 44 затронутых PNG: approval — 12, mcp_pending — 16, timeline_native_mcp_redacted_details — 16. Остальные 420 из 464 снимков не изменились; 212 общих снимков локального и CI прогона совпали побайтно. Пороги сравнения и тестовые методы не изменялись. Отдельный Verify этих 32 тестов в общем локальном прогоне прошёл.
+
+Дополнительно пункт 16 проверен для обычного CancellationException от отменённого дочернего Deferred при активном вызывающем контексте: **пять новых assertion failures до правки** в GenerationLoop/chat, headless Prompt, DirectActions, device/SAF и media; затем все пять прошли. Baseline gate дополнен этими обязательными условиями. Настоящая отмена родителя проверяется отменой Job, завершением cleanup и отсутствием возврата результата. В файловом сценарии сохранены проверки удаления только созданного документа; в root — durable start marker и отсутствие повторного исполнения. Намеренная остановка политики отделена от coroutine cancellation и остаётся BLOCKED без дополнительного запроса модели. Media сохраняет CANCEL cleanup.
+
+Общий локальный targeted-прогон: app **43 suites, 517 tests**, ai **4 suites, 14 tests**; единственное падение — новый тест identity базового marker. Отдельное воспроизведение подтвердило копирование RuntimeException при coroutine stacktrace recovery (тот же тип/текст, cause — исходный объект). Fixture уточнён до сигнала с payload, как реальный HeadlessStop; exact identity, статус, код, payload и активность вызывающего контекста проверяются для direct/SAF. Повторный DeviceToolFailureReasonTest — **20/20 PASS**, Gradle BUILD SUCCESSFUL (18s). Полный Actions остаётся обязательным перед APK. CI Python helpers: **22/22 PASS**. Независимый closing review не выявил ослабления тестов или открытых Critical/Important.

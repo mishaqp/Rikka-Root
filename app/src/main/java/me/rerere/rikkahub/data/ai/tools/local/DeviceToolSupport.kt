@@ -4,6 +4,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import me.rerere.rikkahub.data.ai.tools.ToolExecutionAbortedException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -68,9 +69,13 @@ internal suspend fun deviceToolParts(
         fileOperation?.let { FileOperationDiagnostics.record(it, error) }
         deviceToolError(deviceToolFailureReason(error, fileOperation))
     } catch (error: CancellationException) {
-        throw error
+        currentCoroutineContext().ensureActive()
+        fileOperation?.let { FileOperationDiagnostics.record(it, error) }
+        deviceToolError(deviceToolFailureReason(error, fileOperation))
     } catch (error: Exception) {
-        (safFileCause(error) as? CancellationException)?.let { throw it }
+        if (error is ToolExecutionAbortedException) throw error
+        (safFileCause(error) as? ToolExecutionAbortedException)?.let { throw it }
+        if (safFileCause(error) is CancellationException) currentCoroutineContext().ensureActive()
         fileOperation?.let { FileOperationDiagnostics.record(it, error) }
         deviceToolError(if (error is SecurityException)
             "Android запретил доступ. Проверьте разрешения этой функции в настройках ассистента."
@@ -88,7 +93,9 @@ private val authoredReason = Regex("^(?:[A-Za-z_][A-Za-z0-9_]*\\s+)?[А-Яа-я�
  * before considering an app-authored reason; Cyrillic inside a pathname is not a reason.
  */
 internal fun deviceToolFailureReason(error: Throwable, fileOperation: FileToolOperation? = null): String {
-    if (error is TimeoutCancellationException) return "Операция не завершилась вовремя. Повторите попытку."
+    val cancelled = error as? CancellationException ?: safFileCause(error) as? CancellationException
+    if (cancelled is TimeoutCancellationException) return "Операция не завершилась вовремя. Повторите попытку."
+    if (cancelled != null) return "Выполнение инструмента отменено. Проверьте результат перед повторным вызовом."
     safFileCause(error)?.let { return safFileFailureReason(it, fileOperation) }
     val message = error.message?.trim()
     val platformReason = when (error) {

@@ -98,7 +98,8 @@ internal suspend fun runHeadlessDeadline(timeoutMillis: Long, block: suspend () 
         ?: HeadlessTaskResult(HeadlessTaskStatus.TIMED_OUT, errorCode = "deadline_exceeded")
 }
 
-private class HeadlessStop(val outcome: HeadlessTaskStatus, val code: String) : CancellationException(code)
+private class HeadlessStop(val outcome: HeadlessTaskStatus, val code: String) :
+    me.rerere.rikkahub.data.ai.tools.ToolExecutionAbortedException(code)
 
 /** Runs a fresh in-memory side conversation, retaining the normal generation and tool engines. */
 class HeadlessTaskRunner internal constructor(
@@ -259,7 +260,10 @@ class HeadlessTaskRunner internal constructor(
                 output = "Превышено время ожидания инструмента. Проверьте результат перед повторным запуском.",
                 errorCode = "tool_timeout"), execution, latest, steps)
         } catch (cancelled: CancellationException) {
-            throw cancelled
+            currentCoroutineContext().ensureActive()
+            return decorate(HeadlessTaskResult(HeadlessTaskStatus.INDETERMINATE,
+                output = "Выполнение инструмента отменено. Проверьте результат перед повторным запуском.",
+                errorCode = "tool_cancelled"), execution, latest, steps)
         } catch (_: TokenBudgetExceededException) {
             return decorate(HeadlessTaskResult(HeadlessTaskStatus.BLOCKED, errorCode = "token_budget_exceeded"), execution, latest, steps)
         } catch (_: Exception) {
@@ -272,11 +276,15 @@ class HeadlessTaskRunner internal constructor(
         checkTool(tool, args, context)
         currentCoroutineContext().ensureActive()
         context.executionState.effectsInFlight = true
-        val output = try { tool.execute(args) } catch (timeout: TimeoutCancellationException) {
+        val output = try { tool.execute(args) } catch (stop: HeadlessStop) {
+            throw stop
+        } catch (timeout: TimeoutCancellationException) {
             currentCoroutineContext().ensureActive()
             context.executionState.effectsInFlight = false
             throw timeout
         } catch (cancelled: CancellationException) {
+            currentCoroutineContext().ensureActive()
+            context.executionState.effectsInFlight = false
             throw cancelled
         } catch (_: Exception) {
             stop(HeadlessTaskStatus.INDETERMINATE, "tool_execution_failed")

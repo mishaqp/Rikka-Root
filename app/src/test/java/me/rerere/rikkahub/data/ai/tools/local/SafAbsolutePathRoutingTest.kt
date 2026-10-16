@@ -390,11 +390,21 @@ class SafAbsolutePathRoutingTest {
     } }
 
     @Test fun cancelledNewDocumentCommitDeletesOnlyItsOwnedDocument(): Unit = runBlocking { withNewFileFixture { _, access, provider, path ->
-        provider.afterOutputClose = { if (it == "cancelled.txt") throw kotlinx.coroutines.CancellationException("cancelled provider commit") }
-        try {
+        lateinit var executingJob: Job
+        var returned = false
+        provider.afterOutputClose = { if (it == "cancelled.txt") {
+            val cancelled = CancellationException("cancelled provider commit")
+            executingJob.cancel(cancelled)
+            throw cancelled
+        } }
+        executingJob = launch(start = CoroutineStart.LAZY) {
             writeTextFileTool(access).execute(buildJsonObject { put("path", path("cancelled.txt")); put("content", "partial") })
-            fail("Cancellation must propagate")
-        } catch (_: kotlinx.coroutines.CancellationException) { }
+            returned = true
+        }
+        executingJob.start()
+        executingJob.join()
+        assertTrue(executingJob.isCancelled)
+        assertFalse(returned)
         assertTrue("Must reach the new-document commit", provider.createdNames.contains("cancelled.txt"))
         assertFalse(provider.contains("cancelled.txt"))
         assertEquals(listOf("cancelled.txt"), provider.deletedNames)

@@ -11,6 +11,22 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DeviceToolTimeoutTest {
+    @Test fun cancelledChildDeferredReturnsAnErrorEvenWhenSafWrappedAndKeepsCallerActive() = runTest {
+        for (wrapped in listOf(false, true)) {
+            val outcome = runCatching { deviceToolParts {
+                try { CompletableDeferred<List<UIMessagePart>>().apply { cancel() }.await() }
+                catch (cancelled: CancellationException) {
+                    if (wrapped) throw SafFileOperationException(cancelled) else throw cancelled
+                }
+            } }
+            assertNull("A child cancellation must not escape the device tool", outcome.exceptionOrNull())
+            val text = (outcome.getOrThrow().single() as UIMessagePart.Text).text
+            val error = Json.parseToJsonElement(text).jsonObject.getValue("error").jsonPrimitive.content
+            assertEquals("Выполнение инструмента отменено. Проверьте результат перед повторным вызовом.", error)
+            assertTrue(currentCoroutineContext().isActive)
+        }
+    }
+
     @Test fun toolOwnedTimeoutReturnsAnActionableRussianErrorAndKeepsTheCallerActive() = runTest {
         val parts = deviceToolParts {
             withTimeout(10) { awaitCancellation() }

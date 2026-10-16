@@ -52,6 +52,7 @@ import me.rerere.rikkahub.root.executeRootToolOnce
 import me.rerere.rikkahub.root.awaitRootCheckpoint
 import me.rerere.rikkahub.data.ai.tools.ToolPermissionPolicy.canResumeAutomatic
 import me.rerere.rikkahub.data.ai.tools.ToolPermissionPolicy
+import me.rerere.rikkahub.data.ai.tools.ToolExecutionAbortedException
 import me.rerere.rikkahub.data.ai.tools.HardlineCommandGuard
 import me.rerere.rikkahub.data.ai.tools.WebContentGuard
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
@@ -150,6 +151,10 @@ class GenerationLoop(
         fun toolError(code: String, message: String): List<UIMessagePart> = listOf(
             UIMessagePart.Text(buildJsonObject { put("error", code); put("message", message) }.toString())
         )
+        fun hardlineMessage(reason: String): String {
+            val label = if (reason.startsWith("hardline:")) reason else "hardline: $reason"
+            return "Команда заблокирована защитой ($label). Выберите безопасное действие."
+        }
         fun validateArguments(tool: UIMessagePart.Tool): UIMessagePart.Tool {
             if (tool.isExecuted) return tool
             val arguments = runCatching { json.parseToJsonElement(tool.input.ifBlank { "{}" }) }.getOrNull()
@@ -297,9 +302,7 @@ class GenerationLoop(
                         checked.isExecuted -> checked
                         hardlineReason != null -> {
                             Log.w(TAG, "hardline-blocked ${tool.toolName}: $hardlineReason")
-                            tool.copy(output = toolError("hardline_blocked",
-                                "Команда заблокирована защитой (hardline: $hardlineReason). Выберите безопасное действие."
-                            ))
+                            tool.copy(output = toolError("hardline_blocked", hardlineMessage(hardlineReason)))
                         }
                         // Tool needs approval and state is Auto -> set to Pending
                         tool.approvalState is ToolApprovalState.Auto && toolDef != null && needsApproval(tool, toolDef) -> {
@@ -397,9 +400,7 @@ class GenerationLoop(
                         if (resumeHardlineReason != null) {
                             executedTools += tool.copy(output = listOf(UIMessagePart.Text(
                                 json.encodeToString(buildJsonObject {
-                                    put("error", JsonPrimitive(
-                                        "Команда заблокирована защитой (hardline: $resumeHardlineReason). Выберите безопасное действие."
-                                    ))
+                                    put("error", JsonPrimitive(hardlineMessage(resumeHardlineReason)))
                                 })
                             )))
                             return@forEach
@@ -482,8 +483,8 @@ class GenerationLoop(
                             )
                         }.onFailure {
                             // 取消必须向上传播，否则停止生成会被误报为工具执行错误
-                            if (it is TimeoutCancellationException) currentCoroutineContext().ensureActive()
-                            else if (it is CancellationException) throw it
+                            if (it is ToolExecutionAbortedException) throw it
+                            if (it is CancellationException) currentCoroutineContext().ensureActive()
                             if (it is TokenBudgetExceededException || it is TokenBudgetPersistenceException) throw it
                             // Root input may contain credentials; neither exception details nor arguments belong in logs.
                             if (tool.toolName != "root_exec") it.printStackTrace()
@@ -498,6 +499,9 @@ class GenerationLoop(
                                                 } else if (it is TimeoutCancellationException) {
                                                     put("error", "tool_timeout")
                                                     put("message", "Превышено время ожидания инструмента. Проверьте результат перед повторным вызовом.")
+                                                } else if (it is CancellationException) {
+                                                    put("error", "tool_cancelled")
+                                                    put("message", "Выполнение инструмента отменено. Проверьте результат перед повторным вызовом.")
                                                 } else {
                                                     put("error", me.rerere.rikkahub.data.ai.tools.local.deviceToolFailureReason(it))
                                                     put("raw_error", SecretRedactor.redact(it.message ?: it.javaClass.name))

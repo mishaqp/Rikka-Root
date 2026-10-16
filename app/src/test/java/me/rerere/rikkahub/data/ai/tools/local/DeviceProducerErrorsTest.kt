@@ -5,7 +5,7 @@ import android.content.pm.PackageManager
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.*
 import kotlinx.serialization.json.*
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
@@ -49,13 +49,19 @@ class DeviceProducerErrorsTest {
         val error = result(tool, """{"action":"create","content":"text"}""").getValue("error").jsonPrimitive.content
         assertEquals("Ошибка чтения или записи. Проверьте доступ и свободное место.", error)
         assertFalse(error.contains("Секрет") || error.contains("token="))
-        val cancelled = CancellationException("private")
-        val cancellable = buildMemoryTools(Json, { throw cancelled },
-            { id, content -> AssistantMemory(id, content) }, {}).single()
-        val actual = assertThrows(CancellationException::class.java) {
-            runBlocking { result(cancellable, """{"action":"create","content":"text"}""") }
-        }
-        assertTrue(actual === cancelled || actual.cause === cancelled)
+        val started = CompletableDeferred<Unit>()
+        var cleaned = false
+        var returned = false
+        val cancellable = buildMemoryTools(Json, {
+            try { started.complete(Unit); awaitCancellation() }
+            finally { cleaned = true }
+        }, { id, content -> AssistantMemory(id, content) }, {}).single()
+        val job = launch { result(cancellable, """{"action":"create","content":"text"}"""); returned = true }
+        started.await()
+        job.cancelAndJoin()
+        assertTrue(job.isCancelled)
+        assertTrue(cleaned)
+        assertFalse(returned)
     }
 
     @Test fun ttsMissingTextReturnsAnActionableRussianResult() = runBlocking {

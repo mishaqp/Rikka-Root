@@ -1,6 +1,6 @@
 package me.rerere.rikkahub.data.ai.tools.local
 
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.*
 import kotlinx.coroutines.CancellationException
 import io.mockk.coEvery
 import io.mockk.mockk
@@ -10,6 +10,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.buildJsonObject
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.ai.tools.ToolExecutionAbortedException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -190,18 +191,46 @@ class DeviceToolFailureReasonTest {
     @Test fun nonSafSecurityReasonAndCancellationRemainUnchanged() = runBlocking {
         assertEquals("""{"error":"Android запретил доступ. Проверьте разрешения этой функции в настройках ассистента."}""",
             fileFailure("copy_file", SecurityException("private")))
-        val cancelled = CancellationException("private cancellation")
-        val actual = assertThrows(CancellationException::class.java) {
-            runBlocking { fileFailure("copy_file", cancelled) }
+        assertFileParentCancellation(wrapped = false)
+    }
+
+    private suspend fun assertFileParentCancellation(wrapped: Boolean) = coroutineScope {
+        val started = CompletableDeferred<Unit>()
+        var cleaned = false
+        var returned = false
+        val tool = fileJsonTool("copy_file", "test", fileSchema()) {
+            try { started.complete(Unit); awaitCancellation() }
+            catch (cancelled: CancellationException) {
+                if (wrapped) throw SafFileOperationException(cancelled) else throw cancelled
+            } finally { cleaned = true }
         }
-        assertTrue(actual === cancelled || actual.cause === cancelled)
+        val job = launch { tool.execute(buildJsonObject {}); returned = true }
+        started.await()
+        job.cancelAndJoin()
+        assertTrue(job.isCancelled)
+        assertTrue(cleaned)
+        assertFalse(returned)
     }
 
     @Test fun wrappedSafCancellationStillPropagatesAsCancellation() = runBlocking {
-        val cancelled = CancellationException("private cancellation")
-        val actual = assertThrows(CancellationException::class.java) {
-            runBlocking { fileFailure("copy_file", SafFileOperationException(cancelled)) }
+        assertFileParentCancellation(wrapped = true)
+    }
+
+    private class PolicyAbortFixture(val outcome: String, val code: String, val payload: Any) :
+        ToolExecutionAbortedException(code)
+
+    @Test fun policyAbortIsNotConvertedToDeviceErrorEvenWhenSafWrapped() = runBlocking {
+        for (wrapped in listOf(false, true)) {
+            val payload = Any()
+            val aborted = PolicyAbortFixture("blocked", "policy_denied", payload)
+            val failure = if (wrapped) SafFileOperationException(aborted) else aborted
+            val actual = runCatching { fileFailure("copy_file", failure) }.exceptionOrNull()
+            assertTrue("The exact intentional policy signal must leave the device boundary", actual === aborted)
+            val signal = actual as PolicyAbortFixture
+            assertEquals("blocked", signal.outcome)
+            assertEquals("policy_denied", signal.code)
+            assertTrue("The policy result payload must be preserved", signal.payload === payload)
+            assertTrue(currentCoroutineContext().isActive)
         }
-        assertTrue(actual === cancelled || actual.cause === cancelled)
     }
 }

@@ -1080,10 +1080,13 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         ))
         showStage2(settings, DisplaySetting(), listOf(control))
         compose.onNodeWithText("stage3-secret-must-stay-hidden", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Этот инструмент всегда требует отдельного подтверждения.").assertIsDisplayed()
         compose.onNodeWithTag("chat_timeline_tool_details:stage3_native_mcp").performClick()
         settleNativeRipple()
         compose.onNodeWithTag("chat_timeline_tool_sheet:stage3_native_mcp").assertIsDisplayed()
         compose.onNodeWithText("stage3-secret-must-stay-hidden", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Для этого чата").assertIsNotEnabled()
+        compose.onNodeWithText("∞ Всегда").assertIsNotEnabled()
         capture("timeline_native_mcp_redacted_details", includeWindows = true)
     }
 
