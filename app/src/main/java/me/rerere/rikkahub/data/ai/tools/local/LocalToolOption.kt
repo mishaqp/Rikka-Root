@@ -17,6 +17,8 @@ sealed class LocalToolOption {
     @Serializable @SerialName("sub_agents") data object SubAgents : LocalToolOption()
     @Serializable @SerialName("cron_jobs") data object CronJobs : LocalToolOption()
     @Serializable @SerialName("reliability") data object Reliability : LocalToolOption()
+    @Serializable @SerialName("manage_assistants") data object ManageAssistants : LocalToolOption()
+    @Serializable @SerialName("manage_app_settings") data object ManageAppSettings : LocalToolOption()
     @Serializable @SerialName("files") data object Files : LocalToolOption()
     @Serializable @SerialName("external_storage") data object ExternalStorage : LocalToolOption()
     @Serializable @SerialName("archive") data object Archive : LocalToolOption()

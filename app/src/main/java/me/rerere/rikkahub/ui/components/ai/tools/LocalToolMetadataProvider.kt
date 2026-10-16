@@ -203,6 +203,15 @@ class LocalToolMetadata(context: Context) {
                 LocalToolOption.CronJobs -> createCronJobTools(koin.get<ScheduledJobRepository>(),
                     koin.get<ScheduledJobRunRepository>(), koin.get<CronJobScheduler>(), caller) { emptySet() }
                 LocalToolOption.Reliability -> listOf(generateBugReportTool(context, BugReportBuilder(context)))
+                LocalToolOption.ManageAssistants -> listOf(manageAssistantsTool(
+                    settingsStore = settings,
+                    catalog = { AssistantManagerCatalog() },
+                    caller = AssistantManagerCaller(
+                        currentAssistantId = { assistant.id },
+                        switchAssistant = { metadataOnly() },
+                    ),
+                ))
+                LocalToolOption.ManageAppSettings -> listOf(buildManageAppSettingsTool(settings, context))
                 LocalToolOption.Files -> fileManagerTools(access, context, canReadImages)
                 LocalToolOption.ExternalStorage -> listOf(listStorageVolumesTool(context), listGrantedDirectoriesTool(context),
                     grantDirectoryAccessTool(context), revokeDirectoryAccessTool(context))

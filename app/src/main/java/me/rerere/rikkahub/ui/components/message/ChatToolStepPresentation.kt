@@ -141,11 +141,40 @@ internal fun presentToolHeadline(toolName: String, arguments: JsonElement?): Str
         "text_to_speech" -> s("text")?.let { "Озвучка: $it" }
         "calendar_create", "create_calendar_event" -> s("title")?.let { "Календарь: $it" }
         "workflow_run", "workflow_get", "workflow_delete" -> s("id")?.let { "Сценарий: $it" }
+        "manage_assistants" -> assistantManagementHeadline(s("action"), s("name")
+            ?: (args["settings"] as? JsonObject)?.string("name")?.oneLine()?.takeIf { it.isNotEmpty() }
+            ?: s("assistant_id") ?: s("id"))
+        "manage_app_settings" -> appSettingsHeadline(s("action"), s("key") ?: s("section"))
         "mcp_add" -> s("name")?.let { "MCP: добавить $it" }
         "mcp_test" -> s("id")?.let { "MCP: проверка $it" }
         else -> remoteMcpHeadline(toolName)
     }
     return headline?.take(TITLE_MAX_CHARS)
+}
+
+private fun assistantManagementHeadline(action: String?, target: String?): String? {
+    val title = when (action) {
+        "list" -> return "Ассистенты: список"
+        "list_options" -> return "Ассистенты: доступные параметры"
+        "get" -> "Ассистент: просмотр"
+        "create" -> "Ассистент: создать"
+        "update" -> "Ассистент: изменить"
+        "duplicate" -> "Ассистент: скопировать"
+        "switch" -> "Ассистент: переключить на"
+        "delete" -> "Ассистент: удалить"
+        else -> return null
+    }
+    return listOfNotNull(title, target).joinToString(" ")
+}
+
+private fun appSettingsHeadline(action: String?, target: String?): String? {
+    val title = when (action) {
+        "list_sections" -> return "Настройки: доступные разделы"
+        "get" -> "Настройки: просмотр"
+        "set" -> "Настройки: изменить"
+        else -> return null
+    }
+    return listOfNotNull(title, target).joinToString(" ")
 }
 
 private val remoteMcpName = Regex("mcp__[0-9a-fA-F]{8}_(.+)__(.+)", RegexOption.DOT_MATCHES_ALL)
@@ -205,6 +234,8 @@ private val exactToolIcons: Map<String, ImageVector> = buildMap {
     put("ask_user", HugeIcons.BubbleChatQuestion)
     put("check_token_usage", HugeIcons.MoneyBag02)
     put("generate_bug_report", HugeIcons.Bug01)
+    put("manage_assistants", HugeIcons.AiBrain01)
+    put("manage_app_settings", HugeIcons.Settings03)
     put("download_file", HugeIcons.Download01)
     put("open_url", HugeIcons.Link01)
     put("get_battery_status", HugeIcons.Zap)

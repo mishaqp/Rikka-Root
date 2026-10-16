@@ -294,7 +294,9 @@ private fun LocalToolCompactRow(entry: LocalToolUiEntry, enabled: Boolean, contr
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (entry.requiresRoot) ToolBadge("Root")
                     if (access.isNotEmpty()) ToolBadge("Разрешение Android", access.any { !it.granted })
-                    if (entry.option == LocalToolOption.AskUser || entry.option == LocalToolOption.SkillImport || functions.any { ToolApprovalDefaults.requiresApproval(it.name) }) ToolBadge("Одобрение")
+                    if (entry.option in setOf(LocalToolOption.AskUser, LocalToolOption.SkillImport,
+                            LocalToolOption.ManageAssistants, LocalToolOption.ManageAppSettings) ||
+                        functions.any { ToolApprovalDefaults.requiresApproval(it.name) }) ToolBadge("Одобрение")
                     if (entry.background) ToolBadge("Фон")
                 }
             }

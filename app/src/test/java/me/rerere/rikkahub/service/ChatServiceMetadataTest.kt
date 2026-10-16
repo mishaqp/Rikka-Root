@@ -162,7 +162,8 @@ class ChatServiceMetadataTest {
         val secondStream = CompletableDeferred<Unit>()
         val invocation = java.util.concurrent.atomic.AtomicInteger()
         every { generation.generateText(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-            any(), any(), any(), any(), any(), any(), any(), any()) } answers {
+            any(), any(), any(), any(), any(), any(), any(),
+            prepareToolApproval = any(), beforeModelRequest = any()) } answers {
             val input = arg<List<UIMessage>>(2)
             val number = invocation.incrementAndGet()
             flow {
@@ -227,7 +228,8 @@ class ChatServiceMetadataTest {
         """.trimIndent())
         val entered = CompletableDeferred<Unit>()
         every { generation.generateText(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-            any(), any(), any(), any(), any(), any(), any(), any()) } answers {
+            any(), any(), any(), any(), any(), any(), any(),
+            prepareToolApproval = any(), beforeModelRequest = any()) } answers {
             val input = arg<List<UIMessage>>(2)
             flow {
                 entered.complete(Unit)
@@ -287,7 +289,8 @@ class ChatServiceMetadataTest {
         val source = seed(title = "Сохранённый чат")
         val enteredGeneration = CompletableDeferred<Unit>()
         every { generation.generateText(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-            any(), any(), any(), any(), any(), any(), any(), any()) } answers {
+            any(), any(), any(), any(), any(), any(), any(),
+            prepareToolApproval = any(), beforeModelRequest = any()) } answers {
             val input = arg<List<UIMessage>>(2)
             flow {
                 emit(GenerationChunk.Messages(input + UIMessage.assistant("Полученная часть ответа")))
@@ -332,7 +335,8 @@ class ChatServiceMetadataTest {
         val partial = "Ответ, полученный до остановки"
         val enteredGeneration = CompletableDeferred<Unit>()
         every { generation.generateText(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-            any(), any(), any(), any(), any(), any(), any(), any()) } answers {
+            any(), any(), any(), any(), any(), any(), any(),
+            prepareToolApproval = any(), beforeModelRequest = any()) } answers {
             val input = arg<List<UIMessage>>(2)
             flow {
                 emit(GenerationChunk.Messages(input + UIMessage.assistant(partial)))
@@ -359,7 +363,8 @@ class ChatServiceMetadataTest {
             assertEquals(partial, persisted.currentMessages.last().toText())
             assertTrue(service.getMessageQueueFlow(source.id).value.messages.isEmpty())
             verify(exactly = 1) { generation.generateText(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-                any(), any(), any(), any(), any(), any(), any(), any()) }
+                any(), any(), any(), any(), any(), any(), any(),
+                prepareToolApproval = any(), beforeModelRequest = any()) }
         } finally { writeGate.release.complete(Unit) }
     }
 

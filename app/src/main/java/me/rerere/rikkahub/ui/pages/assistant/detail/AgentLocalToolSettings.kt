@@ -66,6 +66,18 @@ internal fun AgentLocalToolSettings(
         R.string.agent_tools_cron_title, R.string.agent_tools_cron_desc,
         onEnabledChange, controlsEnabled)
     }
+    if (visibleOptions == null || LocalToolOption.ManageAssistants in visibleOptions) {
+        AgentFeatureCard(assistant, onUpdate, LocalToolOption.ManageAssistants,
+            R.string.assistant_page_local_tools_manage_assistants_title,
+            R.string.assistant_page_local_tools_manage_assistants_desc,
+            onEnabledChange, controlsEnabled)
+    }
+    if (visibleOptions == null || LocalToolOption.ManageAppSettings in visibleOptions) {
+        AgentFeatureCard(assistant, onUpdate, LocalToolOption.ManageAppSettings,
+            R.string.assistant_page_local_tools_manage_app_settings_title,
+            R.string.assistant_page_local_tools_manage_app_settings_desc,
+            onEnabledChange, controlsEnabled)
+    }
     if ((visibleOptions == null || LocalToolOption.SubAgents in visibleOptions) &&
         LocalToolOption.SubAgents in assistant.localTools) CardGroup {
         item(headlineContent = {

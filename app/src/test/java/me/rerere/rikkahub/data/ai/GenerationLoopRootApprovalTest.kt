@@ -53,6 +53,34 @@ class GenerationLoopRootApprovalTest {
     @get:Rule val folder = TemporaryFolder()
 
     @Test(timeout = 15_000)
+    fun `app setting mutation is prepared before approval and automatic grants cannot execute it`() = runBlocking {
+        val input = """{"action":"set","key":"display.showTokenUsage","value":false,"_expected_before":false}"""
+        val call = UIMessagePart.Tool("settings-change", "manage_app_settings", input)
+        Fixture(folder.newFolder(), toolResponse(listOf(call))).use { fixture ->
+            var executions = 0
+            val management = ToolPermissionPolicy.apply(Tool("manage_app_settings", "test", execute = { args ->
+                executions++
+                assertEquals(kotlinx.serialization.json.JsonPrimitive(true), args.jsonObject["_expected_before"])
+                listOf(UIMessagePart.Text("Изменено"))
+            }))
+            fixture.collect(listOf(UIMessage.user("Измени отображение статистики")), extraTools = listOf(management), maxSteps = 1,
+                isToolAutoApproved = { _, _ -> true },
+                prepareToolApproval = { name, args ->
+                    me.rerere.rikkahub.data.ai.tools.prepareManagementToolApproval(name, args, Settings())
+                })
+            val pending = fixture.latest.last().getTools().single()
+            assertTrue(pending.isPending)
+            assertEquals(0, executions)
+            assertEquals(kotlinx.serialization.json.JsonPrimitive(true), pending.inputAsJson().jsonObject["_expected_before"])
+            val approved = fixture.latest.dropLast(1) + fixture.latest.last().copy(parts = listOf(
+                pending.copy(approvalState = ToolApprovalState.Approved)))
+            fixture.collect(approved, extraTools = listOf(management), maxSteps = 1,
+                isToolAutoApproved = { _, _ -> true })
+            assertEquals(1, executions)
+        }
+    }
+
+    @Test(timeout = 15_000)
     fun `unexpected tool exceptions become safe Russian results without stack traces`() = runBlocking {
         Fixture(folder.newFolder()).use { fixture ->
             val broken = Tool("workspace_shell", "test", execute = {
@@ -122,7 +150,8 @@ class GenerationLoopRootApprovalTest {
                     onWebContentRead = { webSeen = true },
                     isToolAutoApproved = { name, _ -> resolveToolAutoApproval(approvals.preferences, id, name, webSeen) },
                 )
-                val mandatory = setOf("ask_user", "ssh_forget_host_key", "skill_install_from_url", "skill_install_from_text")
+                val mandatory = setOf("ask_user", "ssh_forget_host_key", "skill_install_from_url", "skill_install_from_text",
+                    "manage_assistants", "manage_app_settings")
                 assertEquals(names - mandatory, runs)
                 assertEquals(listOf("id -u"), fixture.commands)
                 val result = fixture.latest.last().getTools()
@@ -524,6 +553,7 @@ class GenerationLoopRootApprovalTest {
             maxSteps: Int = 3,
             onWebContentRead: suspend () -> Unit = {},
             isToolAutoApproved: suspend (String, kotlinx.serialization.json.JsonElement) -> Boolean = { _, _ -> false },
+            prepareToolApproval: (String, kotlinx.serialization.json.JsonElement) -> kotlinx.serialization.json.JsonElement = { _, input -> input },
             beforeWrite: suspend (GenerationChunk.RootExecutionCheckpoint) -> Unit = {},
         ) {
             latest = messages
@@ -531,6 +561,7 @@ class GenerationLoopRootApprovalTest {
                 assistant = Assistant(streamOutput = false), tools = listOf(tool) + extraTools, maxSteps = maxSteps,
                 onWebContentRead = onWebContentRead,
                 isToolAutoApproved = isToolAutoApproved,
+                prepareToolApproval = prepareToolApproval,
             ).collect { chunk ->
                 when (chunk) {
                     is GenerationChunk.Messages -> latest = chunk.messages

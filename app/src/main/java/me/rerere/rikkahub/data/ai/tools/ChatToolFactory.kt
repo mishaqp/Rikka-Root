@@ -24,6 +24,9 @@ import me.rerere.rikkahub.root.RootAccessStore
 import me.rerere.rikkahub.data.preferences.ToolApprovalPreferences
 import me.rerere.rikkahub.costguards.TokenBudgetLedger
 import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
+import me.rerere.rikkahub.data.ai.tools.local.AssistantManagerCaller
+import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.data.model.ConversationConfig
 import me.rerere.rikkahub.data.model.getAssistantOf
 import me.rerere.rikkahub.service.HeadlessRuntimeBindings
@@ -125,7 +128,22 @@ class ChatToolFactory(
                 { path -> workspaceRepository.resolveRootfsFile(id, path) }
             }, modelCanReadImages = Modality.IMAGE in model.inputModalities,
             callerAssistant = assistant, tokenBudget = tokenBudget ?: executionContext?.costBudget, mcpCaller = mcpCaller,
-            skillCaller = skillCaller, knownToolNames = { map { it.name } }))
+            skillCaller = skillCaller, knownToolNames = { map { it.name } },
+            managerCaller = AssistantManagerCaller(
+                currentAssistantId = {
+                    if (executionContext != null) executionContext.ownerAssistantId
+                    else conversationId?.let { id ->
+                        GlobalContext.get().get<ChatService>().getConversationFlow(Uuid.parse(id)).value.assistantId
+                    } ?: assistant.id
+                },
+                // Selection affects the next chat. This chat keeps its owner and ConversationConfig.
+                switchAssistant = { id ->
+                    GlobalContext.get().get<SettingsStore>().update { live ->
+                        require(live.assistants.any { it.id == id }) { "Ассистент больше недоступен. Обновите список." }
+                        live.copy(assistantId = id)
+                    }
+                },
+            )))
         if (assistant.enableRecentChatsReference) {
             addAll(createConversationTools(conversationRepository, assistant.id))
         }

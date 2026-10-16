@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.ai.tools.local
 
 import android.content.Context
+import kotlinx.coroutines.flow.first
 import me.rerere.rikkahub.data.ai.mcp.control.*
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
@@ -84,6 +85,8 @@ class LocalTools(
         mcpCaller: McpControlCaller? = null,
         skillCaller: me.rerere.rikkahub.skills.SkillInstallCaller? = null,
         knownToolNames: (() -> Collection<String>)? = null,
+        managerCaller: AssistantManagerCaller? = null,
+        managerCatalog: (suspend () -> AssistantManagerCatalog)? = null,
     ): List<Tool> {
         val tools = mutableListOf<Tool>()
         val callerId = assistantId ?: callerAssistant?.id?.toString()
@@ -99,6 +102,32 @@ class LocalTools(
         })
         fun add(option: LocalToolOption, tool: Tool) { tools.add(guard(option, tool)) }
         fun addAll(option: LocalToolOption, values: List<Tool>) { values.forEach { add(option, it) } }
+        if (LocalToolOption.ManageAssistants in options) {
+            val caller = managerCaller ?: AssistantManagerCaller(
+                currentAssistantId = { callerId?.let { runCatching { Uuid.parse(it) }.getOrNull() } },
+                switchAssistant = { id ->
+                    settingsStore.update { live ->
+                        require(live.assistants.any { it.id == id }) { "Ассистент больше недоступен. Обновите список." }
+                        live.copy(assistantId = id)
+                    }
+                },
+            )
+            add(LocalToolOption.ManageAssistants, manageAssistantsTool(settingsStore,
+                catalog = managerCatalog ?: {
+                    val skills = get().get<me.rerere.rikkahub.data.files.SkillManager>().listSkills()
+                    val workspaces = get().get<me.rerere.rikkahub.data.repository.WorkspaceRepository>().listFlow().first()
+                    AssistantManagerCatalog(
+                        skills = skills.map { AssistantManagerOption(it.name, it.name, it.description) },
+                        workspaces = workspaces.map { AssistantManagerOption(it.id, it.name) },
+                        localTools = me.rerere.rikkahub.ui.components.ai.tools.LocalToolUiRegistry.entries.map {
+                            AssistantManagerOption(localToolId(it.option), it.title(context), it.description(context))
+                        },
+                    )
+                }, caller = caller))
+        }
+        if (LocalToolOption.ManageAppSettings in options) {
+            add(LocalToolOption.ManageAppSettings, buildManageAppSettingsTool(settingsStore, context))
+        }
         if (LocalToolOption.Browser in options) {
             val enabled = (browserPreferences ?: get().get<me.rerere.rikkahub.browser.BrowserPreferences>()).snapshotBlocking()
             val invocation = me.rerere.rikkahub.browser.ToolInvocationContext(

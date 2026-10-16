@@ -93,7 +93,8 @@ class ChatDurableQueueIntegrationTest {
         every { budgets.getLedger(any(), any(), any()) } returns TokenBudgetLedger(enabled = false)
         val generation = mockk<GenerationLoop>()
         every { generation.generateText(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-            any(), any(), any(), any(), any(), any(), any(), any()) } answers {
+            any(), any(), any(), any(), any(), any(), any(),
+            prepareToolApproval = any(), beforeModelRequest = any()) } answers {
             generationCalls++
             flowOf(GenerationChunk.Messages(arg<List<UIMessage>>(2) + UIMessage.assistant("Новый ответ")))
         }

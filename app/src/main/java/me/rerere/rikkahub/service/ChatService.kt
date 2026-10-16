@@ -1088,6 +1088,12 @@ class ChatService(
                 outputTransformers = outputTransformers,
                 tools = tools,
                 onWebContentRead = { chatToolFactory.markWebContent(conversationId.toString()) },
+                prepareToolApproval = { name, input ->
+                    me.rerere.rikkahub.data.ai.tools.prepareManagementToolApproval(
+                        name, input, settingsStore.settingsFlow.value,
+                        me.rerere.rikkahub.data.ai.tools.local.appThemePreferences(context),
+                    )
+                },
                 isToolAutoApproved = { toolName, input ->
                     resolveToolAutoApproval(toolApprovalPreferences, conversationId, toolName,
                         webContentSeen = chatToolFactory.hasWebContent(conversationId.toString()),

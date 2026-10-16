@@ -14,7 +14,7 @@ class LocalToolUiRegistryTest {
         val registered = LocalToolUiRegistry.entries.map { it.option }
         val categorized = LocalToolUiRegistry.categories.flatMap { it.options }
 
-        assertEquals(55, discovered.size)
+        assertEquals(57, discovered.size)
         assertEquals(discovered, registered.toSet())
         assertEquals(registered.size, registered.toSet().size)
         assertEquals(discovered, categorized.toSet())
@@ -32,7 +32,8 @@ class LocalToolUiRegistryTest {
             "agent_automation" to listOf(LocalToolOption.SubAgents, LocalToolOption.CronJobs,
                 LocalToolOption.Workflows, LocalToolOption.SkillImport, LocalToolOption.JsSkills,
                 LocalToolOption.JavascriptEngine, LocalToolOption.AskUser, LocalToolOption.CostGuards,
-                LocalToolOption.Reliability),
+                LocalToolOption.Reliability, LocalToolOption.ManageAssistants,
+                LocalToolOption.ManageAppSettings),
             "root_terminal" to listOf(LocalToolOption.Root, LocalToolOption.Termux,
                 LocalToolOption.Ssh, LocalToolOption.ScreenAutomation),
             "internet" to listOf(LocalToolOption.Browser, LocalToolOption.McpControl,

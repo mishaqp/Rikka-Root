@@ -49,6 +49,8 @@ private val nativeTimelineToolNames = mapOf(
     "browser_type" to R.string.chat_timeline_tool_browser_type,
     "browser_wait_for" to R.string.chat_timeline_tool_browser_wait_for,
     "check_token_usage" to R.string.chat_timeline_tool_check_token_usage,
+    "manage_assistants" to R.string.chat_timeline_tool_manage_assistants,
+    "manage_app_settings" to R.string.chat_timeline_tool_manage_app_settings,
     "mcp_add" to R.string.chat_timeline_tool_mcp_add,
     "mcp_delete" to R.string.chat_timeline_tool_mcp_delete,
     "mcp_get" to R.string.chat_timeline_tool_mcp_get,

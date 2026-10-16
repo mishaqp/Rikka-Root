@@ -2,6 +2,9 @@ package me.rerere.rikkahub.ui.components.message
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.AiBrain01
+import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.data.ai.tools.ToolPermissionPolicy
 import me.rerere.rikkahub.ui.components.message.tools.ToolUIRegistry
 import org.junit.Assert.assertEquals
@@ -362,5 +365,39 @@ class ChatToolStepPresentationTest {
         assertNotNull(timelineToolIcon("root_exec"))
         assertTrue(timelineToolIcon("root_exec") != timelineToolIcon("browser_open"))
         assertNull(timelineToolIcon("totally_unknown_tool"))
+    }
+
+    @Test fun assistantManagementHeadlinesShowTheActionAndTarget() {
+        val titles = mapOf(
+            "list" to "Ассистенты: список",
+            "list_options" to "Ассистенты: доступные параметры",
+            "get" to "Ассистент: просмотр Помощник",
+            "create" to "Ассистент: создать Помощник",
+            "update" to "Ассистент: изменить Помощник",
+            "duplicate" to "Ассистент: скопировать Помощник",
+            "switch" to "Ассистент: переключить на Помощник",
+            "delete" to "Ассистент: удалить Помощник",
+        )
+        titles.forEach { (action, expected) ->
+            assertEquals(expected, presentToolHeadline("manage_assistants",
+                json("""{"action":"$action","name":"Помощник"}""")))
+        }
+        assertEquals("Ассистент: просмотр 123", presentToolHeadline("manage_assistants",
+            json("""{"action":"get","assistant_id":"123"}""")))
+        assertEquals("Ассистент: создать Новый помощник", presentToolHeadline("manage_assistants",
+            json("""{"action":"create","settings":{"name":"Новый помощник"}}""")))
+        assertNull(presentToolHeadline("manage_assistants", json("""{"action":"future"}""")))
+        assertEquals(HugeIcons.AiBrain01, timelineToolIcon("manage_assistants"))
+    }
+
+    @Test fun appSettingsHeadlinesShowTheActionWithoutRepeatingTheValue() {
+        assertEquals("Настройки: доступные разделы", presentToolHeadline("manage_app_settings",
+            json("""{"action":"list_sections"}""")))
+        assertEquals("Настройки: просмотр display", presentToolHeadline("manage_app_settings",
+            json("""{"action":"get","section":"display"}""")))
+        assertEquals("Настройки: изменить themeMode", presentToolHeadline("manage_app_settings",
+            json("""{"action":"set","key":"themeMode","value":"dark"}""")))
+        assertNull(presentToolHeadline("manage_app_settings", json("""{"action":"future"}""")))
+        assertEquals(HugeIcons.Settings03, timelineToolIcon("manage_app_settings"))
     }
 }

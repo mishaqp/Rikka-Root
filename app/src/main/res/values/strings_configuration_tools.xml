@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="assistant_page_local_tools_manage_assistants_title" translatable="false">Управление ассистентами</string>
+    <string name="assistant_page_local_tools_manage_assistants_desc" translatable="false">Просмотр, создание, изменение, копирование, переключение и удаление ассистентов. Изменения выполняются только после вашего одобрения. Настройки безопасности, разрешения инструментов и секреты недоступны.</string>
+    <string name="assistant_page_local_tools_manage_assistants_open" translatable="false">Открыть список ассистентов</string>
+    <string name="assistant_page_local_tools_manage_app_settings_title" translatable="false">Настройки приложения</string>
+    <string name="assistant_page_local_tools_manage_app_settings_desc" translatable="false">Чтение и изменение доступных настроек приложения по разделам. Изменения выполняются только после вашего одобрения. Настройки безопасности, разрешения инструментов, ключи и пароли недоступны.</string>
+    <string name="assistant_page_local_tools_manage_app_settings_open" translatable="false">Открыть настройки приложения</string>
+</resources>

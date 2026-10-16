@@ -58,11 +58,13 @@ class LocalToolMetadataProviderTest {
         val definitions = metadata.toolsForAssistant(Assistant(localTools = emptyList()), Model())
 
         assertEquals(LocalToolUiRegistry.entries.map { it.option }.toSet(), definitions.keys)
-        assertEquals(55, definitions.size)
+        assertEquals(57, definitions.size)
         assertTrue(definitions.values.all { it.isNotEmpty() })
         assertEquals(listOf("subagent_dispatch", "subagent_list", "subagent_get", "subagent_cancel"),
             definitions.getValue(LocalToolOption.SubAgents).map { it.name })
         assertEquals(7, definitions.getValue(LocalToolOption.CronJobs).size)
+        assertEquals(listOf("manage_assistants"), definitions.getValue(LocalToolOption.ManageAssistants).map { it.name })
+        assertEquals(listOf("manage_app_settings"), definitions.getValue(LocalToolOption.ManageAppSettings).map { it.name })
         assertTrue(estimateToolTokens(definitions.values.flatten()) > 0L)
         definitions.values.flatten().forEach { tool ->
             val result = runCatching { runBlocking { tool.execute(Json.parseToJsonElement("{}")) } }

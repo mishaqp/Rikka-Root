@@ -33,7 +33,7 @@ fun rememberSharedPreferenceString(
             override var value: String?
                 get() = currentState.value
                 set(value) {
-                    prefs.edit { putString(keyForString, value) }
+                    synchronized(prefs) { prefs.edit { putString(keyForString, value) } }
                 }
 
             override fun component1(): String? = value
@@ -60,7 +60,7 @@ fun rememberSharedPreferenceBoolean(
             override var value: Boolean
                 get() = currentState.value
                 set(value) {
-                    prefs.edit { putBoolean(keyForBoolean, value) }
+                    synchronized(prefs) { prefs.edit { putBoolean(keyForBoolean, value) } }
                 }
 
             override fun component1(): Boolean = value
@@ -70,9 +70,8 @@ fun rememberSharedPreferenceBoolean(
 }
 
 fun Context.writeStringPreference(key: String, value: String?) {
-    getSharedPreferences("rikkahub.preferences", Context.MODE_PRIVATE).edit {
-        putString(key, value)
-    }
+    val prefs = getSharedPreferences("rikkahub.preferences", Context.MODE_PRIVATE)
+    synchronized(prefs) { prefs.edit { putString(key, value) } }
 }
 
 fun Context.readStringPreference(key: String, defaultValue: String? = null): String? {
@@ -80,9 +79,8 @@ fun Context.readStringPreference(key: String, defaultValue: String? = null): Str
 }
 
 fun Context.writeBooleanPreference(key: String, value: Boolean) {
-    getSharedPreferences("rikkahub.preferences", Context.MODE_PRIVATE).edit {
-        putBoolean(key, value)
-    }
+    val prefs = getSharedPreferences("rikkahub.preferences", Context.MODE_PRIVATE)
+    synchronized(prefs) { prefs.edit { putBoolean(key, value) } }
 }
 
 fun Context.readBooleanPreference(key: String, defaultValue: Boolean = false): Boolean {

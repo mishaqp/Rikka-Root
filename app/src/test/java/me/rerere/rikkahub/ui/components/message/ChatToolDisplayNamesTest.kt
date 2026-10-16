@@ -28,7 +28,7 @@ class ChatToolDisplayNamesTest {
             literalRegistration.findAll(ChatProductionSource.read("data/ai/tools/$path.kt"))
                 .forEach { names.add(it.groupValues[1]) }
         }
-        assertEquals("The audited native catalog changed; review display coverage", 183, names.size)
+        assertEquals("The audited native catalog changed; review display coverage", 185, names.size)
         val resources = russianResources()
         names.forEach { name ->
             assertNotNull("Missing display name for $name", timelineToolNameResource(name))
@@ -42,6 +42,11 @@ class ChatToolDisplayNamesTest {
         assertEquals(R.string.chat_timeline_server_tool_web_search, timelineToolNameResource("web_search"))
         assertEquals(R.string.chat_timeline_server_tool_file_search, timelineToolNameResource("file_search"))
         assertEquals(R.string.chat_timeline_server_tool_code_interpreter, timelineToolNameResource("code_interpreter"))
+    }
+
+    @Test fun configurationToolsHaveRussianNames() {
+        assertEquals(R.string.chat_timeline_tool_manage_assistants, timelineToolNameResource("manage_assistants"))
+        assertEquals(R.string.chat_timeline_tool_manage_app_settings, timelineToolNameResource("manage_app_settings"))
     }
 
     @Test fun remoteMcpUsesTheActualGeneratedNamespace() {

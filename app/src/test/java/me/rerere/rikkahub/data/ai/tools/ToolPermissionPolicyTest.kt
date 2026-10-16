@@ -46,6 +46,50 @@ class ToolPermissionPolicyTest {
         assertFalse(ToolPermissionPolicy.canGrantAlways("ask_user", empty))
     }
 
+    @Test fun managementChangesAlwaysNeedOneExplicitApprovalAndCannotRunHeadless() {
+        val actions = mapOf(
+            "manage_assistants" to listOf("create", "update", "duplicate", "switch", "delete"),
+            "manage_app_settings" to listOf("set"),
+        )
+        actions.forEach { (name, mutations) -> mutations.forEach { action ->
+            val args = buildJsonObject { put("action", action) }
+            val tool = ToolPermissionPolicy.apply(Tool(name, "test", execute = { emptyList() }))
+            assertTrue("$name/$action", tool.needsApproval(args))
+            assertTrue("$name/$action", ToolPermissionPolicy.mandatoryConfirmation(name, args))
+            assertFalse(ToolPermissionPolicy.canGrantForChat(name, args))
+            assertFalse(ToolPermissionPolicy.canGrantAlways(name, args))
+            assertEquals("mandatory_confirmation", HeadlessToolPolicy.blockReason(name, args))
+        } }
+    }
+
+    @Test fun managementReadsRemainAvailableWithoutApprovalOrHeadlessBlock() {
+        val actions = mapOf(
+            "manage_assistants" to listOf("list", "get", "list_options"),
+            "manage_app_settings" to listOf("get", "list_sections"),
+        )
+        actions.forEach { (name, reads) -> reads.forEach { action ->
+            val args = buildJsonObject { put("action", action) }
+            val tool = ToolPermissionPolicy.apply(Tool(name, "test", execute = { emptyList() }))
+            assertFalse("$name/$action", tool.needsApproval(args))
+            assertFalse(ToolPermissionPolicy.mandatoryConfirmation(name, args))
+            assertNull(HeadlessToolPolicy.blockReason(name, args))
+        } }
+    }
+
+    @Test fun managementToolsCannotUseGlobalOrSavedAutomaticGrants() = runBlocking {
+        ToolApprovalTestStore(temp.newFolder()).use { fixture ->
+            val chat = Uuid.random()
+            try {
+                fixture.preferences.setYolo(true)
+                for (name in listOf("manage_assistants", "manage_app_settings")) {
+                    fixture.preferences.grantAlways(name)
+                    ToolApprovalAllowList.grantForChat(chat, name)
+                    assertFalse(name, resolveToolAutoApproval(fixture.preferences, chat, name, false))
+                }
+            } finally { ToolApprovalAllowList.clearChat(chat) }
+        }
+    }
+
     @Test fun everyProtectedRootCategoryRequiresExplicitConfirmation() {
         val tool = ToolPermissionPolicy.apply(Tool("root_exec", "test", execute = { emptyList() }))
         val commands = listOf("rm -rf /", "mkfs.ext4 /data/image", "dd if=x of=/dev/block/sda", "fastboot flashing unlock",

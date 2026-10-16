@@ -96,6 +96,18 @@ class LocalToolsRegistrationTest {
         }
     }
 
+    @Test fun managementToolsRegisterOnlyWhenEnabledAndHaveActionSensitiveApproval() = withLocalTools { localTools ->
+        val tools = localTools.getTools(listOf(LocalToolOption.ManageAssistants, LocalToolOption.ManageAppSettings))
+        assertEquals(listOf("manage_assistants", "manage_app_settings"), tools.map { it.name })
+        for (tool in tools) {
+            assertFalse(tool.needsApproval(Json.parseToJsonElement("""{"action":"get"}""")))
+            val action = if (tool.name == "manage_assistants") "create" else "set"
+            assertTrue(tool.needsApproval(Json.parseToJsonElement("""{"action":"$action"}""")))
+            assertTrue(ToolPermissionPolicy.registry.containsKey(tool.name))
+        }
+        assertTrue(Assistant().localTools.none { it in setOf(LocalToolOption.ManageAssistants, LocalToolOption.ManageAppSettings) })
+    }
+
     @Test fun existingToolsKeepTheirNamesWhenPackageFIsEnabled() = withLocalTools { localTools ->
         val options = listOf(LocalToolOption.Root, LocalToolOption.JavascriptEngine, LocalToolOption.TimeInfo,
             LocalToolOption.Clipboard, LocalToolOption.Tts, LocalToolOption.AskUser, LocalToolOption.ScreenTime,

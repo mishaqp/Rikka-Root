@@ -17,6 +17,8 @@ object ToolPermissionPolicy {
             tool.toolName != "ask_user"
 
     val registry: Map<String, String> = linkedMapOf(
+        "manage_assistants" to "управление ассистентами",
+        "manage_app_settings" to "настройки приложения",
         "browser_open" to "открытие страницы браузера",
         "browser_current_url" to "адрес страницы браузера",
         "browser_screenshot" to "снимок страницы браузера",
@@ -186,6 +188,7 @@ object ToolPermissionPolicy {
     )
 
     fun mandatoryConfirmation(name: String, input: JsonElement): Boolean {
+        if (isManagementTool(name)) return managementToolNeedsApproval(name, input)
         if (name in setOf("skill_install_from_url", "skill_install_from_text")) return true
         if (name == "ssh_forget_host_key") return true
         val args = input as? JsonObject
@@ -212,6 +215,7 @@ object ToolPermissionPolicy {
     }
 
     fun sideEffect(name: String, input: JsonElement): Boolean = when (name) {
+        "manage_assistants", "manage_app_settings" -> managementToolNeedsApproval(name, input)
         "clipboard_tool" -> ((input as? JsonObject)?.get("action") as? JsonPrimitive)?.contentOrNull != "read"
         else -> ToolApprovalDefaults.requiresApproval(name)
     }
@@ -239,6 +243,7 @@ object ToolPermissionPolicy {
             "Автоодобрение и «Всегда разрешать» не обходят подтверждение массового удаления защищённых каталогов, форматирования, записи в разделы, " +
             "изменения загрузчика, сброса устройства, отключения SELinux/проверки загрузки и remount рабочих разделов. " +
             "Сброс доверенного ключа SSH-сервера также всегда требует явного подтверждения. " +
+            "Создание, изменение, копирование, выбор и удаление ассистентов, а также изменение настроек приложения всегда требуют отдельного одобрения. " +
             "Подтверждения после веб-поиска возвращаются только при включённом переключателе «Спрашивать после веб-контента». " +
             "Запретный список не разбирает shell-обёртки (sh -c, eval) и содержимое скриптов.\n\n" +
             "Это опасная функция. Включайте, только если доверяете модели, конфигурации ассистента и своим запросам."

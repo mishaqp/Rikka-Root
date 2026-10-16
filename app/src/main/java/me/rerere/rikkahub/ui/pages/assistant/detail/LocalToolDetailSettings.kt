@@ -76,7 +76,8 @@ internal fun LocalToolDetailSettings(
                     FileLocalToolSettings(assistant, onUpdate, visibleOptions, onEnabledChange, controlsEnabled)
 
                 LocalToolOption.CostGuards, LocalToolOption.Reliability,
-                LocalToolOption.SubAgents, LocalToolOption.CronJobs ->
+                LocalToolOption.SubAgents, LocalToolOption.CronJobs,
+                LocalToolOption.ManageAssistants, LocalToolOption.ManageAppSettings ->
                     AgentLocalToolSettings(assistant, onUpdate, visibleOptions, onEnabledChange, controlsEnabled)
 
                 LocalToolOption.Termux, LocalToolOption.Ssh, LocalToolOption.McpControl,
@@ -90,6 +91,16 @@ internal fun LocalToolDetailSettings(
 
             val nav = LocalNavController.current
             when (option) {
+                LocalToolOption.ManageAssistants -> {
+                    TextButton(onClick = { nav.navigate(Screen.Assistant) }) {
+                        Text(stringResource(R.string.assistant_page_local_tools_manage_assistants_open))
+                    }
+                }
+                LocalToolOption.ManageAppSettings -> {
+                    TextButton(onClick = { nav.navigate(Screen.Setting) }) {
+                        Text(stringResource(R.string.assistant_page_local_tools_manage_app_settings_open))
+                    }
+                }
                 LocalToolOption.SkillImport, LocalToolOption.JsSkills -> {
                     TextButton(onClick = { nav.navigate(Screen.Skills) }) {
                         Text("Управление навыками")

@@ -119,6 +119,7 @@ class GenerationLoop(
         onAutoCompress: suspend (List<UIMessage>) -> List<UIMessage>? = { null },
         isToolAutoApproved: suspend (toolName: String, input: JsonElement) -> Boolean = { _, _ -> false },
         tokenBudget: TokenBudgetLedger? = null,
+        prepareToolApproval: (String, JsonElement) -> JsonElement = { _, input -> input },
         beforeModelRequest: suspend () -> Unit = {},
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
@@ -269,7 +270,11 @@ class GenerationLoop(
                         // Tool needs approval and state is Auto -> set to Pending
                         tool.approvalState is ToolApprovalState.Auto && toolDef != null && needsApproval(tool, toolDef) -> {
                             hasPendingApproval = true
-                            tool.copy(approvalState = ToolApprovalState.Pending)
+                            tool.copy(
+                                input = if (tool.toolName == "manage_app_settings")
+                                    prepareToolApproval(tool.toolName, tool.inputAsJson()).toString() else tool.input,
+                                approvalState = ToolApprovalState.Pending,
+                            )
                         }
                         // State is Pending -> keep waiting
                         tool.approvalState is ToolApprovalState.Pending -> {
@@ -383,7 +388,11 @@ class GenerationLoop(
                             if (tool.approvalState == ToolApprovalState.Auto && needsApproval(tool, toolDef)
                             ) {
                                 // Live revocation must also cover resumed/mixed batches.
-                                executedTools += tool.copy(approvalState = ToolApprovalState.Pending)
+                                executedTools += tool.copy(
+                                    input = if (tool.toolName == "manage_app_settings")
+                                        prepareToolApproval(tool.toolName, args).toString() else tool.input,
+                                    approvalState = ToolApprovalState.Pending,
+                                )
                                 return@forEach
                             }
                             Log.i(TAG, "generateText: executing tool ${toolDef.name}")

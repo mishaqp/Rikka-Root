@@ -63,6 +63,11 @@ class HeadlessRuntimeBindingsTest {
         assertNull(localOptionForHeadlessTool("mcp__untrusted__read"))
     }
 
+    @Test fun managementToolsRequireTheirOwnLiveFeatureSwitches() {
+        assertEquals(LocalToolOption.ManageAssistants, localOptionForHeadlessTool("manage_assistants"))
+        assertEquals(LocalToolOption.ManageAppSettings, localOptionForHeadlessTool("manage_app_settings"))
+    }
+
     @Test fun remoteMcpUsesServerIdScopedNamesAndLiveConversationConfiguration() {
         val server = McpServerConfig.StreamableHTTPServer(commonOptions = McpCommonOptions(
             name = "shared", tools = listOf(McpTool(name = "read"))))

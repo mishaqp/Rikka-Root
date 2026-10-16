@@ -26,7 +26,7 @@ internal suspend fun resolveToolAutoApproval(
     webContentSeen: Boolean,
     workspaceNeedsApproval: suspend () -> Boolean = { true },
 ): Boolean {
-    if (toolName == "ask_user") return false
+    if (toolName == "ask_user" || isManagementTool(toolName)) return false
     if (preferences.currentAskAfterWebContent() && webContentSeen) return false
     return preferences.currentYolo() ||
         ToolApprovalAllowList.isAllowedForChat(conversationId, toolName) ||

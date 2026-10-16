@@ -23,6 +23,8 @@
     <string name="chat_timeline_tool_browser_type" translatable="false">Ввод на странице</string>
     <string name="chat_timeline_tool_browser_wait_for" translatable="false">Ожидание содержимого страницы</string>
     <string name="chat_timeline_tool_check_token_usage" translatable="false">Расход токенов текущего чата</string>
+    <string name="chat_timeline_tool_manage_assistants" translatable="false">Управление ассистентами</string>
+    <string name="chat_timeline_tool_manage_app_settings" translatable="false">Настройки приложения</string>
     <string name="chat_timeline_tool_mcp_add" translatable="false">Добавление сервера MCP</string>
     <string name="chat_timeline_tool_mcp_delete" translatable="false">Удаление сервера MCP</string>
     <string name="chat_timeline_tool_mcp_get" translatable="false">Чтение конфигурации MCP</string>

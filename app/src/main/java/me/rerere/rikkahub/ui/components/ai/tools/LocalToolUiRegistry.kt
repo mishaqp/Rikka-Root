@@ -109,6 +109,8 @@ object LocalToolUiRegistry {
         tool(Category.AgentAutomation, LocalToolOption.AskUser, R.string.assistant_page_local_tools_ask_user_title, R.string.assistant_page_local_tools_ask_user_desc, HugeIcons.BubbleChatQuestion),
         tool(Category.AgentAutomation, LocalToolOption.CostGuards, R.string.agent_tools_cost_title, R.string.agent_tools_cost_desc, HugeIcons.MoneyBag02),
         tool(Category.AgentAutomation, LocalToolOption.Reliability, R.string.agent_tools_reliability_title, R.string.agent_tools_reliability_desc, HugeIcons.Bug01),
+        tool(Category.AgentAutomation, LocalToolOption.ManageAssistants, R.string.assistant_page_local_tools_manage_assistants_title, R.string.assistant_page_local_tools_manage_assistants_desc, HugeIcons.AiBrain01),
+        tool(Category.AgentAutomation, LocalToolOption.ManageAppSettings, R.string.assistant_page_local_tools_manage_app_settings_title, R.string.assistant_page_local_tools_manage_app_settings_desc, HugeIcons.Settings03),
 
         tool(Category.RootTerminal, LocalToolOption.Root, R.string.assistant_page_local_tools_root_title, R.string.assistant_page_local_tools_root_desc, HugeIcons.Bash, requiresRoot = true),
         tool(Category.RootTerminal, LocalToolOption.Termux, R.string.assistant_page_local_tools_termux_title, R.string.shell_tools_termux_desc, HugeIcons.ComputerTerminal01),

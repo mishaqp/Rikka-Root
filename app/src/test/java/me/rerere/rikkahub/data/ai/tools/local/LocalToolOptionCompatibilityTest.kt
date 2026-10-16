@@ -14,6 +14,10 @@ class LocalToolOptionCompatibilityTest {
         "mcp_control" to LocalToolOption.McpControl,
         "external_automation" to LocalToolOption.ExternalAutomation,
     )
+    private val configurationOptions = linkedMapOf(
+        "manage_assistants" to LocalToolOption.ManageAssistants,
+        "manage_app_settings" to LocalToolOption.ManageAppSettings,
+    )
 
     @Test fun agentBackupOptionsRoundTripWithoutRenaming() {
         for (name in agentNames) {
@@ -44,6 +48,25 @@ class LocalToolOptionCompatibilityTest {
     @Test fun packageFIsOffForNewAndRestoredAssistants() {
         for (assistant in listOf(Assistant(), Json.decodeFromString<Assistant>("{}"))) {
             assertTrue(assistant.localTools.none { it in packageFOptions.values })
+            assertEquals(listOf(LocalToolOption.TimeInfo), assistant.localTools)
+        }
+    }
+
+    @Test fun configurationToolsKeepTheirBackupNames() {
+        configurationOptions.forEach { (name, expected) ->
+            val encoded = "{\"type\":\"$name\"}"
+            assertEquals(expected, Json.decodeFromString<LocalToolOption>(encoded))
+            assertEquals(encoded, Json.encodeToString<LocalToolOption>(expected))
+        }
+        val names = agentNames + packageFOptions.keys + configurationOptions.keys
+        val backup = names.joinToString(prefix = "[", postfix = "]") { "{\"type\":\"$it\"}" }
+        assertEquals(names.map { Json.decodeFromString<LocalToolOption>("{\"type\":\"$it\"}") },
+            Json.decodeFromString<List<LocalToolOption>>(backup))
+    }
+
+    @Test fun configurationToolsAreOffForNewAndLegacyAssistants() {
+        for (assistant in listOf(Assistant(), Json.decodeFromString<Assistant>("{}"))) {
+            assertTrue(assistant.localTools.none { it in configurationOptions.values })
             assertEquals(listOf(LocalToolOption.TimeInfo), assistant.localTools)
         }
     }

@@ -19,6 +19,8 @@ import kotlinx.coroutines.Job
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.ai.tools.prepareManagementToolApproval
+import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.ui.components.message.ChatMessageToolStep
 import me.rerere.rikkahub.ui.components.message.ToolApprovalAction
 import me.rerere.rikkahub.ui.components.message.presentToolHeadline
@@ -45,6 +47,31 @@ class PendingToolApprovalLayoutTest internal constructor(
     private val width: Int,
 ) {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun appSettingApprovalShowsTheExactBeforeAndAfterValues() {
+        val input = prepareManagementToolApproval("manage_app_settings",
+            kotlinx.serialization.json.Json.parseToJsonElement("""{"action":"set","key":"display.showTokenUsage","value":false}"""),
+            Settings())
+        val tool = UIMessagePart.Tool("settings-approval", "manage_app_settings", input.toString(),
+            approvalState = ToolApprovalState.Pending)
+        compose.setContent {
+            ScreenshotTheme(theme, fontScale) {
+                Surface {
+                    Box(Modifier.width(width.dp)) {
+                        ChainOfThought(steps = listOf(tool)) {
+                            ChatMessageToolStep(it, onToolApproval = { _, _, _, _, _ -> Job().apply { complete() } })
+                        }
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
+        val preview = compose.onNodeWithTag("chat_management_approval:settings-approval", useUnmergedTree = true)
+            .fetchSemanticsNode()
+        assertTrue(preview.boundsInRoot.width > 0f && preview.boundsInRoot.height > 0f)
+        compose.onNodeWithText("Статистика токенов и контекста: Включено → Выключено", useUnmergedTree = true)
+            .fetchSemanticsNode()
+    }
 
     @Test fun pendingToolIdentityAndWrappedActionsRemainVisibleInsideCard() {
         val tool = UIMessagePart.Tool(

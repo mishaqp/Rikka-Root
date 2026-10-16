@@ -73,6 +73,8 @@ import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.ui.components.DotLoading
 import me.rerere.rikkahub.data.ai.tools.ToolPermissionPolicy
+import me.rerere.rikkahub.data.ai.tools.isManagementTool
+import me.rerere.rikkahub.data.ai.tools.managementToolApprovalDescription
 import me.rerere.rikkahub.service.ChatService.ApprovalScope
 import me.rerere.ai.ui.ServerToolStatus
 
@@ -188,7 +190,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     val context = remember(tool, loading) {
         ToolUIContext(
             tool = tool,
-            arguments = tool.inputAsJson(),
+            arguments = if (isManagementTool(tool.toolName)) JsonObject(emptyMap()) else tool.inputAsJson(),
             content = if (tool.isExecuted) outputJson ?: JsonObject(emptyMap()) else null,
             loading = loading,
         )
@@ -220,6 +222,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         me.rerere.rikkahub.workflow.tools.WorkflowApprovalRenderer.isWorkflowTool(tool.toolName)) runCatching {
         me.rerere.rikkahub.workflow.tools.WorkflowApprovalRenderer.renderPlain(tool.toolName, tool.input)
     }.getOrNull() else null
+    val managementPreview = if (isPending) managementToolApprovalDescription(tool.toolName, tool.inputAsJson()) else null
     val resultText = if (!tool.hasExecutionCheckpoint()) tool.output
         .filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }.takeIf { it.isNotBlank() } else null
     val resultPreview = remember(tool, outputJson) {
@@ -230,7 +233,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     val ownPreview = resultPreview != null && (resultPreview !is ToolResultPreview.Summary ||
         outputUnparsable || !renderer.hasSummary(context) ||
         (outputJson as? JsonObject)?.let { toolWarningMessage(tool.toolName, it) } != null)
-    val pendingPreview = if (isPending && !useCustomMcpPreview && workflowPreview == null) {
+    val pendingPreview = if (isPending && !useCustomMcpPreview && workflowPreview == null && !isManagementTool(tool.toolName)) {
         ((tool.inputAsJson() as? JsonObject)?.get("command") as? JsonPrimitive)?.contentOrNull
             ?: tool.input.takeIf { it.isNotBlank() }?.let {
                 presentToolDetails(tool.toolName, tool.inputAsJson(), isResult = false)
@@ -279,6 +282,11 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                         }
                     }
                     if (!workflowPreview.isNullOrBlank()) Text(workflowPreview, style = MaterialTheme.typography.labelSmall)
+                    if (!managementPreview.isNullOrBlank()) Text(
+                        managementPreview,
+                        modifier = Modifier.testTag("chat_management_approval:${tool.toolCallId}"),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
                     if (!chatScopeAllowed) Text(
                         "Этот инструмент всегда требует отдельного подтверждения.",
                         color = MaterialTheme.colorScheme.error,
@@ -421,6 +429,10 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             workflowPreview, modifier = Modifier.padding(horizontal = 16.dp),
                             style = MaterialTheme.typography.bodySmall,
                         )
+                        if (!managementPreview.isNullOrBlank()) Text(
+                            managementPreview, modifier = Modifier.padding(horizontal = 16.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                         FlowRow(
                             modifier = Modifier.padding(horizontal = 12.dp),
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -442,7 +454,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                     }
                     // MCP controls can carry secrets in arguments; their pending sheet shows only
                     // the existing redacted approval preview and scoped actions.
-                    if (!isPending || !useCustomMcpPreview) {
+                    if (!isPending || (!useCustomMcpPreview && !isManagementTool(tool.toolName))) {
                         if (resultPreview is ToolResultPreview.Error) DefaultToolPreview(context = context)
                         else if (outputUnparsable) DefaultToolPreview(context = context)
                         else renderer.Preview(context = context, onDismissRequest = { showResult = false })
