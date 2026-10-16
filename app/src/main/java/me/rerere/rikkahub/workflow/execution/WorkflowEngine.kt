@@ -88,6 +88,7 @@ class WorkflowEngine(
      * call, ignored by the trigger callback path.
      */
     suspend fun fire(workflowId: String): FireOutcome = withContext(Dispatchers.IO) {
+        repository.recoverInterrupted()
         val lock = lockFor(workflowId)
         lock.withLock { fireLocked(workflowId) }
     }
@@ -160,20 +161,23 @@ class WorkflowEngine(
             }
         }
 
+        // Commit intent and quota before effects: process death cannot erase this attempt.
+        val startedRunId = withContext(NonCancellable) { repository.beginRun(workflowId, firedAtMs) }
         // Execute the action sequence. ActionRunner enforces per-action timeout + HARDLINE.
         val result = try {
+            currentCoroutineContext().ensureActive()
             actionRunner.run(def)
         } catch (cancelled: CancellationException) {
             // Actions may already have effects. Preserve this attempt for history,
             // cooldown and daily limits without swallowing caller cancellation.
             withContext(NonCancellable) {
                 persistAndReturn(workflowId, firedAtMs, started, WorkflowRunStatus.FAILED,
-                    "execution_interrupted", "")
+                    "execution_interrupted", "", startedRunId)
             }
             throw cancelled
         }
         val status = if (result.success) WorkflowRunStatus.SUCCESS else WorkflowRunStatus.FAILED
-        return persistAndReturn(workflowId, firedAtMs, started, status, result.error, result.summary)
+        return persistAndReturn(workflowId, firedAtMs, started, status, result.error, result.summary, startedRunId)
     }
 
     /**
@@ -195,6 +199,7 @@ class WorkflowEngine(
         status: WorkflowRunStatus,
         error: String?,
         summary: String,
+        startedRunId: Long? = null,
     ): FireOutcome {
         val durationMs = (System.nanoTime() - startedNanos) / 1_000_000L
         // Once actions have returned, cancellation must not split history insertion
@@ -207,6 +212,7 @@ class WorkflowEngine(
                     status = status,
                     durationMs = durationMs,
                     errorMessage = error,
+                    startedRunId = startedRunId,
                 )
             }.onFailure { Log.w(TAG, "recordFire failed for $workflowId", it) }
         }

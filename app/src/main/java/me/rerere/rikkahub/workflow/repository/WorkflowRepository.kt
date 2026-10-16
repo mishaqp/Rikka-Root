@@ -1,5 +1,8 @@
 package me.rerere.rikkahub.workflow.repository
 
+import androidx.room.withTransaction
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import me.rerere.rikkahub.workflow.db.WorkflowDao
@@ -30,8 +33,32 @@ import java.time.ZoneId
 class WorkflowRepository(
     private val workflowDao: WorkflowDao,
     private val workflowRunDao: WorkflowRunDao,
+    private val database: me.rerere.rikkahub.workflow.db.WorkflowDatabase? = null,
     private val sanitizeDefinition: (WorkflowDefinition) -> WorkflowDefinition,
 ) {
+
+    private val recoveryMutex = Mutex()
+    private var recovered = false
+
+    private suspend fun <T> transaction(block: suspend () -> T): T =
+        if (database == null) block() else database.withTransaction { block() }
+
+    /** Once per process, before scheduling or new effects; never replays interrupted actions. */
+    suspend fun recoverInterrupted(nowMs: Long = System.currentTimeMillis()) = recoveryMutex.withLock {
+        if (recovered) return@withLock
+        for (run in workflowRunDao.running()) {
+            recordFire(run.workflowId, run.firedAtMs, WorkflowRunStatus.FAILED,
+                (nowMs - run.firedAtMs).coerceAtLeast(0), "process_interrupted", startedRunId = run.rowId)
+        }
+        recovered = true
+    }
+
+    suspend fun beginRun(workflowId: String, firedAtMs: Long): Long = transaction {
+        val rowId = workflowRunDao.insertStarted(WorkflowRunEntity(workflowId = workflowId,
+            firedAtMs = firedAtMs, status = WorkflowRunStatus.RUNNING.name, durationMs = 0))
+        projectFire(workflowId, firedAtMs, WorkflowRunStatus.RUNNING, null, ZoneId.systemDefault(), countsTowardCap = true)
+        rowId
+    }
 
     data class Loaded(val entity: WorkflowEntity, val definition: WorkflowDefinition)
 
@@ -144,7 +171,8 @@ class WorkflowRepository(
         durationMs: Long,
         errorMessage: String?,
         zoneId: ZoneId = ZoneId.systemDefault(),
-    ) {
+        startedRunId: Long? = null,
+    ) = transaction {
         val truncatedErr = errorMessage?.let(me.rerere.rikkahub.reliability.SecretRedactor::redact)?.take(WorkflowConstants.MAX_ERROR_LENGTH)
         workflowRunDao.insert(WorkflowRunEntity(
             workflowId = workflowId,
@@ -153,9 +181,20 @@ class WorkflowRepository(
             durationMs = durationMs,
             errorMessage = truncatedErr,
         ))
-        // Daily-cap counter: only counted if the fire was real (SUCCESS or FAILED). Skip
-        // statuses don't count, per spec.
-        val countsTowardCap = status == WorkflowRunStatus.SUCCESS || status == WorkflowRunStatus.FAILED
+        if (startedRunId != null) workflowRunDao.deleteStarted(startedRunId)
+        val countsTowardCap = startedRunId == null && (status == WorkflowRunStatus.SUCCESS || status == WorkflowRunStatus.FAILED)
+        projectFire(workflowId, firedAtMs, status, truncatedErr, zoneId, countsTowardCap)
+        workflowRunDao.trim(workflowId, WorkflowConstants.MAX_RUNS_HISTORY)
+    }
+
+    private suspend fun projectFire(
+        workflowId: String,
+        firedAtMs: Long,
+        status: WorkflowRunStatus,
+        truncatedErr: String?,
+        zoneId: ZoneId,
+        countsTowardCap: Boolean,
+    ) {
         val today = LocalDate.now(zoneId).toString()  // "yyyy-MM-dd"
         val current = workflowDao.getById(workflowId)
         val newCount = when {
@@ -171,7 +210,6 @@ class WorkflowRepository(
             runsTodayCount = newCount,
             runsTodayDate = today,
         )
-        workflowRunDao.trim(workflowId, WorkflowConstants.MAX_RUNS_HISTORY)
     }
 
     /**

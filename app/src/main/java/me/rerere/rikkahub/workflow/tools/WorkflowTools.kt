@@ -463,7 +463,10 @@ private fun errorResponse(code: String, detail: String): List<UIMessagePart> =
         })
     }.toString()))
 
-private fun workflowRunMessage(status: String, error: String?): String {
+internal fun workflowRunMessage(status: String, error: String?): String {
+    if (error == "process_interrupted") {
+        return "Прервано: приложение было закрыто. Часть действий могла выполниться. Проверьте результат и запустите сценарий вручную."
+    }
     if (error?.contains("execution_interrupted") == true) {
         return "Выполнение сценария остановлено. Часть действий могла выполниться. Проверьте состояние перед повторным запуском; автоматически не повторяйте действия."
     }
@@ -471,6 +474,7 @@ private fun workflowRunMessage(status: String, error: String?): String {
         return "Часть действий могла выполниться; результат неизвестен. Проверьте состояние перед новым запуском; автоматически не повторяйте действия."
     }
     return when (status) {
+        "RUNNING" -> "Сценарий выполняется. Дождитесь завершения."
         "SKIPPED_CONDITIONS" -> "Условия сценария не выполнены. Проверьте conditions и состояние устройства."
         "SKIPPED_COOLDOWN" -> "С момента прошлого запуска прошло мало времени. Дождитесь окончания cooldown_seconds."
         "SKIPPED_DAILY_CAP" -> "Достигнут суточный лимит сценария. Дождитесь следующего дня или проверьте max_runs_per_day."

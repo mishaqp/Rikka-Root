@@ -78,6 +78,7 @@ class TriggerRegistry(
         if (started) return
         started = true
         appScope.launch(Dispatchers.IO) {
+            workflowRepository.recoverInterrupted()
             workflowRepository.observeAll()
                 .map { loaded -> loaded.filter { it.entity.enabled }.map {
                     it.definition.copy(enabled = true, updatedAtMs = it.entity.updatedAtMs)

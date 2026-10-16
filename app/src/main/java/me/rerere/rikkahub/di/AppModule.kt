@@ -62,8 +62,12 @@ val appModule = module {
     single { me.rerere.rikkahub.data.repository.SshHostRepository(
         get<me.rerere.rikkahub.data.db.AppDatabase>().sshHostDao(), get(), get()) }
     single { me.rerere.rikkahub.data.preferences.TermuxPreferences(get()) }
-    single { SubAgentRegistry() }
+    single { SubAgentRegistry(java.io.File(get<android.content.Context>().noBackupFilesDir, "subagent-runs"), get<CronPayloadCipher>()) }
     single<CronPayloadCipher> { AndroidCronPayloadCipher() }
+    single {
+        val context = get<android.content.Context>().applicationContext
+        me.rerere.rikkahub.service.MessageQueueStore({ java.io.File(context.noBackupFilesDir, "pending-messages") }, get<CronPayloadCipher>())
+    }
     single { ScheduledJobRepository(get(), get()) }
     single { ScheduledJobRunRepository(get()) }
     single { CronJobScheduler(get(), get(), get(), get()) }
@@ -158,6 +162,7 @@ val appModule = module {
             toolApprovalPreferences = get(),
             tokenBudgetStore = get(),
             subAgentRegistry = get(),
+            messageQueueStore = get(),
         )
     }
 

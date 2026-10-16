@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -26,6 +27,7 @@ data class RootCommandLogEntry(
     val command: String,
     val exitCode: Int? = null,
     val status: String = "running",
+    @SerialName("process_id") val processId: String? = null,
 )
 
 /**
@@ -100,6 +102,7 @@ class RootAccessStore(private val directory: File) {
             assistantId = assistantId,
             timestampMs = System.currentTimeMillis(),
             command = RootCommandRedactor.redact(command),
+            processId = PROCESS_TOKEN,
         )
         val next = (history.value + entry).takeLast(MAX_ENTRIES)
         withContext(Dispatchers.IO) { writeState(StoredRootAccess(permissionState.value, next, webConversations.value)) }
@@ -120,8 +123,13 @@ class RootAccessStore(private val directory: File) {
         if (!file.isFile || file.length() > MAX_FILE_BYTES) return@runCatching StoredRootAccess()
         val state = json.decodeFromString<StoredRootAccess>(file.readText())
         state.copy(entries = state.entries.takeLast(MAX_ENTRIES).map {
-            it.copy(command = RootCommandRedactor.redact(it.command), status = it.status.takeIf { status -> status in STATUSES } ?: "failed")
-        })
+            val status = if (it.status == "running" && it.processId != PROCESS_TOKEN) "process_interrupted"
+                else it.status.takeIf { status -> status in STATUSES } ?: "failed"
+            it.copy(command = RootCommandRedactor.redact(it.command), status = status)
+        }).also { recovered ->
+            // Reading another instance in this process must not interrupt its real command.
+            if (recovered != state) runCatching { writeState(recovered) }
+        }
     }.getOrDefault(StoredRootAccess())
 
     private fun writeState(state: StoredRootAccess) {
@@ -154,9 +162,10 @@ class RootAccessStore(private val directory: File) {
     }
 
     private companion object {
+        val PROCESS_TOKEN = UUID.randomUUID().toString()
         const val MAX_ENTRIES = 200
         const val MAX_FILE_BYTES = 1_048_576L
-        val STATUSES = setOf("running", "completed", "cancelled", "command_timeout", "root_approval_required",
+        val STATUSES = setOf("process_interrupted", "running", "completed", "cancelled", "command_timeout", "root_approval_required",
             "su_not_available", "root_not_granted", "root_verification_timeout", "root_cleanup_unavailable", "exec_failed", "failed")
     }
 }
@@ -174,3 +183,17 @@ private data class StoredRootAccess(
     val entries: List<RootCommandLogEntry> = emptyList(),
     val webContentConversations: Set<String> = emptySet(),
 )
+
+/** Stable journal codes remain machine-readable; only the visible label is translated. */
+fun rootCommandStatusMessage(status: String): String = when (status) {
+    "running" -> "Выполняется"
+    "completed" -> "Завершено"
+    "cancelled" -> "Остановлено пользователем"
+    "process_interrupted" -> "Прервано: приложение было закрыто. Проверьте результат перед ручным запуском."
+    "command_timeout" -> "Истекло время ожидания. Проверьте результат команды."
+    "root_approval_required", "root_not_granted" -> "Доступ root не выдан. Разрешите его в менеджере root."
+    "su_not_available" -> "Root недоступен на этом устройстве."
+    "root_verification_timeout" -> "Не удалось дождаться ответа менеджера root. Повторите проверку доступа."
+    "root_cleanup_unavailable" -> "Остановка команды не подтверждена. Проверьте процессы на устройстве."
+    else -> "Команда завершилась с ошибкой. Проверьте её вывод перед повторным запуском."
+}

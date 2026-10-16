@@ -1265,16 +1265,25 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         showStage2(settings, DisplaySetting(autoCollapseToolSteps = false), listOf(previews))
         listOf("Root: ls /sdcard", "Termux: echo привет", "SSH home: cat /etc/missing",
             "Файл: записан test.txt", "Браузер: открыта example.com").forEach { title ->
+            // Large text can make this five-tool card taller than the measured
+            // viewport. Exercise the user's scroll rather than text below the input.
+            mainChatList().performScrollToNode(hasText(title))
             compose.onNodeWithText(title).assertIsDisplayed()
         }
-        compose.onNodeWithText("Termux не разрешает запуск из фона — дайте Termux разрешение «Поверх других приложений»")
-            .assertIsDisplayed()
+        val termuxWarning = "Termux не разрешает запуск из фона — дайте Termux разрешение «Поверх других приложений»"
+        mainChatList().performScrollToNode(hasText(termuxWarning))
+        compose.onNodeWithText(termuxWarning).assertIsDisplayed()
+        mainChatList().performScrollToNode(hasText("код выхода 1"))
         compose.onNodeWithText("код выхода 1").assertIsDisplayed()
         val rootLayouts = mutableListOf<TextLayoutResult>()
+        mainChatList().performScrollToNode(hasTestTag("chat_timeline_tool_preview:preview_root"))
         compose.onNodeWithTag("chat_timeline_tool_preview:preview_root")
+            .assertIsDisplayed()
             .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(rootLayouts) }
         assertEquals("Command output keeps real line breaks up to four lines", 4, rootLayouts.single().lineCount)
         compose.onAllNodesWithText("{", substring = true).assertCountEquals(0)
+        mainChatList().performScrollToIndex(0)
+        compose.waitForIdle()
         capture("timeline_tool_previews")
     }
 

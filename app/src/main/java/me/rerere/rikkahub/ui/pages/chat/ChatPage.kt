@@ -356,7 +356,7 @@ private fun ChatPageContent(
                 }
             },
             bottomBar = {
-                Column {
+                Column(Modifier.background(MaterialTheme.colorScheme.background)) {
                     if (conversation.historyLoadState == HistoryLoadState.COMPLETE) {
                         Box(Modifier.fillMaxWidth().animateContentSize(
                             animationSpec = tween(180, easing = CubicBezierEasing(0.215f, 0.61f, 0.355f, 1f)),

@@ -230,7 +230,7 @@ fun WorkflowDetailScreen(
                         for (r in history) {
                             val ago = formatRelativeAgo(r.firedAtMs, nowMs, rel)
                             val line = "$ago — ${workflowStatusLabel(r.status.name)}" +
-                                (r.errorMessage?.let { " — ${it.take(60)}" } ?: "")
+                                (r.errorMessage?.let { " — ${me.rerere.rikkahub.workflow.tools.workflowRunMessage(r.status.name, it)}" } ?: "")
                             Text(line, style = MaterialTheme.typography.bodySmall)
                         }
                     }

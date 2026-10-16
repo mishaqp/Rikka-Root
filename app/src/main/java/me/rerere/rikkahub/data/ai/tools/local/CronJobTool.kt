@@ -43,7 +43,8 @@ private fun scheduleJobMessage(code: String): String = when (code) {
     "stale_revision", "run_already_claimed", "concurrent_run" -> "Запуск устарел или уже выполняется. Дождитесь завершения и проверьте историю задания."
     "model_unavailable", "unknown_or_ambiguous_model", "unknown_owner" -> "Ассистент или модель задания недоступны. Проверьте настройки текущего чата и создайте задание заново."
     "root_command_blocked", "web_content_blocked" -> "Действие задания заблокировано проверкой безопасности. Проверьте команду и источники данных задания."
-    "deadline_exceeded", "command_timeout", "execution_cancelled", "process_interrupted", "execution_interrupted", "root_cleanup_unconfirmed", "root_execution_indeterminate", "tool_result_indeterminate" -> "Выполнение прервано; результат действий может быть неполным. Проверьте его на устройстве перед повторным запуском."
+    "process_interrupted" -> "Прервано: приложение было закрыто. Часть действий могла выполниться. Проверьте результат и запустите задание вручную."
+    "deadline_exceeded", "command_timeout", "execution_cancelled", "execution_interrupted", "root_cleanup_unconfirmed", "root_execution_indeterminate", "tool_result_indeterminate" -> "Выполнение прервано; результат действий может быть неполным. Проверьте его на устройстве перед повторным запуском."
     else -> "Не удалось выполнить операцию с заданием. Проверьте историю, параметры и доступность инструментов, затем повторите вызов."
 }
 

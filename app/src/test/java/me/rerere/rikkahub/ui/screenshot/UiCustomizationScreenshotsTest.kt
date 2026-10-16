@@ -3,10 +3,13 @@ package me.rerere.rikkahub.ui.screenshot
 import android.app.Application
 import android.os.Looper
 import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -14,6 +17,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
@@ -71,6 +75,7 @@ import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.util.concurrent.TimeUnit
+import kotlin.math.roundToInt
 import kotlin.uuid.Uuid
 
 internal data class UiCustomizationScreenshotScene(
@@ -416,8 +421,10 @@ class UiCustomizationScreenshotsTest internal constructor(
                     else "Начнём с прогулки по набережной. Затем зайдём в музей и оставим время на обед.\n\nВечером можно вернуться через парк и посмотреть закат.")),
             )), selectIndex = 0)
         })
+        var composerBackground = Color.Unspecified
         compose.setContent {
             ScreenshotTheme(theme, fontScale) {
+                composerBackground = MaterialTheme.colorScheme.background
                 CompositionLocalProvider(LocalSettings provides settings) {
                     Surface(Modifier.requiredSize(widthDp.dp, 891.dp).testTag("ui_customization")) { fixture.Content() }
                 }
@@ -429,11 +436,22 @@ class UiCustomizationScreenshotsTest internal constructor(
         val bar = compose.onNodeWithTag("chat_header_bar").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val identity = compose.onNodeWithTag("chat_header_title_line").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val timeline = compose.onNodeWithTag("chat_list_timeline").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val root = compose.onNodeWithTag("ui_customization").fetchSemanticsNode().boundsInRoot
+        val composerPanel = compose.onNodeWithTag("chat_composer_panel").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val composer = compose.onNodeWithTag("chat_composer").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         assertEquals("Fixed switcher keeps its 56dp row", 56f, bar.height, .5f)
         assertEquals("Conversation/model identity stays immediately below switcher", bar.bottom, identity.top, .5f)
         assertEquals("Identity keeps the compact separate 22dp row", 22f, identity.height, .5f)
         assertEquals("Messages scroll beneath header from viewport top", 0f, timeline.top, .5f)
-        assertEquals("Messages scroll beneath composer to viewport bottom", 891f, timeline.bottom, .5f)
+        // This scene disables navigation. The measured input panel, including its
+        // outer padding, is the exact lower edge of the scrollable message viewport.
+        compose.onNodeWithTag("chat_navigation_dock").assertDoesNotExist()
+        assertEquals("Messages stop exactly above the measured composer panel", composerPanel.top, timeline.bottom, .5f)
+        assertEquals("The composer panel covers the full viewport width", root.left, composerPanel.left, .5f)
+        assertEquals("The composer panel covers the full viewport width", root.right, composerPanel.right, .5f)
+        assertEquals("The composer panel reaches the viewport bottom", root.bottom, composerPanel.bottom, .5f)
+        assertTrue("The input bubble stays entirely inside its opaque panel", composer.left >= composerPanel.left &&
+            composer.right <= composerPanel.right && composer.top >= composerPanel.top && composer.bottom <= composerPanel.bottom)
         if (settings.displaySetting.chatBackgroundEnabled) {
             compose.onNodeWithTag("chat_background_wallpaper").assertIsDisplayed()
             compose.onNodeWithTag("chat_background_mask").assertIsDisplayed()
@@ -443,6 +461,14 @@ class UiCustomizationScreenshotsTest internal constructor(
         }
         compose.onNodeWithTag("chat_header_model").assertIsDisplayed()
         compose.onNodeWithContentDescription(RuntimeEnvironment.getApplication().getString(R.string.chat_header_browser)).assertIsDisplayed()
+        val pixels = compose.onNodeWithTag("ui_customization").captureToImage().toPixelMap()
+        // Sample the panel margin outside the rounded bubble: wallpaper or text
+        // behind the input must not bleed into any of the theme/font/width cases.
+        val panelPixel = pixels[1, (composerPanel.center.y - root.top).roundToInt()]
+        assertEquals("The composer panel remains opaque", 1f, panelPixel.alpha, .001f)
+        assertEquals("The composer panel hides the wallpaper and messages", composerBackground.red, panelPixel.red, .02f)
+        assertEquals(composerBackground.green, panelPixel.green, .02f)
+        assertEquals(composerBackground.blue, panelPixel.blue, .02f)
         capture(scene.name)
         compose.onNodeWithContentDescription(RuntimeEnvironment.getApplication().getString(R.string.chat_header_browser)).performClick()
         compose.runOnIdle {

@@ -416,6 +416,24 @@ class ConversationRepository(
         } else null
     }
 
+    /** Startup-only prefilter for old result cards from versions without a recovery journal. */
+    internal suspend fun findInterruptedBackgroundChats(): Set<Uuid> = withContext(Dispatchers.IO) {
+        val names = listOf("workspace_background_start", "workspace_background_list", "workspace_background_output",
+            "workspace_background_stop", "subagent_dispatch", "subagent_list", "subagent_get")
+        val toolFields = names.map { JsonInstant.encodeToString("toolName") + ":" + JsonInstant.encodeToString(it) }
+        // The native result JSON is nested inside UIMessagePart.Text, so its quotes are escaped.
+        val states = listOf("""\"running\":true""", """\"running\": true""",
+            """\"status\":\"RUNNING\"""", """\"status\": \"RUNNING\"""",
+            """\"status\":\"PENDING\"""", """\"status\": \"PENDING\"""")
+        val toolsWhere = toolFields.joinToString(" OR ") { "instr(messages, ?) > 0" }
+        val statesWhere = states.joinToString(" OR ") { "instr(messages, ?) > 0" }
+        val query = SimpleSQLiteQuery("SELECT DISTINCT conversation_id FROM message_node WHERE ($toolsWhere) AND ($statesWhere)",
+            (toolFields + states).toTypedArray())
+        database.openHelper.readableDatabase.query(query).use { cursor ->
+            buildSet { while (cursor.moveToNext()) runCatching { Uuid.parse(cursor.getString(0)) }.getOrNull()?.let(::add) }
+        }
+    }
+
     suspend fun existsConversationById(uuid: Uuid): Boolean {
         return conversationDAO.existsById(uuid.toString())
     }
@@ -459,6 +477,32 @@ class ConversationRepository(
                 attachmentReferences.conversationWritten(safeConversation.id)
             }
             messageFtsManager.indexConversation(safeConversation)
+        }
+    }
+
+    /** Streaming checkpoint: keep the existing rows and serialize only changed nodes; index at final save. */
+    internal suspend fun checkpointGeneratedNodes(conversation: Conversation, previousNodes: List<MessageNode>?) = withContext(Dispatchers.IO) {
+        requireWritableHistory(conversation)
+        val safe = sanitizeSshConversation(conversation, sshToolSecrets, mcpSecretSanitizer)
+        val previous = previousNodes.orEmpty().withIndex().associateBy { it.value.id }
+        val retainedIds = safe.messageNodes.mapTo(hashSetOf()) { it.id }
+        attachmentReferences.withFileReservation(safe.files.map { it.toString() }) {
+            database.withTransaction {
+                conversationDAO.update(conversationToConversationEntity(safe))
+                if (previousNodes == null) {
+                    // The first chunk can include repairs not yet committed to Room. Replace
+                    // those rows transactionally, but defer the derived search index to final save.
+                    messageNodeDAO.deleteByConversation(safe.id.toString())
+                } else for (removed in previousNodes) if (removed.id !in retainedIds) messageNodeDAO.deleteById(removed.id.toString())
+                val changed = safe.messageNodes.mapIndexedNotNull { index, node ->
+                    val old = previous[node.id]
+                    if (old?.index == index && old.value == node) null else MessageNodeEntity(
+                        id = node.id.toString(), conversationId = safe.id.toString(), nodeIndex = index,
+                        messages = JsonInstant.encodeToString(node.messages), selectIndex = node.selectIndex)
+                }
+                if (changed.isNotEmpty()) messageNodeDAO.insertAll(changed)
+                attachmentReferences.conversationWritten(safe.id)
+            }
         }
     }
 

@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
@@ -56,6 +58,8 @@ import me.rerere.rikkahub.ui.hooks.CustomTtsState
 import me.rerere.rikkahub.ui.screenshot.ChatBeforeFixture
 import me.rerere.rikkahub.ui.screenshot.ScreenshotFixtures
 import me.rerere.rikkahub.ui.screenshot.ScreenshotTheme
+import me.rerere.rikkahub.ui.screenshot.ScreenshotThemeMode
+import me.rerere.rikkahub.ui.screenshot.FixedSeedDynamicColors
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -63,7 +67,8 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
+import org.robolectric.ParameterizedRobolectricTestRunner
+import org.robolectric.ParameterizedRobolectricTestRunner.Parameters
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
@@ -72,10 +77,15 @@ import kotlin.math.ceil
 import kotlin.math.floor
 
 /** Real ChatList/messages/actions and Scaffold insets; composer/IME heights are controlled. */
-@RunWith(RobolectricTestRunner::class)
-@Config(application = Application::class, sdk = [35], qualifiers = "ru-rRU-w411dp-h891dp-mdpi")
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(application = Application::class, sdk = [35], qualifiers = "ru-rRU-w411dp-h891dp-mdpi",
+    shadows = [FixedSeedDynamicColors::class])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-class ChatListBottomReadabilityTest {
+class ChatListBottomReadabilityTest internal constructor(
+    private val theme: ScreenshotThemeMode,
+    private val width: Int,
+    private val fontScale: Float,
+) {
     @get:Rule val compose = createComposeRule()
     private lateinit var fixture: ChatBeforeFixture
 
@@ -110,14 +120,16 @@ class ChatListBottomReadabilityTest {
         val regeneratedIds = mutableListOf<kotlin.uuid.Uuid>()
         val lastReply = hasTestTag("chat_message_row") and hasAnyDescendant(hasText(LAST_TEXT))
         compose.setContent {
-            ScreenshotTheme(fontScale = 1.3f) {
+            ScreenshotTheme(theme, fontScale) {
                 val toaster = rememberToasterState()
                 state = rememberLazyListState()
                 val haze = rememberHazeState()
                 SharedTransitionLayout {
                     CompositionLocalProvider(LocalSettings provides settings, LocalTTSState provides tts,
                         LocalToaster provides toaster, LocalSharedTransitionScope provides this) {
-                        Box(Modifier.requiredSize(411.dp, 891.dp).background(Color.White).testTag("readability_root")) {
+                        // Match ChatPage's real Surface, including the theme's inherited text colour.
+                        Surface(Modifier.requiredSize(width.dp, 891.dp).testTag("readability_root"),
+                            color = MaterialTheme.colorScheme.background) {
                             Scaffold(containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0, 0, 0, 0),
                                 topBar = {
                                     ChatHeader("Чат", false, false, false, false, avatar = {},
@@ -156,19 +168,28 @@ class ChatListBottomReadabilityTest {
                 .assertIsDisplayed()
             val root = compose.onNodeWithTag("readability_root").fetchSemanticsNode().boundsInRoot
             val overlay = compose.onNodeWithTag("readability_composer_overlay").fetchSemanticsNode().boundsInRoot
+            val timeline = compose.onNodeWithTag("chat_list_timeline").fetchSemanticsNode().boundsInRoot
+            val navigation = compose.onNodeWithTag("chat_navigation_dock").fetchSemanticsNode().boundsInRoot
             val textBounds = text.fetchSemanticsNode().boundsInRoot
             val actionBounds = actions.fetchSemanticsNode().boundsInRoot
             assertTrue("Last text stays above the $composer+$ime dp overlay", textBounds.bottom <= overlay.top)
             assertTrue("Last actions stay above the measured overlay", actionBounds.bottom <= overlay.top)
-            assertTrue("Readability must not require an extra 180dp spacer", overlay.top - actionBounds.bottom in 0f..80f)
+            assertEquals("The 48dp navigation dock starts exactly where the message viewport ends", navigation.top, timeline.bottom, .5f)
+            assertEquals("The dock ends at the measured composer/IME boundary", overlay.top, navigation.bottom, .5f)
+            assertTrue("Readability must not require an extra 180dp spacer", timeline.bottom - actionBounds.bottom in 0f..80f)
             val layouts = mutableListOf<TextLayoutResult>()
             text.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
             val layout = layouts.single()
             val lastLine = Rect(textBounds.left, textBounds.top + layout.getLineTop(layout.lineCount - 1),
                 textBounds.right, textBounds.top + layout.getLineBottom(layout.lineCount - 1))
             val pixels = compose.onNodeWithTag("readability_root").captureToImage().toPixelMap()
-            assertTrue("The final line of the last reply keeps its contrast after scrollToEnd", darkestInk(pixels, lastLine, root) < .4f)
-            assertTrue("Last action icons keep their contrast after scrollToEnd", darkestInk(pixels, actionBounds, root) < .55f)
+            if (theme.dark) {
+                assertTrue("The final line keeps light ink in a dark theme", lightestInk(pixels, lastLine, root) > .6f)
+                assertTrue("Last actions keep light ink in a dark theme", lightestInk(pixels, actionBounds, root) > .45f)
+            } else {
+                assertTrue("The final line of the last reply keeps its contrast after scrollToEnd", darkestInk(pixels, lastLine, root) < .4f)
+                assertTrue("Last action icons keep their contrast after scrollToEnd", darkestInk(pixels, actionBounds, root) < .55f)
+            }
             compose.onNode(hasContentDescription(regenerateLabel) and hasAnyAncestor(lastReply))
                 .assertHasClickAction().performClick()
             assertEquals(index + 1, regenerations)
@@ -187,7 +208,22 @@ class ChatListBottomReadabilityTest {
         return darkest
     }
 
+    private fun lightestInk(pixels: PixelMap, bounds: Rect, root: Rect): Float {
+        var lightest = 0f
+        for (y in ceil(bounds.top - root.top).toInt() until floor(bounds.bottom - root.top).toInt()) {
+            for (x in ceil(bounds.left - root.left).toInt() until floor(bounds.right - root.left).toInt()) {
+                val color = pixels[x, y]
+                lightest = maxOf(lightest, (color.red + color.green + color.blue) / 3f)
+            }
+        }
+        return lightest
+    }
+
     companion object {
         private const val LAST_TEXT = "Последний ответ завершён.\nВторая строка остаётся читаемой.\nФинальная строка ответа."
+        @JvmStatic @Parameters(name = "{0}_width{1}_font{2}") fun cases(): List<Array<Any>> =
+            ScreenshotThemeMode.entries.flatMap { theme ->
+                listOf(320, 411).flatMap { width -> listOf(1f, 1.3f).map { font -> arrayOf(theme, width, font) } }
+            }
     }
 }

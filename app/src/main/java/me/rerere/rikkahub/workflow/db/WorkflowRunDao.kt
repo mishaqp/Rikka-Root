@@ -11,6 +11,16 @@ interface WorkflowRunDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(entity: WorkflowRunEntity): Long
 
+    /** A durable intent is committed before any action can cause side effects. */
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertStarted(entity: WorkflowRunEntity): Long
+
+    @Query("SELECT * FROM workflow_runs WHERE status = 'RUNNING'")
+    suspend fun running(): List<WorkflowRunEntity>
+
+    @Query("DELETE FROM workflow_runs WHERE rowId = :rowId AND status = 'RUNNING'")
+    suspend fun deleteStarted(rowId: Long): Int
+
     @Query("""
         SELECT * FROM workflow_runs
         WHERE workflowId = :workflowId

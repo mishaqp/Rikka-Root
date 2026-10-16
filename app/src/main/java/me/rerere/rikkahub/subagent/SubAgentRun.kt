@@ -7,7 +7,9 @@ import me.rerere.ai.provider.ProviderSetting
 enum class SubAgentStatus { PENDING, RUNNING, SUCCEEDED, FAILED, BLOCKED, TIMED_OUT, CANCELLED, INDETERMINATE;
     val terminal: Boolean get() = this != PENDING && this != RUNNING
 }
+@kotlinx.serialization.Serializable
 data class SubAgentOwner(val assistantId: String, val conversationId: String)
+@kotlinx.serialization.Serializable
 data class SubAgentRun(
     val id: String, val owner: SubAgentOwner, val label: String, val modelId: String,
     val status: SubAgentStatus = SubAgentStatus.PENDING, val result: String? = null,

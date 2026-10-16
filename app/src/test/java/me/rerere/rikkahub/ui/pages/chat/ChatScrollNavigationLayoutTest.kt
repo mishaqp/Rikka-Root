@@ -37,14 +37,14 @@ class ChatScrollNavigationLayoutTest(private val width: Int, private val fontSca
     @get:Rule val compose = createComposeRule()
 
     @Test
-    fun `32dp circles overlay 16dp message margins without resizing content`() {
+    fun `navigation stays in its bottom dock and never covers message text`() {
         val enabled = mutableStateOf(true)
         compose.setContent {
             ScreenshotTheme(fontScale = fontScale) {
                 val state = rememberLazyListState()
                 val scope = rememberCoroutineScope()
                 Box(Modifier.requiredSize(width.dp, 240.dp)) {
-                    Box(Modifier.fillMaxSize().padding(16.dp)) {
+                    Box(Modifier.fillMaxSize().padding(bottom = 48.dp).padding(16.dp)) {
                         LazyColumn(state = state, modifier = Modifier.fillMaxSize().testTag("scroll_message_content")) {
                             items(8) { Box(Modifier.height(80.dp)) }
                         }
@@ -62,12 +62,13 @@ class ChatScrollNavigationLayoutTest(private val width: Int, private val fontSca
             assertEquals("$label has a 32dp circle", 32f, node.boundsInRoot.width, .5f)
             assertEquals("$label has a 32dp circle", 32f, node.boundsInRoot.height, .5f)
             assertTrue("$label retains a minimum touch target", node.touchBoundsInRoot.width >= 48f)
-            assertTrue("$label floats over the message margin", if (onLeft) {
-                node.touchBoundsInRoot.left < content.left && node.touchBoundsInRoot.right > content.left
-            } else {
-                node.touchBoundsInRoot.left < content.right && node.touchBoundsInRoot.right > content.right
-            })
+            assertTrue("$label must stay below the message viewport even on a narrow phone",
+                node.touchBoundsInRoot.top >= content.bottom)
+            assertTrue("$label must stay inside the screen", node.touchBoundsInRoot.left >= 0f && node.touchBoundsInRoot.right <= width)
         }
+        val top = compose.onNodeWithContentDescription("К началу чата").fetchSemanticsNode().boundsInRoot
+        val bottom = compose.onNodeWithContentDescription("Прокрутить вниз").fetchSemanticsNode().boundsInRoot
+        assertEquals("The two controls share a horizontal dock", top.top, bottom.top, .5f)
 
         compose.runOnIdle { enabled.value = false }
         compose.onNodeWithContentDescription("К началу чата").assertDoesNotExist()

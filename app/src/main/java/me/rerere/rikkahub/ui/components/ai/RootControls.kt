@@ -61,7 +61,7 @@ fun RootCommandJournalButton(assistantId: String? = null) {
                             Text(dateFormat.format(Date(entry.timestampMs)), style = MaterialTheme.typography.labelMedium)
                             Text(entry.command, style = MaterialTheme.typography.bodyMedium)
                             Text(
-                                stringResource(R.string.root_command_log_status, entry.status),
+                                stringResource(R.string.root_command_log_status, me.rerere.rikkahub.root.rootCommandStatusMessage(entry.status)),
                                 style = MaterialTheme.typography.bodySmall,
                             )
                             entry.exitCode?.let { exitCode ->

@@ -95,6 +95,9 @@ internal class MemoryWorkflowDao : WorkflowDao {
     override suspend fun recordFire(id: String, firedAtMs: Long, status: String, errorMessage: String?, runsTodayCount: Int, runsTodayDate: String) = 1
 }
 internal class MemoryRunDao : WorkflowRunDao {
+    override suspend fun insertStarted(entity: WorkflowRunEntity) = 1L
+    override suspend fun running() = emptyList<WorkflowRunEntity>()
+    override suspend fun deleteStarted(rowId: Long) = 1
     override suspend fun insert(entity: WorkflowRunEntity) = 1L
     override suspend fun lastN(workflowId: String, limit: Int) = emptyList<WorkflowRunEntity>()
     override suspend fun trim(workflowId: String, keep: Int) = Unit

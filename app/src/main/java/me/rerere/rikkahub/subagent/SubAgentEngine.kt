@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.subagent
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -39,7 +40,11 @@ class SubAgentEngine(
         data class Reject(val error: String) : DispatchResult
     }
 
-    suspend fun dispatch(caller: SubAgentCaller, request: SubAgentRequest): DispatchResult {
+    suspend fun dispatch(caller: SubAgentCaller, request: SubAgentRequest): DispatchResult = withContext(Dispatchers.IO) {
+        dispatchOnIo(caller, request)
+    }
+
+    private suspend fun dispatchOnIo(caller: SubAgentCaller, request: SubAgentRequest): DispatchResult {
         if (currentCoroutineContext()[RunExecutionContext] != null) return DispatchResult.Reject("nested_dispatch_disabled")
         validateSubAgentRequest(request)?.let { return DispatchResult.Reject(it) }
         val ownerId = runCatching { Uuid.parse(caller.owner.assistantId) }.getOrNull()
@@ -70,7 +75,7 @@ class SubAgentEngine(
         val run = SubAgentRun(runId.toString(), caller.owner, request.label?.takeIf { it.isNotBlank() } ?: "Субагент",
             model.id.toString(), noResult = request.noResult)
         if (!registry.reserve(run, concurrencyLimit(ownerId))) return DispatchResult.Reject("concurrency_limit")
-        val job = scope.launch(start = CoroutineStart.LAZY) {
+        val job = scope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
             try {
                 val result = runner.run(HeadlessTaskRequest.Prompt(request.task.trim(),
                     request.systemPrompt ?: "Выполни указанную задачу в отдельном контексте и верни краткий итог. Не запрашивай интерактивный ввод."), context)
@@ -90,10 +95,13 @@ class SubAgentEngine(
             }
         }
         job.invokeOnCompletion {
-            registry.finish(caller.owner, run.id) { runState -> runState.copy(
-                status = if (context.executionState.effectsInFlight) SubAgentStatus.INDETERMINATE else SubAgentStatus.CANCELLED,
-                errorCode = "cancelled",
-            ) }
+            // Cancellation may happen before the lazy body starts; settle its receipt off Main.
+            scope.launch(NonCancellable + Dispatchers.IO) {
+                registry.finish(caller.owner, run.id) { runState -> runState.copy(
+                    status = if (context.executionState.effectsInFlight) SubAgentStatus.INDETERMINATE else SubAgentStatus.CANCELLED,
+                    errorCode = "cancelled",
+                ) }
+            }
         }
         registry.attach(caller.owner, run.id, job)
         job.start()

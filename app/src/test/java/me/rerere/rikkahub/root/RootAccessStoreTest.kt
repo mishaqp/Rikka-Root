@@ -11,6 +11,21 @@ import org.junit.rules.TemporaryFolder
 class RootAccessStoreTest {
     @get:Rule val temp = TemporaryFolder()
 
+    @Test fun oldProcessRunningCommandBecomesInterruptedWithoutChangingConsentOrOtherHistory() {
+        val directory = temp.newFolder()
+        java.io.File(directory, "root-access.json").writeText("""{"permissions":{"autoApproveAll":false,"alwaysAllow":["root_exec"]},"entries":[{"id":"old-running","assistantId":"owner","timestampMs":1,"command":"id -u","status":"running","process_id":"previous-process"},{"id":"done","assistantId":"owner","timestampMs":0,"command":"id","exitCode":0,"status":"completed"}],"webContentConversations":["tainted"]}""")
+        val store = RootAccessStore(directory)
+        assertEquals("process_interrupted", store.entries.value.first().status)
+        assertTrue(rootCommandStatusMessage(store.entries.value.first().status).contains("Прервано: приложение было закрыто"))
+        assertEquals("old-running", store.entries.value.first().id)
+        assertEquals("completed", store.entries.value.last().status)
+        assertEquals(0, store.entries.value.last().exitCode)
+        assertEquals(setOf("root_exec"), store.permissions.value.alwaysAllow)
+        assertFalse(store.permissions.value.autoApproveAll)
+        assertFalse(store.isAllowed("root_exec", "tainted"))
+        assertEquals(store.entries.value, RootAccessStore(directory).entries.value)
+    }
+
     @Test fun webGuardPersistsPerConversationWithoutChangingPermissionsOrJournal() = runBlocking {
         val directory = temp.newFolder()
         val store = RootAccessStore(directory)

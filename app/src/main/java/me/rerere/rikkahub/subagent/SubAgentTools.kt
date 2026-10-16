@@ -22,6 +22,8 @@ private fun subagentErrorMessage(code: String): String = when (code) {
     "unknown_run" -> "Субагент текущего диалога не найден. Вызовите subagent_list и укажите доступный id."
     "android_permission_required", "approval_required", "root_interaction_required", "root_approval_required", "root_not_granted" -> "Для действия субагента нужен доступ на устройстве. Откройте приложение и проверьте разрешения инструмента."
     "token_budget_exceeded", "hard_budget_exhausted", "step_limit" -> "Достигнут лимит выполнения субагента. Проверьте бюджет токенов и max_trips или сократите задачу."
+    "result_storage_unavailable" -> "Задача завершена, но результат не удалось сохранить. Скопируйте его из чата и проверьте свободное место."
+    "process_interrupted" -> "Прервано: приложение было закрыто. Часть действий могла выполниться. Проверьте результат и запустите субагента вручную."
     "cancelled", "execution_cancelled" -> "Субагент остановлен. Проверьте выполненные действия перед повторным запуском."
     "execution_interrupted", "deadline_exceeded", "command_timeout", "root_cleanup_unconfirmed", "root_execution_indeterminate", "tool_result_indeterminate" -> "Выполнение субагента прервано; результат действий может быть неполным. Проверьте его на устройстве перед повторным запуском."
     "root_command_blocked", "web_content_blocked" -> "Действие субагента заблокировано проверкой безопасности. Проверьте команду и источники данных."
@@ -88,32 +90,32 @@ fun subagentDispatchTool(engine: SubAgentEngine, caller: SubAgentCaller): Tool =
 fun subagentListTool(registry: SubAgentRegistry, owner: SubAgentOwner): Tool = Tool(
     name = "subagent_list", description = "Список субагентов только текущего ассистента и диалога.",
     parameters = { InputSchema.Obj(buildJsonObject { put("active_only", property("boolean")) }) },
-    execute = { args ->
+    execute = { args -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         val active = runCatching { args.jsonObject.boolean("active_only", false) }.getOrNull()
         if (active == null) error("invalid_arguments") else response(buildJsonObject {
             put("runs", JsonArray(registry.list(owner, active).map { encodeRun(it) }))
         })
-    },
+    } },
 )
 fun subagentGetTool(registry: SubAgentRegistry, owner: SubAgentOwner): Tool = Tool(
     name = "subagent_get", description = "Статус и итог собственного субагента по ID.",
     parameters = { InputSchema.Obj(buildJsonObject { put("id", property("string")) }, required = listOf("id")) },
-    execute = { args ->
+    execute = { args -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         val id = runCatching { args.jsonObject.string("id") }.getOrNull()
         val run = id?.let { registry.get(owner, it) }
         if (run == null) error("unknown_run") else response(encodeRun(run))
-    },
+    } },
 )
 fun subagentCancelTool(registry: SubAgentRegistry, owner: SubAgentOwner): Tool = Tool(
     name = "subagent_cancel", description = "Остановить генерацию собственного субагента. Уже выполненные действия не отменяются.",
     parameters = { InputSchema.Obj(buildJsonObject { put("id", property("string")) }, required = listOf("id")) },
     needsApproval = { true },
-    execute = { args ->
+    execute = { args -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         val id = runCatching { args.jsonObject.string("id") }.getOrNull()
         if (id == null || registry.get(owner, id) == null) error("unknown_run") else response(buildJsonObject {
             val cancelled = registry.cancel(owner, id)
             put("id", id); put("ok", cancelled)
             if (!cancelled) put("message", "Субагент уже завершён. Проверьте его результат через subagent_get.")
         })
-    },
+    } },
 )

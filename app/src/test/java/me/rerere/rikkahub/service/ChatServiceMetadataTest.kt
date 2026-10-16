@@ -154,6 +154,96 @@ class ChatServiceMetadataTest {
     }
 
     @Test(timeout = 30_000)
+    fun `a replaced generation cannot clear the recovery receipt of its successor`() = runBlocking {
+        val source = seed(title = "Сохранённый чат")
+        val application = RuntimeEnvironment.getApplication()
+        val marker = java.io.File(application.noBackupFilesDir, "chat-executions.json")
+        val firstStream = CompletableDeferred<Unit>()
+        val secondStream = CompletableDeferred<Unit>()
+        val invocation = java.util.concurrent.atomic.AtomicInteger()
+        every { generation.generateText(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+            any(), any(), any(), any(), any(), any(), any(), any()) } answers {
+            val input = arg<List<UIMessage>>(2)
+            val number = invocation.incrementAndGet()
+            flow {
+                emit(GenerationChunk.Messages(input + UIMessage.assistant("Часть ответа $number")))
+                if (number == 1) firstStream.complete(Unit) else secondStream.complete(Unit)
+                awaitCancellation()
+            }
+        }
+        val finalSave = FullWriteGate()
+        var successor: Job? = null
+        var watch: java.nio.file.WatchService? = null
+        try {
+            service.sendMessage(source.id, listOf(UIMessagePart.Text("Вопрос")))
+            withTimeout(5_000) { firstStream.await() }
+            val predecessor = service.getGenerationJobStateFlow(source.id).first { it != null }!!
+            val firstPartial = service.getConversationFlow(source.id).value.currentMessages.last()
+            dao.fullWriteGate = finalSave
+            predecessor.cancel()
+            withTimeout(5_000) { finalSave.entered.await() }
+            val watcher = java.nio.file.FileSystems.getDefault().newWatchService()
+            watch = watcher
+            marker.parentFile!!.toPath().register(watcher, java.nio.file.StandardWatchEventKinds.ENTRY_CREATE,
+                java.nio.file.StandardWatchEventKinds.ENTRY_MODIFY)
+            // Observe the actual AtomicFile write while the predecessor still owns the Room gate.
+            val nextReceipt = async(Dispatchers.IO) {
+                withTimeout(5_000) {
+                    var written = false
+                    while (!written) {
+                        val key = watcher.poll(100, java.util.concurrent.TimeUnit.MILLISECONDS) ?: continue
+                        val markerChanged = key.pollEvents().any { it.context().toString() == marker.name }
+                        key.reset()
+                        if (markerChanged && marker.isFile) {
+                            written = runCatching { JsonInstant.parseToJsonElement(marker.readText())
+                                .toString().contains(source.id.toString()) }.getOrDefault(false)
+                        }
+                    }
+                }
+            }
+            service.regenerateAtMessage(source.id, firstPartial)
+            successor = service.getGenerationJobStateFlow(source.id).first { it != null && it !== predecessor }
+            withTimeout(5_000) { nextReceipt.await() }
+            finalSave.release.complete(Unit)
+            withTimeout(5_000) { secondStream.await() }
+            assertTrue("An executing successor must retain its own durable receipt after predecessor cleanup",
+                marker.isFile && marker.readText().contains(source.id.toString()))
+        } finally {
+            finalSave.release.complete(Unit)
+            successor?.cancelAndJoin()
+            watch?.close()
+        }
+    }
+
+    @Test(timeout = 30_000)
+    fun `a search index failure cannot erase an already committed stream chunk`() = runBlocking {
+        val source = seed(title = "Сохранённый чат")
+        val partial = "Полученная часть ответа"
+        // Message rows remain writable; only this derived FTS row fails.
+        database.openHelper.writableDatabase.execSQL("""
+            CREATE TRIGGER fail_partial_fts BEFORE INSERT ON message_fts
+            WHEN NEW.text = 'Полученная часть ответа'
+            BEGIN SELECT RAISE(FAIL, 'fixture search index unavailable'); END
+        """.trimIndent())
+        val entered = CompletableDeferred<Unit>()
+        every { generation.generateText(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+            any(), any(), any(), any(), any(), any(), any(), any()) } answers {
+            val input = arg<List<UIMessage>>(2)
+            flow {
+                entered.complete(Unit)
+                emit(GenerationChunk.Messages(input + UIMessage.assistant(partial)))
+            }
+        }
+        service.sendMessage(source.id, listOf(UIMessagePart.Text("Вопрос")))
+        val job = withTimeout(5_000) { service.getGenerationJobStateFlow(source.id).first { it != null }!! }
+        withTimeout(5_000) { entered.await(); job.join() }
+        assertTrue("A committed chunk must survive a failure in the derived search index",
+            repository.getConversationById(source.id)!!.currentMessages.any { it.toText() == partial })
+        assertTrue("Finalization must retain the same received text in the live session",
+            service.getConversationFlow(source.id).value.currentMessages.any { it.toText() == partial })
+    }
+
+    @Test(timeout = 30_000)
     fun `stopping before the first history save cannot discard the submitted question`() = runBlocking {
         val source = seed(title = "Сохранённый чат")
         val writeGate = FullWriteGate()

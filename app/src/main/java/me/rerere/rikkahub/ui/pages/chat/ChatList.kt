@@ -14,9 +14,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
@@ -68,6 +66,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.graphics.Color
@@ -108,7 +107,6 @@ import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import me.rerere.rikkahub.utils.plus
 import me.rerere.ui.components.ListSelectableItem
 import me.rerere.ui.components.Tooltip
-import kotlin.math.roundToInt
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatList"
@@ -229,13 +227,17 @@ private fun ChatListNormal(
     val density = LocalDensity.current
     val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity
     val volumeScrollSettings by rememberUpdatedState(settings.displaySetting)
-    val volumeScrollPadding by rememberUpdatedState(innerPadding)
+    val captureProgress = LocalScrollCaptureInProgress.current
+    val navigationEnabled = settings.displaySetting.showMessageJumper &&
+        settings.displaySetting.messageNavButtonsMode != MessageNavButtonsMode.NEVER && !captureProgress
+    // Reserve the same dock while its controls auto-hide, so the timeline never jumps or sits underneath them.
+    val navigationHeight = if (navigationEnabled) 48.dp else 0.dp
 
     DisposableEffect(activity, state, density) {
         val listener: (Boolean) -> Boolean = { isVolumeUp ->
             if (volumeScrollSettings.enableVolumeKeyScroll) {
                 val bottomPaddingPx = with(density) {
-                    (32.dp + volumeScrollPadding.calculateBottomPadding()).toPx()
+                    32.dp.toPx()
                 }
                 val scrollAmount = (state.layoutInfo.viewportSize.height - bottomPaddingPx) *
                     volumeScrollSettings.volumeKeyScrollRatio
@@ -251,9 +253,8 @@ private fun ChatListNormal(
 
     fun List<LazyListItemInfo>.isAtBottom(): Boolean {
         val lastItem = lastOrNull() ?: return false
-        val inputBarHeight = with(density) { innerPadding.calculateBottomPadding().toPx() }
         val lastPos = lastItem.offset + lastItem.size
-        val inputPos = (state.layoutInfo.viewportEndOffset - inputBarHeight.roundToInt())
+        val inputPos = state.layoutInfo.viewportEndOffset
         // println("lastPos = $lastPos, inputPos = $inputPos  | ${lastPos <= inputPos - 8}")
         return lastPos <= inputPos - 8
     }
@@ -303,8 +304,9 @@ private fun ChatListNormal(
             canChangeSystemPrompt = canChangeSystemPrompt,
         )
     }
-    val systemPrompt = presentation.items.filterIsInstance<ChatListItemPresentation.SystemPrompt>().firstOrNull()
-    val loadingIndicator = presentation.items.filterIsInstance<ChatListItemPresentation.Loading>().firstOrNull()
+    val messageItems = remember(presentation) { presentation.items.filterIsInstance<ChatListItemPresentation.Message>() }
+    val systemPrompt = remember(presentation) { presentation.items.filterIsInstance<ChatListItemPresentation.SystemPrompt>().firstOrNull() }
+    val loadingIndicator = remember(presentation) { presentation.items.filterIsInstance<ChatListItemPresentation.Loading>().firstOrNull() }
 
     Box(
         modifier = Modifier
@@ -331,18 +333,21 @@ private fun ChatListNormal(
                 contentPadding = PaddingValues(
                     start = 16.dp, end = 16.dp,
                     top = 16.dp + innerPadding.calculateTopPadding(),
-                    bottom = 32.dp + innerPadding.calculateBottomPadding(),
+                    bottom = 32.dp,
                 ),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier
                     .fillMaxSize()
+                    // Scaffold measures queue, multi-line input and IME together. Clip at that exact edge.
+                    .padding(bottom = innerPadding.calculateBottomPadding() + navigationHeight)
+                    .clipToBounds()
                     .testTag("chat_list_timeline")
-                    .chatListEdgeFade(innerPadding.calculateTopPadding(), innerPadding.calculateBottomPadding())
+                    .chatListEdgeFade(innerPadding.calculateTopPadding(), 0.dp)
                     .hazeSource(state = hazeState),
             ) {
             itemsIndexed(
-                items = presentation.items.filterIsInstance<ChatListItemPresentation.Message>(),
+                items = messageItems,
                 key = { _, item -> item.key },
             ) { _, item ->
                 val node = item.node
@@ -469,7 +474,8 @@ private fun ChatListNormal(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding),
+                .padding(innerPadding)
+                .padding(bottom = navigationHeight),
         ) {
             // 错误消息卡片
             ErrorCardsDisplay(
@@ -556,23 +562,33 @@ private fun ChatListNormal(
                     selectedItems.clear()
                 },
                 conversation = conversation,
-                selectedMessages = conversation.messageNodes.filter { it.id in selectedItems }
-                    .map { it.currentMessage }
-            )
-
-            val captureProgress = LocalScrollCaptureInProgress.current
-
-            // 消息快速跳转
-            MessageJumper(
-                show = chatMessageNavigationVisible(settings.displaySetting.messageNavButtonsMode, scrollNavigation.visible) && settings.displaySetting.showMessageJumper && !captureProgress,
-                onLeft = settings.displaySetting.messageJumperOnLeft,
-                scope = scope,
-                state = state,
-                onInteraction = scrollNavigation::onInteraction,
+                selectedMessages = if (showExportSheet) conversation.messageNodes.filter { it.id in selectedItems }
+                    .map { it.currentMessage } else emptyList(),
             )
 
         }
+
+        if (navigationEnabled) Box(Modifier.fillMaxSize().padding(innerPadding)) {
+            ChatMessageNavigation(settings.displaySetting, scrollNavigation, scope, state)
+        }
     }
+}
+
+/** Read scroll visibility in this small scope; showing controls must not recompose a long history. */
+@Composable
+private fun BoxScope.ChatMessageNavigation(
+    settings: me.rerere.rikkahub.data.datastore.DisplaySetting,
+    navigation: ChatScrollNavigationVisibility,
+    scope: CoroutineScope,
+    state: LazyListState,
+) {
+    MessageJumper(
+        show = chatMessageNavigationVisible(settings.messageNavButtonsMode, navigation.visible),
+        onLeft = settings.messageJumperOnLeft,
+        scope = scope,
+        state = state,
+        onInteraction = navigation::onInteraction,
+    )
 }
 
 /**
@@ -768,40 +784,42 @@ internal fun BoxScope.MessageJumper(
     state: LazyListState,
     onInteraction: () -> Unit = {},
 ) {
-    AnimatedVisibility(
-        visible = show,
-        modifier = Modifier.align(if (onLeft) Alignment.CenterStart else Alignment.CenterEnd),
-        enter = fadeIn() + slideInHorizontally(
-            initialOffsetX = { if (onLeft) -it * 2 else it * 2 },
-        ),
-        exit = fadeOut() + slideOutHorizontally(
-            targetOffsetX = { if (onLeft) -it * 2 else it * 2 },
-        )
+    Box(
+        modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(48.dp)
+            .background(MaterialTheme.colorScheme.background)
+            .testTag("chat_navigation_dock"),
+        contentAlignment = if (onLeft) Alignment.CenterStart else Alignment.CenterEnd,
     ) {
-        Column(
-            modifier = Modifier.padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+        AnimatedVisibility(
+            visible = show,
+            enter = fadeIn(),
+            exit = fadeOut(),
         ) {
-            MessageJumperButton(
-                icon = HugeIcons.ArrowUp01,
-                contentDescription = stringResource(R.string.chat_moru_scroll_to_top),
-                onClick = {
-                    onInteraction()
-                    scope.launch {
-                        state.scrollToItem(0)
-                    }
-                },
-            )
-            MessageJumperButton(
-                icon = HugeIcons.ArrowDown01,
-                contentDescription = stringResource(R.string.chat_page_scroll_to_bottom),
-                onClick = {
-                    onInteraction()
-                    scope.launch {
-                        state.scrollToItem(state.layoutInfo.totalItemsCount - 1)
-                    }
-                },
-            )
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                MessageJumperButton(
+                    icon = HugeIcons.ArrowUp01,
+                    contentDescription = stringResource(R.string.chat_moru_scroll_to_top),
+                    onClick = {
+                        onInteraction()
+                        scope.launch {
+                            state.scrollToItem(0)
+                        }
+                    },
+                )
+                MessageJumperButton(
+                    icon = HugeIcons.ArrowDown01,
+                    contentDescription = stringResource(R.string.chat_page_scroll_to_bottom),
+                    onClick = {
+                        onInteraction()
+                        scope.launch {
+                            state.scrollToItem(state.layoutInfo.totalItemsCount - 1)
+                        }
+                    },
+                )
+            }
         }
     }
 }
@@ -810,7 +828,7 @@ internal fun BoxScope.MessageJumper(
 private fun MessageJumperButton(icon: ImageVector, contentDescription: String, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val dark = LocalDarkMode.current
-    // Moru-sized 32dp overlay circles; they float over the list and reserve no space.
+    // Keep the Moru-sized circles and full touch targets inside their own dock.
     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
         Surface(
             onClick = onClick,

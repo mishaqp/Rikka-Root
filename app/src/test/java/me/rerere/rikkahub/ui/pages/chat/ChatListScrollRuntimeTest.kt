@@ -136,6 +136,23 @@ class ChatListScrollRuntimeTest {
         compose.runOnIdle { assertFalse("A stream chunk must retain following when the reader was at the bottom", state.canScrollForward) }
     }
 
+    @Test fun autoHidingControlsDoesNotChangeMessageViewportOrReaderPosition() {
+        settings.value = settings.value.copy(displaySetting = settings.value.displaySetting.copy(
+            messageNavButtonsMode = MessageNavButtonsMode.SCROLL))
+        render()
+        compose.onNodeWithTag("chat_list_timeline").performTouchInput { swipeUp() }
+        compose.onNodeWithContentDescription("К началу чата").assertIsDisplayed()
+        val viewport = state.layoutInfo.viewportSize
+        val position = state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset
+        compose.mainClock.advanceTimeBy(1_600)
+        compose.onNodeWithContentDescription("К началу чата").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals("Auto-hide must not resize the timeline", viewport, state.layoutInfo.viewportSize)
+            assertEquals("Auto-hide must not move the reader's message", position,
+                state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset)
+        }
+    }
+
     @Test fun disablingAutoScrollKeepsThePositionWhenTheLastReplyGrows() {
         settings.value = settings.value.copy(displaySetting = settings.value.displaySetting.copy(enableAutoScroll = false))
         loading.value = true

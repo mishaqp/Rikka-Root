@@ -28,7 +28,7 @@ val workflowModule = module {
         val database = get<WorkflowDatabase>()
         val ssh = get<SshToolSecretSanitizer>()
         val mcp = get<McpToolSecretSanitizer>()
-        WorkflowRepository(database.workflowDao(), database.workflowRunDao()) { definition ->
+        WorkflowRepository(database.workflowDao(), database.workflowRunDao(), database) { definition ->
             sanitizeWorkflowDefinition(definition) { name, input ->
                 me.rerere.rikkahub.data.ai.tools.protectToolArguments(name, input, ssh, mcp)
             }

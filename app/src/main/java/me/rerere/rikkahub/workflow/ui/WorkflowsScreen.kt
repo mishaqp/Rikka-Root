@@ -151,6 +151,7 @@ private fun WorkflowRow(
         else -> {
             val ago = formatRelativeAgo(loaded.entity.lastRunAtMs, nowMs, rel)
             when (loaded.entity.lastRunStatus) {
+                WorkflowRunStatus.RUNNING.name -> "Выполняется…"
                 WorkflowRunStatus.SUCCESS.name ->
                     stringResource(R.string.setting_page_workflows_subtitle_ran_success, ago)
                 WorkflowRunStatus.FAILED.name ->
@@ -233,6 +234,7 @@ internal fun rememberTickingNowMs(): State<Long> {
 }
 
 internal fun workflowStatusLabel(status: String): String = when (status) {
+    "RUNNING" -> "выполняется"
     "SUCCESS" -> "успешно"
     "FAILED" -> "ошибка"
     "SKIPPED_CONDITIONS" -> "условия не выполнены"

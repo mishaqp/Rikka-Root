@@ -92,7 +92,7 @@ class ChatVM(
         chatService.addConversationReference(_conversationId)
 
         // 初始化对话
-        viewModelScope.launch {
+        launchMutation {
             chatService.initializeConversation(_conversationId)
         }
 

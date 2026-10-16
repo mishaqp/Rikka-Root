@@ -118,6 +118,27 @@ class RikkaHubApp : Application() {
         // Start WebServer if enabled in settings
         startWebServerIfEnabled()
 
+        // Close interrupted chats before any new UI/Web generation can reuse their tools.
+        get<AppScope>().launch(Dispatchers.IO) {
+            try {
+                get<me.rerere.rikkahub.service.ChatService>().recoverInterruptedGenerations()
+            } catch (cancel: kotlinx.coroutines.CancellationException) {
+                throw cancel
+            } catch (_: Exception) {
+                Log.w(TAG, "Восстановление незавершённых ответов отложено до открытия чата.")
+            }
+        }
+
+        get<AppScope>().launch(Dispatchers.IO) {
+            try {
+                get<me.rerere.rikkahub.subagent.SubAgentRegistry>().recoverInterrupted()
+            } catch (cancel: kotlinx.coroutines.CancellationException) {
+                throw cancel
+            } catch (_: Exception) {
+                Log.w(TAG, "Восстановление статусов субагентов отложено до просмотра списка.")
+            }
+        }
+
         // Reconcile interrupted claimed occurrences before rearming schedules.
         restoreScheduledJobs()
         restoreAgentExtensions()

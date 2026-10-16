@@ -18,6 +18,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
+import kotlinx.serialization.json.put
 import kotlinx.coroutines.Dispatchers
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
@@ -97,6 +98,37 @@ class CronJobExactSchedulingTest {
         database.close()
         scope.cancel()
         Dispatchers.resetMain()
+    }
+
+    @Test fun processRestartClosesClaimedCronWithoutReplayAndExplainsWhy() = runBlocking {
+        val job = jobs.create(job("once", at = now - 1_000), ScheduledJobPayload("fixture"))
+        val oldRun = runs.queue(job, now - 1_000)!!
+        val oldClaim = runs.claim(oldRun.occurrenceId, now - 1_000) as ScheduledJobRunRepository.ClaimAttempt.Claimed
+        assertEquals("running", runs.getById(oldRun.occurrenceId)!!.status)
+        val restartedRuns = ScheduledJobRunRepository(database)
+        val restarted = CronJobScheduler(context, jobs, restartedRuns, settings, currentTimeMillis = { now })
+
+        restarted.awaitRecovery()
+
+        val restored = restartedRuns.getById(oldRun.occurrenceId)!!
+        assertEquals("indeterminate", restored.status)
+        assertEquals("process_interrupted", restored.outcomeCode)
+        assertEquals(ScheduledJobRunRepository.ClaimAttempt.Gone, restartedRuns.claim(oldRun.occurrenceId, now))
+        assertFalse(restartedRuns.isLive(oldClaim.claim))
+        val conversation = me.rerere.rikkahub.data.model.Conversation.ofId(owner.id, owner.id)
+        val history = me.rerere.rikkahub.data.ai.tools.local.createCronJobTools(jobs, restartedRuns, restarted,
+            conversation, { emptySet() }).single { it.name == "get_job_history" }
+        val text = (history.execute(kotlinx.serialization.json.buildJsonObject { put("id", job.id) }).single()
+            as me.rerere.ai.ui.UIMessagePart.Text).text
+        assertTrue("The persisted interruption must explain process death", text.contains("Прервано: приложение было закрыто"))
+        assertEquals(1L, jobs.getById(job.id)!!.totalRuns)
+        assertEquals(1L, jobs.getById(job.id)!!.totalIndeterminate)
+
+        val next = restartedRuns.queue(jobs.getById(job.id)!!, now, manual = true)!!
+        restartedRuns.claim(next.occurrenceId, now)
+        restarted.awaitRecovery()
+        assertEquals("Repeated initialization must not stop a new actual run", "running",
+            restartedRuns.getById(next.occurrenceId)!!.status)
     }
 
     @Test fun futureOccurrenceIsAnExactWakeupAlarmAtThePersistedTime() = runBlocking {

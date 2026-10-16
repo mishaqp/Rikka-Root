@@ -230,7 +230,9 @@ fun ChatInput(
     }
 
     Surface(
-        color = Color.Transparent,
+        // Keep translucent bubble settings, but never mix the reply behind it with typed text.
+        color = MaterialTheme.colorScheme.background,
+        modifier = Modifier.testTag("chat_composer_panel"),
     ) {
         Column(
             modifier = modifier

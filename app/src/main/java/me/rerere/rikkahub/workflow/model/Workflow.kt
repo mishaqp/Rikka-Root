@@ -26,6 +26,7 @@ data class WorkflowAction(
  *  - SKIPPED_DISABLED — workflow toggle was off when trigger arrived (race-cleanup)
  */
 enum class WorkflowRunStatus {
+    RUNNING,
     SUCCESS,
     FAILED,
     SKIPPED_CONDITIONS,

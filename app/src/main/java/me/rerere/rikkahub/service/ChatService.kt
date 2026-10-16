@@ -12,6 +12,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -285,10 +286,16 @@ class ChatService(
     private val toolApprovalPreferences: ToolApprovalPreferences,
     private val tokenBudgetStore: TokenBudgetStore,
     private val subAgentRegistry: SubAgentRegistry,
+    private val messageQueueStore: MessageQueueStore? = null,
 ) {
     // workspace 系统提示注入 (依赖 workspaceRepository, 故在类内构造)
     private val workspaceReminderTransformer = WorkspaceReminderTransformer(workspaceRepository)
+    private val processRecovery = ChatProcessRecovery(java.io.File(context.noBackupFilesDir, "chat-executions.json"), conversationRepo, subAgentRegistry) { error ->
+        addError(error, title = "Не удалось восстановить фоновые задачи")
+    }
     private val attachmentReferences = conversationRepo.attachmentReferences
+    private val queueStorageReady = CompletableDeferred<Unit>()
+    private val incomingAttachmentReferences = java.util.concurrent.ConcurrentHashMap<Any, List<UIMessagePart>>()
     private val pendingAttachmentCleanup = java.util.concurrent.ConcurrentHashMap<Uuid, Set<String>>()
 
     private val sessionManager = ConversationSessionManager(
@@ -306,9 +313,31 @@ class ChatService(
             val sessions = sessionManager.snapshot()
             val historyFiles = sessions.filterNot { it.id in deletedHistories }
                 .flatMap { it.state.value.files }.mapTo(mutableSetOf()) { it.toString() }
-            historyFiles + settingsStore.settingsFlow.value.localFileUrls(context.filesDir) + sessions.flatMap {
+            historyFiles + settingsStore.settingsFlow.value.localFileUrls(context.filesDir) +
+                messageQueueStore?.cachedAttachmentUrls.orEmpty() + incomingAttachmentReferences.values.flatten().localFileUrls() + sessions.flatMap {
                 it.messageQueue.state.value.messages + listOfNotNull(it.submittingMessage)
             }.flatMap { it.parts }.localFileUrls()
+        }
+        val store = messageQueueStore
+        if (store == null) queueStorageReady.complete(Unit) else {
+            // Reserve unknown references synchronously before the first IO suspension.
+            appScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                attachmentReferences.withPendingFileReservation { resolve ->
+                    try {
+                        withContext(Dispatchers.IO) { store.readAll() }
+                        resolve(store.cachedAttachmentUrls)
+                        queueStorageReady.complete(Unit)
+                    } catch (cancelled: CancellationException) {
+                        queueStorageReady.completeExceptionally(cancelled)
+                        throw cancelled
+                    } catch (error: Exception) {
+                        queueStorageReady.completeExceptionally(error)
+                        // An unreadable encrypted queue still owns unknown attachment bytes.
+                        // Keep the guard until this process ends; never delete them as orphans.
+                        awaitCancellation()
+                    }
+                }
+            }
         }
     }
 
@@ -386,14 +415,49 @@ class ChatService(
                 generationId = generationId,
                 conversationId = conversationId,
             )
+            var ticket: ChatGenerationRecoveryTicket? = null
+            var enteredBody = false
             try {
+                val baseline = sessionManager.get(conversationId)?.state?.value?.currentMessages?.lastOrNull()?.id
+                // Receive the durable owner even if Stop arrives while IO returns to Main.
+                // No generation or tool effects start until the cancellation check below.
+                ticket = withContext(NonCancellable) { processRecovery.begin(conversationId, baseline) }
+                currentCoroutineContext().ensureActive()
+                enteredBody = true
                 block()
+            } catch (error: Exception) {
+                if (!enteredBody) {
+                    val session = sessionManager.get(conversationId)
+                    session?.submittingMessage?.let { pending ->
+                        session.messageQueue.restoreForRetry(pending)
+                        session.submittingMessage = null
+                    }
+                    if (error !is CancellationException) addError(error, conversationId,
+                        title = context.getString(R.string.error_title_send_message))
+                }
+                throw error
             } finally {
-                if (foregroundStarted) {
-                    ChatGenerationForegroundService.release(context, generationId)
+                try {
+                    val ownedTicket = ticket
+                    withContext(NonCancellable) {
+                        val session = sessionManager.get(conversationId)
+                        if (ownedTicket != null && session?.isInitialized == true && session.state.value.historyLoadState == HistoryLoadState.COMPLETE) {
+                            // Clear intent only after the final live snapshot is durably settled.
+                            saveConversation(conversationId, session.state.value)
+                            processRecovery.finish(ownedTicket, session.state.value)
+                        }
+                    }
+                } finally {
+                    if (foregroundStarted) ChatGenerationForegroundService.release(context, generationId)
                 }
             }
         }
+    }
+
+    /** Run for every interrupted chat at process start, even if it is not opened in the UI. */
+    suspend fun recoverInterruptedGenerations() {
+        processRecovery.recoverInterrupted()
+        queueStorageReady.await()
     }
 
     // ---- 初始化对话 ----
@@ -418,10 +482,18 @@ class ChatService(
                 ).updateCurrentMessages(assistant.presetMessages)
             }
         }
+        messageQueueStore?.let { store ->
+            queueStorageReady.await()
+            withContext(Dispatchers.IO) {
+                val savedIds = session.state.value.messageNodes.flatMap { it.messages }.mapTo(hashSetOf()) { it.id }
+                session.messageQueue.restoreFromStore(store, session.id, savedIds)
+            }
+        }
     }
 
     // 引入会话配置之前创建的会话没有固定配置，加载时按助手当前的值补上，之后不再随助手变化。
     private suspend fun loadConversation(conversationId: Uuid): Conversation? {
+        processRecovery.recoverInterrupted()
         val conversation = conversationRepo.getConversationById(conversationId) ?: return null
         val bound = conversation.bindConfig(loadedSettings())
         if (bound !== conversation && bound.historyLoadState == HistoryLoadState.COMPLETE) {
@@ -458,6 +530,12 @@ class ChatService(
         sessionManager.getMessageQueueFlow(conversationId)
 
     fun removeQueuedMessage(conversationId: Uuid, messageId: Uuid) {
+        if (messageQueueStore != null) {
+            mutateDurableQueue(conversationId) { session ->
+                session.messageQueue.remove(messageId)?.let(::cleanupQueuedAttachments)
+            }
+            return
+        }
         sessionManager.get(conversationId)?.let { session ->
             requireWritableSession(session)
             session.messageQueue.remove(messageId)?.let(::cleanupQueuedAttachments)
@@ -476,11 +554,44 @@ class ChatService(
         messageId: Uuid,
         parts: List<UIMessagePart>? = null
     ) {
+        if (messageQueueStore != null) {
+            mutateDurableQueue(conversationId) { session ->
+                session.messageQueue.finishEdit(messageId, parts)?.let(::cleanupQueuedAttachments)
+            }
+            return
+        }
         sessionManager.get(conversationId)?.let { session ->
             requireWritableSession(session)
             session.messageQueue.finishEdit(messageId, parts)?.let(::cleanupQueuedAttachments)
         }
         dispatchNextQueuedMessage(conversationId)
+    }
+
+    private fun mutateDurableQueue(conversationId: Uuid, action: (ConversationSession) -> Unit) {
+        val session = sessionManager.get(conversationId) ?: return
+        requireWritableSession(session)
+        appScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                session.messageQueue.withDurableMutation {
+                    ensureInitialized(session)
+                    requireWritableSession(session)
+                    action(session)
+                    dispatchNextQueuedMessage(conversationId)
+                }
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                session.messageQueue.pause()
+                addError(error, conversationId, title = context.getString(R.string.error_title_send_message))
+            }
+        }
+    }
+
+    private fun reserveIncomingAttachments(parts: List<UIMessagePart>): Any = Any().also { token ->
+        attachmentReferences.withRuntimePublication { incomingAttachmentReferences[token] = parts.toList() }
+    }
+
+    private fun releaseIncomingAttachments(token: Any) {
+        attachmentReferences.withRuntimePublication { incomingAttachmentReferences.remove(token) }
     }
 
     private fun cleanupQueuedAttachments(previous: QueuedMessage) {
@@ -508,6 +619,27 @@ class ChatService(
     fun sendMessage(conversationId: Uuid, content: List<UIMessagePart>, answer: Boolean = true) {
         if (content.isEmptyInputMessage()) return
         val session = sessionManager.getOrCreate(conversationId)
+        if (messageQueueStore != null) {
+            if (session.isInitialized) requireWritableSession(session)
+            val reservation = reserveIncomingAttachments(content)
+            appScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                try {
+                    session.messageQueue.withDurableMutation {
+                        ensureInitialized(session)
+                        requireWritableSession(session)
+                        if (session.messageQueue.state.value.messages.isEmpty()) session.messageQueue.resume()
+                        session.messageQueue.enqueue(content, answer)
+                        dispatchNextQueuedMessage(conversationId)
+                    }
+                } catch (error: Exception) {
+                    if (error is CancellationException) throw error
+                    session.messageQueue.pause()
+                    if (error !is HistoryNotWritableException) addError(error, conversationId,
+                        title = context.getString(R.string.error_title_send_message))
+                } finally { releaseIncomingAttachments(reservation) }
+            }
+            return
+        }
         fun enqueue() = synchronized(session) {
             requireWritableSession(session)
             if (session.messageQueue.state.value.messages.isEmpty()) session.messageQueue.resume()
@@ -531,7 +663,7 @@ class ChatService(
     fun enqueueVoiceMessage(conversationId: Uuid, text: String): Deferred<String?> {
         val session = sessionManager.getOrCreate(conversationId)
         val reply = CompletableDeferred<String?>()
-        fun enqueue() = synchronized(session) {
+        fun enqueue() {
             requireWritableSession(session)
             check(text.isNotBlank()) { context.getString(R.string.chat_page_voice_empty) }
             check(!session.messageQueue.state.value.paused || session.messageQueue.state.value.messages.isEmpty()) {
@@ -544,13 +676,17 @@ class ChatService(
             session.messageQueue.enqueue(listOf(UIMessagePart.Text(text)), reply = reply)
             dispatchNextQueuedMessage(conversationId)
         }
-        appScope.launch {
-            try { ensureInitialized(session); enqueue() }
+        val reservation = if (messageQueueStore != null) reserveIncomingAttachments(listOf(UIMessagePart.Text(text))) else null
+        appScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                if (messageQueueStore == null) { ensureInitialized(session); enqueue() }
+                else session.messageQueue.withDurableMutation { ensureInitialized(session); enqueue() }
+            }
             catch (error: Exception) {
                 reply.completeExceptionally(error)
                 if (error is CancellationException) throw error
                 if (error !is HistoryNotWritableException) addError(error, conversationId)
-            }
+            } finally { reservation?.let(::releaseIncomingAttachments) }
         }
         return reply
     }
@@ -599,6 +735,9 @@ class ChatService(
                     ).toMessageNode(),
                 )
                 saveConversation(conversationId, newConversation)
+                if (messageQueueStore != null) withContext(NonCancellable + Dispatchers.IO) {
+                    session.messageQueue.acknowledgeSubmission(queued.id)
+                }
                 session.submittingMessage = null
 
                 // 开始补全
@@ -925,6 +1064,7 @@ class ChatService(
             // start generating
             val session = sessionManager.getOrCreate(conversationId)
             val generationOwner = currentCoroutineContext()[Job]
+            var durableStreamNodes: List<MessageNode>? = null
             generationLoop.generateText(
                 settings = settings,
                 model = model,
@@ -1002,12 +1142,12 @@ class ChatService(
                                 .let { AutoContextCompression.mergeGenerated(it, chunk.messages, regenerationNodeId) }
                             // Ordered after earlier chunks; tools/compression wait for this Room write.
                             saveConversation(conversationId, checkpoint)
+                            durableStreamNodes = session.state.value.messageNodes
                         }
                     }
                     is GenerationChunk.Messages -> {
-                        updateConversationState(conversationId) {
-                            AutoContextCompression.mergeGenerated(it, chunk.messages, regenerationNodeId)
-                        }
+                        durableStreamNodes = saveGeneratedChunk(session, chunk.messages, regenerationNodeId,
+                            settings, durableStreamNodes)
 
                         // 通知等边缘副作用由 ChatNotificationManager 消费；
                         // tryEmit 不挂起，事件丢失只影响单次通知更新，不能反压生成链
@@ -1039,6 +1179,27 @@ class ChatService(
                 withContext(TokenBudgetContext(generationBudget)) { generateSuggestion(conversationId, finalConversation) }
             }
         }
+    }
+
+    /** Persist on IO before publishing each received chunk; only changed rows after the first save. */
+    private suspend fun saveGeneratedChunk(
+        session: ConversationSession,
+        messages: List<UIMessage>,
+        regenerationNodeId: Uuid?,
+        settings: Settings,
+        previousNodes: List<MessageNode>?,
+    ): List<MessageNode> = session.withPersistenceLock {
+        val current = requireWritableSession(session)
+        val next = AutoContextCompression.mergeGenerated(current, messages, regenerationNodeId)
+            .fillModelSnapshots(settings)
+        requireWritableSession(session, next)
+        withContext(NonCancellable + Dispatchers.IO) {
+            conversationRepo.checkpointGeneratedNodes(next, previousNodes)
+            session.updateState { latest ->
+                latest.copy(messageNodes = next.messageNodes, updateAt = next.updateAt).also { checkFilesDelete(it, latest) }
+            }
+        }
+        next.messageNodes
     }
 
     // ---- 检查无效消息 ----
