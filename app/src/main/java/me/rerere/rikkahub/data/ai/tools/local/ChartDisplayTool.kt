@@ -102,7 +102,7 @@ internal fun buildChartDisplayTool(): Tool = Tool(
         } else {
             buildJsonObject {
                 put("success", true)
-                put("message", "Chart displayed to the user.")
+                put("message", "График показан пользователю.")
             }
         }
         listOf(UIMessagePart.Text(payload.toString()))
@@ -146,64 +146,67 @@ private fun buildAxisSchema(): JsonObject = buildJsonObject {
     })
 }
 
-private fun JsonObject.number(key: String): Double? = (this[key] as? JsonPrimitive)?.doubleOrNull
+// Numeric strings are accepted for compatibility with tool callers; infinities and NaN are never chart data.
+private fun JsonPrimitive.finiteNumber(): Double? = doubleOrNull?.takeIf { it.isFinite() }
+
+private fun JsonObject.number(key: String): Double? = (this[key] as? JsonPrimitive)?.finiteNumber()
 
 private fun JsonObject.string(key: String): String? =
     (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
 
 private fun validateChartArgs(params: JsonObject): String? {
     val style = params.string("style")
-    if (style !in CHART_STYLES) return "style must be one of ${CHART_STYLES.joinToString()}"
+    if (style !in CHART_STYLES) return "Поле style должно быть одним из: ${CHART_STYLES.joinToString()}"
 
     val axes = mutableMapOf<String, JsonObject>()
     for (axisName in listOf("x_axis", "y_axis")) {
         val element = params[axisName] ?: continue
-        val axis = element as? JsonObject ?: return "$axisName must be an object"
+        val axis = element as? JsonObject ?: return "$axisName должен быть объектом"
         validateAxis(axisName, axis, style!!)?.let { return it }
         axes[axisName] = axis
     }
 
     val series = params["series"] as? JsonArray
-    if (series.isNullOrEmpty()) return "series must be a non-empty array"
-    if (series.size > MAX_SERIES) return "series can contain at most $MAX_SERIES items"
+    if (series.isNullOrEmpty()) return "series должен быть непустым массивом"
+    if (series.size > MAX_SERIES) return "В series допускается не более $MAX_SERIES рядов"
 
     val xLabels = axes["x_axis"]?.get("data") as? JsonArray
     val xLog = axes["x_axis"]?.string("scale") == "log"
     val yLog = axes["y_axis"]?.string("scale") == "log"
 
     series.forEachIndexed { index, element ->
-        val item = element as? JsonObject ?: return "series[$index] must be an object"
+        val item = element as? JsonObject ?: return "series[$index] должен быть объектом"
         val color = item["color"]
         if (color != null) {
             val colorText = (color as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
             if (colorText == null || !HEX_COLOR_REGEX.matches(colorText)) {
-                return "series[$index].color must be a hex color like '#F80' or '#FF8800'"
+                return "series[$index].color должен быть цветом в формате '#F80' или '#FF8800'"
             }
         }
 
         if (style == "scatter") {
-            if ("values" in item) return "series[$index] must not use 'values' for scatter charts; use 'points'"
-            val points = item["points"] as? JsonArray ?: return "series[$index].points is required for scatter charts"
-            if (points.size > MAX_SERIES_POINTS) return "series[$index].points can contain at most $MAX_SERIES_POINTS items"
+            if ("values" in item) return "Для точечного графика в series[$index] укажите points вместо values"
+            val points = item["points"] as? JsonArray ?: return "Для точечного графика требуется массив series[$index].points"
+            if (points.size > MAX_SERIES_POINTS) return "В series[$index].points допускается не более $MAX_SERIES_POINTS точек"
             points.forEachIndexed { pointIndex, point ->
                 val obj = point as? JsonObject
                 val x = obj?.number("x")
                 val y = obj?.number("y")
-                if (x == null || y == null) return "series[$index].points[$pointIndex] must have numeric x and y"
-                if (xLog && x <= 0) return "series[$index].points[$pointIndex].x must be > 0 on a log x_axis"
-                if (yLog && y <= 0) return "series[$index].points[$pointIndex].y must be > 0 on a log y_axis"
+                if (x == null || y == null) return "В series[$index].points[$pointIndex] координаты x и y должны быть конечными числами"
+                if (xLog && x <= 0) return "series[$index].points[$pointIndex].x должен быть больше 0 для логарифмической оси X"
+                if (yLog && y <= 0) return "series[$index].points[$pointIndex].y должен быть больше 0 для логарифмической оси Y"
             }
         } else {
-            if ("points" in item) return "series[$index] must not use 'points' for $style charts; use 'values'"
-            val values = item["values"] as? JsonArray ?: return "series[$index].values is required for $style charts"
-            if (values.size > MAX_SERIES_POINTS) return "series[$index].values can contain at most $MAX_SERIES_POINTS items"
+            if ("points" in item) return "Для графика $style в series[$index] укажите values вместо points"
+            val values = item["values"] as? JsonArray ?: return "Для графика $style требуется массив series[$index].values"
+            if (values.size > MAX_SERIES_POINTS) return "В series[$index].values допускается не более $MAX_SERIES_POINTS значений"
             values.forEachIndexed { valueIndex, value ->
-                val number = (value as? JsonPrimitive)?.doubleOrNull
-                    ?: return "series[$index].values[$valueIndex] must be a number"
-                if (yLog && number <= 0) return "series[$index].values[$valueIndex] must be > 0 on a log y_axis"
+                val number = (value as? JsonPrimitive)?.finiteNumber()
+                    ?: return "series[$index].values[$valueIndex] должен быть конечным числом"
+                if (yLog && number <= 0) return "series[$index].values[$valueIndex] должен быть больше 0 для логарифмической оси Y"
             }
             if (xLabels != null && xLabels.size != values.size) {
-                return "series[$index].values has ${values.size} items but x_axis.data has ${xLabels.size}"
+                return "Число значений series[$index].values (${values.size}) не совпадает с числом подписей x_axis.data (${xLabels.size})"
             }
         }
     }
@@ -215,38 +218,38 @@ private fun validateAxis(axisName: String, axis: JsonObject, style: String): Str
     val hasMax = "max" in axis
     // 折线图/柱状图的 X 轴是类目轴, 没有可映射的数值范围或对数刻度
     if (axisName == "x_axis" && style != "scatter" && (hasMin || hasMax || axis.string("scale") == "log")) {
-        return "x_axis.min/max and log scale are not supported for $style charts (the X axis is categorical); " +
-            "use y_axis for range and log scale"
+        return "Для графика $style ось X содержит категории: x_axis.min/max и логарифмическая шкала недоступны. " +
+            "Укажите диапазон и логарифмическую шкалу в y_axis"
     }
     if (style == "bar" && (hasMin || hasMax)) {
-        return "$axisName.min/max are not supported for bar charts (bars always start from 0)"
+        return "$axisName.min/max недоступны для столбчатого графика: столбцы всегда начинаются от 0"
     }
     val min = axis.number("min")
     val max = axis.number("max")
-    if (hasMin && min == null) return "$axisName.min must be a number"
-    if (hasMax && max == null) return "$axisName.max must be a number"
-    if (min != null && max != null && min >= max) return "$axisName.min must be less than $axisName.max"
+    if (hasMin && min == null) return "$axisName.min должен быть конечным числом"
+    if (hasMax && max == null) return "$axisName.max должен быть конечным числом"
+    if (min != null && max != null && min >= max) return "$axisName.min должен быть меньше $axisName.max"
 
     val scale = axis["scale"]
     if (scale != null && axis.string("scale") !in AXIS_SCALES) {
-        return "$axisName.scale must be one of ${AXIS_SCALES.joinToString()}"
+        return "$axisName.scale должен быть одним из: ${AXIS_SCALES.joinToString()}"
     }
     if (axis.string("scale") == "log" && min != null && min <= 0) {
-        return "$axisName.min must be > 0 on a log scale"
+        return "$axisName.min должен быть больше 0 для логарифмической шкалы"
     }
 
     val data = axis["data"]
     // 标签只用于折线图/柱状图的类目 X 轴, 其余情况渲染时会被忽略
     if (data != null && (axisName == "y_axis" || style == "scatter")) {
         return if (axisName == "y_axis") {
-            "y_axis.data is not supported; category labels belong to x_axis.data"
+            "y_axis.data недоступен: подписи категорий указываются в x_axis.data"
         } else {
-            "x_axis.data is not supported for scatter charts (the X axis is numeric); use points[].x"
+            "Для точечного графика x_axis.data недоступен: ось X числовая, используйте points[].x"
         }
     }
     if (data != null) {
-        val labels = data as? JsonArray ?: return "$axisName.data must be an array of strings"
-        if (labels.any { (it as? JsonPrimitive)?.isString != true }) return "$axisName.data must be an array of strings"
+        val labels = data as? JsonArray ?: return "$axisName.data должен быть массивом строк"
+        if (labels.any { (it as? JsonPrimitive)?.isString != true }) return "$axisName.data должен быть массивом строк"
     }
     return null
 }

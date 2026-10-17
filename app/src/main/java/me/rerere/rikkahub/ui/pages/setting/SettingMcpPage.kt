@@ -1022,21 +1022,6 @@ private fun McpToolCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                // 需要审批开关
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Text(
-                        text = stringResource(R.string.setting_mcp_page_needs_approval),
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                    Switch(
-                        checked = tool.needsApproval,
-                        onCheckedChange = onNeedsApprovalChange,
-                        size = SwitchSize.Small
-                    )
-                }
                 // 启用开关
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -1064,6 +1049,27 @@ private fun McpToolCard(
                     )
                 }
             }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.setting_mcp_page_additional_server_approval),
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(
+                    checked = tool.needsApproval,
+                    onCheckedChange = onNeedsApprovalChange,
+                    size = SwitchSize.Small
+                )
+            }
+            Text(
+                text = stringResource(R.string.setting_mcp_page_additional_server_approval_explanation),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             // 展开后显示描述和参数
             if (expanded) {
                 // 描述

@@ -42,6 +42,7 @@ fun replaceText(
 ): ReplaceTextResult {
     require(oldText.isNotEmpty()) { "old_text не должен быть пустым. Укажите текст для замены." }
     for (replacer in replacers) {
+        if (replaceAll && replacer !== ExactReplacer) continue
         val matches = replacer.findMatches(content, oldText, newText)
         if (matches.isEmpty()) continue
         if (!replaceAll) {
@@ -67,7 +68,8 @@ fun replaceText(
         )
     }
     throw IllegalArgumentException(
-        "Текст old_text не найден. Прочитайте файл заново и скопируйте нужный фрагмент из его текущего содержимого."
+        "Текст old_text не найден. Прочитайте файл заново и скопируйте нужный фрагмент из его текущего содержимого." +
+            if (replaceAll) " Для replace_all требуется точное совпадение, включая пробелы." else ""
     )
 }
 

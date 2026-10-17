@@ -20,6 +20,41 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [28], application = Application::class)
 class AppThemePreferencesTest {
+    @Test fun `glass preset approval discloses appearance changes in both directions`() = runBlocking {
+        val theme = appThemePreferences(RuntimeEnvironment.getApplication())
+        var settings = Settings(dynamicColor = false, displaySetting = DisplaySetting(
+            chatMessageBackgroundStyle = ChatMessageBackgroundStyle.SOLID,
+            userChatBubbleStyleOverrides = ChatBubbleStyleOverrides(solidOpacity = .4f),
+        ))
+        val engine = AppSettingsEngine({ settings }, { settings = it(settings); settings }, theme)
+        for (enabled in listOf(true, false)) {
+            val preview = engine.previewSet("theme.glassTheme", JsonPrimitive(enabled))
+            val changes = preview.toJson()["changes"] as? JsonArray
+            assertNotNull("Glass preset must disclose its full side effects", changes)
+            val keys = changes!!.map { it.jsonObject["key"]!!.jsonPrimitive.content }
+            assertTrue(keys.contains("display.chatMessageBackgroundStyle"))
+            assertTrue(keys.any { it.startsWith("display.userChatBubbleStyleOverrides") })
+            assertTrue("Actual appearance changes must be visible in approval", preview.description.contains("Стиль сообщений"))
+            assertEquals("ok", engine.applyApproved(preview)["status"]!!.jsonPrimitive.content)
+        }
+    }
+
+    @Test fun `glass approval does not overwrite an appearance edited after preview`() = runBlocking {
+        val theme = appThemePreferences(RuntimeEnvironment.getApplication())
+        var settings = Settings(dynamicColor = false, displaySetting = DisplaySetting(
+            chatMessageBackgroundStyle = ChatMessageBackgroundStyle.SOLID,
+        ))
+        var writes = 0
+        val engine = AppSettingsEngine({ settings }, { settings = it(settings); writes++; settings }, theme)
+        val preview = engine.previewSet("theme.glassTheme", JsonPrimitive(true))
+        settings = settings.copy(displaySetting = settings.displaySetting.copy(
+            chatMessageBackgroundStyle = ChatMessageBackgroundStyle.DEFAULT,
+        ))
+        assertEquals("stale_preview", engine.applyApproved(preview)["code"]?.jsonPrimitive?.content)
+        assertEquals(0, writes)
+        assertFalse(settings.displaySetting.glassTheme)
+    }
+
     @Test fun `dark mode and AMOLED use original preferences and preserve unrelated keys`() = runBlocking {
         val context = RuntimeEnvironment.getApplication()
         val original = context.getSharedPreferences("rikkahub.preferences", Context.MODE_PRIVATE)

@@ -44,7 +44,11 @@ internal fun manageAppSettingsTool(engine: AppSettingsEngine): Tool = Tool(
             args.keys.any { it !in setOf("action", "section", "key", "value", "_expected_before", "_approval_preview") } -> error(APP_SETTINGS_MANUAL_ONLY, "manual_only")
             action == "list_sections" && args.keys == setOf("action") -> engine.listSections()
             action == "get" && args.keys.all { it in setOf("action", "section", "key") } -> engine.get(section, key)
-            action == "set" && key != null && "value" in args && args.keys.all { it in setOf("action", "key", "value", "_expected_before", "_approval_preview") } -> engine.set(key, args.getValue("value"), args["_expected_before"])
+            action == "set" && key != null && "value" in args && args.keys.all { it in setOf("action", "key", "value", "_expected_before", "_approval_preview") } -> {
+                val preview = args["_approval_preview"] as? JsonObject
+                if (preview == null) error("Изменение настроек требует нового одобрения пользователя.", "approval_required")
+                else engine.set(key, args.getValue("value"), args["_expected_before"], preview)
+            }
             else -> error("Укажите list_sections без дополнительных полей; get с section или key; set с key и value.")
         }
         listOf(UIMessagePart.Text(result.toString()))

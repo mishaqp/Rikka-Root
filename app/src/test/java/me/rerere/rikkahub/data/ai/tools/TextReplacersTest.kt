@@ -6,6 +6,18 @@ import org.junit.Test
 
 class TextReplacersTest {
 
+    @Test fun `replace all never replaces different blocks using only shared anchors`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            replaceText("start\nfirst\nend\nstart\nsecond\nend", "start\nmissing\nend", "updated", replaceAll = true)
+        }
+    }
+
+    @Test fun `replace all requires exact whitespace too`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            replaceText("  first\n  second\n", "first\nsecond", "updated", replaceAll = true)
+        }
+    }
+
     // ---- exact ----
 
     @Test

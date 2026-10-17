@@ -73,7 +73,7 @@ class SshToolSecretSanitizer(private val store: SshCredentialStore) {
                 JsonObject(args.filterKeys { it !in FIELDS }).toString()
             } catch (_: Exception) { PLACEHOLDER }
         }
-        private fun isSshTool(toolName: String): Boolean = TOOLS.any { it.startsWith(toolName) }
+        private fun isSshTool(toolName: String): Boolean = toolName in TOOLS
         private val TOOLS = setOf("ssh_exec", "save_ssh_host")
         private val FIELDS = listOf("password", "private_key", "passphrase")
         private const val PREFIX = "rikka-ssh-secret:"

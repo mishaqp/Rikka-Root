@@ -50,6 +50,22 @@ class SshToolSecretSanitizerTest {
         assertEquals(args, sanitizer().sanitizeForPersistence("unrelated_tool", args))
     }
 
+    @Test fun `partial tool names never redact ordinary fields or create vault references`() {
+        val args = """{"password":"ordinary-data","value":1}"""
+        for (name in listOf("", "ssh", "save", "ssh_exec_saved", "ssh_exec_extra")) {
+            assertEquals(name, args, SshToolSecretSanitizer.sanitizeForExport(name, args))
+            assertEquals(name, args, sanitizer().sanitizeForPersistence(name, args))
+        }
+    }
+
+    @Test fun `both exact credential tool names still redact every credential during export`() {
+        val args = """{"password":"private-password","private_key":"private-key","passphrase":"private-passphrase","host":"server"}"""
+        for (name in listOf("ssh_exec", "save_ssh_host")) {
+            val result = Json.parseToJsonElement(SshToolSecretSanitizer.sanitizeForExport(name, args)) as JsonObject
+            assertEquals(Json.parseToJsonElement("""{"host":"server"}"""), result)
+        }
+    }
+
     @Test fun `invalid reference errors cannot echo raw credential contents`() {
         val failure = assertThrows(IllegalArgumentException::class.java) {
             sanitizer().resolveArgs("ssh_exec", Json.parseToJsonElement("""{"password":"rikka-ssh-secret:private-password:password"}"""))

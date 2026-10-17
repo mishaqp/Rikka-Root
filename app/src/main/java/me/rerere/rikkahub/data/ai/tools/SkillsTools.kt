@@ -128,12 +128,13 @@ fun createSkillTools(
                                 "skill_body_not_found" -> "Файл SKILL.md навыка не найден."
                                 "path_outside_skill" -> "Путь выходит за папку навыка."
                                 "skill_file_not_found" -> "Файл навыка не найден."
+                                "skill_path_is_directory" -> "Указана папка навыка, а требуется файл."
                                 else -> "Не удалось прочитать навык."
                             })
                             put("recovery", when (code) {
                                 "skill_not_enabled" -> "Включите навык в настройках текущего чата и повторите use_skill."
                                 "skill_body_not_found", "skill_not_found" -> "Проверьте установку навыка или установите его заново."
-                                "path_outside_skill", "skill_file_not_found" -> "Укажите path из ссылок в SKILL.md внутри папки навыка."
+                                "path_outside_skill", "skill_file_not_found", "skill_path_is_directory" -> "Укажите путь к файлу из ссылок в SKILL.md внутри папки навыка; для основных инструкций не передавайте path."
                                 else -> "Укажите name из available_skills и повторите use_skill."
                             })
                             put(
@@ -208,6 +209,9 @@ fun createSkillTools(
                         "skill_file_not_found",
                         "File '$path' does not exist in skill '$name'. Use only paths from Markdown links inside SKILL.md.",
                     )
+                }
+                if (!target.isFile) {
+                    return@Tool err("skill_path_is_directory", "Путь должен указывать на обычный файл внутри папки навыка.")
                 }
                 if (target.length() > SkillManager.MAX_SKILL_FILE_BYTES) {
                     return@Tool tooLargeErr(target)

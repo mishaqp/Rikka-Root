@@ -16,7 +16,7 @@ import kotlin.uuid.Uuid
 
 internal const val APP_SETTINGS_MANUAL_ONLY = "Это можно изменить только вручную в настройках"
 
-internal data class AppSettingsChangePreview(
+internal data class AppSettingChange(
     val key: String,
     val title: String,
     val before: JsonElement,
@@ -28,6 +28,23 @@ internal data class AppSettingsChangePreview(
     fun toJson(): JsonObject = buildJsonObject {
         put("key", key); put("title", title); put("before", before); put("after", after)
         put("before_label", beforeLabel); put("after_label", afterLabel); put("description", description)
+    }
+}
+
+internal data class AppSettingsChangePreview(
+    val key: String,
+    val title: String,
+    val before: JsonElement,
+    val after: JsonElement,
+    val beforeLabel: String = readableSettingValue(before),
+    val afterLabel: String = readableSettingValue(after),
+    val changes: List<AppSettingChange> = listOf(AppSettingChange(key, title, before, after, beforeLabel, afterLabel)),
+) {
+    val description: String get() = changes.joinToString("\n") { it.description }
+    fun toJson(): JsonObject = buildJsonObject {
+        put("key", key); put("title", title); put("before", before); put("after", after)
+        put("before_label", beforeLabel); put("after_label", afterLabel); put("description", description)
+        put("changes", JsonArray(changes.map { it.toJson() }))
     }
 }
 
@@ -300,7 +317,42 @@ internal fun previewAppSettingsChange(settings: Settings, key: String, value: Js
     val field = appSettingField(key, themePreferences)
     field.validate(settings, value)
     val before = field.read(settings)
-    return AppSettingsChangePreview(key, field.title, before, value, field.label(settings, before), field.label(settings, value))
+    val primary = AppSettingChange(key, field.title, before, value, field.label(settings, before), field.label(settings, value))
+    val changes = mutableListOf(primary)
+    if (key.startsWith("display.") || key == "theme.glassTheme" || key == "language.appLanguageTag") {
+        // Serialize only the ordinary display settings, never the complete Settings (credentials).
+        val changed = field.write(settings, value)
+        val oldDisplay = JsonInstant.encodeToJsonElement(DisplaySetting.serializer(), settings.displaySetting)
+        val newDisplay = JsonInstant.encodeToJsonElement(DisplaySetting.serializer(), changed.displaySetting)
+        val fields = appSettingFields(themePreferences).associateBy { it.key }
+        fun collect(path: String, old: JsonElement, new: JsonElement) {
+            if (old == new) return
+            if (old is JsonObject || new is JsonObject) {
+                val oldObject = old as? JsonObject
+                val newObject = new as? JsonObject
+                (oldObject?.keys.orEmpty() + newObject?.keys.orEmpty()).forEach { child ->
+                    collect("$path.$child", oldObject?.get(child) ?: JsonNull, newObject?.get(child) ?: JsonNull)
+                }
+            } else {
+                val equivalentKey = when (path) {
+                    "display.glassTheme" -> "theme.glassTheme"
+                    "display.appLanguageTag" -> "language.appLanguageTag"
+                    else -> path
+                }
+                if (equivalentKey != key) {
+                    val title = fields[equivalentKey]?.title ?: when {
+                        path.startsWith("display.glassPreviousMessageStyle") -> "Сохранённый стиль для восстановления (${path.substringAfter("display.glassPreviousMessageStyle")})"
+                        path.startsWith("display.userChatBubbleStyleOverrides") -> "Оформление сообщений пользователя (${path.substringAfterLast('.')})"
+                        path.startsWith("display.assistantChatBubbleStyleOverrides") -> "Оформление ответов (${path.substringAfterLast('.')})"
+                        else -> "Параметр оформления (${path.removePrefix("display.")})"
+                    }
+                    changes += AppSettingChange(equivalentKey, title, old, new)
+                }
+            }
+        }
+        collect("display", oldDisplay, newDisplay)
+    }
+    return AppSettingsChangePreview(key, field.title, before, value, primary.beforeLabel, primary.afterLabel, changes)
 }
 
 /** Functional update always receives the latest persisted snapshot, including after approval. */
@@ -348,26 +400,27 @@ internal class AppSettingsEngine(
 
     fun previewSet(key: String, value: JsonElement): AppSettingsChangePreview = previewAppSettingsChange(snapshot(), key, value, themePreferences)
 
-    suspend fun set(key: String, value: JsonElement, expectedBefore: JsonElement?): JsonObject = safelySuspend {
+    suspend fun set(key: String, value: JsonElement, expectedBefore: JsonElement?, expectedPreview: JsonObject? = null): JsonObject = safelySuspend {
         val preview = previewSet(key, value)
         if (expectedBefore == null) rejectSetting("approval_required", "Изменение настроек требует нового одобрения пользователя.")
         if (preview.before != expectedBefore) stalePreview()
+        if (expectedPreview != null && expectedPreview != preview.toJson()) stalePreview()
         applyApproved(preview)
     }
 
-    suspend fun applyApproved(preview: AppSettingsChangePreview): JsonObject {
+    suspend fun applyApproved(preview: AppSettingsChangePreview): JsonObject = safelySuspend {
         val saved = if (preview.key in setOf("theme.colorMode", "theme.amoledDark")) {
             val preferences = themePreferences ?: manualSetting()
             val current = snapshot()
             val fresh = previewAppSettingsChange(current, preview.key, preview.after, preferences)
-            if (fresh.before != preview.before || !preferences.compareAndSet(preview.key, preview.before, fresh.after)) stalePreview()
+            if (fresh.changes != preview.changes || !preferences.compareAndSet(preview.key, preview.before, fresh.after)) stalePreview()
             current
         } else update { current ->
             val fresh = previewAppSettingsChange(current, preview.key, preview.after, themePreferences)
-            if (fresh.before != preview.before) stalePreview()
+            if (fresh.changes != preview.changes) stalePreview()
             appSettingField(preview.key, themePreferences).write(current, fresh.after)
         }
-        return buildJsonObject {
+        buildJsonObject {
             put("status", "ok"); put("change", preview.toJson())
             put("setting", appSettingField(preview.key, themePreferences).toJson(saved)); put("message", "Настройка сохранена.")
         }

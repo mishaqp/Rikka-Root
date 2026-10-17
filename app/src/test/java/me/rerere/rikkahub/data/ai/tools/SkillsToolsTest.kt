@@ -2,6 +2,9 @@ package me.rerere.rikkahub.data.ai.tools
 
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.UIMessagePart
@@ -15,6 +18,24 @@ import org.junit.rules.TemporaryFolder
 class SkillsToolsTest {
     @get:Rule
     val tempFolder = TemporaryFolder()
+
+    @Test fun `use_skill directory paths return recoverable Russian errors without throwing`() = runBlocking {
+        val skillDir = tempFolder.newFolder("directory-paths")
+        skillDir.resolve("SKILL.md").writeText("Instructions")
+        skillDir.resolve("references").mkdir()
+        val tool = createSkillTools(setOf("directory-paths"), listOf(SkillMetadata(
+            name = "directory-paths", description = "Test skill", skillDir = skillDir,
+        ))).single()
+        for (path in listOf(".", "./", "references")) {
+            val output = tool.execute(buildJsonObject { put("name", "directory-paths"); put("path", path) })
+            val error = Json.parseToJsonElement((output.single() as UIMessagePart.Text).text).jsonObject
+            assertTrue("Directory path must yield a structured error", error.containsKey("error"))
+            assertTrue(error["message"]!!.jsonPrimitive.content.any { it in 'А'..'я' })
+            assertTrue(error["recovery"]!!.jsonPrimitive.content.isNotBlank())
+        }
+        val content = tool.execute(buildJsonObject { put("name", "directory-paths"); put("path", "SKILL.md") })
+        assertEquals("Instructions", (content.single() as UIMessagePart.Text).text)
+    }
 
     @Test
     fun `use_skill reads metadata directory when display name differs`() = runBlocking {
