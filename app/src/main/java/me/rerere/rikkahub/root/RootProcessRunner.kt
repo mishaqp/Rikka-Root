@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.root
 
 import java.io.IOException
+import java.io.InputStream
 import java.util.concurrent.TimeUnit
 
 internal data class RootProcessResult(
@@ -13,6 +14,8 @@ internal data class RootProcessResult(
 
 /** One launch only; cancellation/timeout never retries a command that may have side effects. */
 internal object RootProcessRunner {
+    private const val MAX_FINAL_DRAIN_BYTES = 1024 * 1024
+
     fun run(
         argv: List<String>,
         timeoutMs: Int,
@@ -33,8 +36,8 @@ internal object RootProcessRunner {
         val stdout = BoundedOutputStream(maxStdoutBytes)
         val stderr = BoundedOutputStream(maxStderrBytes)
         val readers = listOf(
-            Thread({ runCatching { process.inputStream.use { it.copyTo(stdout) } } }, "root-stdout"),
-            Thread({ runCatching { process.errorStream.use { it.copyTo(stderr) } } }, "root-stderr"),
+            Thread({ drainWhileRunning(process, process.inputStream, stdout) }, "root-stdout"),
+            Thread({ drainWhileRunning(process, process.errorStream, stderr) }, "root-stderr"),
         ).onEach { it.isDaemon = true; it.start() }
         try {
             val finished = process.waitFor(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
@@ -59,6 +62,40 @@ internal object RootProcessRunner {
             throw error
         } finally {
             if (process.isAlive) process.destroyForcibly()
+        }
+    }
+
+    /** A background descendant may keep a pipe open after the owned shell has exited.
+     * Drain available bytes while running, then one finite snapshot after shell exit.
+     * Closing a stream from another thread cannot safely unblock ProcessPipeInputStream.read.
+     */
+    private fun drainWhileRunning(process: Process, stream: InputStream, output: BoundedOutputStream) {
+        runCatching {
+            stream.use {
+                val buffer = ByteArray(4096)
+                while (!Thread.currentThread().isInterrupted) {
+                    if (!process.isAlive) {
+                        // Descendants can replenish a pipe forever. After the owned process
+                        // exits, drain one bounded snapshot instead of waiting for an empty pipe.
+                        var remaining = minOf(stream.available(), MAX_FINAL_DRAIN_BYTES)
+                        while (remaining > 0 && !Thread.currentThread().isInterrupted) {
+                            val count = stream.read(buffer, 0, minOf(buffer.size, remaining))
+                            if (count <= 0) break
+                            output.write(buffer, 0, count)
+                            remaining -= count
+                        }
+                        break
+                    }
+                    val available = stream.available()
+                    if (available > 0) {
+                        val count = stream.read(buffer, 0, minOf(buffer.size, available))
+                        if (count < 0) break
+                        output.write(buffer, 0, count)
+                    } else {
+                        Thread.sleep(5)
+                    }
+                }
+            }
         }
     }
 }

@@ -5,6 +5,7 @@ import kotlinx.serialization.json.*
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.ai.tools.HeadlessToolPolicy
 import me.rerere.rikkahub.data.db.entity.ScheduledJobEntity
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.repository.*
@@ -140,6 +141,9 @@ fun createCronJobTools(
             )
             val next = CronJobScheduler.nextScheduled(job, now) ?: return@Tool error("no_future_occurrence")
             val actions = (obj["actions"] as? JsonArray)?.map { el -> val action = el.jsonObject; CronAction(action["tool"]!!.jsonPrimitive.content, action["args"]!!.jsonObject) } ?: emptyList()
+            for (action in actions) {
+                HeadlessToolPolicy.blockReason(action.tool, action.args)?.let { return@Tool error(it) }
+            }
             if (callerConversation.config == null) return@Tool error("missing_conversation_snapshot")
             val payload = ScheduledJobPayload(text("name")!!, text("prompt"), actions, callerConversation.config, callerConversation.workspaceCwd, allowed)
             try {

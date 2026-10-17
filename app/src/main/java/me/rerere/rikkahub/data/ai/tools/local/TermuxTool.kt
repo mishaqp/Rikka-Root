@@ -652,7 +652,8 @@ fun termuxRunCommandTool(context: Context): Tool = Tool(
             }
             is CaptureResult.Timeout -> buildJsonObject {
                 put("error", "timeout")
-                put("recovery", "Команда не вернула результат за ${timeoutMs / 1000} с. Увеличьте timeout_seconds или проверьте allow-external-apps=true в ~/.termux/termux.properties. После изменения принудительно остановите Termux и откройте снова.")
+                put("may_still_be_running", true)
+                put("recovery", "Команда не вернула результат за ${timeoutMs / 1000} с и могла продолжить работу в Termux. Проверьте процессы и результат её выполнения. Не повторяйте команду до этой проверки. После проверки при необходимости увеличьте timeout_seconds.")
                 res.failureDiagnostics().forEach { (key, value) -> put(key, value) }
             }
             is CaptureResult.Denied -> buildJsonObject {

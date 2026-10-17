@@ -46,6 +46,7 @@ class HostShellRunner : WorkspaceShellRunner {
 const val MAX_OUTPUT_CHARS = 128 * 1024
 
 fun Process.readResult(timeoutMillis: Long, stdin: ByteArray? = null): WorkspaceCommandResult {
+    val identity = ownedIdentity()
     val stdout = StreamCollector(inputStream)
     val stderr = StreamCollector(errorStream)
     val stdinWriter = stdin?.let { bytes -> StreamWriter(outputStream, bytes) }
@@ -61,7 +62,7 @@ fun Process.readResult(timeoutMillis: Long, stdin: ByteArray? = null): Workspace
     try {
         val finished = waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
         if (!finished) {
-            destroyForcibly()
+            stopForeground(identity)
         }
         stdinWriter?.join(1_000)
         stdout.join(1_000)
@@ -74,14 +75,66 @@ fun Process.readResult(timeoutMillis: Long, stdin: ByteArray? = null): Workspace
             truncated = stdout.truncated || stderr.truncated,
         )
     } catch (e: InterruptedException) {
-        // 调用方线程被中断（如协程取消时的 runInterruptible），杀掉进程避免命令继续执行
-        destroyForcibly()
-        // 进程被杀后 stdout/stderr 会关闭, 这里 join 回收两个采集线程, 避免每次取消泄漏一对线程
-        stdinWriter?.join(1_000)
-        stdout.join(1_000)
-        stderr.join(1_000)
+        // PRoot must receive QUIT while alive so it can reap tracees before forced cleanup.
+        stopForeground(identity)
+        runCatching { stdinWriter?.join(1_000) }
+        runCatching { stdout.join(1_000) }
+        runCatching { stderr.join(1_000) }
+        Thread.currentThread().interrupt()
         throw e
     }
+}
+
+private data class ForegroundProcessIdentity(val pid: Long, val parent: Long, val started: Long)
+
+/** Android's Process has no public pid() API. Its platform toString exposes pid; /proc
+ * must independently verify that it is our direct child, and record its kernel start time.
+ * On a desktop JVM prefer the public pid() method, accessed without an Android API dependency.
+ */
+private fun Process.ownedIdentity(): ForegroundProcessIdentity? = runCatching {
+    val pid = (runCatching { Process::class.java.getMethod("pid").invoke(this) as Long }.getOrNull()
+        ?: Regex("\\bpid=(\\d+)").find(toString())?.groupValues?.get(1)?.toLongOrNull()) ?: return null
+    if (pid <= 1 || !isAlive) return null
+    val self = File("/proc/self/stat").readText().substringBefore(' ').toLong()
+    val fields = File("/proc/$pid/stat").readText().substringAfterLast(") ").trim().split(Regex("\\s+"))
+    val parent = fields.getOrNull(1)?.toLongOrNull() ?: return null
+    val started = fields.getOrNull(19)?.toLongOrNull() ?: return null
+    if (parent != self || started <= 0) return null
+    ForegroundProcessIdentity(pid, parent, started)
+}.getOrNull()
+
+private fun Process.stopForeground(identity: ForegroundProcessIdentity?) {
+    if (!isAlive) return
+    if (identity != null) {
+        // Check ownership again in the signal sender. PID and start time come only from
+        // the owned Process and procfs, never from a command or model-visible output.
+        val script = """
+            IFS= read -r stat < /proc/${identity.pid}/stat || exit 1
+            rest=${'$'}{stat##*) }
+            set -- ${'$'}rest
+            [ "${'$'}2" = "${identity.parent}" ] || exit 1
+            shift 19
+            [ "${'$'}1" = "${identity.started}" ] || exit 1
+            kill -QUIT ${identity.pid}
+        """.trimIndent()
+        runCatching {
+            val shell = if (File("/system/bin/sh").isFile) "/system/bin/sh" else "/bin/sh"
+            val signal = ProcessBuilder(shell, "-c", script).redirectErrorStream(true).start()
+            try {
+                signal.outputStream.close()
+                if (!signal.waitFor(200, TimeUnit.MILLISECONDS)) signal.destroyForcibly()
+            } finally {
+                if (signal.isAlive) signal.destroyForcibly()
+                signal.inputStream.close()
+            }
+        }
+    } else {
+        // If the platform cannot prove a PID, use the owned handle rather than guess one.
+        destroy()
+    }
+    if (runCatching { waitFor(500, TimeUnit.MILLISECONDS) }.getOrDefault(false)) return
+    destroyForcibly()
+    runCatching { waitFor(500, TimeUnit.MILLISECONDS) }
 }
 
 private class StreamWriter(

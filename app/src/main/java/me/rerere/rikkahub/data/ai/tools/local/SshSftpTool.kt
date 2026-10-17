@@ -21,6 +21,10 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.repository.SshHostRepository
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.BasicFileAttributes
 import java.util.concurrent.atomic.AtomicReference
 
 private const val TAG_SFTP = "SshSftpTool"
@@ -113,14 +117,18 @@ fun sshUploadTool(context: Context, repo: SshHostRepository, access: LocalFileAc
             ))
         }
         val payload = runCancellableSshOp(timeoutSec * 1000L) { sessionRef ->
+            val uploadContext = currentCoroutineContext()
             withSavedHostSession(context, repo, name, timeoutSec * 1000, sessionRef) { session ->
                 val sftp = openSftp(session)
                 try {
-                    localFile.inputStream().use { input -> sftp.put(input, remotePath) }
+                    uploadContext.ensureActive()
+                    // The handshake can outlive a grant or a pathname. Revalidate
+                    // at stream acquisition, within the interruptible session.
+                    access.checkFile(localFile).inputStream().use { input -> sftp.put(input, remotePath) }
                     buildJsonObject {
                         put("success", true)
                         put("remote_path", remotePath)
-                        put("bytes", localFile.length())
+                        put("bytes", access.checkFile(localFile).length())
                     }
                 } catch (e: Throwable) {
                     sshFailureEnvelope(e, "Ошибка загрузки SFTP.",
@@ -163,30 +171,67 @@ fun sshDownloadTool(context: Context, repo: SshHostRepository, access: LocalFile
         val localFile = requireNotNull((access.resolve(localPath, write = true) as? LocalFileSource.Local)?.file) {
             "SFTP работает с локальными файлами scratch, upload или workspace."
         }
-        // Ensure the local parent directory exists.
-        try { localFile.parentFile?.mkdirs() } catch (_: Throwable) {}
         val payload = runCancellableSshOp(timeoutSec * 1000L) { sessionRef ->
+            val downloadContext = currentCoroutineContext()
             withSavedHostSession(context, repo, name, timeoutSec * 1000, sessionRef) { session ->
                 val sftp = openSftp(session)
-                var ok = false
-                try {
-                    localFile.outputStream().use { output -> sftp.get(remotePath, output) }
-                    ok = true
+                var partialFile: File? = null
+                var partialKey: Any? = null
+                var published = false
+                var cleanupFailed = false
+                fun checkedPartial(file: File): File = access.checkFile(file, write = true).also { guarded ->
+                    val key = Files.readAttributes(guarded.toPath(), BasicFileAttributes::class.java,
+                        LinkOption.NOFOLLOW_LINKS).fileKey()
+                    require(partialKey != null && key == partialKey) { "Временный файл SFTP изменился. Проверьте исходную папку." }
+                }
+                val result = try {
+                    downloadContext.ensureActive()
+                    val parent = access.checkFile(requireNotNull(localFile.absoluteFile.parentFile))
+                    access.checkFile(localFile, write = true)
+                    require(parent.mkdirs() || parent.isDirectory) { "Не удалось создать папку назначения SFTP." }
+                    access.checkFile(parent)
+                    access.checkFile(localFile, write = true)
+                    val partial = File.createTempFile(".rikka-sftp-", ".part", parent)
+                    partialFile = partial
+                    partialKey = Files.readAttributes(access.checkFile(partial, write = true).toPath(),
+                        BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS).fileKey()
+                    checkedPartial(partial).outputStream().use { output -> sftp.get(remotePath, output) }
+                    downloadContext.ensureActive()
+                    // The final path changes only after a complete transfer. Never fall back to
+                    // truncating/copying the destination when the filesystem cannot move atomically.
+                    access.checkFile(parent)
+                    checkedPartial(partial)
+                    access.checkFile(localFile, write = true)
+                    downloadContext.ensureActive()
+                    Files.move(partial.toPath(), localFile.toPath(),
+                        StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+                    published = true
                     buildJsonObject {
                         put("success", true)
                         put("local_path", localFile.absolutePath)
-                        put("bytes", localFile.length())
+                        put("bytes", access.checkFile(localFile).length())
                     }
                 } catch (e: Throwable) {
                     sshFailureEnvelope(e, "Ошибка скачивания SFTP.",
                         "Проверьте remote_path, право чтения на сервере и доступ к local_path, затем повторите ssh_download.")
                 } finally {
-                    // Delete partial files left by a failed get. Otherwise the user is left
-                    // with a half-written file that LOOKS like a successful download —
-                    // misleading and (for binaries) dangerous to execute.
-                    if (!ok) try { if (localFile.exists()) localFile.delete() } catch (_: Throwable) {}
+                    // A stale pathname can now resolve to somebody else's file.
+                    // Never follow a swapped ancestor or delete a replacement inode.
+                    if (!published) partialFile?.let { partial ->
+                        try {
+                            val guarded = access.checkFile(partial, write = true)
+                            if (guarded.exists()) check(checkedPartial(guarded).delete())
+                        } catch (_: Throwable) { cleanupFailed = true }
+                    }
                     try { sftp.disconnect() } catch (_: Throwable) {}
                 }
+                if (cleanupFailed) buildJsonObject {
+                    result.forEach { (key, value) -> put(key, value) }
+                    put("cleanup_failed", true)
+                    put("partial_path", partialFile!!.absolutePath)
+                    put("partial_path_unverified", true)
+                    put("cleanup_recovery", "Временный файл не удалён: путь или доступ изменились. Указан прежний путь; его текущее содержимое не подтверждено. Проверьте исходную папку перед повтором.")
+                } else result
             }
         }
         listOf(UIMessagePart.Text(withSftpPaths(payload, name, localPath, remotePath).toString()))
