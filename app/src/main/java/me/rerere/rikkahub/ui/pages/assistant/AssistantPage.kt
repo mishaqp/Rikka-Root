@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -85,6 +86,7 @@ import androidx.compose.foundation.lazy.items as lazyItems
 @Composable
 fun AssistantPage(vm: AssistantVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val removalError by vm.removalError.collectAsStateWithLifecycle()
     val createState = useEditState<Assistant> {
         vm.addAssistant(it)
     }
@@ -234,6 +236,19 @@ fun AssistantPage(vm: AssistantVM = koinViewModel()) {
     }
 
     AssistantCreationSheet(createState)
+
+    removalError?.let { error ->
+        AlertDialog(
+            onDismissRequest = vm::clearRemovalError,
+            title = { Text(stringResource(R.string.assistant_page_delete_error_title)) },
+            text = { Text(stringResource(error.messageRes, error.cronJobs, error.workflows)) },
+            confirmButton = {
+                TextButton(onClick = vm::clearRemovalError) {
+                    Text(stringResource(R.string.confirm))
+                }
+            },
+        )
+    }
 
     RikkaConfirmDialog(
         show = deleteTarget != null,

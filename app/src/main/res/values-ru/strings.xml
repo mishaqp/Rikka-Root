@@ -1570,4 +1570,8 @@
     <string name="chat_page_history_backup_save">Сохранить резервную копию</string>
     <string name="chat_page_history_partial_export">Этот экспорт содержит только загруженные сообщения. Для сохранения всей истории используйте полную резервную копию.</string>
     <string name="chat_page_history_backup_error">Не удалось сохранить резервную копию</string>
+  <string name="assistant_page_delete_error_title">Удаление ассистента</string>
+  <string name="assistant_page_delete_has_scheduled_work">Нельзя удалить ассистента со связанными заданиями или сценариями: задания — %1$d, сценарии — %2$d. Сначала перенесите или удалите связанные данные вручную.</string>
+  <string name="assistant_page_delete_failed">Не удалось завершить удаление ассистента. Обновите список и проверьте связанные данные.</string>
+  <string name="assistant_page_delete_cleanup_failed">Ассистент удалён, но очистка чатов или памяти не завершена. Проверьте связанные данные.</string>
 </resources>

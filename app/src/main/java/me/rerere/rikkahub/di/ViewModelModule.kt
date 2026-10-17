@@ -46,7 +46,12 @@ val viewModelModule = module {
     viewModelOf(::SettingVM)
     viewModelOf(::DebugVM)
     viewModelOf(::HistoryVM)
-    viewModelOf(::AssistantVM)
+    viewModel {
+        AssistantVM(
+            settingsStore = get(), memoryRepository = get(), conversationRepo = get(), filesManager = get(),
+            ownershipGuard = get(), scheduledJobRepository = get(), workflowRepository = get(),
+        )
+    }
     viewModel<AssistantDetailVM> {
         AssistantDetailVM(
             id = it.get(),
