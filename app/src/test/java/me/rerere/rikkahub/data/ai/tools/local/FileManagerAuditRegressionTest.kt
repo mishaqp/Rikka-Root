@@ -90,6 +90,35 @@ class FileManagerAuditRegressionTest {
         assertFalse("SAF must not create a raw host directory", target.exists())
     }
 
+    @Test fun remaining45SafChildLookupFindsTheExactNameBeyondTheListingBudget(): Unit = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val tree = Uri.parse("content://com.android.externalstorage.documents/tree/primary%3ADownload")
+        val provider = DirectoryProvider().apply {
+            repeat(LocalFileAccess.MAX_ENTRIES + 1) { directories += "primary:Download/entry-$it" }
+            directories += "primary:Download/wanted"
+        }
+        attachProvider(context, tree.authority!!, provider)
+        context.contentResolver.takePersistableUriPermission(tree,
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        val access = LocalFileAccess(context)
+        val found = access.findChild(access.resolve(tree.toString()), "wanted")
+        assertNotNull("An exact SAF child lookup must not inherit the UI listing cap", found)
+        assertEquals("wanted", access.name(found!!))
+    }
+
+    @Test fun remaining45SafChildLookupProvesAbsenceWithoutSilentlyTruncating(): Unit = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val tree = Uri.parse("content://com.android.externalstorage.documents/tree/primary%3ADownload")
+        val provider = DirectoryProvider().apply {
+            repeat(LocalFileAccess.MAX_ENTRIES + 1) { directories += "primary:Download/entry-$it" }
+        }
+        attachProvider(context, tree.authority!!, provider)
+        context.contentResolver.takePersistableUriPermission(tree,
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        val access = LocalFileAccess(context)
+        assertNull(access.findChild(access.resolve(tree.toString()), "missing"))
+    }
+
     @Test fun parentAndNameCanCreateChildrenAtEveryLocalScopeRoot(): Unit = runBlocking {
         val scratch = temporary.newFolder("scratch")
         val upload = temporary.newFolder("upload")

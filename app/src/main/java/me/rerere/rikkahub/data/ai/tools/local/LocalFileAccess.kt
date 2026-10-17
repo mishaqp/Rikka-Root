@@ -646,7 +646,34 @@ class LocalFileAccess internal constructor(
                 val child = checkFile(File(directory, name))
                 if (child.exists()) LocalFileSource.Local(child) else null
             }
-            is LocalFileSource.Content -> list(parent).firstOrNull { this@LocalFileAccess.name(it) == name }
+            is LocalFileSource.Content -> {
+                // A lookup must not inherit the UI listing's 5000-row/materialization
+                // budget. Stream the provider cursor until the exact child or EOF;
+                // only EOF proves absence, while cancellation still aborts the lookup.
+                checkGrant(parent, false)
+                require(isDirectory(parent)) { "Папка назначения не найдена." }
+                val id = DocumentsContract.getDocumentId(documentUri(parent.uri))
+                val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(parent.uri, id)
+                val projection = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                var found: LocalFileSource.Content? = null
+                safProviderCall { androidContext.contentResolver.query(childrenUri, projection, null, null, null) }
+                    ?.let(::SafCursor)?.use { cursor ->
+                        while (safProviderCall { cursor.moveToNext() }) {
+                            currentCoroutineContext().ensureActive()
+                            if (safProviderCall { cursor.getString(1) } != name) continue
+                            val childId = safProviderCall { cursor.getString(0) }
+                            require(!childId.isNullOrBlank() && childId.length <= 8192) {
+                                "Провайдер SAF вернул некорректный идентификатор."
+                            }
+                            found = LocalFileSource.Content(DocumentsContract.buildDocumentUriUsingTree(parent.uri, childId))
+                            break
+                        }
+                    } ?: error("Не удалось прочитать папку SAF.")
+                currentCoroutineContext().ensureActive()
+                checkGrant(parent, false)
+                found?.also { checkGrant(it, false) }
+            }
         }
     } }
 
@@ -801,12 +828,16 @@ class LocalFileAccess internal constructor(
         val directory = source.isDirectory
         if (!directory && !source.isFile) return@withContext null
         require(!directory || !target.toPath().startsWith(source.toPath())) { "Нельзя перемещать папку внутрь себя." }
-        // Existing directory merges and overwrite transactions retain the existing path.
+        // Directory merges retain their existing copy/delete semantics. Regular-file
+        // replacements can keep the old inode beside the destination instead of
+        // allocating an unbounded byte copy through scratch.
         require(!target.exists() || overwrite) { "Назначение уже существует. Укажите overwrite=true." }
-        if (target.exists()) return@withContext null
+        if (target.exists() && (directory || !target.isFile)) return@withContext null
         val parent = target.parentFile ?: return@withContext null
-        if (!parent.isDirectory) return@withContext null
-        val sameVolume = try { Files.getFileStore(source.toPath()) == Files.getFileStore(checkFile(parent).toPath()) }
+        var existingParent = checkFile(parent)
+        while (!existingParent.exists()) existingParent = checkFile(existingParent.parentFile ?: return@withContext null)
+        require(existingParent.isDirectory) { "Родительский путь назначения занят файлом." }
+        val sameVolume = try { Files.getFileStore(source.toPath()) == Files.getFileStore(existingParent.toPath()) }
         catch (_: java.io.IOException) { false }
         if (!sameVolume) return@withContext null
         val bytes = if (directory) {
@@ -827,6 +858,15 @@ class LocalFileAccess internal constructor(
         checkFile(source, true)
         checkFile(target, true)
         currentCoroutineContext().ensureActive()
+        createMoveParents(parent)
+        checkFile(source, true)
+        checkFile(target, true)
+        currentCoroutineContext().ensureActive()
+        if (target.exists()) {
+            require(overwrite) { "Назначение уже существует. Укажите overwrite=true." }
+            if (directory || !target.isFile) return@withContext null
+            return@withContext replaceLocalMove(source, target, bytes)
+        }
         try {
             Files.move(source.toPath(), target.toPath())
             bytes
@@ -837,6 +877,98 @@ class LocalFileAccess internal constructor(
             null // Cross-device/unsupported rename keeps the copy-then-delete transaction.
         } catch (_: UnsupportedOperationException) {
             null
+        }
+    }
+
+    /** Missing parents use the same guarded scope as the destination, never raw absolute routing. */
+    private suspend fun createMoveParents(parent: File) {
+        val missing = ArrayList<File>()
+        var current = checkFile(parent)
+        while (!current.exists()) {
+            require(missing.size < MAX_DEPTH) { "Слишком глубокая структура папок." }
+            missing += checkFile(current, true)
+            current = checkFile(current.parentFile ?: error("Не удалось определить папку назначения."))
+        }
+        require(current.isDirectory) { "Родительский путь назначения занят файлом." }
+        for (directory in missing.asReversed()) {
+            currentCoroutineContext().ensureActive()
+            val guarded = checkFile(directory, true)
+            try { Files.createDirectory(guarded.toPath()) }
+            catch (_: java.nio.file.FileAlreadyExistsException) {
+                require(checkFile(directory).isDirectory) { "Родительский путь назначения занят файлом." }
+            }
+        }
+    }
+
+    /** Once the old target moves, every failure must restore it or retain its recovery path. */
+    private suspend fun replaceLocalMove(source: File, target: File, bytes: Long): Long {
+        val parent = requireNotNull(target.parentFile)
+        val backup = File(parent, ".rk-move-${java.util.UUID.randomUUID()}.bak")
+        val sourceKey = Files.readAttributes(checkFile(source).toPath(), java.nio.file.attribute.BasicFileAttributes::class.java,
+            LinkOption.NOFOLLOW_LINKS).fileKey()
+        val targetKey = Files.readAttributes(checkFile(target).toPath(), java.nio.file.attribute.BasicFileAttributes::class.java,
+            LinkOption.NOFOLLOW_LINKS).fileKey()
+        // A shared pathname may be replaced by another application between steps.
+        // A provider without stable inode identity cannot use this transaction.
+        require(sourceKey != null && targetKey != null) { "Хранилище не поддерживает безопасное перемещение с заменой." }
+        fun sameInode(file: File, expected: Any): Boolean = Files.readAttributes(checkFile(file).toPath(),
+            java.nio.file.attribute.BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS).fileKey() == expected
+        var backedUp = false
+        var installed = false
+        try {
+            currentCoroutineContext().ensureActive()
+            checkFile(source, true)
+            checkFile(target, true)
+            checkFile(backup, true)
+            require(sameInode(source, sourceKey) && sameInode(target, targetKey)) { "Источник или назначение изменились во время перемещения." }
+            currentCoroutineContext().ensureActive()
+            // Neither move may replace an existing pathname. In particular an
+            // unrelated file created at target after backup must survive failure.
+            Files.move(target.toPath(), backup.toPath())
+            backedUp = true
+            currentCoroutineContext().ensureActive()
+            checkFile(source, true)
+            checkFile(target, true)
+            checkFile(backup, true)
+            require(sameInode(source, sourceKey) && sameInode(backup, targetKey)) { "Источник или резервная копия изменились во время перемещения." }
+            require(!target.exists()) { "Назначение изменилось во время перемещения." }
+            currentCoroutineContext().ensureActive()
+            Files.move(source.toPath(), target.toPath())
+            installed = true
+            // Rename is the commit point. Cancellation after it keeps the accepted
+            // result; do not move a new source back over a possibly raced pathname.
+            withContext(NonCancellable) {
+                checkFile(target, true)
+                checkFile(backup, true)
+                require(sameInode(target, sourceKey) && sameInode(backup, targetKey)) { "Назначение или резервная копия изменились; проверьте оба файла." }
+                Files.delete(backup.toPath())
+            }
+            return bytes
+        } catch (failure: Exception) {
+            if (!backedUp) throw failure
+            if (!installed) {
+                try {
+                    withContext(NonCancellable) {
+                        checkFile(target, true)
+                        checkFile(backup, true)
+                        require(sameInode(backup, targetKey)) { "Резервная копия изменена другим приложением; файл сохранён для проверки." }
+                        require(!target.exists()) { "Назначение занято другим файлом; резервная копия сохранена." }
+                        Files.move(backup.toPath(), target.toPath())
+                    }
+                } catch (restoration: Exception) {
+                    val recovery = FileMoveRecoveryException(backup.absolutePath, restoration, installed = false)
+                    if (failure is CancellationException) { failure.addSuppressed(recovery); throw failure }
+                    recovery.addSuppressed(failure)
+                    throw recovery
+                }
+                throw failure
+            }
+            // Source installation succeeded but cleanup failed (including revoked
+            // storage access). Never delete the completed destination in response.
+            if (!Files.exists(backup.toPath(), LinkOption.NOFOLLOW_LINKS)) throw failure
+            val recovery = FileMoveRecoveryException(backup.absolutePath, failure, installed = true)
+            if (failure is CancellationException) { failure.addSuppressed(recovery); throw failure }
+            throw recovery
         }
     }
 
@@ -1178,8 +1310,13 @@ else "Не удалось убрать созданный документ по�
 internal class FileMoveSourceDeleteException(cause: Exception) :
     java.io.IOException("Копия сохранена, но источник не удалось полностью удалить.", cause)
 
+internal class FileMoveRecoveryException(val backupPath: String, cause: Exception, val installed: Boolean) :
+    java.io.IOException(if (installed) "Файл перемещён, но прежняя версия осталась в резервной копии: $backupPath"
+        else "Не удалось восстановить прежнее имя файла. Резервная копия сохранена: $backupPath", cause)
+
 internal fun isMoveCopyPreserved(error: Exception): Boolean = error is FileMoveSourceDeleteException ||
-    error.suppressed.any { it is FileMoveSourceDeleteException }
+    error is FileMoveRecoveryException && error.installed ||
+    error.suppressed.any { it is FileMoveSourceDeleteException || it is FileMoveRecoveryException && it.installed }
 
 internal class FileRestoreFailedException(val backup: File, cause: Exception) :
     java.io.IOException("Не удалось восстановить файл. Резервная копия сохранена: /scratch/${backup.name}", cause)

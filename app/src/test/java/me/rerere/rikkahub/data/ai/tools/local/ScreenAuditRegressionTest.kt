@@ -97,6 +97,30 @@ class ScreenAuditRegressionTest {
         assertNotEquals(original, labelId())
     }
 
+    @Test fun `remaining 50 changed order number rejects stale click before input`() = runBlocking {
+        xml = ancestorXml(editable = false).replace("text=\"Search\"", "text=\"Открыть заказ 123\"")
+        val svc = service()
+        val original = execute(findNodeTool(svc), """{"by":"text","value":"Открыть заказ 123"}""")
+            .getValue("matches").jsonArray.single().jsonObject.getValue("node_id").jsonPrimitive.content
+        xml = xml.replace("Открыть заказ 123", "Открыть заказ 456")
+        calls.clear()
+        val result = execute(clickNodeTool(svc), buildJsonObject { put("node_id", original) }.toString())
+        assertEquals(result.toString(), "stale_node_id", result["error"]?.jsonPrimitive?.content)
+        assertFalse("A stale order must never tap the replacement", calls.any { it.startsWith("input tap ") })
+    }
+
+    @Test fun `remaining 50 changed accessible amount rejects stale click before input`() = runBlocking {
+        xml = ancestorXml(editable = false).replace("text=\"Search\"", "text=\"Оплатить\" content-desc=\"Оплатить 100 рублей\"")
+        val svc = service()
+        val original = execute(findNodeTool(svc), """{"by":"content_description","value":"Оплатить 100 рублей"}""")
+            .getValue("matches").jsonArray.single().jsonObject.getValue("node_id").jsonPrimitive.content
+        xml = xml.replace("Оплатить 100 рублей", "Оплатить 900 рублей")
+        calls.clear()
+        val result = execute(clickNodeTool(svc), buildJsonObject { put("node_id", original) }.toString())
+        assertEquals(result.toString(), "stale_node_id", result["error"]?.jsonPrimitive?.content)
+        assertFalse("A stale amount must never tap the replacement", calls.any { it.startsWith("input tap ") })
+    }
+
     @Test fun `replaced element refuses stale click without tapping replacement`() = runBlocking {
         val svc = service()
         val id = nodeId(svc)
@@ -149,6 +173,28 @@ class ScreenAuditRegressionTest {
         val result = execute(clickNodeTool(svc), buildJsonObject { put("node_id", id) }.toString())
         assertEquals(result.toString(), "stale_node_id", result["error"]?.jsonPrimitive?.content)
         assertTrue(calls.toString(), calls.none { it.startsWith("input ") })
+    }
+
+    @Test fun `changed semantic text of click target invalidates its unchanged child handle`() = runBlocking {
+        xml = ancestorXml(editable = false).replace("text=\"Parent\"", "text=\"Открыть заказ 123\"")
+        val svc = service()
+        val id = nodeId(svc)
+        xml = xml.replace("Открыть заказ 123", "Открыть заказ 456")
+        calls.clear()
+        val result = execute(clickNodeTool(svc), buildJsonObject { put("node_id", id) }.toString())
+        assertEquals(result.toString(), "stale_node_id", result["error"]?.jsonPrimitive?.content)
+        assertTrue(calls.toString(), calls.none { it.startsWith("input ") })
+    }
+
+    @Test fun `a ticking countdown on the click target preserves its unchanged child handle`() = runBlocking {
+        xml = ancestorXml(editable = false).replace("text=\"Parent\"", "text=\"Отправить код (59с)\"")
+        val svc = service()
+        val id = nodeId(svc)
+        xml = xml.replace("(59с)", "(58с)")
+        calls.clear()
+        val result = execute(clickNodeTool(svc), buildJsonObject { put("node_id", id) }.toString())
+        assertEquals(result.toString(), "true", result["success"]?.jsonPrimitive?.content)
+        assertEquals(listOf("input tap 150 300"), calls.filter { it.startsWith("input ") })
     }
 
     @Test fun `changed editable ancestor refuses child handle before focus or deletion`() = runBlocking {

@@ -61,6 +61,15 @@ internal fun fileJsonTool(name: String, description: String, schema: InputSchema
                     else "Android не разрешил убрать созданный документ. Проверьте его в выбранной папке.")
                 }
             }
+            catch (recovery: FileMoveRecoveryException) {
+                fileToolOperation(name)?.let { FileOperationDiagnostics.record(it, recovery) }
+                buildJsonObject {
+                    put("error", "move_recovery_required"); put("backup_path", recovery.backupPath)
+                    put("source_installed", recovery.installed)
+                    put("detail", if (recovery.installed) "Файл перемещён, но прежнюю версию не удалось убрать. Проверьте резервную копию."
+                        else "Перемещение прервано. Резервная копия прежнего файла сохранена; существующее назначение не заменено.")
+                }
+            }
             catch (failure: FileMoveSourceDeleteException) {
                 fileToolOperation(name)?.let { FileOperationDiagnostics.record(it, failure) }
                 buildJsonObject {
@@ -181,6 +190,10 @@ fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCan
                         else if (error is FileCreationCleanupFailedException && error.sharedPathMayBePartial) error.message.orEmpty()
                         else if (safFileCause(error) != null) deviceToolFailureReason(error, fileOperation)
                         else "Не удалось выполнить операцию. Проверьте путь, доступ и существующее назначение.")
+                    if (error is FileMoveRecoveryException) {
+                        put("backup_path", error.backupPath); put("source_installed", error.installed)
+                        put("error", "Перемещение требует проверки: прежний файл сохранён в резервной копии.")
+                    }
                     if (error is FileRestoreFailedException) put("backup_path", "/scratch/${error.backup.name}")
                     if (error is FileCreationCleanupFailedException) put("created_path", error.created.reference)
                 }

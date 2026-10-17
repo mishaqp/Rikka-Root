@@ -19,7 +19,12 @@ import me.rerere.ai.ui.UIMessagePart
 private const val DEFAULT_MAX_NODES = 500
 private const val MAX_NODES_HARD_CEILING = 2000
 
-private val NODE_TEXT_DIGITS = Regex("\\d+")
+// Preserve order numbers, amounts and other semantic digits. Only the explicit
+// seconds countdown suffix is volatile, e.g. «Отправить код (59с)».
+private val NODE_COUNTDOWN = Regex("(\\()\\d+(\\s*[сs]\\))")
+private fun stableNodeLabel(text: String): String = text.replace(NODE_COUNTDOWN) {
+    "${it.groupValues[1]}#${it.groupValues[2]}"
+}
 
 /**
  * What makes a node "the same element" for a later action. Bounds move when the keyboard
@@ -28,8 +33,8 @@ private val NODE_TEXT_DIGITS = Regex("\\d+")
  */
 private fun nodeIdentity(node: RootScreenNode, withText: Boolean): List<String> = listOf(
     node.packageName.orEmpty(), node.className.orEmpty(),
-    if (withText && !node.isEditable) node.text.orEmpty().replace(NODE_TEXT_DIGITS, "#") else "",
-    node.contentDescription.orEmpty().replace(NODE_TEXT_DIGITS, "#"), node.viewIdResourceName.orEmpty(),
+    if (withText && !node.isEditable) stableNodeLabel(node.text.orEmpty()) else "",
+    stableNodeLabel(node.contentDescription.orEmpty()), node.viewIdResourceName.orEmpty(),
     node.isClickable.toString(), node.isEditable.toString(), node.isScrollable.toString(),
 )
 
@@ -49,7 +54,9 @@ internal fun nodeFingerprint(node: RootScreenNode): String = fnv1a64(buildList {
             add("none")
         } else {
             add(depth.toString())
-            addAll(nodeIdentity(target, withText = false))
+            // A child handle can trigger this ancestor's action. Its non-editable
+            // label is part of that action's identity, including semantic numbers.
+            addAll(nodeIdentity(target, withText = true))
         }
     }
     addActionTarget("click") { it.isClickable }
