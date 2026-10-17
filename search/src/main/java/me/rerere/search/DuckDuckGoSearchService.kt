@@ -80,8 +80,8 @@ object DuckDuckGoSearchService : SearchService<SearchServiceOptions.DuckDuckGoOp
                 }.build())
             check(page.code == 200) { "DuckDuckGo search failed: HTTP ${page.code}; retry later" }
             // Without a charset header, let Jsoup read <meta charset> (old windows-1251 sites).
-        val doc = if (page.declaredCharset) Jsoup.parse(page.body, page.url)
-        else Jsoup.parse(java.io.ByteArrayInputStream(page.bytes), null, page.url)
+            val doc = if (page.declaredCharset) Jsoup.parse(page.body, page.url)
+            else Jsoup.parse(java.io.ByteArrayInputStream(page.bytes), null, page.url)
             check(doc.select(".anomaly-modal, [class*=anomaly-modal]").isEmpty() &&
                 !page.body.contains("confirm this search was made by a human", ignoreCase = true)
             ) { "DuckDuckGo returned an anti-bot challenge; retry later" }
