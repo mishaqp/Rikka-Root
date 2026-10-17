@@ -172,10 +172,20 @@ internal suspend fun writeZipArchive(
 
 private fun archiveParts(value: JsonObject) = listOf(UIMessagePart.Text(value.toString()))
 private fun archiveError(message: String) = archiveParts(buildJsonObject { put("error", message) })
+private class ArchiveRecoveryWarning(message: String) : Exception(message)
 private suspend fun archiveOperation(operation: FileToolOperation, action: suspend () -> JsonObject): List<UIMessagePart> = withContext(Dispatchers.IO) {
     try {
-        val result = withTimeoutOrNull(180_000) { action() }
-        if (result == null) archiveError("Время операции с архивом истекло. Повторите запрос с меньшим архивом.") else archiveParts(result)
+        var recoveryWarning: String? = null
+        val result = withTimeoutOrNull(180_000) {
+            try { action() }
+            catch (cancelled: CancellationException) {
+                recoveryWarning = cancelled.suppressed.filterIsInstance<ArchiveRecoveryWarning>().firstOrNull()?.message
+                throw cancelled
+            }
+        }
+        if (result == null) archiveError(listOfNotNull(
+            "Время операции с архивом истекло. Повторите запрос с меньшим архивом.", recoveryWarning,
+        ).joinToString(" ")) else archiveParts(result)
     } catch (cancelled: CancellationException) { throw cancelled }
     catch (unsafe: ArchiveSafetyException) {
         FileOperationDiagnostics.record(operation, unsafe)
@@ -262,7 +272,9 @@ internal suspend fun collectArchiveSources(access: LocalFileAccess, roots: List<
                 }
             }
         } else {
-            for (child in access.list(source)) walk(child, "$entryName/${access.name(child)}", depth + 1)
+            val children = access.list(source, limit = minOf(LocalFileAccess.MAX_ENTRIES, 10_000 - visited),
+                onTruncated = { throw ArchiveSafetyException("Слишком много файлов для одного архива.") })
+            for (child in children) walk(child, "$entryName/${access.name(child)}", depth + 1)
         }
     }
     for (root in roots) {
@@ -293,10 +305,16 @@ internal suspend fun createOwnedArchiveChild(
     name: String,
     isDirectory: Boolean,
     record: (LocalFileSource) -> Unit,
-): LocalFileSource = recordArchiveCreation(
-    create = { if (isDirectory) access.createNewChild(parent, name, isDirectory = true) else access.createFile(parent, name) },
-    record = record,
-)
+): LocalFileSource {
+    val created = recordArchiveCreation(
+        create = { if (isDirectory) access.createNewChild(parent, name, isDirectory = true) else access.createFile(parent, name) },
+        record = record,
+    )
+    // Record the returned URI before querying metadata: refusal and cancellation must
+    // only roll back the document that this operation actually created.
+    if (access.name(created) != name) throw ArchiveSafetyException("Провайдер SAF изменил имя создаваемого файла или папки.")
+    return created
+}
 
 private suspend fun backupArchiveTarget(access: LocalFileAccess, target: LocalFileSource, scratch: LocalFileSource.Local, index: Int, budget: ArchiveBudget): LocalFileSource.Local {
     val backup = scratchFile(access, scratch, "backup-$index")
@@ -327,22 +345,49 @@ private suspend fun rollbackArchiveChanges(access: LocalFileAccess, changes: Lis
     restored
 }
 
-private fun archiveSharedRollbackWarning(
+private fun archiveRollbackWarning(
     access: LocalFileAccess,
     changes: List<ArchiveChange>,
     directories: List<LocalFileSource>,
     scratch: LocalFileSource.Local,
-): String? = if ((changes.map { it.target } + directories).any { !access.permitsAutomaticRollback(it) })
-    "Операция прервана. В общей памяти могли остаться частичные файлы: проверьте папку назначения перед повтором. " +
-        "Временные файлы и резервные копии сохранены в /scratch/${scratch.file.name}."
-else null
+    failure: Throwable,
+): String {
+    val targets = (changes.map { it.target } + directories).distinctBy { it.reference }
+    val partialPaths = targets.mapTo(linkedSetOf()) { it.reference }
+    val scratchPath = "/scratch/${scratch.file.name}"
+    val recoveryPaths = changes.mapNotNullTo(linkedSetOf()) { it.backup?.let { backup -> "$scratchPath/${backup.file.name}" } }
+    // Lower file-access layers may retain a same-volume stage or a SAF restore
+    // backup. Keep these paths when replacing their exception with archive guidance.
+    val pending = ArrayDeque<Throwable>().apply { add(failure) }
+    val visited = HashSet<Throwable>()
+    while (pending.isNotEmpty() && visited.size < 64) {
+        val error = pending.removeFirst()
+        if (!visited.add(error)) continue
+        when (error) {
+            is FileCreationCleanupFailedException -> partialPaths.add(error.created.reference)
+            is FileRestoreFailedException -> recoveryPaths.add("/scratch/${error.backup.name}")
+        }
+        error.cause?.let(pending::addLast)
+        error.suppressed.forEach(pending::addLast)
+    }
+    val reason = if (targets.any { !access.permitsAutomaticRollback(it) })
+        "Операция прервана. В общей памяти могли остаться частичные файлы: проверьте их перед повтором."
+    else "Android не смог полностью восстановить файлы или удалить частичные результаты."
+    return buildString {
+        append(reason)
+        if (partialPaths.isNotEmpty()) append(" Пути назначения и частичных файлов: ${partialPaths.joinToString(", ")}.")
+        append(" Временные файлы сохранены в $scratchPath.")
+        if (recoveryPaths.isNotEmpty()) append(" Резервные копии: ${recoveryPaths.joinToString(", ")}.")
+    }
+}
 
 fun zipFilesTool(context: Context, access: LocalFileAccess = LocalFileAccess(context)): Tool = Tool(
     name = "zip_files",
-    description = "Создать ZIP из файлов и папок рабочего пространства, временной области или явно выданных SAF-папок. Предпочитайте этот встроенный инструмент вместо workspace_exec для создания ZIP: он не требует установки zip/unzip через apt или другой менеджер пакетов. sources и destination поддерживают /workspace/..., относительные пути от текущей папки рабочего пространства (без рабочего пространства — от /scratch), /scratch/..., file:// и content://. base_dir задаёт локальную базовую папку для имён записей. compression_level: 0–9, по умолчанию 6. Максимум 10 000 записей, 2 ГиБ данных и 512 МиБ ZIP." + ASSISTANT_FILE_DIRECTORY_HINT,
+    description = "Создать ZIP из файлов и папок рабочего пространства, временной области или явно выданных SAF-папок. Предпочитайте этот встроенный инструмент вместо workspace_exec для создания ZIP: он не требует установки zip/unzip через apt или другой менеджер пакетов. sources и destination поддерживают /workspace/..., относительные пути от текущей папки рабочего пространства (без рабочего пространства — от /scratch), /scratch/..., file:// и content://. base_dir задаёт локальную базовую папку для имён записей. overwrite по умолчанию false; для замены существующего ZIP укажите overwrite=true. compression_level: 0–9, по умолчанию 6. Максимум 10 000 записей, 2 ГиБ данных и 512 МиБ ZIP." + ASSISTANT_FILE_DIRECTORY_HINT,
     parameters = { InputSchema.Obj(buildJsonObject {
         put("sources", buildJsonObject { put("type", "array"); put("items", buildJsonObject { put("type", "string") }) })
         put("destination", buildJsonObject { put("type", "string") })
+        put("overwrite", buildJsonObject { put("type", "boolean"); put("default", false) })
         put("base_dir", buildJsonObject { put("type", "string") })
         put("compression_level", buildJsonObject { put("type", "integer"); put("minimum", 0); put("maximum", 9) })
     }, listOf("sources", "destination")) },
@@ -354,6 +399,10 @@ fun zipFilesTool(context: Context, access: LocalFileAccess = LocalFileAccess(con
         if (references.isEmpty() || references.size > 10_000) throw ArchiveSafetyException("Укажите от 1 до 10 000 источников.")
         val destinationPlan = access.planWritePath(obj.archivePath("destination"))
         if (destinationPlan.existing?.let { access.isDirectory(it) } == true) throw ArchiveSafetyException("destination должен указывать файл ZIP, а не папку.")
+        val overwrite = obj["overwrite"]?.jsonPrimitive?.booleanOrNull ?: false
+        if (!overwrite && destinationPlan.existing?.let { access.exists(it) } == true) {
+            throw ArchiveSafetyException("Файл назначения уже существует. Для замены ZIP укажите overwrite=true.")
+        }
         val roots = references.map { access.resolve(it) }
         val base = obj["base_dir"]?.jsonPrimitive?.contentOrNull?.let { access.resolve(it) }
         val level = obj["compression_level"]?.jsonPrimitive?.intOrNull ?: 6
@@ -368,13 +417,22 @@ fun zipFilesTool(context: Context, access: LocalFileAccess = LocalFileAccess(con
             val staged = scratchFile(access, scratch, "archive.zip")
             val stats = writeZipArchive(sources, access.openOutput(staged), level)
             val result = access.withWriteTarget(destinationPlan) { destination, created ->
-                val backup = if (!created && access.exists(destination)) backupArchiveTarget(access, destination, scratch, 0, backupBudget) else null
+                val exists = !created && access.exists(destination)
+                if (exists && !overwrite) throw ArchiveSafetyException("Файл назначения уже существует. Для замены ZIP укажите overwrite=true.")
+                val backup = if (exists) backupArchiveTarget(access, destination, scratch, 0, backupBudget) else null
                 if (destination is LocalFileSource.Local) {
                     val parent = destination.file.parentFile ?: throw ArchiveSafetyException("Не удалось определить папку назначения.")
                     createArchiveDirectories(access, LocalFileSource.Local(parent), createdDirectories)
                 }
-                changes.add(ArchiveChange(destination, backup))
-                access.copy(staged, destination, overwrite = true, ownedDestination = created)
+                // Reserve a new private local file exclusively before taking rollback
+                // ownership. A raced existing file must never become ours to delete.
+                val reserveLocal = !created && !exists && destination is LocalFileSource.Local && access.permitsAutomaticRollback(destination)
+                val target = if (reserveLocal) {
+                    val local = destination as LocalFileSource.Local
+                    createOwnedArchiveChild(access, LocalFileSource.Local(requireNotNull(local.file.parentFile)), local.file.name, false,
+                        record = { changes.add(ArchiveChange(it, null)) })
+                } else destination.also { changes.add(ArchiveChange(it, backup)) }
+                access.copy(staged, target, overwrite = overwrite || created || reserveLocal, ownedDestination = created || reserveLocal)
                 coroutineContext.ensureActive()
                 buildJsonObject { put("success", true); put("bytes_written", stats.bytes); put("entry_count", stats.entries) }
             }.second
@@ -384,9 +442,13 @@ fun zipFilesTool(context: Context, access: LocalFileAccess = LocalFileAccess(con
         } catch (failure: Throwable) {
             if (!rollbackArchiveChanges(access, changes, createdDirectories)) {
                 retainBackups = true
-                if (failure is CancellationException) throw failure
-                throw ArchiveSafetyException(archiveSharedRollbackWarning(access, changes, createdDirectories, scratch)
-                    ?: "Android не смог восстановить исходный файл. Резервная копия сохранена в ${scratch.reference}.")
+                val warning = archiveRollbackWarning(access, changes, createdDirectories, scratch, failure)
+                val cancelled = failure as? CancellationException ?: (failure as? Exception)?.let { safFileCause(it) as? CancellationException }
+                if (cancelled != null) {
+                    cancelled.addSuppressed(ArchiveRecoveryWarning(warning))
+                    throw cancelled
+                }
+                throw ArchiveSafetyException(warning)
             }
             throw failure
         } finally {
@@ -509,9 +571,13 @@ fun unzipFileTool(context: Context, access: LocalFileAccess = LocalFileAccess(co
         } catch (failure: Throwable) {
             if (!rollbackArchiveChanges(access, changes, createdDirectories)) {
                 retainBackups = true
-                if (failure is CancellationException) throw failure
-                throw ArchiveSafetyException(archiveSharedRollbackWarning(access, changes, createdDirectories, scratch)
-                    ?: "Android не смог полностью удалить частичные результаты. Резервные копии сохранены в ${scratch.reference}.")
+                val warning = archiveRollbackWarning(access, changes, createdDirectories, scratch, failure)
+                val cancelled = failure as? CancellationException ?: (failure as? Exception)?.let { safFileCause(it) as? CancellationException }
+                if (cancelled != null) {
+                    cancelled.addSuppressed(ArchiveRecoveryWarning(warning))
+                    throw cancelled
+                }
+                throw ArchiveSafetyException(warning)
             }
             throw failure
         } finally {
@@ -522,26 +588,38 @@ fun unzipFileTool(context: Context, access: LocalFileAccess = LocalFileAccess(co
 
 fun listZipContentsTool(context: Context, access: LocalFileAccess = LocalFileAccess(context)): Tool = Tool(
     name = "list_zip_contents",
-    description = "Показать записи ZIP без распаковки в пользовательскую папку. Предпочитайте этот встроенный инструмент вместо workspace_exec для просмотра ZIP: он не требует установки zip/unzip через apt или другой менеджер пакетов. source поддерживает /workspace/..., относительные пути от текущей папки рабочего пространства (без рабочего пространства — от /scratch), /scratch/..., file:// и content:// явно выданных SAF-папок. Чтение ограничено 10 000 записями, 2 ГиБ распакованных данных и 512 МиБ ZIP." + ASSISTANT_FILE_DIRECTORY_HINT,
-    parameters = { InputSchema.Obj(buildJsonObject { put("source", buildJsonObject { put("type", "string") }) }, listOf("source")) },
+    description = "Показать записи ZIP без распаковки в пользовательскую папку. Предпочитайте этот встроенный инструмент вместо workspace_exec для просмотра ZIP: он не требует установки zip/unzip через apt или другой менеджер пакетов. source поддерживает /workspace/..., относительные пути от текущей папки рабочего пространства (без рабочего пространства — от /scratch), /scratch/..., file:// и content:// явно выданных SAF-папок. limit ограничивает число записей в ответе: 1–10 000, по умолчанию 1000; truncated сообщает об усечении ответа. Весь ZIP проверяется независимо от limit: максимум 10 000 записей, 2 ГиБ распакованных данных и 512 МиБ ZIP." + ASSISTANT_FILE_DIRECTORY_HINT,
+    parameters = { InputSchema.Obj(buildJsonObject {
+        put("source", buildJsonObject { put("type", "string") })
+        put("limit", buildJsonObject { put("type", "integer"); put("minimum", 1); put("maximum", 10_000); put("default", 1000) })
+    }, listOf("source")) },
     needsApproval = { true },
     execute = { input -> archiveOperation(FileToolOperation.LIST_ZIP) {
-        val source = access.resolve(input.jsonObject.archivePath("source"))
+        val obj = input.jsonObject
+        val limit = if ("limit" in obj) obj["limit"]?.jsonPrimitive?.intOrNull
+            ?: throw ArchiveSafetyException("limit должен быть целым числом от 1 до 10 000.") else 1000
+        if (limit !in 1..10_000) throw ArchiveSafetyException("limit должен быть целым числом от 1 до 10 000.")
+        val source = access.resolve(obj.archivePath("source"))
         val entries = ArrayList<ZipEntry>()
-        readZipArchive(access.openInput(source)) { entry, _, _ -> entries.add(entry) }
+        // Limit retained metadata only. readZipArchive still validates and drains
+        // every hidden entry with the same count, path and byte budgets.
+        val stats = readZipArchive(access.openInput(source)) { entry, _, _ -> if (entries.size < limit) entries.add(entry) }
         val active = coroutineContext
-        buildJsonObject { put("entries", buildJsonArray {
-            for (entry in entries) {
-                active.ensureActive()
-                addJsonObject {
-                    put("name", entry.name)
-                    put("size", entry.size)
-                    put("compressed_size", entry.compressedSize)
-                    put("is_dir", entry.isDirectory)
-                    put("modified_at_unix_ms", entry.time)
-                    put("crc32", entry.crc)
+        buildJsonObject {
+            put("truncated", stats.entries > entries.size)
+            put("entries", buildJsonArray {
+                for (entry in entries) {
+                    active.ensureActive()
+                    addJsonObject {
+                        put("name", entry.name)
+                        put("size", entry.size)
+                        put("compressed_size", entry.compressedSize)
+                        put("is_dir", entry.isDirectory)
+                        put("modified_at_unix_ms", entry.time)
+                        put("crc32", entry.crc)
+                    }
                 }
-            }
-        }) }
+            })
+        }
     } },
 )

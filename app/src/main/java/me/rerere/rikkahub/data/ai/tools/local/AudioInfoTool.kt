@@ -44,7 +44,7 @@ fun audioInfoTool(context: Context): Tool = Tool(
     execute = { deviceToolResult {
         val am = context.getSystemService(AudioManager::class.java)
         val payload = if (am == null) {
-            buildJsonObject { put("error", "AudioManager unavailable") }
+            deviceToolError("Служба звука недоступна. Повторите запрос позже.")
         } else {
             val ringer = when (am.ringerMode) {
                 AudioManager.RINGER_MODE_SILENT -> "silent"

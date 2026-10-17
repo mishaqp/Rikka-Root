@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.ai.tools.local
 
+import android.speech.tts.TextToSpeech
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -46,6 +47,11 @@ internal fun buildTextToSpeechTool(
     execute = { deviceToolParts {
         val text = it.jsonObject["text"]?.jsonPrimitive?.contentOrNull
             ?: error("Укажите text — текст для озвучивания.")
+        // Android measures this limit in UTF-16 code units, matching String.length.
+        val maxLength = TextToSpeech.getMaxSpeechInputLength()
+        require(text.length <= maxLength) {
+            "Текст для озвучивания слишком длинный: не более $maxLength символов. Сократите текст или разделите его на части."
+        }
         eventBus.emit(AppEvent.Speak(text))
         val payload = buildJsonObject {
             put("success", true)

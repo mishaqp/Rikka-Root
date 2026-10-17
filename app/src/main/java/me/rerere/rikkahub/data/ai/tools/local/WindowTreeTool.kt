@@ -19,6 +19,36 @@ import me.rerere.ai.ui.UIMessagePart
 private const val DEFAULT_MAX_NODES = 500
 private const val MAX_NODES_HARD_CEILING = 2000
 
+private fun nodeIdentity(node: RootScreenNode): List<String> = listOf(
+    node.packageName.orEmpty(), node.className.orEmpty(), node.text.orEmpty(),
+    node.contentDescription.orEmpty(), node.viewIdResourceName.orEmpty(),
+    node.bounds.left.toString(), node.bounds.top.toString(), node.bounds.right.toString(), node.bounds.bottom.toString(),
+    node.isEnabled.toString(), node.isClickable.toString(), node.isEditable.toString(), node.isScrollable.toString(),
+)
+
+/** Include the actual click/edit targets, since a child handle can promote to an ancestor. */
+internal fun nodeFingerprint(node: RootScreenNode): String = fnv1a64(buildList {
+    add("node")
+    addAll(nodeIdentity(node))
+    fun addActionTarget(kind: String, accepts: (RootScreenNode) -> Boolean) {
+        var target: RootScreenNode? = node
+        var depth = 0
+        while (target != null && !accepts(target)) {
+            target = target.parent
+            depth++
+        }
+        add(kind)
+        if (target == null) {
+            add("none")
+        } else {
+            add(depth.toString())
+            addAll(nodeIdentity(target))
+        }
+    }
+    addActionTarget("click") { it.isClickable }
+    addActionTarget("edit") { it.isEditable }
+}).toULong().toString(16)
+
 internal fun nodeToJson(
     node: RootScreenNode,
     windowId: Int,
@@ -27,7 +57,7 @@ internal fun nodeToJson(
     val rect = Rect()
     node.getBoundsInScreen(rect)
     return buildJsonObject {
-        put("node_id", "${windowId}:${traversalIndex}")
+        put("node_id", "${windowId}:${traversalIndex}:${nodeFingerprint(node)}")
         put("bounds", buildJsonArray {
             add(rect.left); add(rect.top); add(rect.right); add(rect.bottom)
         })
@@ -77,13 +107,20 @@ fun readWindowTreeTool(
         )
     },
     execute = { input ->
-        service.wakeIfNeeded()
+        screenArgumentError(input, "verbose" to "boolean", "max_nodes" to "integer", "package_name" to "string")
+            ?.let { return@Tool listOf(UIMessagePart.Text(it.toString())) }
         val verbose = input.jsonObject["verbose"]?.jsonPrimitive?.booleanOrNull ?: false
-        val maxNodesRaw = input.jsonObject["max_nodes"]?.jsonPrimitive?.intOrNull ?: DEFAULT_MAX_NODES
-        val maxNodes = maxNodesRaw.coerceIn(1, MAX_NODES_HARD_CEILING)
+        val maxNodesRaw = input.jsonObject["max_nodes"]?.jsonPrimitive?.intOrNull
+            ?: if (input.jsonObject.containsKey("max_nodes")) 0 else DEFAULT_MAX_NODES
+        if (maxNodesRaw !in 1..MAX_NODES_HARD_CEILING) {
+            return@Tool listOf(UIMessagePart.Text(buildJsonObject {
+                put("error", "Укажите max_nodes от 1 до $MAX_NODES_HARD_CEILING.")
+            }.toString()))
+        }
+        val maxNodes = maxNodesRaw
         val pkgFilter = input.jsonObject["package_name"]?.jsonPrimitive?.contentOrNull
 
-        val payload = service.withService { svc ->
+        val payload = service.withService(wakeBeforeSnapshot = true) { svc ->
             val root = svc.rootInActiveWindow
             if (root == null) {
                 return@withService buildJsonObject {

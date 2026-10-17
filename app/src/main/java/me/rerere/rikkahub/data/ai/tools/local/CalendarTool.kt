@@ -33,8 +33,8 @@ internal fun buildCalendarQueryTool(context: Context): Tool = Tool(
         Returns a list of events with title, description, location, start/end times, and calendar info.
         The device timezone is '${ZoneId.systemDefault()}' (UTC offset ${OffsetDateTime.now().offset});
         times without an explicit offset are interpreted in this timezone.
-        Requires the 'Calendar' permission; if it is not granted, an error is returned and the
-        permission request is triggered automatically.
+        With begin but no end, queries one day from begin and ignores range.
+        Requires the 'Calendar' permission; if it is missing, returns an error with manual access guidance.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
@@ -52,7 +52,8 @@ internal fun buildCalendarQueryTool(context: Context): Tool = Tool(
                     put("type", "string")
                     put(
                         "description",
-                        "End time (exclusive), same formats as 'begin'. Defaults to now."
+                        "End time (exclusive), same formats as 'begin'. With begin, defaults to begin plus one day; " +
+                            "otherwise defaults to the end of the selected today/week/month period."
                     )
                 })
                 put("range", buildJsonObject {
@@ -115,6 +116,8 @@ internal fun buildCalendarQueryTool(context: Context): Tool = Tool(
             }
             endTime = if (endRaw != null) {
                 parseCalendarTime(endRaw, zone)
+            } else if (beginRaw != null) {
+                startTime.plusDays(1)
             } else when (rangePreset) {
                 "week" -> startTime.plusDays(7)
                 "month" -> startTime.plusMonths(1)
@@ -151,10 +154,11 @@ internal fun buildCalendarQueryTool(context: Context): Tool = Tool(
         )
 
         val selection = if (query != null) {
-            "${CalendarContract.Instances.TITLE} LIKE ?"
+            "${CalendarContract.Instances.TITLE} LIKE ? ESCAPE '\\'"
         } else null
         val selectionArgs = if (query != null) {
-            arrayOf("%$query%")
+            val literalQuery = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            arrayOf("%$literalQuery%")
         } else null
 
         val uri = CalendarContract.Instances.CONTENT_URI.buildUpon()
@@ -226,8 +230,7 @@ internal fun buildCalendarCreateTool(context: Context): Tool = Tool(
         Requires title and start time at minimum. End time defaults to 1 hour after start.
         The device timezone is '${ZoneId.systemDefault()}' (UTC offset ${OffsetDateTime.now().offset});
         times without an explicit offset are interpreted in this timezone.
-        Requires the 'Calendar' permission; if it is not granted, an error is returned and the
-        permission request is triggered automatically.
+        Requires the 'Calendar' permission; if it is missing, returns an error with manual access guidance.
     """.trimIndent().replace("\n", " "),
     needsApproval = { true },
     parameters = {

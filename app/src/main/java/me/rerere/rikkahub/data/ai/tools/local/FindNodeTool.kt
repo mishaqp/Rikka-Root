@@ -19,6 +19,24 @@ private const val MATCH_CAP = 50
 
 private data class NodeMatch(val node: RootScreenNode, val traversalIndex: Int)
 
+private data class FingerprintedNodeId(val windowId: Int, val index: Int, val fingerprint: String)
+
+private fun parseFingerprintedNodeId(raw: String): FingerprintedNodeId? {
+    val parts = raw.split(':')
+    if (parts.size != 3 || !Regex("[0-9a-f]{1,16}").matches(parts[2])) return null
+    val position = parseNodeId(parts.take(2).joinToString(":")) ?: return null
+    return FingerprintedNodeId(position.first, position.second, parts[2])
+}
+
+private fun invalidNodeId(raw: String): JsonObject = buildJsonObject {
+    if (parseNodeId(raw) != null) {
+        put("error", "stale_node_id")
+        put("message", "Экран изменился, прочитайте дерево заново через read_window_tree и используйте новый node_id.")
+    } else {
+        put("error", "Укажите node_id с отпечатком элемента из нового вызова read_window_tree.")
+    }
+}
+
 /**
  * Matches nodes via the same traversal (and therefore the same traversalIndex numbering)
  * as read_window_tree, so returned node_ids agree across tools and a node visible in the
@@ -51,13 +69,14 @@ private fun findMatchesUnified(
 /**
  * Resolves a read_window_tree node_id back to a live node. Returns the node or null with
  * a reason string. Staleness detection: window changed, index out of range, or the node
- * is no longer visible.
+ * is no longer visible, or its observed identity (including class/text/bounds) changed.
  */
 private fun resolveByNodeId(
     svc: RootScreenService,
     root: RootScreenNode,
     windowId: Int,
     traversalIndex: Int,
+    fingerprint: String,
 ): Pair<RootScreenNode?, String?> {
     if (root.windowId != windowId) return null to "stale_node_id"
     var found: RootScreenNode? = null
@@ -69,7 +88,7 @@ private fun resolveByNodeId(
         emit = { n, _, idx -> if (idx == traversalIndex) found = n },
     )
     val node = found ?: return null to "stale_node_id"
-    if (!node.isVisibleToUser) return null to "stale_node_id"
+    if (!node.isVisibleToUser || nodeFingerprint(node) != fingerprint) return null to "stale_node_id"
     return node to null
 }
 
@@ -114,7 +133,8 @@ fun findNodeTool(
         )
     },
     execute = { input ->
-        service.wakeIfNeeded()
+        screenArgumentError(input, "by" to "string", "value" to "string", "package_name" to "string")
+            ?.let { return@Tool listOf(UIMessagePart.Text(it.toString())) }
         val (by, value, pkgFilter) = parseSelector(input)
         if (by == null || by !in ALLOWED_BY || value == null) {
             return@Tool listOf(
@@ -125,7 +145,7 @@ fun findNodeTool(
                 )
             )
         }
-        val payload = service.withService { svc ->
+        val payload = service.withService(wakeBeforeSnapshot = true) { svc ->
             val root = svc.rootInActiveWindow
             if (root == null) {
                 return@withService buildJsonObject {
@@ -172,7 +192,7 @@ fun clickNodeTool(
             properties = buildJsonObject {
                 put("node_id", buildJsonObject {
                     put("type", "string")
-                    put("description", "Node handle from read_window_tree/find_node (\"windowId:index\"). Preferred over by/value; on a stale id you get stale_node_id and should re-read the tree.")
+                    put("description", "Node handle from read_window_tree/find_node (\"windowId:index:fingerprint\"). Preferred over by/value; on a stale id you get stale_node_id and should re-read the tree.")
                 })
                 put("by", buildJsonObject {
                     put("type", "string")
@@ -188,19 +208,16 @@ fun clickNodeTool(
         )
     },
     execute = { input ->
-        service.wakeIfNeeded()
+        screenArgumentError(input, "by" to "string", "value" to "string", "package_name" to "string",
+            "node_id" to "string", "nth" to "integer")
+            ?.let { return@Tool listOf(UIMessagePart.Text(it.toString())) }
         val (by, value, pkgFilter) = parseSelector(input)
-        val nth = input.jsonObject["nth"]?.jsonPrimitive?.intOrNull ?: 0
+        val nth = input.jsonObject["nth"]?.jsonPrimitive?.intOrNull
+            ?: if (input.jsonObject.containsKey("nth")) -1 else 0
         val rawNodeId = input.jsonObject["node_id"]?.jsonPrimitive?.contentOrNull
-        val parsedNodeId = rawNodeId?.let { parseNodeId(it) }
+        val parsedNodeId = rawNodeId?.let { parseFingerprintedNodeId(it) }
         if (rawNodeId != null && parsedNodeId == null) {
-            return@Tool listOf(
-                UIMessagePart.Text(
-                    buildJsonObject {
-                        put("error", "Укажите node_id в формате windowId:index из нового вызова read_window_tree.")
-                    }.toString()
-                )
-            )
+            return@Tool listOf(UIMessagePart.Text(invalidNodeId(rawNodeId).toString()))
         }
         if (rawNodeId == null && (by == null || by !in ALLOWED_BY || value == null)) {
             return@Tool listOf(
@@ -220,7 +237,7 @@ fun clickNodeTool(
                 )
             )
         }
-        val payload = service.withService { svc ->
+        val payload = service.withService(wakeBeforeSnapshot = true) { svc ->
             withActionEnvelope(svc) { _ ->
                 val root = svc.rootInActiveWindow
                     ?: return@withActionEnvelope buildJsonObject { put("error", svc.lastTreeError ?: "no_active_window")
@@ -233,7 +250,7 @@ fun clickNodeTool(
                     }
                 }
                 val (target, staleReason) = if (parsedNodeId != null) {
-                    resolveByNodeId(svc, root, parsedNodeId.first, parsedNodeId.second)
+                    resolveByNodeId(svc, root, parsedNodeId.windowId, parsedNodeId.index, parsedNodeId.fingerprint)
                 } else {
                     val (matches, truncated) = findMatchesUnified(svc, root, by!!, value!!)
                     when {
@@ -250,7 +267,7 @@ fun clickNodeTool(
                     return@withActionEnvelope buildJsonObject {
                         put("error", staleReason ?: "no_match")
                         if (staleReason == "stale_node_id") {
-                            put("hint", "Экран изменился. Повторите read_window_tree и используйте новый node_id.")
+                            put("hint", "Экран изменился, прочитайте дерево заново через read_window_tree и используйте новый node_id.")
                         }
                     }
                 }
@@ -304,7 +321,7 @@ fun setTextTool(
             properties = buildJsonObject {
                 put("node_id", buildJsonObject {
                     put("type", "string")
-                    put("description", "Node handle from read_window_tree/find_node (\"windowId:index\"). Preferred over by/value; on a stale id you get stale_node_id and should re-read the tree.")
+                    put("description", "Node handle from read_window_tree/find_node (\"windowId:index:fingerprint\"). Preferred over by/value; on a stale id you get stale_node_id and should re-read the tree.")
                 })
                 put("by", buildJsonObject {
                     put("type", "string")
@@ -332,12 +349,15 @@ fun setTextTool(
         )
     },
     execute = { input ->
-        service.wakeIfNeeded()
+        screenArgumentError(input, "by" to "string", "value" to "string", "package_name" to "string",
+            "node_id" to "string", "nth" to "integer", "text" to "string")
+            ?.let { return@Tool listOf(UIMessagePart.Text(it.toString())) }
         val (by, value, pkgFilter) = parseSelector(input)
-        val nth = input.jsonObject["nth"]?.jsonPrimitive?.intOrNull ?: 0
+        val nth = input.jsonObject["nth"]?.jsonPrimitive?.intOrNull
+            ?: if (input.jsonObject.containsKey("nth")) -1 else 0
         val newText = input.jsonObject["text"]?.jsonPrimitive?.contentOrNull
         val rawNodeId = input.jsonObject["node_id"]?.jsonPrimitive?.contentOrNull
-        val parsedNodeId = rawNodeId?.let { parseNodeId(it) }
+        val parsedNodeId = rawNodeId?.let { parseFingerprintedNodeId(it) }
         if (newText == null) {
             return@Tool listOf(
                 UIMessagePart.Text(
@@ -346,13 +366,7 @@ fun setTextTool(
             )
         }
         if (rawNodeId != null && parsedNodeId == null) {
-            return@Tool listOf(
-                UIMessagePart.Text(
-                    buildJsonObject {
-                        put("error", "Укажите node_id в формате windowId:index из нового вызова read_window_tree.")
-                    }.toString()
-                )
-            )
+            return@Tool listOf(UIMessagePart.Text(invalidNodeId(rawNodeId).toString()))
         }
         if (rawNodeId == null && (by == null || by !in ALLOWED_BY || value == null)) {
             return@Tool listOf(
@@ -370,7 +384,7 @@ fun setTextTool(
                 )
             )
         }
-        val payload = service.withService { svc ->
+        val payload = service.withService(wakeBeforeSnapshot = true) { svc ->
             withActionEnvelope(svc) { _ ->
                 val root = svc.rootInActiveWindow
                     ?: return@withActionEnvelope buildJsonObject { put("error", svc.lastTreeError ?: "no_active_window")
@@ -383,7 +397,7 @@ fun setTextTool(
                     }
                 }
                 val (target, staleReason) = if (parsedNodeId != null) {
-                    resolveByNodeId(svc, root, parsedNodeId.first, parsedNodeId.second)
+                    resolveByNodeId(svc, root, parsedNodeId.windowId, parsedNodeId.index, parsedNodeId.fingerprint)
                 } else {
                     val (matches, truncated) = findMatchesUnified(svc, root, by!!, value!!)
                     when {
@@ -400,7 +414,7 @@ fun setTextTool(
                     return@withActionEnvelope buildJsonObject {
                         put("error", staleReason ?: "no_match")
                         if (staleReason == "stale_node_id") {
-                            put("hint", "Экран изменился. Повторите read_window_tree и используйте новый node_id.")
+                            put("hint", "Экран изменился, прочитайте дерево заново через read_window_tree и используйте новый node_id.")
                         }
                     }
                 }

@@ -22,7 +22,8 @@ class LocalToolPermissionsTest {
         assertTrue(missingRuntimePermissions(LocalToolOption.Location, 37) { it == Manifest.permission.ACCESS_COARSE_LOCATION }.isEmpty())
         assertTrue(missingRuntimePermissions(LocalToolOption.Location, 26) { it == Manifest.permission.ACCESS_FINE_LOCATION }.isEmpty())
         assertEquals(2, missingRuntimePermissions(LocalToolOption.Location, 37) { false }.size)
-        assertEquals(listOf(Manifest.permission.ACCESS_FINE_LOCATION), missingRuntimePermissions(LocalToolOption.WifiInfo, 37) { it == Manifest.permission.ACCESS_COARSE_LOCATION })
+        assertTrue(missingRuntimePermissions(LocalToolOption.WifiInfo, 37) { it == Manifest.permission.ACCESS_COARSE_LOCATION }.isEmpty())
+        assertEquals(2, missingRuntimePermissions(LocalToolOption.WifiInfo, 37) { false }.size)
     }
 
     @Test fun wifiRequestsBothLocationPermissionsButNeverPhoneOrActivity() {
@@ -35,7 +36,7 @@ class LocalToolPermissionsTest {
 
     @Test fun permissionsNotPresentOnOlderAndroidAreNeverRequested() {
         assertTrue(localToolRuntimePermissions(LocalToolOption.Sensors, 28).isEmpty())
-        assertEquals(listOf(Manifest.permission.ACTIVITY_RECOGNITION), localToolRuntimePermissions(LocalToolOption.Sensors, 29))
+        assertTrue(localToolRuntimePermissions(LocalToolOption.Sensors, 29).isEmpty())
         assertTrue(localToolRuntimePermissions(LocalToolOption.Notification, 32).isEmpty())
         assertEquals(listOf(Manifest.permission.POST_NOTIFICATIONS), localToolRuntimePermissions(LocalToolOption.Notification, 33))
     }

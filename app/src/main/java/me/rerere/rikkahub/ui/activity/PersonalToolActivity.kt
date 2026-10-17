@@ -69,7 +69,7 @@ class PersonalToolActivity : FragmentActivity() {
         }
         if (!sharedPersonalSessions.setCancellationAction(id) {
                 val running=withContext(Dispatchers.Main.immediate) {
-                    worker?.cancel(); runCatching { biometric?.cancelAuthentication() }; revokeCameraAccess(); finish(); worker
+                    worker?.cancel(); runCatching { biometric?.cancelAuthentication() }; revokeCameraAccess(); releaseScreen(); finish(); worker
                 }
                 running?.join()
             }) { finish(); return }
@@ -101,13 +101,16 @@ class PersonalToolActivity : FragmentActivity() {
                 }
             }
         }
-        lifecycleScope.launch { current.await(); finish() }
+        lifecycleScope.launch { current.await(); releaseScreen(); finish() }
     }
 
     override fun onResume() {
         super.onResume()
         val current=session ?: return
         if (!sharedPersonalSessions.isActive(current.id)) { finish(); return }
+        if (current.request is PersonalUiRequest.Record || current.request is PersonalUiRequest.Speech) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
         if (launched) return
         launched=true
         try {
@@ -178,20 +181,26 @@ class PersonalToolActivity : FragmentActivity() {
     }
 
     private fun complete(result: PersonalUiResult) {
+        releaseScreen()
         revokeCameraAccess()
         val current=session
         if (current == null) { result.destroy(); finish(); return }
         lifecycleScope.launch(start=CoroutineStart.UNDISPATCHED) { sharedPersonalSessions.complete(current.id,result); finish() }
     }
     private fun cancel() {
+        releaseScreen()
         val current=session ?: return
         lifecycleScope.launch(start=CoroutineStart.UNDISPATCHED) { sharedPersonalSessions.cancel(current.id); finish() }
+    }
+    private fun releaseScreen() {
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
     private fun revokeCameraAccess() {
         cameraUri?.let { uri -> runCatching { revokeUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) } }
         cameraUri=null
     }
     override fun onPause() {
+        releaseScreen()
         super.onPause()
         if (!waitingExternal) cancel()
     }

@@ -9,6 +9,7 @@ import android.nfc.tech.Ndef
 import android.nfc.tech.NdefFormatable
 import android.nfc.tech.TagTechnology
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -69,6 +70,7 @@ class NfcToolActivity : ComponentActivity() {
         lifecycleScope.launch {
             val result = withTimeoutOrNull(request.timeoutSeconds * 1000L) { request.await() }
             if (result == null) sharedNfcSessions.complete(request.requestId, NfcResult.Timeout)
+            releaseScreen()
             finish()
         }
     }
@@ -82,6 +84,7 @@ class NfcToolActivity : ComponentActivity() {
             completeSession(NfcResult.Error(getString(R.string.nfc_tool_unavailable)))
             finish(); return
         }
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         try {
             // SKIP_NDEF_CHECK would hide the Ndef technology that read/write needs.
             reader.enableReaderMode(this, { tag ->
@@ -154,9 +157,14 @@ class NfcToolActivity : ComponentActivity() {
     }
 
     private fun completeSession(result: NfcResult) {
+        releaseScreen()
         val request = session ?: return
         // Marks the session as stopping before dispatching close/drain to IO.
         lifecycleScope.launch(start = CoroutineStart.UNDISPATCHED) { sharedNfcSessions.complete(request.requestId, result) }
+    }
+
+    private fun releaseScreen() {
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
     private fun cancelSession() = completeSession(NfcResult.Cancelled)

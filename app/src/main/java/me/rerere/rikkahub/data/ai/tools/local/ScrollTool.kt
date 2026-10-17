@@ -77,7 +77,8 @@ fun scrollTool(
         )
     },
     execute = { input ->
-        val wakeOk = service.wakeIfNeeded()
+        screenArgumentError(input, "direction" to "string", "x" to "number", "y" to "number")
+            ?.let { return@Tool listOf(UIMessagePart.Text(it.toString())) }
         val direction = input.jsonObject["direction"]?.jsonPrimitive?.contentOrNull
         if (direction == null || direction !in ALLOWED_DIRECTIONS) {
             return@Tool listOf(
@@ -90,8 +91,16 @@ fun scrollTool(
         }
         val anchorX = input.jsonObject["x"]?.jsonPrimitive?.doubleOrNull?.takeIf { it.isFinite() }
         val anchorY = input.jsonObject["y"]?.jsonPrimitive?.doubleOrNull?.takeIf { it.isFinite() }
+        if ((anchorX == null) != (anchorY == null) || anchorX?.let { it < 0 } == true || anchorY?.let { it < 0 } == true) {
+            return@Tool listOf(UIMessagePart.Text(buildJsonObject {
+                put("error", "Укажите x и y вместе — неотрицательные координаты области прокрутки.")
+            }.toString()))
+        }
 
-        val payload = service.withService { svc ->
+        val payload = service.withService(wakeBeforeSnapshot = true,
+            validateBeforeWake = if (anchorX != null && anchorY != null) {
+                { svc -> screenBoundsError(svc, anchorX to anchorY) }
+            } else null) { svc ->
             withActionEnvelope(svc) { _ ->
                 val root = svc.rootInActiveWindow
                     ?: return@withActionEnvelope buildJsonObject { put("error", svc.lastTreeError ?: "no_active_window")
@@ -103,7 +112,6 @@ fun scrollTool(
                     findFirstScrollable(root)
                 }
 
-                var usedFallback = false
                 val ok = if (target != null) {
                     val action = when (direction) {
                         "down" -> RootScreenNode.ACTION_SCROLL_FORWARD
@@ -116,17 +124,14 @@ fun scrollTool(
                         target.performAction(action)
                     } else {
                         // Container does not support this axis; fall back to a direction-true swipe.
-                        usedFallback = true
-                        dispatchFallbackSwipe(svc, root, direction)
+                        dispatchFallbackSwipe(svc, target, direction)
                     }
                 } else {
-                    usedFallback = true
                     dispatchFallbackSwipe(svc, root, direction)
                 }
                 buildJsonObject {
                     put("success", ok)
                     if (!ok) put("reason", "no_scroll_action_accepted")
-                    if (!wakeOk) put("wake_failed", true)
                 }
             }
         }
@@ -153,15 +158,17 @@ fun scrollTool(
  */
 private suspend fun dispatchFallbackSwipe(
     svc: RootScreenService,
-    root: RootScreenNode,
+    region: RootScreenNode,
     direction: String,
 ): Boolean {
     val rect = Rect()
-    root.getBoundsInScreen(rect)
-    val cx = (rect.left + rect.right) / 2f
-    val cy = (rect.top + rect.bottom) / 2f
-    val w = (rect.width() / 3f).coerceAtLeast(100f)
-    val h = (rect.height() / 3f).coerceAtLeast(100f)
+    region.getBoundsInScreen(rect)
+    if (!rect.intersect(0, 0, svc.displayMetrics.widthPixels, svc.displayMetrics.heightPixels) || rect.isEmpty) return false
+    val cx = (rect.left.toFloat() + rect.right - 1) / 2f
+    val cy = (rect.top.toFloat() + rect.bottom - 1) / 2f
+    // Keep the whole gesture inside the selected visible container, including small panels.
+    val w = (rect.width() / 3f).coerceAtMost((rect.width() - 1) / 2f)
+    val h = (rect.height() / 3f).coerceAtMost((rect.height() - 1) / 2f)
     val (sx, sy, ex, ey) = when (direction) {
         "down" -> floatArrayOf(cx, cy + h, cx, cy - h)
         "up" -> floatArrayOf(cx, cy - h, cx, cy + h)

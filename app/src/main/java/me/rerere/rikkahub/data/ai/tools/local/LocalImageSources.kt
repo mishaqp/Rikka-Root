@@ -4,6 +4,7 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import java.io.File
+import java.io.InputStream
 import java.net.URI
 import java.net.URISyntaxException
 import java.nio.file.Paths
@@ -25,6 +26,7 @@ class LocalImageSources(
     private val workspaceCwd: String? = null,
     private val chatImages: List<String> = emptyList(),
     private val resolveWorkspacePath: (suspend (String) -> File)? = null,
+    private val fileAccess: LocalFileAccess? = null,
 ) {
     internal suspend fun resolve(reference: String): LocalImageSource {
         require(reference.isNotBlank() && reference.length <= 8192 && reference.none { it.isISOControl() }) { "Некорректный путь изображения." }
@@ -34,6 +36,14 @@ class LocalImageSources(
             chatImages[index - 1]
         } else reference
         require(source.length <= 8192 && source.none { it.isISOControl() }) { "Некорректный путь изображения «$reference»." }
+        // A selected attachment is already a user-provided image capability. Other
+        // supplied paths use the same SAF and storage boundaries as the file tools.
+        if (fileAccess != null && !isTrustedAttachment(reference)) {
+            return when (val resolved = fileAccess.resolve(reference)) {
+                is LocalFileSource.Local -> LocalImageSource.LocalFile(resolved.file, reference)
+                is LocalFileSource.Content -> LocalImageSource.ContentUri(resolved.uri.toString(), reference)
+            }
+        }
         if (source.startsWith("content:")) {
             val uri = localImageUri(source, reference)
             require(uri.scheme == "content" && !uri.authority.isNullOrBlank() && uri.fragment == null) { "Некорректный content:// URI: «$reference»." }
@@ -68,6 +78,21 @@ class LocalImageSources(
         }
         return LocalImageSource.LocalFile(file, reference)
     }
+
+    internal suspend fun openInput(source: LocalImageSource, openContent: (String) -> InputStream?): InputStream? {
+        if (fileAccess != null && !isTrustedAttachment(source.requested)) {
+            // Resolve again at stream acquisition; LocalFileAccess also guards each
+            // direct-storage read when a setting or Android grant is revoked.
+            return fileAccess.openInput(fileAccess.resolve(source.requested))
+        }
+        return when (source) {
+            is LocalImageSource.LocalFile -> source.file.inputStream()
+            is LocalImageSource.ContentUri -> openContent(source.uri)
+        }
+    }
+
+    private fun isTrustedAttachment(reference: String): Boolean =
+        reference.startsWith("attachment:") || reference in chatImages
 
     internal fun attachmentPrompt(): String = if (chatImages.isEmpty()) "" else
         "set_wallpaper can use the images in the latest user message containing images: " +

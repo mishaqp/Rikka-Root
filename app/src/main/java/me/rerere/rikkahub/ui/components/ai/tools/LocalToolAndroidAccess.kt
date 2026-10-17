@@ -61,12 +61,13 @@ internal fun localToolAndroidRuntimeAccess(
     val permissions = if (option == LocalToolOption.Calendar)
         listOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
         else localToolRuntimePermissions(option, sdkInt)
+    val supportsApproximateLocation = option == LocalToolOption.Location || option == LocalToolOption.WifiInfo
     return permissions.map { permission ->
-        val approximateLocation = option == LocalToolOption.Location && permission == Manifest.permission.ACCESS_COARSE_LOCATION
+        val approximateLocation = supportsApproximateLocation && permission == Manifest.permission.ACCESS_COARSE_LOCATION
         val allowed = if (approximateLocation)
             granted(Manifest.permission.ACCESS_COARSE_LOCATION) || granted(Manifest.permission.ACCESS_FINE_LOCATION)
             else granted(permission)
-        val required = !(option == LocalToolOption.Location && permission == Manifest.permission.ACCESS_FINE_LOCATION)
+        val required = !(supportsApproximateLocation && permission == Manifest.permission.ACCESS_FINE_LOCATION)
         LocalToolAndroidAccess(permissionLabel(permission, approximateLocation), allowed, required)
     }
 }

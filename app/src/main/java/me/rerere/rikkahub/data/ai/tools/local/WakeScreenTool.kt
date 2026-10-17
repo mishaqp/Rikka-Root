@@ -44,8 +44,15 @@ fun wakeScreenTool(context: Context, service: RootScreenService): Tool = Tool(
         )
     },
     execute = { input ->
-        @Suppress("UNUSED_VARIABLE") val holdMs = input.jsonObject["hold_ms"]?.jsonPrimitive?.intOrNull
-            ?.coerceIn(500, 30_000)?.toLong() ?: 3_000L
+        screenArgumentError(input, "hold_ms" to "integer")
+            ?.let { return@Tool listOf(UIMessagePart.Text(it.toString())) }
+        val holdMs = input.jsonObject["hold_ms"]?.jsonPrimitive?.intOrNull
+            ?: if (input.jsonObject.containsKey("hold_ms")) 0 else 3_000
+        if (holdMs !in 500..30_000) {
+            return@Tool listOf(UIMessagePart.Text(buildJsonObject {
+                put("error", "Укажите hold_ms от 500 до 30000 миллисекунд.")
+            }.toString()))
+        }
         val payload = service.withService(treeRequired = false) {
             val wasOff = !ScreenWaker.isInteractive(context)
             val woke = if (wasOff) service.wakeIfNeeded() else false

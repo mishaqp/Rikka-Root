@@ -20,15 +20,17 @@ internal fun localToolRuntimePermissions(option: LocalToolOption, sdkInt: Int): 
     LocalToolOption.MicRecorder, LocalToolOption.SpeechToText -> listOf(Manifest.permission.RECORD_AUDIO)
     LocalToolOption.Torch -> listOf(Manifest.permission.CAMERA)
     LocalToolOption.TelephonyInfo -> listOf(Manifest.permission.READ_PHONE_STATE)
-    // Android 12+ requires requesting coarse and fine together, even for precise-only use.
+    // Request together on Android 12+, but accepting approximate location still allows basic Wi-Fi info.
     LocalToolOption.WifiInfo -> listOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)
-    LocalToolOption.Sensors -> if (sdkInt >= 29) listOf(Manifest.permission.ACTIVITY_RECOGNITION) else emptyList()
+    // Only the step-counter read needs recognition; other sensors and enumeration do not.
+    LocalToolOption.Sensors -> emptyList()
     LocalToolOption.Notification -> if (sdkInt >= 33) listOf(Manifest.permission.POST_NOTIFICATIONS) else emptyList()
     else -> emptyList()
 }
 
 internal fun missingRuntimePermissions(option: LocalToolOption, sdkInt: Int, granted: (String) -> Boolean): List<String> {
-    if (option == LocalToolOption.Location && (granted(Manifest.permission.ACCESS_COARSE_LOCATION) || granted(Manifest.permission.ACCESS_FINE_LOCATION))) return emptyList()
+    if ((option == LocalToolOption.Location || option == LocalToolOption.WifiInfo) &&
+        (granted(Manifest.permission.ACCESS_COARSE_LOCATION) || granted(Manifest.permission.ACCESS_FINE_LOCATION))) return emptyList()
     return localToolRuntimePermissions(option, sdkInt).filterNot(granted)
 }
 

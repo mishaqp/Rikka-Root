@@ -250,7 +250,8 @@ class LocalTools(
             add(LocalToolOption.Volume, setVolumeTool(context))
         }
         if (LocalToolOption.Wallpaper in options) add(LocalToolOption.Wallpaper, setWallpaperTool(context,
-            LocalImageSources(File(context.filesDir, "upload"), workspaceCwd, chatImages, resolveWorkspacePath)))
+            LocalImageSources(File(context.filesDir, "upload"), workspaceCwd, chatImages, resolveWorkspacePath,
+                LocalFileAccess(context, workspaceCwd, chatImages, resolveWorkspacePath))))
         if (LocalToolOption.Nfc in options) {
             add(LocalToolOption.Nfc, nfcStatusTool(context))
             add(LocalToolOption.Nfc, nfcReadTagTool(context))

@@ -44,7 +44,9 @@ fun swipeTool(
         )
     },
     execute = { input ->
-        val wakeOk = service.wakeIfNeeded()
+        screenArgumentError(input, "start_x" to "number", "start_y" to "number",
+            "end_x" to "number", "end_y" to "number", "duration_ms" to "integer")
+            ?.let { return@Tool listOf(UIMessagePart.Text(it.toString())) }
         val sx = numOrNull(input, "start_x")
         val sy = numOrNull(input, "start_y")
         val ex = numOrNull(input, "end_x")
@@ -68,7 +70,8 @@ fun swipeTool(
                 )
             )
         }
-        val payload = service.withService { svc ->
+        val payload = service.withService(wakeBeforeSnapshot = true,
+            validateBeforeWake = { screenBoundsError(it, sx to sy, ex to ey) }) { svc ->
             withActionEnvelope(svc) { _ ->
                 val dm = svc.displayMetrics
                 if (coordsOutOfBounds(sx, sy, dm.widthPixels, dm.heightPixels) ||
@@ -86,7 +89,6 @@ fun swipeTool(
                 buildJsonObject {
                     put("success", ok)
                     if (!ok) put("reason", "gesture_cancelled_or_timeout")
-                    if (!wakeOk) put("wake_failed", true)
                 }
             }
         }

@@ -24,10 +24,50 @@ class LocalToolAndroidAccessTest {
     }
 
     @Test
-    fun wifiStillRequiresPreciseLocation() {
+    fun wifiReportsPrecisionSeparatelyFromRequiredApproximateAccess() {
         val access = localToolAndroidRuntimeAccess(LocalToolOption.WifiInfo, 36) { it == Manifest.permission.ACCESS_COARSE_LOCATION }
         assertEquals(2, access.size)
-        assertEquals(1, access.count { it.required && !it.granted })
+        assertEquals(0, access.count { it.required && !it.granted })
+        assertTrue(access.first().required && access.first().granted)
+        assertFalse(access.last().required || access.last().granted)
+    }
+
+    @Test
+    fun wifiApproximateGrantSatisfiesRequiredRowsWithoutRequestingOptionalPrecision() {
+        val access = localToolAndroidRuntimeAccess(LocalToolOption.WifiInfo, 36) { it == Manifest.permission.ACCESS_COARSE_LOCATION }
+        assertEquals(2, access.size)
+        assertTrue(access.filter { it.required }.all { it.granted })
+        assertFalse(access.last().required)
+        assertFalse(access.last().granted)
+        assertFalse(androidAccessRequestNeeded(LocalToolOption.WifiInfo, access))
+    }
+
+    @Test
+    fun wifiWithoutLocationStillNeedsARequiredGrant() {
+        val access = localToolAndroidRuntimeAccess(LocalToolOption.WifiInfo, 36) { false }
+        assertEquals(2, access.size)
+        assertTrue(access.any { it.required && !it.granted })
+        assertTrue(androidAccessRequestNeeded(LocalToolOption.WifiInfo, access))
+    }
+
+    @Test
+    fun wifiFineGrantAlsoSatisfiesTheRequiredLocationRow() {
+        val access = localToolAndroidRuntimeAccess(LocalToolOption.WifiInfo, 36) { it == Manifest.permission.ACCESS_FINE_LOCATION }
+        assertTrue(access.filter { it.required }.all { it.granted })
+        assertFalse(access.last().required)
+        assertTrue(access.last().granted)
+        assertFalse(androidAccessRequestNeeded(LocalToolOption.WifiInfo, access))
+    }
+
+    @Test
+    fun wifiRevocationFallsBackToApproximateThenRequiresAccessWhenBothAreRevoked() {
+        var permissions = setOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)
+        fun access() = localToolAndroidRuntimeAccess(LocalToolOption.WifiInfo, 36) { it in permissions }
+        assertFalse(androidAccessRequestNeeded(LocalToolOption.WifiInfo, access()))
+        permissions = setOf(Manifest.permission.ACCESS_COARSE_LOCATION)
+        assertFalse(androidAccessRequestNeeded(LocalToolOption.WifiInfo, access()))
+        permissions = emptySet()
+        assertTrue(androidAccessRequestNeeded(LocalToolOption.WifiInfo, access()))
     }
 
     @Test

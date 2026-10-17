@@ -197,6 +197,18 @@ object ToolPermissionPolicy {
         if (name == "ssh_forget_host_key") return true
         val args = input as? JsonObject
         fun text(key: String): String? = (args?.get(key) as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+        if (name == "batch_delete" && (args?.get("recursive") as? JsonPrimitive)?.booleanOrNull == true) return true
+        if (name in setOf("move_file", "batch_move")) {
+            val paths = listOfNotNull(text("src"), text("dst"), text("dst_dir"), text("root")) +
+                ((args?.get("paths") as? kotlinx.serialization.json.JsonArray)?.mapNotNull {
+                    (it as? JsonPrimitive)?.takeIf { value -> value.isString }?.contentOrNull
+                }.orEmpty())
+            if (paths.any { reference ->
+                val path = if (reference.startsWith("file:")) runCatching { java.net.URI(reference).path }.getOrNull().orEmpty() else reference
+                val normalized = runCatching { java.nio.file.Paths.get(path).normalize().toString() }.getOrDefault(path)
+                path.startsWith("content:") || listOf("/sdcard", "/mnt/sdcard", "/storage", "/mnt/media_rw").any { root -> normalized == root || normalized.startsWith("$root/") }
+            }) return true
+        }
         val command = text("command")
         if (name == "root_exec") return command.isNullOrBlank() || RootApprovalPolicy.reason(command) != null
         val commands = when (name) {

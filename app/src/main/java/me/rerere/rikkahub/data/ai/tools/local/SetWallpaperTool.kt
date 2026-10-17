@@ -32,7 +32,8 @@ internal fun readBoundedImage(input: InputStream, maxBytes: Int = 16_777_216): B
     return output.toByteArray()
 }
 
-fun setWallpaperTool(context: Context, sources: LocalImageSources = LocalImageSources(File(context.filesDir, "upload"))): Tool = Tool(
+fun setWallpaperTool(context: Context, sources: LocalImageSources = LocalImageSources(
+    File(context.filesDir, "upload"), fileAccess = LocalFileAccess(context))): Tool = Tool(
     name = "set_wallpaper",
     description = "Set home, lock, or both wallpapers from a local image (at most 16 MiB): file://, content://, a PRoot/workspace path such as /workspace/image.png, or attachment:1 for the first image in the latest user message containing images. Relative paths use this chat's workspace current directory. Large images are sampled safely. Default target: both.",
     parameters = { InputSchema.Obj(buildJsonObject {
@@ -67,10 +68,8 @@ fun setWallpaperTool(context: Context, sources: LocalImageSources = LocalImageSo
         if (!manager.isWallpaperSupported || !manager.isSetWallpaperAllowed) return@withContext deviceToolError("Android запретил смену обоев на этом устройстве или в этом профиле. Проверьте ограничения профиля в настройках Android.")
         try {
             val bytes = try {
-                val stream = when (resolved) {
-                    is LocalImageSource.LocalFile -> resolved.file.inputStream()
-                    is LocalImageSource.ContentUri -> context.contentResolver.openInputStream(Uri.parse(resolved.uri))
-                } ?: return@withContext deviceToolError(resolved.unavailableMessage() + " Прикрепите изображение в чат или выберите файл снова через системное меню Android.")
+                val stream = sources.openInput(resolved) { uri -> context.contentResolver.openInputStream(Uri.parse(uri)) }
+                    ?: return@withContext deviceToolError(resolved.unavailableMessage() + " Прикрепите изображение в чат или выберите файл снова через системное меню Android.")
                 stream.use { readBoundedImage(it) }
             } catch (_: IllegalArgumentException) {
                 return@withContext deviceToolError("Изображение «$source» недопустимо или превышает 16 МиБ. Выберите другое изображение меньшего размера.")

@@ -25,7 +25,7 @@ fun batteryTool(context: Context): Tool = Tool(
             IntentFilter(Intent.ACTION_BATTERY_CHANGED)
         )
         val payload = if (intent == null) {
-            buildJsonObject { put("error", "battery status unavailable") }
+            deviceToolError("Сведения о батарее недоступны. Повторите запрос позже.")
         } else {
             val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
             val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)

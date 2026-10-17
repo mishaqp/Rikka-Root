@@ -13,6 +13,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.asContextElement
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.io.File
@@ -48,6 +49,55 @@ class LocalFileAccess internal constructor(
         resolveWorkspacePath: (suspend (String) -> File)? = null) : this(
         File(context.filesDir, "tool_scratch"), File(context.filesDir, "upload"), workspaceCwd,
         chatImages, resolveWorkspacePath, context.applicationContext)
+
+    private data class SafReadMetadata(val name: String, val directory: Boolean, val bytes: Long, val modified: Long)
+
+    private class ReadOperationState {
+        // One traversal budget plus its root. Prefetched/unused rows can be evicted.
+        val metadata = java.util.LinkedHashMap<String, SafReadMetadata>(16, 0.75f, true)
+        val safParents = linkedSetOf<LocalFileSource.Content>()
+        var sharedReadAnchor: File? = null
+
+        fun remember(source: LocalFileSource.Content, row: SafReadMetadata) {
+            metadata[source.reference] = row
+            if (metadata.size > MAX_ENTRIES + 1) metadata.entries.iterator().run { next(); remove() }
+        }
+
+        fun parent(source: LocalFileSource.Content) {
+            require(safParents.size <= MAX_ENTRIES || source in safParents) { "Слишком много папок SAF." }
+            safParents += source
+        }
+    }
+
+    private val readOperation = ThreadLocal<ReadOperationState>()
+
+    /** Only a side-effect-free listing query may run inside this call-scoped snapshot. */
+    internal suspend fun <T> withReadOperation(action: suspend () -> T): T = withContext(Dispatchers.IO) { withStorageTopology {
+        if (readOperation.get() != null) action()
+        else {
+            val state = ReadOperationState()
+            withContext(readOperation.asContextElement(state)) {
+                try {
+                    val result = action()
+                    currentCoroutineContext().ensureActive()
+                    // Cached rows cannot outlive either their provider tree or live direct access.
+                    for (parent in state.safParents) {
+                        currentCoroutineContext().ensureActive()
+                        checkGrant(parent, false)
+                    }
+                    state.sharedReadAnchor?.let { checkFile(it) }
+                    currentCoroutineContext().ensureActive()
+                    result
+                } finally {
+                    state.metadata.clear()
+                    state.safParents.clear()
+                }
+            }
+        }
+    } }
+
+    private fun cachedMetadata(source: LocalFileSource.Content): SafReadMetadata? =
+        readOperation.get()?.metadata?.get(source.reference)
 
     val defaultPath: String get() = if (resolveWorkspacePath == null) "/scratch" else "/workspace"
     private val scratchRoot = scratchDir.canonicalFile
@@ -253,9 +303,11 @@ class LocalFileAccess internal constructor(
 
     internal suspend fun movePath(from: LocalFileSource, reference: String, overwrite: Boolean = false): Pair<LocalFileSource, Long> {
         validateMoveSource(from)
+        val target = planWritePath(reference).existing
+        if (target != null) tryLocalMove(from, target, overwrite)?.let { return target to it }
         val copied = copyPath(from, reference, overwrite)
-        // Ownership/creation rollback is finished before deleting the source. A failed
-        // deletion or cancellation after deletion must never remove the committed copy.
+        // Finish ownership rollback before deletion: a committed copy survives a
+        // source-delete failure, including cancellation after partial deletion.
         deleteMovedSource(from)
         return copied
     }
@@ -263,7 +315,10 @@ class LocalFileAccess internal constructor(
     fun checkFile(file: File, write: Boolean = false): File {
         val absolute = file.absoluteFile.toPath().normalize()
         val localScope = listOfNotNull(scratchRoot, uploadRoot, workspaceRoot).any { absolute.startsWith(it.toPath()) }
-        if (!localScope) sharedStorageAccess?.resolve(file.absolutePath, write)?.let { return it }
+        if (!localScope) sharedStorageAccess?.resolve(file.absolutePath, write)?.let {
+            readOperation.get()?.let { state -> if (state.sharedReadAnchor == null) state.sharedReadAnchor = it }
+            return it
+        }
         var parent = absolute
         while (parent.parent != null) {
             require(!Files.isSymbolicLink(parent)) { "Символические ссылки недоступны файловым инструментам." }
@@ -391,75 +446,104 @@ class LocalFileAccess internal constructor(
     } }
     suspend fun isDirectory(source: LocalFileSource): Boolean = withContext(Dispatchers.IO) { when (source) {
         is LocalFileSource.Local -> checkFile(source.file).isDirectory
-        is LocalFileSource.Content -> {
+        is LocalFileSource.Content -> cachedMetadata(source)?.directory ?: run {
             val metadata = document(source)
             safProviderCall { metadata.isDirectory }
         }
     } }
     suspend fun name(source: LocalFileSource): String = withContext(Dispatchers.IO) { when (source) {
         is LocalFileSource.Local -> checkFile(source.file).name
-        is LocalFileSource.Content -> {
+        is LocalFileSource.Content -> cachedMetadata(source)?.name ?: run {
             val metadata = document(source)
             safProviderCall { metadata.name } ?: "file"
         }
     } }
     suspend fun size(source: LocalFileSource): Long = withContext(Dispatchers.IO) { when (source) {
         is LocalFileSource.Local -> checkFile(source.file).length()
-        is LocalFileSource.Content -> {
+        is LocalFileSource.Content -> cachedMetadata(source)?.bytes ?: run {
             val metadata = document(source)
             safProviderCall { metadata.length() }
         }
     } }
     suspend fun modified(source: LocalFileSource): Long = withContext(Dispatchers.IO) { when (source) {
         is LocalFileSource.Local -> checkFile(source.file).lastModified()
-        is LocalFileSource.Content -> {
+        is LocalFileSource.Content -> cachedMetadata(source)?.modified ?: run {
             val metadata = document(source)
             safProviderCall { metadata.lastModified() }
         }
     } }
 
-    suspend fun list(source: LocalFileSource, onRestrictedPathSkipped: ((String) -> Unit)? = null): List<LocalFileSource> = withContext(Dispatchers.IO) {
+    private suspend fun <T> withStorageTopology(action: suspend () -> T): T =
+        if (sharedStorageAccess == null) action() else sharedStorageAccess.withTopologySnapshot(action)
+
+    /** A bounded prefix is opt-in; transaction preflights remain strict by default. */
+    suspend fun list(
+        source: LocalFileSource,
+        onRestrictedPathSkipped: ((String) -> Unit)? = null,
+        limit: Int = MAX_ENTRIES,
+        onTruncated: (() -> Unit)? = null,
+    ): List<LocalFileSource> = withContext(Dispatchers.IO) { withStorageTopology {
+        require(limit in 0..MAX_ENTRIES) { "Некорректный лимит файлов." }
         currentCoroutineContext().ensureActive()
         require(isDirectory(source)) { "Путь не является папкой." }
-        val children = when (source) {
+        val children = mutableListOf<Pair<String, LocalFileSource>>()
+        fun truncated() {
+            requireNotNull(onTruncated) { "В папке слишком много файлов." }.invoke()
+        }
+        when (source) {
             is LocalFileSource.Local -> {
-                val entries = mutableListOf<LocalFileSource>()
                 Files.newDirectoryStream(checkFile(source.file).toPath()).use { directory ->
                     for (path in directory) {
                         currentCoroutineContext().ensureActive()
-                        require(entries.size < MAX_ENTRIES) { "В папке слишком много файлов." }
-                        try { entries += LocalFileSource.Local(checkFile(path.toFile())) }
-                        catch (denied: SharedStoragePrivatePathException) {
-                            // Only read-only listings may omit private Android trees. Mutating
-                            // operations and archives keep their strict preflight by default.
+                        if (children.size >= limit) { truncated(); break }
+                        try {
+                            val file = checkFile(path.toFile())
+                            children += file.name to LocalFileSource.Local(file)
+                        } catch (denied: SharedStoragePrivatePathException) {
+                            // Mutating operations and archives omit no private descendants.
                             if (onRestrictedPathSkipped == null) throw denied
                             onRestrictedPathSkipped(path.toString())
                         }
                     }
                 }
-                entries
+                // A revocation during enumeration must reject the entire result.
+                checkFile(source.file)
             }
             is LocalFileSource.Content -> {
-                val tree = DocumentFile.fromTreeUri(androidContext, source.uri)
-                requireNotNull(tree) { "Нужна папка SAF." }
-                // fromTreeUri always points at the tree root: find the actual requested directory.
                 val id = if (DocumentsContract.isDocumentUri(androidContext, source.uri)) DocumentsContract.getDocumentId(source.uri) else DocumentsContract.getTreeDocumentId(source.uri)
                 val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(source.uri, id)
-                val found = mutableListOf<LocalFileSource>()
-                safProviderCall { androidContext.contentResolver.query(childrenUri, arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID), null, null, null) }?.let(::SafCursor)?.use { cursor ->
+                val scope = readOperation.get()
+                val projection = if (scope == null) arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                else arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    DocumentsContract.Document.COLUMN_MIME_TYPE, DocumentsContract.Document.COLUMN_SIZE, DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+                // The granted parent and provider-enumerated edges establish child scope.
+                // Names travel in the same cursor, avoiding metadata/grant IPC per row.
+                checkGrant(source, false)
+                scope?.parent(source)
+                safProviderCall { androidContext.contentResolver.query(childrenUri, projection, null, null, null) }?.let(::SafCursor)?.use { cursor ->
                     while (safProviderCall { cursor.moveToNext() }) {
                         currentCoroutineContext().ensureActive()
-                        require(found.size < MAX_ENTRIES) { "В папке слишком много файлов." }
-                        val child = LocalFileSource.Content(DocumentsContract.buildDocumentUriUsingTree(source.uri, safProviderCall { cursor.getString(0) }))
-                        checkGrant(child, false); found += child
+                        if (children.size >= limit) { truncated(); break }
+                        val childId = safProviderCall { cursor.getString(0) }
+                        require(!childId.isNullOrBlank() && childId.length <= 8192) { "Провайдер SAF вернул некорректный идентификатор." }
+                        val child = LocalFileSource.Content(DocumentsContract.buildDocumentUriUsingTree(source.uri, childId))
+                        val childName = safProviderCall { cursor.getString(1) } ?: "file"
+                        if (scope != null) {
+                            val mime = safProviderCall { cursor.getString(2) }
+                            require(!mime.isNullOrBlank()) { "Провайдер SAF не подтвердил тип дочернего документа." }
+                            val bytes = safProviderCall { cursor.getLong(3) }
+                            val modified = safProviderCall { cursor.getLong(4) }
+                            scope.remember(child, SafReadMetadata(childName, mime == DocumentsContract.Document.MIME_TYPE_DIR, bytes, modified))
+                        }
+                        children += childName to child
                     }
                 } ?: error("Не удалось прочитать папку SAF.")
-                found
+                checkGrant(source, false)
             }
         }
-        require(children.size <= MAX_ENTRIES) { "В папке слишком много файлов." }
-        children.map { name(it) to it }.sortedBy { it.first }.map { it.second }
-    }
+        currentCoroutineContext().ensureActive()
+        children.sortedBy { it.first }.map { it.second }
+    } }
 
     private fun validateChildName(name: String) {
         require(name.isNotBlank() && name.length <= 255 && name !in listOf(".", "..") && name.none { it == '/' || it == '\\' || it.isISOControl() }) { "Некорректное имя файла." }
@@ -529,7 +613,19 @@ class LocalFileAccess internal constructor(
         }
     }
 
-    suspend fun findChild(parent: LocalFileSource, name: String): LocalFileSource? = list(parent).firstOrNull { this.name(it) == name }
+    suspend fun findChild(parent: LocalFileSource, name: String): LocalFileSource? = withContext(Dispatchers.IO) { withStorageTopology {
+        validateChildName(name)
+        currentCoroutineContext().ensureActive()
+        when (parent) {
+            is LocalFileSource.Local -> {
+                val directory = checkFile(parent.file)
+                require(directory.isDirectory) { "Папка назначения не найдена." }
+                val child = checkFile(File(directory, name))
+                if (child.exists()) LocalFileSource.Local(child) else null
+            }
+            is LocalFileSource.Content -> list(parent).firstOrNull { this@LocalFileAccess.name(it) == name }
+        }
+    } }
 
     suspend fun createDirectory(source: LocalFileSource): Boolean = withContext(Dispatchers.IO) {
         when (source) {
@@ -538,19 +634,32 @@ class LocalFileAccess internal constructor(
         }
     }
 
-    suspend fun walk(source: LocalFileSource, recursive: Boolean = true, onRestrictedPathSkipped: ((String) -> Unit)? = null): List<LocalFileSource> {
+    suspend fun walk(
+        source: LocalFileSource,
+        recursive: Boolean = true,
+        onRestrictedPathSkipped: ((String) -> Unit)? = null,
+        limit: Int = MAX_ENTRIES,
+        onTruncated: (() -> Unit)? = null,
+    ): List<LocalFileSource> = withStorageTopology {
+        require(limit in 0..MAX_ENTRIES) { "Некорректный лимит файлов." }
         val result = mutableListOf<LocalFileSource>()
+        var wasTruncated = false
+        fun truncated() {
+            requireNotNull(onTruncated) { "Слишком много файлов." }
+            if (!wasTruncated) { wasTruncated = true; onTruncated() }
+        }
         suspend fun visit(current: LocalFileSource, depth: Int) {
             currentCoroutineContext().ensureActive()
             require(depth <= MAX_DEPTH) { "Слишком глубокая структура папок." }
-            for (entry in list(current, onRestrictedPathSkipped)) {
-                require(result.size < MAX_ENTRIES) { "Слишком много файлов." }
+            for (entry in list(current, onRestrictedPathSkipped, limit - result.size, ::truncated)) {
+                currentCoroutineContext().ensureActive()
+                if (result.size >= limit) { truncated(); return }
                 result += entry
                 if (recursive && isDirectory(entry)) visit(entry, depth + 1)
             }
         }
         visit(source, 0)
-        return result
+        result
     }
 
     suspend fun delete(source: LocalFileSource, recursive: Boolean = false): Boolean = withContext(Dispatchers.IO) {
@@ -658,8 +767,59 @@ class LocalFileAccess internal constructor(
         }
     }
 
+    /** Same-volume rename preserves the inode and never allocates a copy stage. */
+    internal suspend fun tryLocalMove(from: LocalFileSource, to: LocalFileSource, overwrite: Boolean): Long? = withContext(Dispatchers.IO) {
+        if (from !is LocalFileSource.Local || to !is LocalFileSource.Local) return@withContext null
+        currentCoroutineContext().ensureActive()
+        val source = checkFile(from.file, true)
+        val target = checkFile(to.file, true)
+        require(source != target) { "Источник совпадает с назначением." }
+        require(source.exists()) { "Источник не найден." }
+        val directory = source.isDirectory
+        if (!directory && !source.isFile) return@withContext null
+        require(!directory || !target.toPath().startsWith(source.toPath())) { "Нельзя перемещать папку внутрь себя." }
+        // Existing directory merges and overwrite transactions retain the existing path.
+        require(!target.exists() || overwrite) { "Назначение уже существует. Укажите overwrite=true." }
+        if (target.exists()) return@withContext null
+        val parent = target.parentFile ?: return@withContext null
+        if (!parent.isDirectory) return@withContext null
+        val sameVolume = try { Files.getFileStore(source.toPath()) == Files.getFileStore(checkFile(parent).toPath()) }
+        catch (_: java.io.IOException) { false }
+        if (!sameVolume) return@withContext null
+        val bytes = if (directory) {
+            // Renaming a tree must not bypass the checks required by copy/delete.
+            // Walk is strict: forbidden or truncated descendants abort before rename.
+            val descendants = walk(from)
+            var total = 0L
+            for (entry in descendants) {
+                currentCoroutineContext().ensureActive()
+                val child = checkFile((entry as LocalFileSource.Local).file, true)
+                val relative = source.toPath().relativize(child.toPath())
+                checkFile(target.toPath().resolve(relative).toFile(), true)
+                if (!child.isDirectory) total = Math.addExact(total, child.length())
+            }
+            total
+        } else source.length()
+        // Recheck live capability and symlinks immediately before the filesystem action.
+        checkFile(source, true)
+        checkFile(target, true)
+        currentCoroutineContext().ensureActive()
+        try {
+            Files.move(source.toPath(), target.toPath())
+            bytes
+        } catch (collision: java.nio.file.FileAlreadyExistsException) {
+            require(overwrite) { "Назначение уже существует. Укажите overwrite=true." }
+            null // Explicit overwrite uses the existing staged transaction.
+        } catch (_: java.nio.file.FileSystemException) {
+            null // Cross-device/unsupported rename keeps the copy-then-delete transaction.
+        } catch (_: UnsupportedOperationException) {
+            null
+        }
+    }
+
     suspend fun move(from: LocalFileSource, to: LocalFileSource, overwrite: Boolean = false, ownedDestination: Boolean = false): Long {
         validateMoveSource(from)
+        if (!ownedDestination) tryLocalMove(from, to, overwrite)?.let { return it }
         val bytes = copy(from, to, overwrite, ownedDestination)
         deleteMovedSource(from)
         return bytes

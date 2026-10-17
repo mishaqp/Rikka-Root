@@ -17,8 +17,12 @@ import kotlinx.serialization.json.*
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.util.encodeBase64
 import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
+import java.nio.CharBuffer
 import java.nio.charset.Charset
+import java.nio.charset.CodingErrorAction
 import java.security.MessageDigest
 import java.util.Base64
 import java.util.UUID
@@ -87,17 +91,19 @@ fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCan
             if (source is LocalFileSource.Content) put("is_content_uri", true)
         }
     }
-    suspend fun listing(obj: JsonObject, find: Boolean): JsonObject {
+    suspend fun listing(obj: JsonObject, find: Boolean): JsonObject = access.withReadOperation {
         val root = access.resolve(fileArgument(obj, if (find) "root" else "path"))
         val query = if (find) fileArgument(obj, "query") else obj.textArgument("pattern")
         val regex = query?.takeIf { !find || '*' in it || '?' in it }?.let(::fileGlobRegex)
         var skippedPrivatePaths = 0
-        val all = access.walk(root, fileBoolean(obj, "recursive", find), onRestrictedPathSkipped = { skippedPrivatePaths++ })
+        var traversalTruncated = false
+        val all = access.walk(root, fileBoolean(obj, "recursive", find),
+            onRestrictedPathSkipped = { skippedPrivatePaths++ }, onTruncated = { traversalTruncated = true })
         val limit = fileInteger(obj, "limit", 50, 1..500)
         val matches = all.filter { val name = access.name(it); if (regex != null) regex.matches(name) else query == null || name.contains(query, ignoreCase = true) }
         val selected = matches.take(limit).map { entry(it) }
-        return buildJsonObject {
-            put("files", JsonArray(selected)); put("truncated", matches.size > limit)
+        buildJsonObject {
+            put("files", JsonArray(selected)); put("truncated", traversalTruncated || matches.size > limit)
             if (skippedPrivatePaths > 0) {
                 put("skipped_restricted_count", skippedPrivatePaths)
                 put("warnings", buildJsonArray { add("Папки Android/data и Android/obb пропущены: доступ к личным данным других приложений запрещён.") })
@@ -132,9 +138,19 @@ fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCan
                     val previous = access.findChild(destination!!, name)
                     val overwrite = fileBoolean(obj, "overwrite")
                     require(previous == null || overwrite) { "Назначение уже существует." }
+                    if (operation == "move" && previous == null &&
+                        from is LocalFileSource.Local && destination is LocalFileSource.Local) {
+                        val target = access.child(destination, name)
+                        if (access.tryLocalMove(from, target, overwrite = false) != null) {
+                            succeeded++
+                            continue
+                        }
+                    }
                     var owned: LocalFileSource? = null
                     val directory = access.isDirectory(from)
                     val unpublishedShared = previous == null && !access.permitsAutomaticRollback(destination)
+                    // Failed rename attempts retain the original owned destination
+                    // transaction, including cleanup of a partial directory copy.
                     val to = if (previous != null) previous else if (unpublishedShared) access.child(destination, name)
                     else withContext(kotlinx.coroutines.NonCancellable) { access.createNewChild(destination, name, directory).also { owned = it } }
                     try {
@@ -175,6 +191,7 @@ fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCan
     tools += fileJsonTool("read_file", "Read at most max_bytes (default65536, maximum1048576). Text includes BOM detection; binary data returns base64." + scope,
         fileSchema(listOf("path"), "path" to "string", "max_bytes" to "integer", "encoding" to "string")) { obj ->
         val source = source(obj)
+        require(!access.isDirectory(source)) { "Это папка, используйте list_files" }
         val limit = fileInteger(obj, "max_bytes", 65536, 1..1048576)
         val bytes = access.openInput(source).use { readFileBytes(it, limit + 1) }
         val data = bytes.take(limit).toByteArray()
@@ -185,21 +202,31 @@ fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCan
             data.size >= 2 && data[0] == 0xfe.toByte() && data[1] == 0xff.toByte() -> Charsets.UTF_16BE
             else -> Charsets.UTF_8
         }
+        var bytesRead = data.size
         buildJsonObject {
-            put("bytes_read", data.size); put("truncated", bytes.size > limit)
+            put("truncated", bytes.size > limit)
             if (binary && charset !in listOf(Charsets.UTF_16LE, Charsets.UTF_16BE)) { put("binary", true); put("content_base64", Base64.getEncoder().encodeToString(data)) }
             else {
                 val utf16Bom = data.size >= 2 && ((data[0] == 0xff.toByte() && data[1] == 0xfe.toByte()) || (data[0] == 0xfe.toByte() && data[1] == 0xff.toByte()))
                 val offset = if (bom) 3 else if (utf16Bom) 2 else 0
-                put("content", String(data, offset, data.size - offset, charset)); put("encoding", charset.name())
+                val input = ByteBuffer.wrap(data, offset, data.size - offset)
+                val output = CharBuffer.allocate(data.size + 1)
+                val decoder = charset.newDecoder().onMalformedInput(CodingErrorAction.REPLACE)
+                    .onUnmappableCharacter(CodingErrorAction.REPLACE)
+                // A truncated stream is not at EOF: leave a partial final code point
+                // unconsumed, instead of manufacturing a replacement character.
+                val decoded = decoder.decode(input, output, bytes.size <= limit)
+                if (decoded.isError) decoded.throwException()
+                put("content", output.flip().toString()); put("encoding", charset.name())
+                bytesRead = input.position()
             }
+            put("bytes_read", bytesRead)
         }
     }
     tools += fileJsonTool("write_binary_file", "Write base64_content, up to16MiB decoded. overwrite=false refuses an existing file. Local writes are staged before replacement." + scope,
         fileSchema(listOf("path", "base64_content"), "path" to "string", "base64_content" to "string", "overwrite" to "boolean")) { obj ->
-        val encoded = fileArgument(obj, "base64_content")
-        require(encoded.length <= (LocalFileAccess.MAX_WRITE_BYTES * 4L / 3L + 8)) { "Данные слишком велики." }
-        val (destination, bytes) = access.writePath(fileArgument(obj, "path"), Base64.getDecoder().decode(encoded), fileBoolean(obj, "overwrite"))
+        val encoded = decodeFileBase64(fileArgument(obj, "base64_content"))
+        val (destination, bytes) = access.writePath(fileArgument(obj, "path"), encoded, fileBoolean(obj, "overwrite"))
         buildJsonObject { put("success", true); put("path", destination.reference); put("bytes_written", bytes) }
     }
     tools += fileJsonTool("delete_file", "Delete a file or directory; recursive=true required for nonempty folders. Roots cannot be deleted." + scope,
@@ -219,14 +246,36 @@ fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCan
         else access.movePath(from, fileArgument(obj, "dst"), fileBoolean(obj, "overwrite"))
         buildJsonObject { put("success", true); put("from", from.reference); put("to", destination.reference); put("bytes_copied", bytes) }
     }
-    tools += fileJsonTool("create_directory", "Create a local directory with parents. For SAF, path is an existing parent tree/document and name is the new direct directory name." + scope,
+    tools += fileJsonTool("create_directory", "Create a directory by path, including an absolute path inside a granted SAF tree. Alternatively supply an existing parent path and a direct child name." + scope,
         fileSchema(listOf("path"), "path" to "string", "name" to "string")) { obj ->
-        val parent = source(obj)
-        val existing = access.exists(parent)
-        val destination = if (parent is LocalFileSource.Content) access.child(parent, fileArgument(obj, "name"), true) else parent
-        val created = access.createDirectory(destination)
+        val path = fileArgument(obj, "path")
+        val name = if ("name" in obj) fileArgument(obj, "name") else null
+        val plan = if (name != null) {
+            require(name.isNotBlank() && name != "." && name != ".." && name.length <= 255 &&
+                name.none { it == '/' || it == '\\' || it.isISOControl() }) { "Нужно прямое имя папки без разделителей." }
+            val parent = access.resolve(path)
+            require(access.isDirectory(parent)) { "Папка назначения не найдена." }
+            if (parent is LocalFileSource.Content) FileWritePlan(access.findChild(parent, name), parent, name)
+            else access.planWritePath(java.io.File((parent as LocalFileSource.Local).file, name).path)
+        } else access.planWritePath(path)
+        val existing = plan.existing?.let { access.exists(it) } == true
+        var owned: LocalFileSource? = null
+        val destination = plan.existing ?: withContext(kotlinx.coroutines.NonCancellable) {
+            access.createNewChild(requireNotNull(plan.parent), plan.name, isDirectory = true).also { owned = it }
+        }
+        val created = try {
+            currentCoroutineContext().ensureActive()
+            if (owned != null) {
+                require(access.name(destination) == plan.name) { "Провайдер SAF изменил имя создаваемой папки." }
+                require(access.isDirectory(destination)) { "Провайдер SAF не создал папку." }
+            }
+            access.createDirectory(destination)
+        } catch (failure: Exception) {
+            owned?.let { access.cleanupOwnedTarget(it, failure) }
+            throw failure
+        }
         buildJsonObject {
-            put("success", created); put("path", destination.reference); put("created", !existing || destination != parent)
+            put("success", created); put("path", destination.reference); put("created", created && !existing)
             if (!created) put("message", "Не удалось создать папку. Проверьте, не занят ли путь файлом; укажите другое имя или проверьте доступ к родительской папке.")
         }
     }
@@ -267,6 +316,31 @@ internal suspend fun readFileBytes(input: java.io.InputStream, limit: Int): Byte
     return output.toByteArray()
 }
 
+private suspend fun decodeFileBase64(value: String): ByteArray {
+    val start = if (value.startsWith("data:", ignoreCase = true)) {
+        val comma = value.indexOf(',')
+        require(comma >= 0 && value.substring(0, comma).endsWith(";base64", ignoreCase = true)) {
+            "Нужен data URI с кодировкой base64."
+        }
+        comma + 1
+    } else 0
+    val maximum = ((LocalFileAccess.MAX_WRITE_BYTES.toLong() + 2) / 3 * 4).toInt()
+    val encoded = StringBuilder(minOf(value.length - start, maximum))
+    for (index in start until value.length) {
+        if (index % 8192 == 0) currentCoroutineContext().ensureActive()
+        val character = value[index]
+        // MIME base64 ignores separators outside its alphabet, including all
+        // whitespace. Count only meaningful input to bound decoded allocation.
+        if (character !in 'A'..'Z' && character !in 'a'..'z' && character !in '0'..'9' &&
+            character != '+' && character != '/' && character != '=') continue
+        require(encoded.length < maximum) { "Данные слишком велики." }
+        encoded.append(character)
+    }
+    return Base64.getMimeDecoder().decode(encoded.toString()).also {
+        require(it.size <= LocalFileAccess.MAX_WRITE_BYTES) { "Данные слишком велики." }
+    }
+}
+
 internal fun fileGlobRegex(pattern: String): Regex {
     require(pattern.length <= 512) { "Шаблон слишком длинный." }
     return Regex(buildString {
@@ -289,9 +363,20 @@ private fun showImageFileTool(access: LocalFileAccess, modelCanReadImages: Boole
         val metadata = buildJsonObject { put("success", true); put("path", from.reference); put("size_bytes", bytes.size)
             put("width", dimensions.outWidth); put("height", dimensions.outHeight); put("visible_to_you", modelCanReadImages) }
         if (modelCanReadImages) {
-            val saved = access.resolve("/scratch/.shown-${UUID.randomUUID()}.img", true)
-            access.write(saved, bytes)
-            listOf(UIMessagePart.Image("file://${(saved as LocalFileSource.Local).file.absolutePath}"), UIMessagePart.Text(metadata.toString()))
+            val saved = access.createNewChild(access.resolve("/scratch"), ".shown-${UUID.randomUUID()}.img")
+            try {
+                access.write(saved, bytes, overwrite = true)
+                // Normalize and bound the image exactly as file-backed provider inputs
+                // do, while the owned scratch file is still available to the encoder.
+                val encoded = UIMessagePart.Image("file://${(saved as LocalFileSource.Local).file.absolutePath}")
+                    .encodeBase64().getOrThrow()
+                currentCoroutineContext().ensureActive()
+                listOf(UIMessagePart.Image(encoded.base64), UIMessagePart.Text(metadata.toString()))
+            } finally {
+                withContext(kotlinx.coroutines.NonCancellable) {
+                    check(access.delete(saved)) { "Не удалось удалить временное изображение из scratch." }
+                }
+            }
         } else listOf(UIMessagePart.Text(metadata.toString()))
     } } })
 

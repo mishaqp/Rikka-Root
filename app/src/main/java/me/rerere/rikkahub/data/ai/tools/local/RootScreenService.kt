@@ -5,6 +5,9 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Rect
+import android.hardware.display.DisplayManager
+import android.view.Display
+import android.view.Surface
 import android.util.DisplayMetrics
 import android.util.Log
 import android.util.Xml
@@ -18,6 +21,9 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.Tool
@@ -66,13 +72,26 @@ class RootScreenService internal constructor(
     private var exceptionDetail: String? = null
     private var exceptionStage: String? = null
 
-    internal suspend fun withService(treeRequired: Boolean = true, block: suspend (RootScreenService) -> JsonObject): JsonObject =
+    internal suspend fun withService(
+        treeRequired: Boolean = true,
+        wakeBeforeSnapshot: Boolean = false,
+        validateBeforeWake: ((RootScreenService) -> JsonObject?)? = null,
+        block: suspend (RootScreenService) -> JsonObject,
+    ): JsonObject =
         lock.withLock {
             if (!mayExecute()) return@withLock denied()
             try {
                 lastFailure = null
                 exceptionDetail = null
                 exceptionStage = null
+                if (validateBeforeWake != null) {
+                    refreshDisplayMetrics()
+                    if (lastFailure != null) return@withLock failure(lastFailure!!)
+                    validateBeforeWake(this)?.let { return@withLock explainScreenResult(it) }
+                }
+                if (wakeBeforeSnapshot && !wakeIfNeeded()) {
+                    return@withLock failure(lastFailure ?: "root_input_failed")
+                }
                 refreshSnapshot(treeRequired)
                 if (lastFailure != null) return@withLock failure(lastFailure!!)
                 operationStage = "screen_action"
@@ -143,6 +162,7 @@ class RootScreenService internal constructor(
 
     internal suspend fun wakeIfNeeded(): Boolean {
         if (ScreenWaker.isInteractive(context)) return true
+        operationStage = "screen_wake"
         val result = exec("input keyevent 224")
         return result.error == null && result.exitCode == 0
     }
@@ -150,10 +170,8 @@ class RootScreenService internal constructor(
     internal suspend fun refreshSnapshot(includeTree: Boolean) {
         rootInActiveWindow = null
         lastTreeError = null
-        operationStage = "snapshot_wm_size"
-        val display = exec("wm size")
-        if (display.error != null || display.exitCode != 0) return
-        parseRootDisplaySize(display.stdout)?.let { (w, h) -> displayMetrics.widthPixels = w; displayMetrics.heightPixels = h }
+        refreshDisplayMetrics()
+        if (lastFailure != null) return
         operationStage = "snapshot_window_state"
         val window = exec("dumpsys window windows | grep -E 'mCurrentFocus|mFocusedApp|mInputMethodWindow|mImeInputTarget|mShowingDream|mDisplayFrozen|isVisible=true|StatusBar|NotificationShade'")
         // grep has exit code 1 when an OEM omits these diagnostics. This cannot block gestures.
@@ -161,15 +179,6 @@ class RootScreenService internal constructor(
         operationStage = "snapshot_window_parse"
         // Android's ICU regex rejects a bare closing brace; the desktop JVM accepts it.
         currentFocus = Regex("mCurrentFocus=Window\\{[^}]*\\}").find(window.stdout)?.value.orEmpty()
-        operationStage = "snapshot_orientation"
-        val orientation = exec("dumpsys input | grep -m 1 'SurfaceOrientation'")
-        if (orientation.error == null && orientation.exitCode != 0) lastFailure = null
-        val rotation = Regex("SurfaceOrientation:\\s*(\\d+)").find(orientation.stdout)?.groupValues?.get(1)?.toIntOrNull()
-        if (rotation == 1 || rotation == 3) {
-            val w = displayMetrics.widthPixels
-            displayMetrics.widthPixels = displayMetrics.heightPixels
-            displayMetrics.heightPixels = w
-        }
         // An input-method target by itself does not prove the keyboard is visible.
         imeShown = window.stdout.lineSequence().any { it.contains("mInputMethodWindow=") && it.contains("Window{") }
         shadeShown = currentFocus.contains("NotificationShade") || currentFocus.contains("StatusBar")
@@ -199,6 +208,19 @@ class RootScreenService internal constructor(
         } finally {
             xmlFile.delete()
         }
+    }
+
+    private suspend fun refreshDisplayMetrics() {
+        operationStage = "snapshot_wm_size"
+        val result = exec("wm size")
+        if (result.error != null || result.exitCode != 0) return
+        val size = parseRootDisplaySize(result.stdout) ?: return
+        operationStage = "snapshot_orientation"
+        val rotation = context.getSystemService(DisplayManager::class.java)
+            ?.getDisplay(Display.DEFAULT_DISPLAY)?.rotation ?: Surface.ROTATION_0
+        val landscape = rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270
+        displayMetrics.widthPixels = if (landscape) size.second else size.first
+        displayMetrics.heightPixels = if (landscape) size.first else size.second
     }
 
     internal suspend fun refreshAfterSnapshot() {
@@ -363,7 +385,7 @@ private fun explainScreenResult(result: JsonObject): JsonObject {
         "wrong_foreground_app" -> "Открыто другое приложение. Откройте нужное приложение и повторите чтение экрана."
         "no_active_window", "ui_tree_unavailable", "ui_tree_decode_failed" -> "Не удалось прочитать экран. Разблокируйте устройство и откройте нужное приложение; при необходимости используйте take_screenshot."
         "no_match", "nth_out_of_range" -> "Элемент экрана не найден. Повторите read_window_tree и уточните поиск или номер nth."
-        "stale_node_id", "wrong_window" -> "Экран изменился. Повторите read_window_tree и используйте новый node_id."
+        "stale_node_id", "wrong_window" -> "Экран изменился, прочитайте дерево заново через read_window_tree и используйте новый node_id."
         "no_clickable_ancestor" -> "Этот элемент не поддерживает нажатие. Выберите другой элемент или используйте tap с координатами."
         "node_not_editable" -> "В этот элемент нельзя ввести текст. Выберите текстовое поле."
         "gesture_cancelled_or_timeout", "action_rejected", "rejected_by_os" -> "Android не подтвердил действие. Проверьте экран перед новым вызовом."
@@ -411,6 +433,34 @@ internal class RootScreenNode(
 }
 internal data class RootScreenAction(val id: Int)
 internal data class RootScreenWindow(val title: String)
+
+/** Validate supplied JSON types before any root command or screen wake. */
+internal fun screenArgumentError(input: JsonElement, vararg fields: Pair<String, String>): JsonObject? {
+    fun error(message: String) = buildJsonObject { put("error", message) }
+    val args = input as? JsonObject ?: return error("Передайте параметры инструмента как JSON-объект.")
+    for ((name, type) in fields) {
+        val value = args[name] ?: continue
+        val primitive = value as? JsonPrimitive
+        val valid = primitive != null && when (type) {
+            "string" -> primitive.isString
+            "number" -> !primitive.isString && primitive.doubleOrNull?.isFinite() == true
+            "integer" -> !primitive.isString && primitive.longOrNull != null
+            "boolean" -> !primitive.isString && primitive.booleanOrNull != null
+            else -> false
+        }
+        if (!valid) return error("Некорректный параметр $name: ожидается $type.")
+    }
+    return null
+}
+
+internal fun screenBoundsError(service: RootScreenService, vararg points: Pair<Double, Double>): JsonObject? {
+    val dm = service.displayMetrics
+    if (points.none { (x, y) -> coordsOutOfBounds(x, y, dm.widthPixels, dm.heightPixels) }) return null
+    return buildJsonObject {
+        put("error", "out_of_bounds")
+        put("display", buildJsonObject { put("w", dm.widthPixels); put("h", dm.heightPixels) })
+    }
+}
 
 internal fun rootScreenQuote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
 internal fun rootInputText(value: String): String? = if (value.any { it.code !in 32..126 } || "%s" in value) null else value.replace(" ", "%s")

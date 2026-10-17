@@ -39,6 +39,7 @@ class SafToolActivity : ComponentActivity() {
 
     private val picker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         waitingForPicker = false
+        session?.pickerRequestCode = null
         val id = session?.id ?: run { finish(); return@registerForActivityResult }
         val uri = result.data?.data
         if (result.resultCode != Activity.RESULT_OK || uri == null) {
@@ -68,7 +69,17 @@ class SafToolActivity : ComponentActivity() {
         session = current
         waitingForPicker = savedInstanceState?.getBoolean(STATE_WAITING) ?: current.pickerStarted
         if (!sharedSafToolSessions.attach(id) {
-                withContext(Dispatchers.Main.immediate) { picker.unregister(); finish() }
+                withContext(Dispatchers.Main.immediate) {
+                    val pickerCode = current.pickerRequestCode
+                    current.pickerRequestCode = null
+                    waitingForPicker = false
+                    try {
+                        if (pickerCode != null) finishActivity(pickerCode)
+                    } finally {
+                        picker.unregister()
+                        finish()
+                    }
+                }
             }) { finish(); return }
         enableEdgeToEdge()
         setContent {
@@ -101,9 +112,21 @@ class SafToolActivity : ComponentActivity() {
         waitingForPicker = true
         try { picker.launch(treePicker) } catch (_: Exception) {
             waitingForPicker = false
+            current.pickerRequestCode = null
             sharedSafToolSessions.complete(current.id, SafUiResult.Error("В Android нет доступного системного выбора папки."))
             finish()
         }
+    }
+
+    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+    override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) {
+        // Android only closes a launched child via its real request code. Unregistering
+        // the launcher drops callbacks but leaves the system picker on screen.
+        val current = session
+        if (intent.action == Intent.ACTION_OPEN_DOCUMENT_TREE && current != null) {
+            current.pickerRequestCode = requestCode
+        }
+        super.startActivityForResult(intent, requestCode, options)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

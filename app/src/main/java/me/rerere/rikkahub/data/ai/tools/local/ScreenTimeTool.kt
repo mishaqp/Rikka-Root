@@ -15,7 +15,6 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.utils.hasUsageStatsPermission
 import java.time.Instant
@@ -33,8 +32,8 @@ internal fun buildScreenTimeTool(context: Context, eventBus: AppEventBus): Tool 
         Returns the total foreground time and a per-app breakdown sorted by usage time (descending).
         The device timezone is '${ZoneId.systemDefault()}' (UTC offset ${OffsetDateTime.now().offset});
         times without an explicit offset are interpreted in this timezone.
-        Requires the 'Usage access' special permission; if it is not granted, the device's usage
-        access settings page is opened automatically and an error is returned.
+        Requires the 'Usage access' special permission. If it is missing, an error explains
+        how the user can grant access manually. Future end times are limited to the current time.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
@@ -76,21 +75,20 @@ internal fun buildScreenTimeTool(context: Context, eventBus: AppEventBus): Tool 
             }
         )
     },
-    execute = {
+    execute = { input -> deviceToolParts {
         if (!context.hasUsageStatsPermission()) {
-            eventBus.emit(AppEvent.OpenUsageAccessSettings)
             val payload = buildJsonObject {
                 put("error", "NO_PERMISSION")
                 put(
                     "message",
-                    "Usage access permission is not granted. The system settings page has been " +
-                        "opened; please ask the user to enable 'Usage access' for this app and try again."
+                    "Нет разрешения на статистику использования. Попросите пользователя вручную " +
+                        "включить доступ к статистике использования для приложения в настройках Android и повторите запрос."
                 )
             }
-            return@Tool listOf(UIMessagePart.Text(payload.toString()))
+            return@deviceToolParts listOf(UIMessagePart.Text(payload.toString()))
         }
 
-        val params = it.jsonObject
+        val params = input.jsonObject
         val top = params["top"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()?.coerceIn(1, 50) ?: 10
 
         val now = ZonedDateTime.now()
@@ -102,27 +100,28 @@ internal fun buildScreenTimeTool(context: Context, eventBus: AppEventBus): Tool 
         val startTime: ZonedDateTime
         val endTime: ZonedDateTime
         try {
-            endTime = endRaw?.let { raw -> parseUsageTime(raw, zone) } ?: now
+            val requestedEnd = endRaw?.let { raw -> parseUsageTime(raw, zone) } ?: now
+            endTime = if (requestedEnd.isAfter(now)) now else requestedEnd
             startTime = if (beginRaw != null) {
                 parseUsageTime(beginRaw, zone)
             } else when (rangePreset) {
                 "week" -> now.minusDays(7)
                 else -> now.toLocalDate().atStartOfDay(zone)
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             val payload = buildJsonObject {
                 put("error", "INVALID_TIME")
-                put("message", e.message ?: "Invalid time format for begin/end.")
+                put("message", "Укажите begin и end как дату ISO-8601, дату со временем или число миллисекунд Unix.")
             }
-            return@Tool listOf(UIMessagePart.Text(payload.toString()))
+            return@deviceToolParts listOf(UIMessagePart.Text(payload.toString()))
         }
 
         if (!startTime.isBefore(endTime)) {
             val payload = buildJsonObject {
                 put("error", "INVALID_RANGE")
-                put("message", "begin must be earlier than end.")
+                put("message", "Укажите begin раньше end и текущего времени.")
             }
-            return@Tool listOf(UIMessagePart.Text(payload.toString()))
+            return@deviceToolParts listOf(UIMessagePart.Text(payload.toString()))
         }
 
         val isCustom = beginRaw != null || endRaw != null
@@ -130,7 +129,10 @@ internal fun buildScreenTimeTool(context: Context, eventBus: AppEventBus): Tool 
         val startMs = startTime.toInstant().toEpochMilli()
 
         val usageStatsManager =
-            context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+            context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
+                ?: return@deviceToolParts listOf(UIMessagePart.Text(
+                    deviceToolError("Служба статистики использования недоступна. Повторите запрос позже.").toString()
+                ))
         val pm = context.packageManager
 
         // 通过逐个前台/后台事件配对计算真实前台时长, 比 queryAndAggregateUsageStats
@@ -163,7 +165,7 @@ internal fun buildScreenTimeTool(context: Context, eventBus: AppEventBus): Tool 
             })
         }
         listOf(UIMessagePart.Text(payload.toString()))
-    }
+    } }
 )
 
 // 计算屏幕时间时向前回看的窗口(12h), 用于还原区间开始时刻已在前台的 App;
@@ -272,5 +274,5 @@ private fun parseUsageTime(raw: String, zone: ZoneId): ZonedDateTime {
     runCatching { return Instant.parse(text).atZone(zone) }
     runCatching { return LocalDateTime.parse(text).atZone(zone) }
     runCatching { return LocalDate.parse(text).atStartOfDay(zone) }
-    error("Invalid time format: '$raw'. Use ISO-8601 date/date-time or epoch milliseconds.")
+    error("Укажите дату ISO-8601, дату со временем или число миллисекунд Unix.")
 }

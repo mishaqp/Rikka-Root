@@ -37,8 +37,9 @@ fun Context.readClipboardText(): String {
     val clipboardManager =
         getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
     val clip = clipboardManager.primaryClip ?: return ""
+    if (clip.itemCount == 0) return ""
     val item = clip.getItemAt(0) ?: return ""
-    return item.text.toString()
+    return item.coerceToText(this)?.toString().orEmpty()
 }
 
 /**

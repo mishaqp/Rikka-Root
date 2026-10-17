@@ -46,7 +46,8 @@ fun globalActionTool(
         )
     },
     execute = { input ->
-        val wakeOk = service.wakeIfNeeded()
+        screenArgumentError(input, "action" to "string")
+            ?.let { return@Tool listOf(UIMessagePart.Text(it.toString())) }
         val action = input.jsonObject["action"]?.jsonPrimitive?.contentOrNull
         val code = action?.let { ACTION_MAP[it] }
         if (action == null || code == null) {
@@ -58,13 +59,12 @@ fun globalActionTool(
                 )
             )
         }
-        val payload = service.withService { svc ->
+        val payload = service.withService(wakeBeforeSnapshot = true) { svc ->
             withActionEnvelope(svc) { _ ->
                 val ok = svc.performGlobalAction(code)
                 buildJsonObject {
                     put("success", ok)
                     if (!ok) put("reason", "rejected_by_os")
-                    if (!wakeOk) put("wake_failed", true)
                 }
             }
         }

@@ -46,8 +46,8 @@ fun tapTool(
         )
     },
     execute = { input ->
-        // Wake screen so gestures land on a visible surface, not a dark screen.
-        val wakeOk = service.wakeIfNeeded()
+        screenArgumentError(input, "x" to "number", "y" to "number")
+            ?.let { return@Tool listOf(UIMessagePart.Text(it.toString())) }
         val x = coordOrError(input, "x")
         val y = coordOrError(input, "y")
         if (x == null || y == null) {
@@ -59,7 +59,8 @@ fun tapTool(
                 )
             )
         }
-        val payload = service.withService { svc ->
+        val payload = service.withService(wakeBeforeSnapshot = true,
+            validateBeforeWake = { screenBoundsError(it, x to y) }) { svc ->
             withActionEnvelope(svc) { _ ->
                 val dm = svc.displayMetrics
                 if (coordsOutOfBounds(x, y, dm.widthPixels, dm.heightPixels)) {
@@ -75,7 +76,6 @@ fun tapTool(
                 buildJsonObject {
                     put("success", ok)
                     if (!ok) put("reason", "gesture_cancelled_or_timeout")
-                    if (!wakeOk) put("wake_failed", true)
                 }
             }
         }
@@ -113,7 +113,8 @@ fun longPressTool(
         )
     },
     execute = { input ->
-        val wakeOk = service.wakeIfNeeded()
+        screenArgumentError(input, "x" to "number", "y" to "number", "duration_ms" to "integer")
+            ?.let { return@Tool listOf(UIMessagePart.Text(it.toString())) }
         val x = coordOrError(input, "x")
         val y = coordOrError(input, "y")
         if (x == null || y == null) {
@@ -136,7 +137,8 @@ fun longPressTool(
                 )
             )
         }
-        val payload = service.withService { svc ->
+        val payload = service.withService(wakeBeforeSnapshot = true,
+            validateBeforeWake = { screenBoundsError(it, x to y) }) { svc ->
             withActionEnvelope(svc) { _ ->
                 val dm = svc.displayMetrics
                 if (coordsOutOfBounds(x, y, dm.widthPixels, dm.heightPixels)) {
@@ -152,7 +154,6 @@ fun longPressTool(
                 buildJsonObject {
                     put("success", ok)
                     if (!ok) put("reason", "gesture_cancelled_or_timeout")
-                    if (!wakeOk) put("wake_failed", true)
                 }
             }
         }

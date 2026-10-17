@@ -24,6 +24,8 @@ internal class SafUiSession(val id: String, val request: SafUiRequest) {
     private val result = CompletableDeferred<SafUiResult>()
     internal var closing = false
     internal var pickerStarted = false
+    // ActivityResultRegistry chooses this code; keep it through host recreation.
+    internal var pickerRequestCode: Int? = null
     internal var cancellationAction: (suspend () -> Unit)? = null
     internal fun finish(value: SafUiResult) { result.complete(value) }
     suspend fun await(): SafUiResult = result.await()
