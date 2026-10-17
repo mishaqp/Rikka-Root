@@ -171,6 +171,9 @@ fun sshDownloadTool(context: Context, repo: SshHostRepository, access: LocalFile
         val localFile = requireNotNull((access.resolve(localPath, write = true) as? LocalFileSource.Local)?.file) {
             "SFTP работает с локальными файлами scratch, upload или workspace."
         }
+        // This reference belongs to one invocation. A local timeout discards the block's
+        // result, but waits for its finally; publish only safe diagnostics after cleanup.
+        val completedCleanupDetails = AtomicReference<JsonObject?>(null)
         val payload = runCancellableSshOp(timeoutSec * 1000L) { sessionRef ->
             val downloadContext = currentCoroutineContext()
             withSavedHostSession(context, repo, name, timeoutSec * 1000, sessionRef) { session ->
@@ -224,17 +227,20 @@ fun sshDownloadTool(context: Context, repo: SshHostRepository, access: LocalFile
                         } catch (_: Throwable) { cleanupFailed = true }
                     }
                     try { sftp.disconnect() } catch (_: Throwable) {}
+                    if (cleanupFailed) completedCleanupDetails.set(buildJsonObject {
+                        put("cleanup_failed", true)
+                        put("partial_path", partialFile!!.absolutePath)
+                        put("partial_path_unverified", true)
+                        put("cleanup_recovery", "Временный файл не удалён: путь или доступ изменились. Указан прежний путь; его текущее содержимое не подтверждено. Проверьте исходную папку перед повтором.")
+                    })
                 }
-                if (cleanupFailed) buildJsonObject {
-                    result.forEach { (key, value) -> put(key, value) }
-                    put("cleanup_failed", true)
-                    put("partial_path", partialFile!!.absolutePath)
-                    put("partial_path_unverified", true)
-                    put("cleanup_recovery", "Временный файл не удалён: путь или доступ изменились. Указан прежний путь; его текущее содержимое не подтверждено. Проверьте исходную папку перед повтором.")
-                } else result
+                result
             }
         }
-        listOf(UIMessagePart.Text(withSftpPaths(payload, name, localPath, remotePath).toString()))
+        // The wrapper returns only after blocking I/O and cleanup finish. Parent cancellation
+        // still throws before this point; it is never turned into a normal timeout result.
+        val reported = JsonObject(payload + completedCleanupDetails.get().orEmpty())
+        listOf(UIMessagePart.Text(withSftpPaths(reported, name, localPath, remotePath).toString()))
     }
 )
 
