@@ -3,6 +3,7 @@ package me.rerere.search
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
@@ -12,6 +13,11 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.search.SearchResult.SearchResultItem
 import org.jsoup.Jsoup
+import org.jsoup.HttpStatusException
+import java.io.IOException
+import java.io.InterruptedIOException
+import java.net.ConnectException
+import java.net.UnknownHostException
 import java.net.URLEncoder
 import java.util.Locale
 
@@ -41,7 +47,7 @@ object BingSearchService : SearchService<SearchServiceOptions.BingLocalOptions> 
         commonOptions: SearchCommonOptions,
         serviceOptions: SearchServiceOptions.BingLocalOptions
     ): Result<SearchResult> = withContext(Dispatchers.IO) {
-        runCatching {
+        try {
             val query = params["query"]?.jsonPrimitive?.content ?: error("Укажите поисковый запрос в query.")
             val url = "https://www.bing.com/search?q=" + URLEncoder.encode(query, "UTF-8")
             val locale = Locale.getDefault()
@@ -77,7 +83,19 @@ object BingSearchService : SearchService<SearchServiceOptions.BingLocalOptions> 
                 "Bing не вернул результатов. Измените запрос или выберите другой поисковый сервис в настройках."
             }
 
-            SearchResult(items = results)
+            Result.success(SearchResult(items = results))
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: IOException) {
+            val reason = when (error) {
+                is HttpStatusException -> "Bing вернул ошибку HTTP ${error.statusCode}. Повторите поиск позже или выберите другой поисковый сервис."
+                is InterruptedIOException -> "Bing не ответил вовремя. Проверьте подключение к интернету и повторите поиск."
+                is UnknownHostException, is ConnectException -> "Не удалось подключиться к Bing. Проверьте подключение к интернету и повторите поиск."
+                else -> "Не удалось выполнить поиск Bing из-за ошибки соединения. Повторите поиск или выберите другой поисковый сервис."
+            }
+            Result.failure(IOException(reason, error))
+        } catch (error: Exception) {
+            Result.failure(error)
         }
     }
 

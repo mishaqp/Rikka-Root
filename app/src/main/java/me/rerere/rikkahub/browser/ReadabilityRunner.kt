@@ -2,14 +2,17 @@ package me.rerere.rikkahub.browser
 
 import android.content.Context
 import android.webkit.WebView
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.util.WeakHashMap
 
 /**
  * Token-cost optimisation pass — Readability.js bridge for browser_get_text.
@@ -45,19 +48,25 @@ object ReadabilityRunner {
     @Volatile
     private var cachedLibrary: String? = null
 
+    // A timeout stops waiting for the callback, not the parser in Chromium. Keep the
+    // failed document out of subsequent article attempts until navigation/reload.
+    private val timedOutDocuments = WeakHashMap<WebView, BrowserDocumentIdentity>()
+
+    class ExtractionTimedOut(val documentUrl: String? = null) :
+        RuntimeException("Извлечение статьи не завершилось вовремя.")
+
     /**
      * Inject Readability.js (if not already loaded in this WebView instance) and run
      * it against a clone of the live document. Returns the extracted plain text or
      * `null` if Readability decided the page wasn't article-shaped.
      *
-     * Hard timeout via [withTimeoutOrNull] — Readability rarely hangs but a
-     * pathological DOM could OOM the script engine; we bound the wait so the
-     * calling tool never exceeds its own 30-s tool budget.
+     * Bounds the callback wait. JavaScript may continue running after timeout;
+     * that document is skipped on subsequent extraction attempts.
      */
     suspend fun WebView.runReadability(timeoutMs: Long = 4_000L): String? =
         runReadabilityResult(timeoutMs = timeoutMs)?.text
 
-    data class Extraction(val text: String, val totalChars: Int)
+    data class Extraction(val text: String, val totalChars: Int, val url: String)
 
     /** Clip inside JavaScript: clipping after the callback cannot protect its native bridge. */
     suspend fun WebView.runReadabilityResult(
@@ -67,34 +76,62 @@ object ReadabilityRunner {
         val limit = maxChars.coerceIn(100, 64 * 1024)
         val context = this.context.applicationContext ?: return null
         val library = loadLibrary(context) ?: return null
-        return withTimeoutOrNull(timeoutMs) {
-            // Inject the library, then run Readability against a cloned document.
-            // Cloning is critical — Readability's `parse()` mutates the document it
-            // operates on. Running against the live DOM would scrub the page from
-            // under any subsequent browser_get_dom / browser_click call.
-            val payload = """(function(){
-                try {
-                    // Cloning and scoring a huge DOM (large GitHub diffs, listings) outlives the
-                    // timeout and blocks the renderer for the raw fallback, so skip it.
-                    if (document.getElementsByTagName && document.getElementsByTagName('*').length > $MAX_READABILITY_ELEMENTS) return JSON.stringify(null);
-                    if (typeof Readability === 'undefined') { $library }
-                    var doc = document.cloneNode(true);
-                    var article = new Readability(doc).parse();
-                    if (!article) return JSON.stringify(null);
-                    var text = (article.textContent || '').replace(/\s+/g,' ').trim();
-                    return JSON.stringify({
-                        textContent: text.substring(0, $limit),
-                        total_chars: text.length,
-                        title: String(article.title || '').substring(0, 1024),
-                        byline: String(article.byline || '').substring(0, 1024),
-                        siteName: String(article.siteName || '').substring(0, 1024),
-                        length: (article.textContent || '').length
-                    });
-                } catch(e) { return JSON.stringify({error: String(e)}); }
-            })()"""
-            val raw = this@runReadabilityResult.evaluateJavascriptAsync(payload, timeoutMs)
-            parseExtraction(raw)
+        val identity = extractionDocumentIdentity() ?: throw ExtractionTimedOut()
+        synchronized(timedOutDocuments) {
+            if (timedOutDocuments[this] == identity) return null
+            timedOutDocuments.remove(this)
         }
+        val raw = try {
+            withTimeoutOrNull(timeoutMs) {
+                // Inject the library, then run Readability against a cloned document.
+                // Cloning is critical — Readability's `parse()` mutates the document it
+                // operates on. Running against the live DOM would scrub the page from
+                // under any subsequent browser_get_dom / browser_click call.
+                val payload = """(function(){
+                    try {
+                        // Cloning and scoring a huge DOM (large GitHub diffs, listings) outlives the
+                        // timeout and blocks the renderer for the raw fallback, so skip it.
+                        if (document.getElementsByTagName && document.getElementsByTagName('*').length > $MAX_READABILITY_ELEMENTS) return JSON.stringify(null);
+                        if (typeof Readability === 'undefined') { $library }
+                        var doc = document.cloneNode(true);
+                        var article = new Readability(doc).parse();
+                        if (!article) return JSON.stringify(null);
+                        var text = (article.textContent || '').replace(/\s+/g,' ').trim();
+                        return JSON.stringify({
+                            url: document.URL || '',
+                            textContent: text.substring(0, $limit),
+                            total_chars: text.length,
+                            title: String(article.title || '').substring(0, 1024),
+                            byline: String(article.byline || '').substring(0, 1024),
+                            siteName: String(article.siteName || '').substring(0, 1024),
+                            length: (article.textContent || '').length
+                        });
+                    } catch(e) { return JSON.stringify({error: String(e)}); }
+                })()"""
+                this@runReadabilityResult.evaluateJavascriptAsync(payload, timeoutMs)
+            }
+        } catch (cancelled: CancellationException) {
+            synchronized(timedOutDocuments) { timedOutDocuments[this] = identity }
+            throw cancelled
+        }
+        if (raw == null) {
+            synchronized(timedOutDocuments) { timedOutDocuments[this] = identity }
+            throw ExtractionTimedOut(identity.url)
+        }
+        return parseExtraction(raw)
+    }
+
+    private suspend fun WebView.extractionDocumentIdentity(): BrowserDocumentIdentity? {
+        val raw = evaluateJavascriptAsync("""(function(){
+            return JSON.stringify([document.URL || '', String(
+                performance.timeOrigin || (performance.timing && performance.timing.navigationStart) || 0)]);
+        })()""", 1_500L) ?: return null
+        return runCatching {
+            val outer = Json.parseToJsonElement(raw)
+            val inner = if (outer is JsonPrimitive && outer.isString) outer.content else outer.toString()
+            val fields = Json.parseToJsonElement(inner).jsonArray
+            BrowserDocumentIdentity(fields[0].jsonPrimitive.content, fields[1].jsonPrimitive.content)
+        }.getOrNull()
     }
 
     /**
@@ -145,7 +182,7 @@ object ReadabilityRunner {
                 ?: return@runCatching null
             val total = obj["total_chars"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
                 ?.coerceAtLeast(text.length) ?: text.length
-            Extraction(text, total)
+            Extraction(text, total, obj["url"]?.jsonPrimitive?.contentOrNull.orEmpty())
         }.getOrNull()
     }
 }

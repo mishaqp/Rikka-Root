@@ -3,7 +3,10 @@ package me.rerere.rikkahub.data.ai.tools.local
 import android.content.Context
 import com.sun.net.httpserver.HttpServer
 import io.mockk.every
+import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.mockk
+import io.mockk.spyk
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
 import me.rerere.ai.ui.UIMessagePart
@@ -12,6 +15,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.io.IOException
 import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -64,6 +68,41 @@ class DownloadNamingTest {
             val replaced = download(overwrite = true)
             assertEquals("latest.json", replaced["filename"]?.jsonPrimitive?.content)
             assertEquals("""{"version":3}""", File(scratch, "latest.json").readText())
+        } finally { server.stop(0) }
+    }
+
+    @Test fun `failed overwrite preserves the original file when destination write fails`() = runBlocking {
+        val hits = AtomicInteger()
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/module-update.json") { exchange ->
+            hits.incrementAndGet()
+            val bytes = """{"version":2}""".toByteArray()
+            exchange.responseHeaders.add("Content-Type", "application/json")
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.start()
+        try {
+            val cache = temp.newFolder("failure-cache")
+            val context = mockk<Context> { every { cacheDir } returns cache }
+            val scratch = temp.newFolder("failure-scratch")
+            val original = File(scratch, "module-update.json").apply { writeText("""{"version":1}""") }
+            val access = spyk(LocalFileAccess(scratch, temp.newFolder("failure-upload")))
+            coEvery { access.openOutput(any(), any()) } throws IOException("injected destination write failure")
+            val tool = downloadTool(context, access)
+            val parts = tool.execute(buildJsonObject {
+                put("url", "http://127.0.0.1:${server.address.port}/module-update.json")
+                put("directory", "/scratch")
+                put("overwrite", true)
+            })
+            val result = Json.parseToJsonElement((parts.single() as UIMessagePart.Text).text).jsonObject
+            assertEquals(1, hits.get())
+            coVerify(exactly = 1) { access.openOutput(any(), any()) }
+            assertTrue("The injected write failure must reach the tool result: $result", result.containsKey("error"))
+            assertTrue("An unsuccessful replacement must retain the old file", original.exists())
+            assertEquals("""{"version":1}""", original.readText())
+            assertEquals(listOf("module-update.json"), scratch.listFiles()!!.map { it.name })
+            assertTrue("Download staging must be cleaned", cache.listFiles()!!.isEmpty())
         } finally { server.stop(0) }
     }
 }

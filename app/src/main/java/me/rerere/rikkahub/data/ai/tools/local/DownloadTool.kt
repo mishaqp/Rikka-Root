@@ -34,6 +34,10 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.URI
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.coroutineContext
 import kotlin.coroutines.resume
@@ -229,45 +233,56 @@ fun downloadTool(context: Context, access: LocalFileAccess = LocalFileAccess(con
                     val existing = access.findChild(directory, wantedName)
                     if (existing != null && overwrite) {
                         require(!access.isDirectory(existing)) { "С таким именем уже есть папка. Укажите другое filename." }
-                        access.delete(existing)
                     } else if (existing != null) {
                         name = (2..100).asSequence().map { numberedDownloadName(wantedName, it) }
                             .firstOrNull { access.findChild(directory, it) == null }
                             ?: error("Слишком много файлов с таким именем. Укажите другое filename.")
                     }
-                    // Keep ownership of the newly created document even if cancellation occurs
-                    // during provider IPC, before entering the cleanup-protected copy.
-                    val unpublishedShared = !access.permitsAutomaticRollback(directory)
-                    val target = if (unpublishedShared) access.child(directory, name)
-                        else withContext(NonCancellable) { access.createFile(directory, name) }
-                    try {
-                        val jobContext = coroutineContext
-                        if (unpublishedShared) {
-                            val local = target as? LocalFileSource.Local ?: error("Не удалось определить путь назначения.")
-                            installNewSharedStorageFile(staging, local.file, verifyAccess = { access.checkFile(local.file, true) })
-                        } else access.openOutput(target).use { output ->
-                            staging.inputStream().use { input -> copyDownloadBounded(input, output, maxBytes) { jobContext.ensureActive() } }
-                        }
-                        coroutineContext.ensureActive()
-                        target.reference
-                    } catch (failure: Exception) {
-                        if (unpublishedShared) {
-                            if (failure is FileCreationCleanupFailedException) return@withContext buildJsonObject {
-                                put("error", "creation_cleanup_failed")
-                                put("created_path", failure.created.reference)
-                                put("detail", failure.message.orEmpty())
-                            }
-                            throw failure
-                        }
-                        try { access.cleanupOwnedTarget(target, failure) }
-                        catch (partial: FileCreationCleanupFailedException) {
+                    if (overwrite) {
+                        try {
+                            replacePrivateDownload(access, directory as LocalFileSource.Local, name, staging, maxBytes)
+                        } catch (partial: FileCreationCleanupFailedException) {
                             return@withContext buildJsonObject {
                                 put("error", "creation_cleanup_failed")
                                 put("created_path", partial.created.reference)
                                 put("detail", partial.message.orEmpty())
                             }
                         }
-                        throw failure
+                    } else {
+                        // Keep ownership of the newly created document even if cancellation occurs
+                        // during provider IPC, before entering the cleanup-protected copy.
+                        val unpublishedShared = !access.permitsAutomaticRollback(directory)
+                        val target = if (unpublishedShared) access.child(directory, name)
+                            else withContext(NonCancellable) { access.createFile(directory, name) }
+                        try {
+                            val jobContext = coroutineContext
+                            if (unpublishedShared) {
+                                val local = target as? LocalFileSource.Local ?: error("Не удалось определить путь назначения.")
+                                installNewSharedStorageFile(staging, local.file, verifyAccess = { access.checkFile(local.file, true) })
+                            } else access.openOutput(target).use { output ->
+                                staging.inputStream().use { input -> copyDownloadBounded(input, output, maxBytes) { jobContext.ensureActive() } }
+                            }
+                            coroutineContext.ensureActive()
+                            target.reference
+                        } catch (failure: Exception) {
+                            if (unpublishedShared) {
+                                if (failure is FileCreationCleanupFailedException) return@withContext buildJsonObject {
+                                    put("error", "creation_cleanup_failed")
+                                    put("created_path", failure.created.reference)
+                                    put("detail", failure.message.orEmpty())
+                                }
+                                throw failure
+                            }
+                            try { access.cleanupOwnedTarget(target, failure) }
+                            catch (partial: FileCreationCleanupFailedException) {
+                                return@withContext buildJsonObject {
+                                    put("error", "creation_cleanup_failed")
+                                    put("created_path", partial.created.reference)
+                                    put("detail", partial.message.orEmpty())
+                                }
+                            }
+                            throw failure
+                        }
                     }
                 } else publishPublicDownload(context, staging, wantedName, mime, maxBytes).also { name = it.second }.first
                 buildJsonObject {
@@ -280,6 +295,43 @@ fun downloadTool(context: Context, access: LocalFileAccess = LocalFileAccess(con
         }
     } }
 )
+
+/** Keep the previous private file intact until the complete replacement is ready beside it. */
+private suspend fun replacePrivateDownload(
+    access: LocalFileAccess,
+    directory: LocalFileSource.Local,
+    name: String,
+    staging: File,
+    maxBytes: Long,
+): String {
+    val target = access.child(directory, name) as LocalFileSource.Local
+    val temporary = withContext(NonCancellable) {
+        access.createFile(directory, ".download-${UUID.randomUUID()}.partial")
+    } as LocalFileSource.Local
+    try {
+        val jobContext = coroutineContext
+        access.openOutput(temporary).use { output ->
+            staging.inputStream().use { input ->
+                copyDownloadBounded(input, output, maxBytes) { jobContext.ensureActive() }
+            }
+        }
+        coroutineContext.ensureActive()
+        val sourceFile = access.checkFile(temporary.file, true)
+        val targetFile = access.checkFile(target.file, true)
+        try {
+            Files.move(sourceFile.toPath(), targetFile.toPath(),
+                StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        } catch (unsupported: AtomicMoveNotSupportedException) {
+            throw IOException("Хранилище не поддерживает атомарную замену. Старый файл сохранён.", unsupported)
+        } catch (unsupported: UnsupportedOperationException) {
+            throw IOException("Хранилище не поддерживает атомарную замену. Старый файл сохранён.", unsupported)
+        }
+        return target.reference
+    } catch (failure: Exception) {
+        access.cleanupOwnedTarget(temporary, failure)
+        throw failure
+    }
+}
 
 /** Returns the destination and the actual name: MediaStore renames a taken name itself. */
 private suspend fun publishPublicDownload(context: Context, staging: File, name: String, mime: String?, maxBytes: Long): Pair<String, String> {

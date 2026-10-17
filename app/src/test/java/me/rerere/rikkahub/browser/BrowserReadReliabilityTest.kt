@@ -32,6 +32,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLog
 
 /**
  * A scripted WebView models native callback loss/navigation without a network. The real
@@ -283,6 +284,135 @@ class BrowserReadReliabilityTest {
         assertEquals("https://example.test/releases", result["url"]?.jsonPrimitive?.content)
     }
 
+    private suspend fun assertReadDocumentUrl(name: String, args: String = "{}") {
+        view.pageUrl = { "https://example.test/pending-navigation" }
+        view.documentUrl = { "https://example.test/still-visible" }
+        view.pageText = "Текст прежнего документа"
+        view.articleText = "Статья прежнего документа ".repeat(20)
+        val result = execute(name, args)
+        assertFalse(result.toString(), result.containsKey("error"))
+        assertEquals("A native URL update must not relabel the previous document's content",
+            "https://example.test/still-visible", result["url"]?.jsonPrimitive?.content)
+    }
+
+    @Test fun `raw text identifies its document even when native URL has already changed`() = runTest {
+        assertReadDocumentUrl(BrowserToolDefaults.GET_TEXT, """{"extract_mode":"raw"}""")
+    }
+
+    @Test fun `selector text identifies its document even when native URL has already changed`() = runTest {
+        assertReadDocumentUrl(BrowserToolDefaults.GET_TEXT, """{"selector":"main"}""")
+    }
+
+    @Test fun `readability text identifies its document even when native URL has already changed`() = runTest {
+        assertReadDocumentUrl(BrowserToolDefaults.GET_TEXT, """{"extract_mode":"readability"}""")
+    }
+
+    @Test fun `DOM identifies its document even when native URL has already changed`() = runTest {
+        assertReadDocumentUrl(BrowserToolDefaults.GET_DOM)
+    }
+
+    @Test fun `links identify their document even when native URL has already changed`() = runTest {
+        assertReadDocumentUrl(BrowserToolDefaults.GET_LINKS)
+    }
+
+    @Test fun `timed out readability does not queue raw extraction behind an unresponsive parser`() = runTest {
+        view.dropReadabilityCallbacks = true
+        val result = execute(BrowserToolDefaults.GET_TEXT)
+        assertTrue("A parser timeout must remain visible: $result", result.containsKey("error"))
+        assertEquals("The still-running parser must not receive a queued fallback", 0, view.rawReadRequests)
+        assertEquals(1, view.readabilityInvocations)
+        assertEquals(0, view.navigationCount)
+        assertSame(view, BrowserController.activeWebView())
+    }
+
+    @Test fun `auto extraction skips a timed out parser for the same document and retries on a new document`() = runTest {
+        view.dropReadabilityCallbacks = true
+        execute(BrowserToolDefaults.GET_TEXT)
+        assertEquals(1, view.readabilityInvocations)
+        view.dropReadabilityCallbacks = false
+        view.articleText = "Восстановившаяся статья ".repeat(20)
+        view.pageText = "Доступный обычный текст"
+        val recovered = execute(BrowserToolDefaults.GET_TEXT)
+        assertFalse(recovered.toString(), recovered.containsKey("error"))
+        assertEquals(view.pageText, recovered["text"]?.jsonPrimitive?.content)
+        assertEquals("Do not rerun the parser which timed out in this document", 1, view.readabilityInvocations)
+        // Reloading the same URL creates a new document and must allow article extraction again.
+        view.documentOrigin = { 2000 }
+        val reloaded = execute(BrowserToolDefaults.GET_TEXT)
+        assertEquals("readability", reloaded["extract_mode"]?.jsonPrimitive?.content)
+        assertEquals(2, view.readabilityInvocations)
+        assertEquals(0, view.navigationCount)
+    }
+
+    @Test fun `XML without body is read from its root by text DOM and links tools`() = runTest {
+        view.hasBody = false
+        view.pageText = "Версия 42 из Atom"
+        view.outerHtml = "<feed><entry>Версия 42 из Atom</entry></feed>"
+        view.anchorCount = 1
+        val text = execute(BrowserToolDefaults.GET_TEXT, """{"extract_mode":"raw"}""")
+        assertEquals(view.pageText, text["text"]?.jsonPrimitive?.content)
+        val dom = execute(BrowserToolDefaults.GET_DOM)
+        assertEquals(view.outerHtml, dom["html"]?.jsonPrimitive?.content)
+        val links = execute(BrowserToolDefaults.GET_LINKS)
+        assertEquals(1, links["count"]?.jsonPrimitive?.intOrNull)
+        assertFalse(links.toString(), links.containsKey("error"))
+    }
+
+    @Test fun `malformed bridge payload exposes only a short preview and logs exception type`() = runTest {
+        view.malformedReadPayload = "x".repeat(70_000)
+        val result = execute(BrowserToolDefaults.GET_TEXT, """{"extract_mode":"raw"}""")
+        assertEquals("js_parse_failed", result["error"]?.jsonPrimitive?.content)
+        assertFalse(result.toString(), result.containsKey("raw"))
+        assertEquals("x".repeat(300), result["raw_preview"]?.jsonPrimitive?.content)
+        assertTrue("The diagnostic must retain the error type and original size",
+            ShadowLog.getLogsForTag("BrowserTools").any {
+                Regex("js_parse_failed: [A-Za-z]+Exception, 70000 chars").containsMatchIn(it.msg)
+            })
+    }
+
+    @Test fun `Enter in an input submits its associated form once`() = runTest {
+        val result = execute(BrowserToolDefaults.PRESS_KEY, """{"key":"Enter","full":true}""")
+        assertEquals(true, result["success"]?.jsonPrimitive?.booleanOrNull)
+        assertEquals(true, result["submitted"]?.jsonPrimitive?.booleanOrNull)
+        assertEquals(1, view.submitCount)
+        assertEquals(view.pageUrl(), result["current_url"]?.jsonPrimitive?.content)
+    }
+
+    @Test fun `Enter in textarea does not submit the associated form`() = runTest {
+        view.activeTagName = "TEXTAREA"
+        val result = execute(BrowserToolDefaults.PRESS_KEY, """{"key":"Enter","full":true}""")
+        assertEquals(true, result["success"]?.jsonPrimitive?.booleanOrNull)
+        assertFalse(result["submitted"]?.jsonPrimitive?.booleanOrNull == true)
+        assertEquals(0, view.submitCount)
+    }
+
+    @Test fun `cancelled Enter keydown does not submit a form`() = runTest {
+        view.cancelKeydown = true
+        val result = execute(BrowserToolDefaults.PRESS_KEY, """{"key":"Enter","full":true}""")
+        assertEquals(true, result["success"]?.jsonPrimitive?.booleanOrNull)
+        assertFalse(result["submitted"]?.jsonPrimitive?.booleanOrNull == true)
+        assertEquals(0, view.submitCount)
+    }
+
+    @Test fun `missing select value preserves selection and dispatches no change`() = runTest {
+        view.activeTagName = "SELECT"
+        val result = execute(BrowserToolDefaults.SELECT, """{"selector":"#pick","value":"missing","full":true}""")
+        assertEquals("option_not_found", result["error"]?.jsonPrimitive?.content)
+        assertFalse(result["success"]?.jsonPrimitive?.booleanOrNull == true)
+        assertEquals("existing", view.lastSelectedValue)
+        assertEquals(0, view.changeCount)
+        assertTrue(result["options"].toString().contains("existing"))
+    }
+
+    @Test fun `links report the full count when only the first hundred are returned`() = runTest {
+        view.anchorCount = 101
+        val result = execute(BrowserToolDefaults.GET_LINKS)
+        assertEquals(100, result["count"]?.jsonPrimitive?.intOrNull)
+        assertEquals(101, result["total"]?.jsonPrimitive?.intOrNull)
+        assertEquals(true, result["truncated"]?.jsonPrimitive?.booleanOrNull)
+        assertEquals(100, result["links"]?.let { (it as kotlinx.serialization.json.JsonArray).size })
+    }
+
     @Test fun `ready state timeout includes an unresponsive JavaScript callback`() = runTest {
         view.dropAllCallbacks = true
         assertFalse(view.awaitReadyState(1000L))
@@ -296,6 +426,7 @@ class BrowserReadReliabilityTest {
         var pageTextAt: () -> String = { pageText }
         var onClick: () -> Unit = {}
         var pageUrl: () -> String = { "https://example.test/releases" }
+        var documentUrl: () -> String = { pageUrl() }
         var documentOrigin: () -> Int = { 1000 }
         var articleText: String? = null
         var articleMetadata = ""
@@ -304,6 +435,18 @@ class BrowserReadReliabilityTest {
         var lostReadCallbacks = 0
         var lostIdentityCallbacks = 0
         var dropAllCallbacks = false
+        var dropReadabilityCallbacks = false
+        var readabilityInvocations = 0
+        var rawReadRequests = 0
+        var hasBody = true
+        var outerHtml: String? = null
+        var anchorCount = 0
+        var malformedReadPayload: String? = null
+        var activeTagName = "INPUT"
+        var cancelKeydown = false
+        var submitCount = 0
+        var changeCount = 0
+        var lastSelectedValue = "existing"
         var maxCallbackChars = Int.MAX_VALUE
         var navigationCount = 0
         var clickCount = 0
@@ -314,6 +457,11 @@ class BrowserReadReliabilityTest {
 
         override fun evaluateJavascript(script: String, resultCallback: ValueCallback<String>?) {
             if (dropAllCallbacks) return
+            val isReadability = script.contains("new Readability(doc).parse()")
+            if (isReadability) {
+                readabilityInvocations++
+                if (dropReadabilityCallbacks) return
+            }
             if (script.contains("JSON.stringify([document.URL") && lostIdentityCallbacks > 0) {
                 lostIdentityCallbacks--
                 resultCallback?.onReceiveValue("null")
@@ -322,6 +470,11 @@ class BrowserReadReliabilityTest {
             if (script.contains(".click()")) { clickCount++; onClick() }
             val isRead = (script.contains("querySelector") || script.contains("document.body.innerText")) &&
                 !script.contains(".click()")
+            if (isRead && !isReadability) rawReadRequests++
+            if (isRead && !isReadability && malformedReadPayload != null) {
+                resultCallback?.onReceiveValue(malformedReadPayload)
+                return
+            }
             if (isRead && lostReadCallbacks > 0) {
                 lostReadCallbacks--
                 resultCallback?.onReceiveValue("null")
@@ -334,12 +487,25 @@ class BrowserReadReliabilityTest {
             val text = JsonPrimitive(pageTextAt()).toString()
             val article = JsonPrimitive(articleText).toString()
             val fixture = """
-                var el = {innerText:$text,textContent:$text,outerHTML:'<main>'+$text+'</main>',
-                    scrollIntoView:function(){},click:function(){},querySelectorAll:function(){return[];},
+                var fixtureSubmitCount = 0, fixtureChangeCount = 0;
+                function KeyboardEvent(type, options) { this.type = type; this.key = options.key; }
+                function Event(type) { this.type = type; }
+                var anchors = Array.from({length:$anchorCount}, function(_, i) {
+                    return {href:'https://example.test/link/'+i,innerText:'Link '+i};
+                });
+                var el = {innerText:$text,textContent:$text,outerHTML:${JsonPrimitive(outerHtml ?: "<main>${pageTextAt()}</main>")},
+                    tagName:${JsonPrimitive(activeTagName)},value:'existing',options:[{value:'existing'}],
+                    form:{requestSubmit:function(){fixtureSubmitCount++;},submit:function(){fixtureSubmitCount++;}},
+                    dispatchEvent:function(event){
+                        if(event.type === 'change') fixtureChangeCount++;
+                        return !(event.type === 'keydown' && $cancelKeydown);
+                    },
+                    scrollIntoView:function(){},click:function(){},querySelectorAll:function(selector){return selector === 'a[href]' ? anchors : [];},
                     cloneNode:function(){return this;}};
                 var performance = {timeOrigin:${documentOrigin()},timing:{navigationStart:${documentOrigin()}}};
-                var document = {URL:${JsonPrimitive(pageUrl())},readyState:${JsonPrimitive(if (ready()) "complete" else "loading")},body:el,
-                    querySelector:function(){return el;},cloneNode:function(){return this;}};
+                var document = {URL:${JsonPrimitive(documentUrl())},readyState:${JsonPrimitive(if (ready()) "complete" else "loading")},
+                    body:${if (hasBody) "el" else "null"},documentElement:el,activeElement:el,
+                    querySelector:function(selector){return selector === 'body' ? this.body : el;},cloneNode:function(){return this;}};
                 var fixtureArticle = $article;
                 var fixtureMetadata = ${JsonPrimitive(articleMetadata)};
             """.trimIndent()
@@ -347,6 +513,11 @@ class BrowserReadReliabilityTest {
                 script.replace(bundledParser, "function Readability(){this.parse=function(){return fixtureArticle === null ? null : {textContent:fixtureArticle,title:fixtureMetadata,byline:fixtureMetadata,siteName:fixtureMetadata};};}")
             } else script
             val returned = runBlocking { js.evaluate<Any?>(fixture + "\n" + executable) }
+            runBlocking {
+                submitCount += js.evaluate<Int>("fixtureSubmitCount")
+                changeCount += js.evaluate<Int>("fixtureChangeCount")
+                lastSelectedValue = js.evaluate<String>("el.value")
+            }
             val raw = when (returned) {
                 is String -> JsonPrimitive(returned).toString()
                 null -> "null"

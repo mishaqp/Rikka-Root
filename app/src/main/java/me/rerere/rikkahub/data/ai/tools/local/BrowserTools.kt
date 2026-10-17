@@ -35,6 +35,7 @@ import me.rerere.rikkahub.browser.BrowserDiffHelper
 import me.rerere.rikkahub.browser.BrowserToolDefaults
 import me.rerere.rikkahub.browser.HeadlessBrowserSessionPool
 import me.rerere.rikkahub.browser.ReadabilityRunner.runReadabilityResult
+import me.rerere.rikkahub.browser.ReadabilityRunner.ExtractionTimedOut
 import me.rerere.rikkahub.browser.awaitReadyState
 import me.rerere.rikkahub.browser.evaluateJavascriptAsync
 import me.rerere.rikkahub.browser.loadUrlAndAwaitReady
@@ -426,7 +427,7 @@ fun browserGetDomTool(): Tool = Tool(
                 var total = html.length;
                 var truncated = total > $maxChars;
                 if (truncated) html = html.substring(0, $maxChars);
-                return JSON.stringify({html:html, truncated:truncated, total_chars:total});
+                return JSON.stringify({url:document.URL, html:html, truncated:truncated, total_chars:total});
             } catch(e) { return JSON.stringify({error:'js_failed', detail:String(e)}); }
         })()"""
     }) },
@@ -462,12 +463,12 @@ fun browserGetLinksTool(): Tool = Tool(
                             if (text.length>200) text = text.substring(0,200);
                             out.push({href:href, text:text});
                         }
-                        return JSON.stringify({links:out, count:out.length, total:anchors.length,
+                        return JSON.stringify({url:document.URL, links:out, count:out.length, total:anchors.length,
                             truncated:anchors.length > out.length});
                     } catch(e) { return JSON.stringify({error:'js_failed', detail:String(e)}); }
                 })()"""
                 webView.awaitReadyState(8_000L)
-                withDocumentUrl(evaluateReadResult(js), webView.url)
+                evaluateReadResult(js)
             }
         } ?: timeoutEnvelope(BrowserToolDefaults.GET_LINKS)
         textPart(out)
@@ -1403,7 +1404,7 @@ private suspend fun runReadHelper(
     return withTimeoutOrNull(toolTimeoutMs) {
         BrowserControllerHandle.withController {
             webView.awaitReadyState(8_000L)
-            withDocumentUrl(withContentSize(evaluateReadResult(jsBuilder(selector, maxChars)), "html"), webView.url)
+            withContentSize(evaluateReadResult(jsBuilder(selector, maxChars)), "html")
         }
     } ?: timeoutEnvelope(toolName)
 }
@@ -1435,9 +1436,8 @@ private suspend fun runGetText(input: kotlinx.serialization.json.JsonElement): J
         BrowserControllerHandle.withController {
             webView.awaitReadyState(8_000L)
             // Explicit selectors retain priority over Readability.
-            val result = if (explicitSelector != null) runRawText(explicitSelector, maxChars, mode = "raw_selector")
+            if (explicitSelector != null) runRawText(explicitSelector, maxChars, mode = "raw_selector")
             else runExtractedText(mode, maxChars)
-            withDocumentUrl(result, webView.url)
         }
     } ?: timeoutEnvelope(BrowserToolDefaults.GET_TEXT)
 }
@@ -1446,10 +1446,21 @@ private suspend fun BrowserControllerHandle.WithControllerScope.runExtractedText
     mode: String,
     maxChars: Int,
 ): JsonObject {
-    val article = if (mode == "raw") null else webView.runReadabilityResult(maxChars = maxChars)
+    val article = try {
+        if (mode == "raw") null else webView.runReadabilityResult(maxChars = maxChars)
+    } catch (timeout: ExtractionTimedOut) {
+        // The renderer can still be executing the parser. Do not queue raw extraction
+        // behind it; the next auto read skips Readability in this same document.
+        return buildJsonObject {
+            put("error", "readability_timeout")
+            put("message", "Извлечение статьи не завершилось вовремя. Подождите и повторите чтение: для этой страницы будет использован обычный текст.")
+            timeout.documentUrl?.let { put("url", it) }
+        }
+    }
     if (article != null && (mode == "readability" || article.totalChars >= READABILITY_MIN_CHARS)) {
         return withContentSize(buildJsonObject {
             put("text", article.text)
+            put("url", article.url)
             put("total_chars", article.totalChars)
             put("truncated", article.totalChars > article.text.length)
             put("extract_mode", "readability")
@@ -1478,7 +1489,7 @@ private suspend fun BrowserControllerHandle.WithControllerScope.runRawText(
             var total = t.length;
             var truncated = total > $maxChars;
             if (truncated) t = t.substring(0, $maxChars);
-            return JSON.stringify({text:t, truncated:truncated, total_chars:total});
+            return JSON.stringify({url:document.URL, text:t, truncated:truncated, total_chars:total});
         } catch(e) { return JSON.stringify({error:'js_failed', detail:String(e)}); }
     })()"""
     val res = withContentSize(evaluateReadResult(js), "text")
@@ -1487,11 +1498,6 @@ private suspend fun BrowserControllerHandle.WithControllerScope.runRawText(
         put("extract_mode", mode)
     }
 }
-
-/** Lets the model notice that a read returned another page than the one it opened. */
-private fun withDocumentUrl(result: JsonObject, url: String?): JsonObject =
-    if (url.isNullOrBlank() || result.containsKey("url")) result
-    else buildJsonObject { result.forEach { (key, value) -> put(key, value) }; put("url", url) }
 
 private fun clipText(text: String, maxChars: Int): Pair<String, Boolean> =
     if (text.length <= maxChars) text to false

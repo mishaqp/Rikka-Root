@@ -5,16 +5,19 @@ import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.ai.tools.local.deviceToolFailureReason
 import me.rerere.rikkahub.data.files.SkillMetadata
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
 import me.rerere.rikkahub.data.ai.mcp.control.McpUrlGuard
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
+import java.io.IOException
 import java.net.InetAddress
 import java.net.URI
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * Phase 16 — narrow interface seam over SkillManager so JVM tests can supply a
@@ -162,7 +165,7 @@ class SkillUrlImporter(
      * cancels the call with the coroutine, and refuses every redirect hop that resolves to
      * the phone itself or the home network.
      */
-    private suspend fun fetch(url: String): String = withContext(Dispatchers.IO) {
+    private suspend fun fetch(url: String): String = suspendCancellableCoroutine { continuation ->
         val req = Request.Builder()
             .url(url)
             .header("User-Agent", "rikkahub-agent/skill-importer")
@@ -179,20 +182,30 @@ class SkillUrlImporter(
             }
             .build()
         val call = client.newCall(req)
-        val cancelOnStop = currentCoroutineContext()[Job]?.invokeOnCompletion { if (it != null) call.cancel() }
-        try {
-            call.execute().use { resp ->
-                if (!resp.isSuccessful) throw RuntimeException("HTTP ${resp.code}")
-                val source = resp.body.source()
-                source.request(MAX_BODY_BYTES + 1L)
-                if (source.buffer.size > MAX_BODY_BYTES) {
-                    throw RuntimeException("Файл навыка больше ${MAX_BODY_BYTES / 1024} КБ. Укажите ссылку на SKILL.md, а не на архив или релиз.")
-                }
-                source.buffer.readUtf8()
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (continuation.isActive) continuation.resumeWithException(e)
             }
-        } finally {
-            cancelOnStop?.dispose()
-        }
+
+            override fun onResponse(call: Call, response: Response) {
+                try {
+                    val raw = response.use { resp ->
+                        if (!continuation.isActive) return
+                        if (!resp.isSuccessful) throw RuntimeException("HTTP ${resp.code}")
+                        val source = resp.body.source()
+                        source.request(MAX_BODY_BYTES + 1L)
+                        if (source.buffer.size > MAX_BODY_BYTES) {
+                            throw RuntimeException("Файл навыка больше ${MAX_BODY_BYTES / 1024} КБ. Укажите ссылку на SKILL.md, а не на архив или релиз.")
+                        }
+                        source.buffer.readUtf8()
+                    }
+                    if (continuation.isActive) continuation.resume(raw)
+                } catch (error: Exception) {
+                    if (continuation.isActive) continuation.resumeWithException(error)
+                }
+            }
+        })
     }
 
     private fun detectFormat(raw: String): SkillFormat {
