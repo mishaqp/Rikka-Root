@@ -32,6 +32,47 @@ class McpManualRedirectAuditTest {
         assertRedirectBlocked(useKtor = true)
     }
 
+    @Test fun `manual clients follow a same-origin redirect with its credentials`() = runBlocking {
+        for (useKtor in listOf(false, true)) {
+            val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+            val redirected = AtomicReference<String>()
+            server.createContext("/mcp/") { exchange ->
+                redirected.set(exchange.requestHeaders.getFirst("X-Auth"))
+                exchange.sendResponseHeaders(200, -1)
+                exchange.close()
+            }
+            server.createContext("/mcp") { exchange ->
+                exchange.responseHeaders.add("Location", "/mcp/")
+                exchange.sendResponseHeaders(307, -1)
+                exchange.close()
+            }
+            server.start()
+            val cancelledJob = SupervisorJob().apply { cancel() }
+            val appScope = mockk<AppScope> { every { coroutineContext } returns (cancelledJob + Dispatchers.Unconfined) }
+            val manager = McpManager(mockk(), appScope, mockk(), McpControlSecretStore(temporary.newFolder()) {
+                error("Redirect test must not access Keystore")
+            })
+            val url = "http://127.0.0.1:${server.address.port}/mcp"
+            try {
+                val status = if (useKtor) {
+                    field<HttpClient>(manager, "httpClient").get(url) { headers.append("X-Auth", "same-origin") }.status.value
+                } else {
+                    field<OkHttpClient>(manager, "okHttpClient").newCall(Request.Builder().url(url)
+                        .header("X-Auth", "same-origin").build()).execute().use { it.code }
+                }
+                assertEquals(200, status)
+                assertEquals("same-origin", redirected.get())
+            } finally {
+                field<HttpClient>(manager, "httpClient").close()
+                field<HttpClient>(manager, "publicHttpClient").close()
+                for (name in listOf("okHttpClient", "publicOkHttpClient")) {
+                    field<OkHttpClient>(manager, name).apply { connectionPool.evictAll(); dispatcher.executorService.shutdownNow() }
+                }
+                server.stop(0)
+            }
+        }
+    }
+
     private suspend fun assertRedirectBlocked(useKtor: Boolean) {
         val first = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         val second = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)

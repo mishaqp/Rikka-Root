@@ -69,6 +69,28 @@ class GenerationLoopAuditRegressionTest {
         }
     }
 
+    @Test fun `review headless run that ends with an empty answer after a tool is not a step limit`() = runBlocking {
+        val empty = """{"id":"final","model":"test-chat","choices":[{"finish_reason":"stop","message":{"role":"assistant","content":""}}]}"""
+        Fixture(folder.newFolder(), call("read_only_tool"), final = empty).use { fixture ->
+            val result = fixture.headless(listOf(Tool("read_only_tool", "test", execute = {
+                listOf(UIMessagePart.Text("tool result"))
+            })))
+            assertEquals(HeadlessTaskStatus.SUCCEEDED, result.status)
+        }
+    }
+
+    @Test fun `review limit notice is shown to the user but not sent to the model`() = runBlocking {
+        Fixture(folder.newFolder(), call("read_only_tool")).use { fixture ->
+            fixture.collect(listOf(Tool("read_only_tool", "test", execute = {
+                listOf(UIMessagePart.Text("result"))
+            })), maxSteps = 1)
+            val stored = fixture.latest.last().parts.filterIsInstance<UIMessagePart.Text>().joinToString { it.text }
+            assertTrue(stored, stored.contains("лимит шагов"))
+            val sent = modelVisibleMessages(fixture.latest).flatMap { it.parts }.filterIsInstance<UIMessagePart.Text>()
+            assertTrue(sent.none { it.text.contains("лимит шагов") })
+        }
+    }
+
     @Test fun `1 exhausted headless step limit remains a failure after tool execution`() = runBlocking {
         Fixture(folder.newFolder(), call("read_only_tool")).use { fixture ->
             val result = fixture.headless(listOf(Tool("read_only_tool", "test", execute = {
@@ -243,7 +265,11 @@ class GenerationLoopAuditRegressionTest {
             fixture.collect(listOf(Tool(name, "test", execute = {
                 listOf(UIMessagePart.Text("A".repeat(40000)), image, UIMessagePart.Text("B".repeat(40000)))
             })))
-            val output = fixture.latest.last().getTools().single().output
+            val stored = fixture.latest.last().getTools().single().output
+            assertEquals("The saved message keeps the full result for the UI", 80000,
+                stored.filterIsInstance<UIMessagePart.Text>().sumOf { it.text.length })
+            assertTrue("The provider request must carry only the bounded copy", fixture.bodies[1].length < 40000)
+            val output = boundToolOutputsForModel(fixture.latest).last().getTools().single().output
             val text = output.filterIsInstance<UIMessagePart.Text>().joinToString("") { it.text }
             assertTrue("Output has ${text.length} chars", text.length <= 32 * 1024)
             assertTrue(text, text.contains("сокращ"))
@@ -269,7 +295,9 @@ class GenerationLoopAuditRegressionTest {
         }.toString()
         Fixture(folder.newFolder(), call("search_web")).use { fixture ->
             fixture.collect(listOf(Tool("search_web", "test", execute = { listOf(UIMessagePart.Text(payload)) })))
-            val text = fixture.latest.last().getTools().single().output.filterIsInstance<UIMessagePart.Text>().single().text
+            assertEquals(payload, fixture.latest.last().getTools().single().output.filterIsInstance<UIMessagePart.Text>().single().text)
+            val text = boundToolOutputsForModel(fixture.latest).last().getTools().single().output
+                .filterIsInstance<UIMessagePart.Text>().single().text
             assertTrue("Serialized JSON has ${text.length} chars", text.length <= 32 * 1024)
             val value = Json.parseToJsonElement(text) as kotlinx.serialization.json.JsonObject
             val items = value["items"] as kotlinx.serialization.json.JsonArray
@@ -328,8 +356,9 @@ class GenerationLoopAuditRegressionTest {
         } finally { ToolRuntimeLimits.turnBudgetMs = original }
     }
 
-    private class Fixture(val directory: File, private val first: String = FINAL) : Closeable {
+    private class Fixture(val directory: File, private val first: String = FINAL, private val final: String = FINAL) : Closeable {
         val requests = AtomicInteger()
+        val bodies = java.util.concurrent.CopyOnWriteArrayList<String>()
         var latest = emptyList<UIMessage>()
         val snapshots = mutableListOf<List<UIMessage>>()
         private val context = object : ContextWrapper(null) {
@@ -337,7 +366,8 @@ class GenerationLoopAuditRegressionTest {
             override fun getFilesDir() = directory
         }
         private val client = OkHttpClient.Builder().addInterceptor { chain ->
-            val response = if (requests.incrementAndGet() == 1) first else FINAL
+            bodies += okio.Buffer().also { chain.request().body?.writeTo(it) }.readUtf8()
+            val response = if (requests.incrementAndGet() == 1) first else final
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
                 .body(response.toResponseBody("application/json".toMediaType())).build()
         }.build()

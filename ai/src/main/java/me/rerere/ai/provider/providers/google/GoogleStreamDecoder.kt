@@ -92,7 +92,7 @@ internal class GoogleStreamDecoder(
             UIMessagePart.Tool(
                 toolCallId = toolCallId,
                 toolName = functionCall["name"]?.jsonPrimitive?.contentOrNull ?: "",
-                input = functionCall["args"]?.let(json::encodeToString) ?: "",
+                input = functionCall["args"]?.takeUnless { it is kotlinx.serialization.json.JsonNull }?.let(json::encodeToString) ?: "",
                 output = emptyList(),
                 metadata = GoogleThoughtMetadata(
                     thoughtSignature = part["thoughtSignature"]?.jsonPrimitive?.contentOrNull,

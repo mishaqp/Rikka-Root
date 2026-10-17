@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.workflow.tools
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -184,13 +186,31 @@ object WorkflowApprovalRenderer {
             val str = if (isSensitiveKey(k)) {
                 "***"
             } else when (v) {
-                is JsonPrimitive -> v.contentOrNull.orEmpty()
-                else -> v.toString()
+                is JsonPrimitive -> maskSecretValues(v.contentOrNull.orEmpty())
+                else -> maskNested(v).toString()
             }
             "$k=\"$str\""
         }
         return pairs
     }
+
+    /** Nested objects (`headers.Authorization`) are shown in full, so mask them at every depth. */
+    private fun maskNested(value: JsonElement): JsonElement = when (value) {
+        is JsonObject -> JsonObject(value.mapValues { (key, nested) ->
+            if (isSensitiveKey(key)) JsonPrimitive("***") else maskNested(nested)
+        })
+        is JsonArray -> JsonArray(value.map(::maskNested))
+        is JsonPrimitive -> if (value.isString) JsonPrimitive(maskSecretValues(value.content)) else value
+    }
+
+    /** A secret under a neutral key (`X-Custom: sk-…`, `"Bearer …"`) is recognised by its form. */
+    private fun maskSecretValues(text: String): String = SECRET_VALUE.replace(text) { match ->
+        if (match.value.startsWith("bearer", ignoreCase = true)) "Bearer ***" else "***"
+    }
+
+    private val SECRET_VALUE = Regex(
+        "(?i)\\bBearer\\s+[A-Za-z0-9._~+/=-]+|\\b(?:sk-|sk_|ghp_|gho_|ghs_|github_pat_|glpat-|xox[abps]-|AIza|gsk_|xai-)[A-Za-z0-9._-]{6,}"
+    )
 
     /**
      * Match a key name against the redaction list (case-insensitive, snake_case AND
@@ -205,7 +225,7 @@ object WorkflowApprovalRenderer {
     private val SENSITIVE_KEY_PARTS = setOf(
         "token", "password", "passphrase", "private_key", "privatekey",
         "secret", "api_key", "apikey", "authorization", "auth_token", "access_token",
-        "client_secret", "credential", "credentials",
+        "client_secret", "credential", "credentials", "cookie", "x_auth", "xauth",
     )
 
     private fun renderDelete(argsJson: String, html: Boolean): String {

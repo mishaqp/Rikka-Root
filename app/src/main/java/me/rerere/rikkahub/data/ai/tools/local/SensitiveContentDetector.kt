@@ -67,6 +67,22 @@ internal object SensitiveContentDetector {
     }
 
     /**
+     * Replaces what [scan] would report with `••••`, keeping the last four digits of a card so
+     * the user can still tell which card it is. Text without findings is returned unchanged.
+     */
+    fun mask(text: String): String {
+        var out = JWT.replace(text, "••••")
+        out = API_KEY_SHAPED.replace(out, "••••")
+        out = EMAIL_PASS.replace(out) { it.value.substringBeforeLast(':') + ":••••" }
+        out = CARD_LIKE.replace(out) { m ->
+            val digits = m.value.filter { it.isDigit() }
+            if (digits.length in 13..19 && luhnValid(digits)) "•••• " + digits.takeLast(4) else m.value
+        }
+        if (out == text && LONG_BASE64.containsMatchIn(out)) out = LONG_BASE64.replace(out, "••••")
+        return out
+    }
+
+    /**
      * Same scan, but only inspect the query string of [url]. Returns the matched
      * categories. Used by browser_open to avoid flagging URLs whose PATH segments
      * happen to contain long opaque tokens (e.g. CDN asset hashes are not exfil).

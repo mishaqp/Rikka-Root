@@ -5,12 +5,28 @@ import me.rerere.rikkahub.root.RootApprovalPolicy
 
 private val SHELL_COMMAND_FLAGS = Regex("-[a-zA-Z]*c[a-zA-Z]*")
 
+// Utilities whose `-c`-ending flags take data, not a script (`grep -ic shutdown log`).
+// Unknown executables are still treated as possible shells; `git -c` can run commands.
+private val NON_SHELL_PROGRAMS = setOf(
+    "grep", "egrep", "fgrep", "rg", "ag", "ack", "wc", "sort", "uniq", "cut", "head", "tail",
+    "ls", "du", "df", "cat", "tr", "diff", "cmp", "file", "stat", "date", "echo", "printf",
+)
+
 /** The same accidental-destruction floor applies to every Termux dispatch, including headless calls. */
-internal fun checkTermuxCommand(executable: String, arguments: Array<String>): String? =
-    RootCommandGuard.check((listOf(executable) + arguments).joinToString(" "))
-        ?: arguments.withIndex().firstNotNullOfOrNull { (index, argument) ->
-            if (argument.startsWith('-') && argument.endsWith('c') || SHELL_COMMAND_FLAGS.matches(argument)) arguments.getOrNull(index + 1)?.let(RootCommandGuard::check) else null
+internal fun checkTermuxCommand(executable: String, arguments: Array<String>): String? {
+    RootCommandGuard.check((listOf(executable) + arguments).joinToString(" "))?.let { return it }
+    var program = executable.substringAfterLast('/')
+    arguments.forEachIndexed { index, argument ->
+        if (program !in NON_SHELL_PROGRAMS && (argument.startsWith('-') && argument.endsWith('c') || SHELL_COMMAND_FLAGS.matches(argument))) {
+            arguments.getOrNull(index + 1)?.let(RootCommandGuard::check)?.let { return it }
         }
+        // `busybox sh -c …` and `env bash -c …`: a later word may name the real program.
+        if (!argument.startsWith('-') && program in setOf("busybox", "toybox", "env", "nohup", "timeout", "nice")) {
+            program = argument.substringAfterLast('/')
+        }
+    }
+    return null
+}
 
 /** Keep trailing input whitespace: removing it would turn `setenforce ` + `0` into a different word. */
 internal fun termuxVisibleCommandLine(screen: String): String {

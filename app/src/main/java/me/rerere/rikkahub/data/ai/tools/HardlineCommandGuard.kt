@@ -58,12 +58,60 @@ object HardlineCommandGuard {
         "(?:(?:" + CMD_POS_BARE + ")|(?:" + SHELL_EVAL_OPEN + "))" +
         "\\s*" +
         "(?:[({]\\s*|[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+|(?:[\\w./_-]*/)?(?:" +
-        "(?:sudo|su)\\s+(?:-[^\\s]+\\s+)*(?:0\\s+)?|" +
+        // `su -c 'cmd'`, `su root -c cmd`, `sudo -u root cmd`: the quoted body is a command.
+        "(?:sudo|su)\\s+(?:-u\\s+\\S+\\s+|-[^\\s]+\\s+|(?:root|0)\\s+)*[\"']?|" +
         "env\\s+(?:(?:-u|--unset)\\s+\\w+\\s+|--unset=\\w+\\s+|-[^\\s]+\\s+|\\w+=\\S*\\s+)*|" +
         "(?:busybox|toybox|exec|nohup|setsid|time|then|do|else|if|while|until|command|!)\\s+|" +
-        "timeout\\s+(?:-[^\\s]+\\s+)*[0-9]+(?:\\.[0-9]+)?[smhd]?\\s+" +
+        "(?:nice|ionice|xargs|stdbuf|chrt|taskset)\\s+(?:-[^\\s]+\\s+(?:-?[0-9]+\\s+)?)*|" +
+        "timeout\\s+(?:-[sk]\\s+\\S+\\s+|-[^\\s]+\\s+)*[0-9]+(?:\\.[0-9]+)?[smhd]?\\s+" +
         "))*" +
         "(?:[\\w./_-]*/)?"
+
+    private val SHELL_BODY_OPENER = Regex("(?:-[a-zA-Z]*c[a-zA-Z]*|\\beval)\\s+$")
+
+    /**
+     * A separator inside a quoted argument (`git commit -m "fix; reboot loop"`) is data, not a
+     * new command. Quotes that open a shell body (`sh -c '…'`, `su -c "…"`, `eval "…"`) keep
+     * their separators, and double quotes keep `$(…)`/backticks because the shell runs them.
+     */
+    internal fun neutraliseQuotedSeparators(command: String): String {
+        val out = StringBuilder(command.length)
+        var quote: Char? = null
+        var shellBody = false
+        // Depth of `$(…)`/backtick substitutions inside double quotes: their bodies are executed.
+        var substitution = 0
+        var backtick = false
+        var index = 0
+        while (index < command.length) {
+            val c = command[index]
+            when {
+                // `\"` outside quotes is a literal character, not an opening quote.
+                quote == null && c == '\\' && index + 1 < command.length -> {
+                    out.append(c).append(command[index + 1]); index++
+                }
+                quote == null && (c == '"' || c == '\'') -> {
+                    quote = c
+                    shellBody = SHELL_BODY_OPENER.containsMatchIn(out)
+                    out.append(c)
+                }
+                quote == '"' && c == '\\' && index + 1 < command.length -> {
+                    out.append(c).append(command[index + 1]); index++
+                }
+                quote == '"' && c == '$' && command.getOrNull(index + 1) == '(' -> {
+                    substitution++; out.append("$("); index++
+                }
+                quote == '"' && substitution > 0 && c == ')' -> { substitution--; out.append(c) }
+                quote == '"' && c == '`' -> { backtick = !backtick; out.append(c) }
+                quote != null && c == quote && substitution == 0 && !backtick -> { quote = null; out.append(c) }
+                quote != null && !shellBody && substitution == 0 && !backtick &&
+                    (c == ';' || c == '&' || c == '|' || c == '\n' || quote == '\'' && (c == '`' || c == '$')) ->
+                    out.append(' ')
+                else -> out.append(c)
+            }
+            index++
+        }
+        return out.toString()
+    }
 
     /** End-of-path anchor — whitespace, shell delimiters, a closing quote, or end-of-string. */
     private const val PATH_END = "(?:\\s|[\"';&|)}]|\$)"
@@ -122,10 +170,18 @@ object HardlineCommandGuard {
      * Returns the human-readable reason if blocked, or null if safe.
      * Case-insensitive; the input is lowercased before matching.
      */
-    fun checkCommand(command: String?): String? {
+    fun checkCommand(command: String?): String? = checkCommand(command, freeText = false)
+
+    /**
+     * [freeText] is for strings that are not known to be shell input (MCP note titles, task
+     * bodies). Only the payload-shaped rules apply there: "Reboot plan" or "Notes\nShutdown
+     * checklist" are prose, while `rm -rf /` stays destructive in any field.
+     */
+    private fun checkCommand(command: String?, freeText: Boolean): String? {
         if (command.isNullOrEmpty()) return null
-        val normalised = command.lowercase()
+        val normalised = neutraliseQuotedSeparators(command).lowercase()
         for ((pattern, reason) in PATTERNS) {
+            if (freeText && pattern.pattern.startsWith(CMD_POS)) continue
             if (pattern.containsMatchIn(normalised)) return reason
         }
         return null
@@ -234,26 +290,40 @@ object HardlineCommandGuard {
      * Walk a JSON element recursively. Run [checkCommand] on every string primitive we
      * find. Return the first match's reason, or null if everything is clean.
      */
-    private fun walkAndCheck(element: JsonElement): String? {
+    private fun walkAndCheck(element: JsonElement, shellInput: Boolean = false, argv: Boolean = false): String? {
         when (element) {
             is JsonPrimitive -> {
                 if (element.isString) {
-                    return checkCommand(element.contentOrNull)
+                    return checkCommand(element.contentOrNull, freeText = !shellInput)
                 }
             }
             is JsonObject -> {
-                for ((_, v) in element) {
-                    val r = walkAndCheck(v)
+                for ((key, v) in element) {
+                    val name = key.lowercase()
+                    val r = walkAndCheck(v, shellInput || name in SHELL_INPUT_KEYS, name in ARGV_KEYS)
                     if (r != null) return r
                 }
             }
             is JsonArray -> {
+                if (argv) {
+                    // An argv list is one command: `["git","commit","-m","Reboot fix"]` is data.
+                    val joined = element.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.contentOrNull }
+                    checkCommand(joined.joinToString(" "))?.let { return it }
+                }
                 for (v in element) {
-                    val r = walkAndCheck(v)
+                    val r = walkAndCheck(v, shellInput && !argv)
                     if (r != null) return r
                 }
             }
         }
         return null
     }
+
+    private val ARGV_KEYS = setOf("args", "argv", "arguments")
+
+    /** Argument names that conventionally carry a shell command in MCP and sub-agent tools. */
+    private val SHELL_INPUT_KEYS = setOf(
+        "command", "commands", "cmd", "script", "shell", "bash", "sh", "code", "exec", "run",
+        "args", "argv", "arguments", "command_line", "commandline", "cmdline",
+    )
 }

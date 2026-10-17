@@ -570,7 +570,11 @@ fun mcpUpdateTool(settingsStore: SettingsStore, manager: McpManager, secretStore
         if (urlCheck is McpUrlGuard.Result.Reject) {
             return@Tool errEnv(urlCheck.error, urlCheck.detail)
         }
-        val originChanged = mcpCredentialOrigin(old.serverUrl) != mcpCredentialOrigin(rawUrl.trim())
+        // A malformed saved URL has no trusted origin, so its credentials are treated as moving.
+        val oldOrigin = runCatching { mcpCredentialOrigin(old.serverUrl) }.getOrNull()
+        val newOrigin = runCatching { mcpCredentialOrigin(rawUrl.trim()) }.getOrNull()
+            ?: return@Tool errEnv("invalid_url", "Некорректный адрес сервера MCP. Укажите адрес вида https://example.com/mcp.")
+        val originChanged = oldOrigin != newOrigin
         val enabled = enabledArg ?: old.commonOptions.enable
         val requestedHeaders = if (params.containsKey("headers")) parseHeaders(params["headers"]) else old.commonOptions.headers
         // Never carry credentials to a new origin, including explicitly repeated old references.
@@ -610,7 +614,7 @@ fun mcpUpdateTool(settingsStore: SettingsStore, manager: McpManager, secretStore
             s.copy(mcpServers = s.mcpServers.map { row ->
                 if (row.id == serverId) newConfig.clone(commonOptions = newConfig.commonOptions.copy(
                     tools = row.commonOptions.tools,
-                    oauth = if (originChanged || mcpCredentialOrigin(row.serverUrl) != mcpCredentialOrigin(newConfig.serverUrl)) null else row.commonOptions.oauth,
+                    oauth = if (originChanged || runCatching { mcpCredentialOrigin(row.serverUrl) }.getOrNull() != newOrigin) null else row.commonOptions.oauth,
                 )) else row
             })
         }

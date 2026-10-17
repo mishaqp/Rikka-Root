@@ -52,6 +52,8 @@ class ChatToolDisplayNamesTest {
     @Test fun remoteMcpUsesTheActualGeneratedNamespace() {
         val remote = buildMcpToolName(Uuid.parse("12345678-1234-1234-1234-123456789abc"), "Мой сервер", "read")
         assertEquals(R.string.chat_timeline_tool_remote_mcp, timelineToolNameResource(remote))
+        val shortened = buildMcpToolName(Uuid.parse("12345678-1234-1234-1234-123456789abc"), "s".repeat(60), "read")
+        assertEquals(shortened, R.string.chat_timeline_tool_remote_mcp, timelineToolNameResource(shortened))
         assertEquals(R.string.chat_timeline_tool_mcp_list, timelineToolNameResource("mcp_list"))
         listOf("mcp_future", "mcp__server__read", "mcp__12345678___", "mcp__12345678_server__").forEach {
             assertNull(it, timelineToolNameResource(it))

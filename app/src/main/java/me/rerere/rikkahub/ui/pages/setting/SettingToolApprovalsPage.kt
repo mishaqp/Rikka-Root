@@ -327,7 +327,7 @@ private fun ApprovalFunctionRow(
                 if (function.name in setOf("root_exec", "ssh_exec", "ssh_exec_saved", "termux_run_command", "termux_session_start", "termux_session_send")) {
                     Text("Защищённые команды всегда требуют отдельного подтверждения.", style = MaterialTheme.typography.bodySmall)
                 }
-                if (function.name == "clipboard_tool") Text("Чтение буфера не требует одобрения; запись учитывает это разрешение.",
+                if (function.name == "clipboard_tool") Text("Чтение буфера со скрытыми паролями и номерами карт не требует одобрения; запись и чтение без скрытия учитывают это разрешение.",
                     style = MaterialTheme.typography.bodySmall)
             }
             if (granted) TextButton(enabled = !saving, onClick = onRevoke) { Text("Отозвать") }

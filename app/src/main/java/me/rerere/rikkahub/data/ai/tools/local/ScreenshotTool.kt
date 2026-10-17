@@ -18,6 +18,10 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.data.files.saveUploadFromBytes
+import org.koin.core.context.GlobalContext
+import kotlin.coroutines.cancellation.CancellationException
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -35,9 +39,29 @@ private fun pruneOldCacheScreenshots(dir: File) {
     }
 }
 
+/**
+ * The cache copy is pruned after an hour, but the image stays in the chat history. Move it to the
+ * chat's managed uploads, which are deleted together with the conversation that references them.
+ */
+internal suspend fun keepWithChat(
+    cacheFile: File,
+    displayName: String,
+    files: FilesManager? = GlobalContext.getOrNull()?.getOrNull<FilesManager>(),
+): File {
+    if (files == null) return cacheFile
+    return try {
+        val entity = files.saveUploadFromBytes(cacheFile.readBytes(), displayName, "image/png")
+        files.getFile(entity).also { cacheFile.delete() }
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        cacheFile
+    }
+}
+
 fun takeScreenshotTool(context: Context, service: RootScreenService): Tool = Tool(
     name = "take_screenshot",
-    description = "Capture the current display via root screencap and return it as a vision attachment. PNG is stored in private cache by default. Set save_to_gallery=true only when the user requests a public copy in Pictures/RikkaHub/Screenshots/; gallery_path then gives its on-device path. Secure surfaces (banking, DRM, password fields) may be blank under Android capture restrictions. Root capture is bounded by a timeout. The result includes screen_state (foreground package, shade_open, display size). For \"did my action work\" checks prefer the \"after\" object that action tools already return; screenshot only when you need visual detail.",
+    description = "Capture the current display via root screencap and return it as a vision attachment. PNG is stored privately with the chat by default. Set save_to_gallery=true only when the user requests a public copy in Pictures/RikkaHub/Screenshots/; gallery_path then gives its on-device path. Secure surfaces (banking, DRM, password fields) may be blank under Android capture restrictions. Root capture is bounded by a timeout. The result includes screen_state (foreground package, shade_open, display size). For \"did my action work\" checks prefer the \"after\" object that action tools already return; screenshot only when you need visual detail.",
     needsApproval = { true },
     parameters = {
         InputSchema.Obj(
@@ -87,6 +111,7 @@ fun takeScreenshotTool(context: Context, service: RootScreenService): Tool = Too
                         }
                     } catch (t: Throwable) {
                         res.bitmap.recycle()
+                        cacheFile.delete()
                         return@withService buildJsonObject {
                             put("error", "write_failed")
                             put("reason", deviceToolFailureReason(t))
@@ -96,11 +121,11 @@ fun takeScreenshotTool(context: Context, service: RootScreenService): Tool = Too
                     // Public storage is an explicit opt-in; normal tool captures stay private.
                     val galleryPath = if (shouldSaveToGallery) saveToGallery(context, res.bitmap, displayName) else null
                     res.bitmap.recycle()
-
+                    val storedFile = keepWithChat(cacheFile, displayName)
 
                     buildJsonObject {
                         put("success", true)
-                        put("file_path", cacheFile.absolutePath)
+                        put("file_path", storedFile.absolutePath)
                         if (shouldSaveToGallery) {
                             put("gallery_path", galleryPath ?: "(gallery_save_failed)")
                             if (galleryPath == null) put("warning", "Снимок получен, но копию в галерею сохранить не удалось. Проверьте свободное место и доступ к фото; сам снимок доступен в чате.")
@@ -180,10 +205,16 @@ private fun saveToGallery(context: Context, bitmap: Bitmap, displayName: String)
             val pictures = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
             val targetDir = File(pictures, PICTURES_SUBDIR).apply { mkdirs() }
             val out = File(targetDir, displayName)
-            FileOutputStream(out).use { os ->
-                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, os)) {
-                    "Не удалось записать снимок в галерею."
+            try {
+                FileOutputStream(out).use { os ->
+                    check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, os)) {
+                        "Не удалось записать снимок в галерею."
+                    }
                 }
+            } catch (error: Throwable) {
+                // A half-written PNG must not appear in the user's gallery.
+                out.delete()
+                throw error
             }
             // Tell MediaScanner so the gallery picks it up promptly.
             android.media.MediaScannerConnection.scanFile(

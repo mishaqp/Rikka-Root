@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.ai.tools
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.ToolApprovalState
@@ -219,7 +220,9 @@ object ToolPermissionPolicy {
 
     fun sideEffect(name: String, input: JsonElement): Boolean = when (name) {
         "manage_assistants", "manage_app_settings" -> managementToolNeedsApproval(name, input)
-        "clipboard_tool" -> ((input as? JsonObject)?.get("action") as? JsonPrimitive)?.contentOrNull != "read"
+        // Reading is free while sensitive values are masked; reveal hands them over unmasked.
+        "clipboard_tool" -> ((input as? JsonObject)?.get("action") as? JsonPrimitive)?.contentOrNull != "read" ||
+            ((input as? JsonObject)?.get("reveal") as? JsonPrimitive)?.booleanOrNull == true
         else -> ToolApprovalDefaults.requiresApproval(name)
     }
 

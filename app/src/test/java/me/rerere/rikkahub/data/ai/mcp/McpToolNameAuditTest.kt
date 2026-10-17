@@ -28,8 +28,7 @@ class McpToolNameAuditTest {
         assertNotEquals(buildMcpToolName(id, "сервер", "tool"), buildMcpToolName(id, "伺服器", "tool"))
     }
 
-    @Test fun `audit 18 UUID prefixes do not collide when the remainder differs`() {
-        val other = Uuid.parse("12345678-9999-2222-3333-444444444444")
-        assertNotEquals(buildMcpToolName(id, "server", "tool"), buildMcpToolName(other, "server", "tool"))
+    @Test fun `review valid names stay unchanged for saved approvals and scheduled tasks`() {
+        assertEquals("mcp__12345678_server__tool", buildMcpToolName(id, "server", "tool"))
     }
 }

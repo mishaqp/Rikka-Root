@@ -5,6 +5,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -20,6 +21,8 @@ internal fun buildClipboardTool(context: Context): Tool = Tool(
     description = """
         Read or write plain text from the device clipboard.
         Use action: read or write. For write, provide text.
+        Card numbers, passwords and tokens in a read are masked; pass reveal: true only when
+        the user asked for the exact value (this needs user approval).
         Do NOT write to the clipboard unless the user has explicitly requested it.
     """.trimIndent().replace("\n", " "),
     parameters = {
@@ -40,6 +43,10 @@ internal fun buildClipboardTool(context: Context): Tool = Tool(
                     put("type", "string")
                     put("description", "Text to write to the clipboard (required for write)")
                 })
+                put("reveal", buildJsonObject {
+                    put("type", "boolean")
+                    put("description", "Read only: return sensitive values unmasked. Requires user approval.")
+                })
             },
             required = listOf("action")
         )
@@ -51,11 +58,15 @@ internal fun buildClipboardTool(context: Context): Tool = Tool(
             "read" -> {
                 val text = context.readClipboardText()
                 val sensitiveCategories = SensitiveContentDetector.scan(text)
+                val reveal = params["reveal"]?.jsonPrimitive?.booleanOrNull == true
                 val payload = buildJsonObject {
-                    put("text", text)
+                    put("text", if (sensitiveCategories.isEmpty() || reveal) text else SensitiveContentDetector.mask(text))
                     if (sensitiveCategories.isNotEmpty()) {
                         put("sensitive_content_detected", true)
-                        put("warning", "В буфере обмена обнаружены возможные конфиденциальные данные (${sensitiveCategories.joinToString { category -> category.name.lowercase() }}). Не повторяйте их в ответе и не включайте в сводки; используйте только для запрошенного пользователем действия.")
+                        put("masked", !reveal)
+                        put("warning", "В буфере обмена обнаружены возможные конфиденциальные данные (${sensitiveCategories.joinToString { category -> category.name.lowercase() }}). " +
+                            (if (reveal) "Не повторяйте их в ответе и не включайте в сводки; используйте только для запрошенного пользователем действия."
+                            else "Они скрыты как ••••. Если пользователю нужно точное значение, повторите чтение с reveal: true — потребуется его подтверждение."))
                     }
                 }
                 listOf(UIMessagePart.Text(payload.toString()))

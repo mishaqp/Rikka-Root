@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonArrayBuilder
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -618,7 +619,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 UIMessagePart.Tool(
                     toolCallId = toolCallId,
                     toolName = functionCall["name"]!!.jsonPrimitive.content,
-                    input = json.encodeToString(functionCall["args"]),
+                    input = functionCall["args"]?.takeUnless { it is JsonNull }?.let(json::encodeToString) ?: "",
                     output = emptyList(),
                     metadata = GoogleThoughtMetadata(
                         thoughtSignature = jsonObject["thoughtSignature"]?.jsonPrimitive?.contentOrNull,

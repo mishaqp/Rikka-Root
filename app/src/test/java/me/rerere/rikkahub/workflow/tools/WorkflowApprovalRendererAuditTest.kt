@@ -30,4 +30,18 @@ class WorkflowApprovalRendererAuditTest {
             }
         }
     }
+
+    @Test fun `review nested headers and secret-shaped values are masked at every depth`() {
+        val definition = """{"name":"Проверка","trigger":{"type":"manual"},"actions":[{"tool":"http_request","args":
+            {"url":"https://example.test/hook","headers":{"Authorization":"Bearer abc.def-123","X-Custom":"sk-proj-SECRETVALUE"},
+             "body":{"items":[{"note":"ghp_SECRETTOKEN123"}],"text":"видимый текст"}}}]}"""
+        assertNotNull(WorkflowJson.parseStored(definition))
+        val input = JsonObject(mapOf("definition" to Json.parseToJsonElement(definition))).toString()
+        for (rendered in listOf(WorkflowApprovalRenderer.renderPlain("workflow_create", input),
+            WorkflowApprovalRenderer.renderTelegramHtml("workflow_create", input))) {
+            for (secret in listOf("abc.def-123", "SECRETVALUE", "SECRETTOKEN123")) assertFalse(rendered, rendered.contains(secret))
+            assertTrue(rendered, rendered.contains("https://example.test/hook"))
+            assertTrue(rendered, rendered.contains("видимый текст"))
+        }
+    }
 }

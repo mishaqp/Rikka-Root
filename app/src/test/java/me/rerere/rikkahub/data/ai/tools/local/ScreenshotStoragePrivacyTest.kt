@@ -11,6 +11,7 @@ import io.mockk.*
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.files.saveUploadFromBytes
 import me.rerere.rikkahub.root.RootProcessResult
 import org.junit.Assert.*
 import org.junit.Test
@@ -104,4 +105,37 @@ class ScreenshotStoragePrivacyTest {
         verify(exactly = 0) { resolver.update(uri, any(), null, null) }
     }
 
+    @Test fun privateScreenshotMovesToChatUploadsSoItOutlivesTheHourlyCachePrune() = runBlocking {
+        val cache = File(context.cacheDir, "screenshots").apply { mkdirs() }
+        val cacheFile = File(cache, "screen-test.png").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        val stored = File(context.filesDir, "upload/screen.png").apply { parentFile?.mkdirs() }
+        val entity = mockk<me.rerere.rikkahub.data.db.entity.ManagedFileEntity>()
+        val files = mockk<me.rerere.rikkahub.data.files.FilesManager>()
+        mockkStatic("me.rerere.rikkahub.data.files.FilesManagerKt")
+        try {
+            coEvery { files.saveUploadFromBytes(any(), "Screenshot.png", "image/png") } answers {
+                stored.writeBytes(secondArg()); entity
+            }
+            every { files.getFile(entity) } returns stored
+            assertEquals(stored, keepWithChat(cacheFile, "Screenshot.png", files))
+            assertFalse("The cache copy is removed after the move", cacheFile.exists())
+            assertArrayEquals(byteArrayOf(1, 2, 3), stored.readBytes())
+        } finally {
+            unmockkStatic("me.rerere.rikkahub.data.files.FilesManagerKt")
+        }
+    }
+
+    @Test fun failedMoveKeepsTheCacheCopy() = runBlocking {
+        val cacheFile = File(File(context.cacheDir, "screenshots").apply { mkdirs() }, "screen-fail.png")
+            .apply { writeBytes(byteArrayOf(4)) }
+        val files = mockk<me.rerere.rikkahub.data.files.FilesManager>()
+        mockkStatic("me.rerere.rikkahub.data.files.FilesManagerKt")
+        try {
+            coEvery { files.saveUploadFromBytes(any(), any(), any()) } throws IOException("disk full")
+            assertEquals(cacheFile, keepWithChat(cacheFile, "Screenshot.png", files))
+            assertTrue(cacheFile.exists())
+        } finally {
+            unmockkStatic("me.rerere.rikkahub.data.files.FilesManagerKt")
+        }
+    }
 }

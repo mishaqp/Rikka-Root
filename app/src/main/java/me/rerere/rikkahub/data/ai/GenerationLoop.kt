@@ -24,6 +24,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
@@ -553,7 +554,8 @@ class GenerationLoop(
             onLimitReached?.invoke(reason)
             val notice = UIMessagePart.Text(if (reason == "time_limit")
                 "Достигнут лимит времени ответа. Выполнение остановлено. Проверьте результаты инструментов перед продолжением."
-            else "Достигнут лимит шагов ответа. Выполнение остановлено. Проверьте результаты инструментов перед продолжением.")
+            else "Достигнут лимит шагов ответа. Выполнение остановлено. Проверьте результаты инструментов перед продолжением.",
+                metadata = generationNoticeMetadata())
             val last = messages.lastOrNull()
             messages = if (last?.role == MessageRole.ASSISTANT)
                 messages.dropLast(1) + last.copy(parts = last.parts + notice)
@@ -617,9 +619,9 @@ class GenerationLoop(
         )
         // OCR runs before the main reservation and must inherit this exact explicit ledger.
         // Keep the context limited to transforms: onUpdateMessages emits into the outer Flow.
-        val internalMessages = if (tokenBudget != null) withContext(TokenBudgetContext(tokenBudget)) {
+        val internalMessages = modelVisibleMessages(if (tokenBudget != null) withContext(TokenBudgetContext(tokenBudget)) {
             transformInput()
-        } else transformInput()
+        } else transformInput())
 
         var messages: List<UIMessage> = messages
         val params = TextGenerationParams(
@@ -842,18 +844,9 @@ class GenerationLoop(
         val nonTextParts = output.filter { it !is UIMessagePart.Text }
         val totalChars = textParts.sumOf { it.text.length }
 
-        if (totalChars <= MAX_TOOL_OUTPUT_CHARS) return output
-        if (!hasShellAccess) {
-            if (tool.toolName == "search_web") {
-                boundedSearchOutput(textParts.joinToString("\n") { it.text }, MAX_TOOL_OUTPUT_CHARS)?.let {
-                    return listOf(UIMessagePart.Text(it)) + nonTextParts
-                }
-            }
-            val marker = "\n[Вывод инструмента сокращён: всего $totalChars символов.]"
-            val text = textParts.joinToString("\n") { it.text }
-                .take(MAX_TOOL_OUTPUT_CHARS - marker.length) + marker
-            return listOf(UIMessagePart.Text(text)) + nonTextParts
-        }
+        // Without a shell the model cannot read a saved file: the message keeps the full result
+        // for the UI, and boundToolOutputsForModel shortens only the copy sent to the provider.
+        if (totalChars <= MAX_TOOL_OUTPUT_CHARS || !hasShellAccess) return output
 
         Log.i(TAG, "maybeTruncateToolOutput: truncating tool $toolCallId output ($totalChars chars)")
 
@@ -878,4 +871,48 @@ class GenerationLoop(
         ) + nonTextParts
     }
 
+}
+
+private const val GENERATION_NOTICE_KEY = "rikka_generation_notice"
+
+private fun generationNoticeMetadata() = buildJsonObject {
+    put(GENERATION_NOTICE_KEY, JsonPrimitive(true))
+}
+
+private fun UIMessagePart.isGenerationNotice(): Boolean =
+    this is UIMessagePart.Text && (metadata?.get(GENERATION_NOTICE_KEY) as? JsonPrimitive)?.booleanOrNull == true
+
+/**
+ * The provider copy of the history: app notices for the user (step or time limit) are not the
+ * model's own words, and tool results are bounded.
+ */
+internal fun modelVisibleMessages(messages: List<UIMessage>): List<UIMessage> = boundToolOutputsForModel(
+    messages.mapNotNull { message ->
+        if (message.parts.none { it.isGenerationNotice() }) return@mapNotNull message
+        message.copy(parts = message.parts.filterNot { it.isGenerationNotice() }).takeIf { it.parts.isNotEmpty() }
+    }
+)
+
+/**
+ * Bounds every tool result in the provider request. Stored messages keep the full output, so
+ * UI cards still parse complete JSON and a later request can bound it again.
+ */
+internal fun boundToolOutputsForModel(messages: List<UIMessage>): List<UIMessage> = messages.map { message ->
+    if (message.parts.none { it is UIMessagePart.Tool && it.output.textLength() > MAX_TOOL_OUTPUT_CHARS }) return@map message
+    message.copy(parts = message.parts.map { part ->
+        if (part !is UIMessagePart.Tool || part.output.textLength() <= MAX_TOOL_OUTPUT_CHARS) part
+        else part.copy(output = boundedToolOutput(part.toolName, part.output))
+    })
+}
+
+private fun List<UIMessagePart>.textLength(): Int = filterIsInstance<UIMessagePart.Text>().sumOf { it.text.length }
+
+private fun boundedToolOutput(toolName: String, output: List<UIMessagePart>): List<UIMessagePart> {
+    val text = output.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }
+    val nonTextParts = output.filter { it !is UIMessagePart.Text }
+    if (toolName == "search_web") {
+        boundedSearchOutput(text, MAX_TOOL_OUTPUT_CHARS)?.let { return listOf(UIMessagePart.Text(it)) + nonTextParts }
+    }
+    val marker = "\n[Вывод инструмента сокращён: всего ${text.length} символов.]"
+    return listOf(UIMessagePart.Text(text.take(MAX_TOOL_OUTPUT_CHARS - marker.length) + marker)) + nonTextParts
 }

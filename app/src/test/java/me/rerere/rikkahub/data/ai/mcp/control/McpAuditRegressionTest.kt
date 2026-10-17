@@ -83,6 +83,17 @@ class McpAuditRegressionTest {
         assertNull("OAuth from the old host must not be forwarded", fixture.state.value.mcpServers.single().commonOptions.oauth)
     }
 
+    @Test fun `review malformed saved URL is updated without a crash and without carrying OAuth`() = runBlocking {
+        val old = server().copy(url = "not a url", commonOptions = McpCommonOptions(name = "Remote", enable = false,
+            oauth = McpOAuthState(enabled = true, accessToken = "old-access", refreshToken = "old-refresh")))
+        val fixture = Fixture(old)
+        val output = mcpUpdateTool(fixture.store, fixture.manager, vault()).execute(updateArgs(old, "https://1.1.1.1/mcp"))
+        assertFalse(output.toString(), output.toString().contains("\"error\""))
+        val saved = fixture.state.value.mcpServers.single() as McpServerConfig.StreamableHTTPServer
+        assertEquals("https://1.1.1.1/mcp", saved.url)
+        assertNull(saved.commonOptions.oauth)
+    }
+
     @Test fun `audit 3 changing host drops old secret references even when repeated in headers`() = runBlocking {
         val vault = vault()
         val old = secureMcpConfigForPersistence(server().copy(commonOptions = McpCommonOptions(

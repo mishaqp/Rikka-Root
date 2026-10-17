@@ -18,9 +18,10 @@ internal fun timelineToolNameResource(toolName: String): Int? =
     nativeTimelineToolNames[toolName]
         ?: R.string.chat_timeline_tool_remote_mcp.takeIf { remoteMcpToolName.matches(toolName) }
 
-// McpManager.buildMcpToolName: mcp__<first eight UUID characters>_<server name>__<tool name>.
+// McpManager.buildMcpToolName: mcp__<first eight UUID characters>_<server name>__<tool name>,
+// shortened with a hash suffix when invalid or too long, which may cut the "__" separator.
 // Exact local mcp_* controls resolve above. Arbitrary remote names do not become invented actions.
-private val remoteMcpToolName = Regex("mcp__[0-9a-fA-F]{8}_.+__.+", RegexOption.DOT_MATCHES_ALL)
+private val remoteMcpToolName = Regex("mcp__[0-9a-fA-F]{8}_(?:.+__.+|[a-zA-Z0-9_-]+_[0-9a-f]{16})", RegexOption.DOT_MATCHES_ALL)
 
 private val nativeTimelineToolNames = mapOf(
     "web_search" to R.string.chat_timeline_server_tool_web_search,

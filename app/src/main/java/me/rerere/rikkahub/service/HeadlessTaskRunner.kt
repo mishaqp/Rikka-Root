@@ -209,11 +209,9 @@ class HeadlessTaskRunner internal constructor(
                             if (generationLimit == "step_limit") stop(HeadlessTaskStatus.FAILED, "step_limit")
                             val last = latest.lastOrNull()
                             if (last?.role != MessageRole.ASSISTANT) stop(HeadlessTaskStatus.FAILED, "no_response")
-                            val lastToolIndex = last.parts.indexOfLast { it is UIMessagePart.Tool }
-                            if (last.getTools().any { !it.isExecuted } || lastToolIndex >= 0 &&
-                                last.parts.drop(lastToolIndex + 1).none { it is UIMessagePart.Text && it.text.isNotBlank() }) {
-                                stop(HeadlessTaskStatus.FAILED, "step_limit")
-                            }
+                            // The loop reports exhausted steps through onLimitReached; a final answer may be
+                            // only an image or empty text after a tool, which is still a finished response.
+                            if (last.getTools().any { !it.isExecuted }) stop(HeadlessTaskStatus.FAILED, "step_limit")
                             HeadlessTaskResult(HeadlessTaskStatus.SUCCEEDED,
                                 output = latest.last().parts.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text },
                                 imageUrls = latest.last().parts.filterIsInstance<UIMessagePart.Image>().map { it.url })

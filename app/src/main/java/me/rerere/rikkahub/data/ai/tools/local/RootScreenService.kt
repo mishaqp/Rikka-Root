@@ -243,7 +243,10 @@ class RootScreenService internal constructor(
         // Unicode. Adding Cyrillic to a forbidden literal must not bypass the existing floor.
         val inputCommand = "input text ${rootScreenQuote(escapedText ?: text)}"
         // HARDLINE preflight must happen before focus/select/delete, even for literal input.
-        if (RootCommandGuard.check(inputCommand) != null) { lastFailure = "root_command_blocked"; return false }
+        // The typed text may become a command in the focused app (a terminal), so check it unquoted too.
+        if (RootCommandGuard.check(inputCommand) != null || RootCommandGuard.check(text) != null) {
+            lastFailure = "root_command_blocked"; return false
+        }
         if (!node.isEnabled) { lastFailure = "root_input_failed"; return false }
         if (!tap(node.bounds.centerX().toDouble(), node.bounds.centerY().toDouble())) return false
         // ACTION_SET_TEXT targets the node directly. Root input is global, so verify the focused

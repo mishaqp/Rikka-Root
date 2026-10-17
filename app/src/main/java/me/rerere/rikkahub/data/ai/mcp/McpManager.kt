@@ -35,6 +35,7 @@ import me.rerere.rikkahub.data.ai.mcp.control.classifyMcpError
 import me.rerere.rikkahub.data.ai.mcp.control.guardedMcpHttpClient
 import me.rerere.rikkahub.reliability.SecretRedactor
 import me.rerere.rikkahub.utils.JsonInstant
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 import kotlin.io.encoding.Base64
@@ -65,11 +66,12 @@ class McpManager(
         .writeTimeout(120, TimeUnit.SECONDS)
         .followSslRedirects(false)
         .followRedirects(false)
+        .addInterceptor(sameOriginMcpRedirects)
         .build()
 
     private val httpClient = HttpClient(OkHttp) {
         // Every endpoint change must pass the request-origin credential check again.
-        // Neither engine nor Ktor may replay custom headers on a redirected request.
+        // Only same-origin redirects (`/mcp` → `/mcp/`) are followed, by the OkHttp interceptor.
         followRedirects = false
         engine {
             preconfigured = okHttpClient
@@ -238,11 +240,42 @@ class McpManager(
 // Adapted from ExTV/rikkahub-agent McpManager.kt (AGPL v3), shared with mcp_list_tools.
 // Registration retains the exact remote name in its execute closure, never decodes this name.
 fun buildMcpToolName(serverId: Uuid, serverName: String, toolName: String): String {
-    val serverSlug = serverId.toString().take(8)
-    val readable = ("mcp__" + serverSlug + "_" + serverName + "__" + toolName)
-        .replace(Regex("[^a-zA-Z0-9_-]"), "_")
+    val serverSlug = serverId.toString().take(8).replace("-", "")
+    val original = "mcp__" + serverSlug + "_" + serverName + "__" + toolName
+    // Valid names stay unchanged so saved approvals and scheduled-task tool lists keep matching.
+    if (original.length <= MCP_TOOL_NAME_MAX && MCP_TOOL_NAME_VALID.matches(original)) return original
     val identity = "$serverId\u0000$serverName\u0000$toolName"
     val suffix = java.security.MessageDigest.getInstance("SHA-256")
         .digest(identity.toByteArray(Charsets.UTF_8)).take(8).joinToString("") { "%02x".format(it) }
-    return readable.take(47) + "_" + suffix
+    return original.replace(MCP_TOOL_NAME_INVALID_CHAR, "_").take(MCP_TOOL_NAME_MAX - suffix.length - 1) + "_" + suffix
+}
+
+private const val MCP_TOOL_NAME_MAX = 64
+private val MCP_TOOL_NAME_VALID = Regex("[a-zA-Z0-9_-]+")
+private val MCP_TOOL_NAME_INVALID_CHAR = Regex("[^a-zA-Z0-9_-]")
+
+private val MCP_REDIRECT_CODES = setOf(301, 302, 303, 307, 308)
+
+/**
+ * Follows a redirect only while scheme, host and port stay the same, so credentials never reach
+ * another origin. A cross-origin redirect is returned as-is and needs an explicit URL change.
+ */
+internal val sameOriginMcpRedirects = Interceptor { chain ->
+    var request = chain.request()
+    var response = chain.proceed(request)
+    var hops = 0
+    while (response.code in MCP_REDIRECT_CODES && hops < 5) {
+        val target = response.header("Location")?.let(request.url::resolve) ?: break
+        if (target.scheme != request.url.scheme || target.host != request.url.host || target.port != request.url.port) break
+        val keepMethod = response.code == 307 || response.code == 308 ||
+            request.method == "GET" || request.method == "HEAD"
+        if (keepMethod && request.body?.isOneShot() == true) break
+        val next = request.newBuilder().url(target)
+        if (!keepMethod) next.method("GET", null).removeHeader("Content-Type").removeHeader("Content-Length")
+        response.close()
+        request = next.build()
+        response = chain.proceed(request)
+        hops++
+    }
+    response
 }
