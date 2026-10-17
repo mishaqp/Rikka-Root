@@ -86,7 +86,7 @@ class ChatProcessDeathTest {
         val generation = mockk<GenerationLoop>()
         every { generation.generateText(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
             any(), any(), any(), any(), any(), any(), any(),
-            prepareToolApproval = any(), beforeModelRequest = any()) } answers {
+            prepareToolApproval = any(), beforeModelRequest = any(), approveEverything = any()) } answers {
             val input = arg<List<UIMessage>>(2)
             requestedTexts = input.map { it.toText() }
             kotlinx.coroutines.flow.flow { generationBody(input) }

@@ -126,14 +126,15 @@ class GenerationLoop(
         onWebContentRead: suspend () -> Unit = {},
         onAutoCompress: suspend (List<UIMessage>) -> List<UIMessage>? = { null },
         isToolAutoApproved: suspend (toolName: String, input: JsonElement) -> Boolean = { _, _ -> false },
-        // «Я ГЛУПЫЙ» in an interactive chat: the user chose to never be asked, including for
-        // mandatory confirmations. HARDLINE blocks and ask_user questions still apply.
-        approveEverything: suspend () -> Boolean = { false },
         tokenBudget: TokenBudgetLedger? = null,
         prepareToolApproval: (String, JsonElement) -> JsonElement = { _, input -> input },
         beforeModelRequest: suspend () -> Unit = {},
         onStepStarted: (suspend () -> Unit)? = null,
         onLimitReached: (suspend (String) -> Unit)? = null,
+        // «Я ГЛУПЫЙ» in an interactive chat: the user chose not to be asked, including for most
+        // mandatory confirmations. Protected shell commands, HARDLINE and ask_user still apply.
+        // Nullable and last, like the other optional hooks, so positional mocks keep matching.
+        approveEverything: (suspend () -> Boolean)? = null,
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
@@ -155,10 +156,12 @@ class GenerationLoop(
             val mandatory = ToolPermissionPolicy.mandatoryConfirmation(tool.toolName, args)
             // Protected shell commands (remount, SELinux, bootloader, formatting) always ask.
             if (mandatory && tool.toolName in PROTECTED_SHELL_TOOLS) return true
-            if (approveEverything()) return false
+            // Read the mode only when a prompt would otherwise be shown.
+            if (!mandatory && !definition.needsApproval(args)) return false
+            if (approveEverything?.invoke() == true) return false
             // These exceptions cannot be bypassed by chat grants or Always.
             if (mandatory) return true
-            return definition.needsApproval(args) && !isToolAutoApproved(tool.toolName, args)
+            return !isToolAutoApproved(tool.toolName, args)
         }
 
         fun toolError(code: String, message: String): List<UIMessagePart> = listOf(
