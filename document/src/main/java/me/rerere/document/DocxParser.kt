@@ -4,6 +4,7 @@ import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 import java.io.File
 import java.io.InputStream
+import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
 
 private data class ListInfo(
@@ -32,6 +33,16 @@ object DocxParser {
                     "Unable to find document content in DOCX file"
                 }
             }
+        } catch (e: Exception) {
+            "Error parsing DOCX file: ${e.message}"
+        }
+    }
+
+    /** Reads the entry the central directory lists, i.e. the one a ZipFile size check measured. */
+    fun parse(zip: ZipFile): String {
+        val entry = zip.getEntry("word/document.xml") ?: return "Unable to find document content in DOCX file"
+        return try {
+            zip.getInputStream(entry).use(::parseDocumentXml)
         } catch (e: Exception) {
             "Error parsing DOCX file: ${e.message}"
         }

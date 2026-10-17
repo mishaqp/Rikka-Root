@@ -1,7 +1,10 @@
 package me.rerere.rikkahub.data.ai.tools.local
 
 import java.io.IOException
+import java.net.InetAddress
+import java.net.Proxy
 import java.net.URI
+import java.net.UnknownHostException
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.util.Base64
@@ -23,11 +26,13 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.AIRequestInterceptor
 import me.rerere.rikkahub.data.ai.RequestLoggingInterceptor
+import me.rerere.rikkahub.data.ai.mcp.control.McpUrlGuard
 import me.rerere.rikkahub.data.ai.tools.HttpToolSecretSanitizer
 import okhttp3.Authenticator
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.CookieJar
+import okhttp3.Dns
 import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
@@ -38,7 +43,10 @@ import okhttp3.Response
 import okio.Buffer
 import okio.BufferedSink
 
-internal fun httpRequestTool(client: OkHttpClient): Tool = Tool(
+internal fun httpRequestTool(
+    client: OkHttpClient,
+    isAllowedAddress: (InetAddress) -> Boolean = McpUrlGuard::isPublicAddress,
+): Tool = Tool(
     name = "http_request",
     description = "Выполнить HTTP(S) запрос GET, POST, PUT, PATCH, DELETE или HEAD. " +
         "url без встроенного логина и пароля; headers — объект строковых заголовков; " +
@@ -47,7 +55,8 @@ internal fun httpRequestTool(client: OkHttpClient): Tool = Tool(
         "Возвращает status, headers (массивы значений без Set-Cookie), body, encoding (text/base64), truncated. " +
         "Перенаправления и автоматические повторы изменяющих запросов отключены; при 3xx проверьте Location и вызовите конечный URL отдельно. " +
         "Секретные заголовки скрываются в истории; после перезапуска передайте их заново. " +
-        "GET/HEAD не требуют подтверждения; остальные методы используют обычное подтверждение инструмента.",
+        "GET/HEAD не требуют подтверждения; остальные методы используют обычное подтверждение инструмента. " +
+        "Адреса локальной сети и самого телефона (localhost, 192.168.x.x и т. п.) недоступны.",
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {
             put("url", buildJsonObject { put("type", "string"); put("description", "HTTP(S) URL без логина и пароля") })
@@ -79,7 +88,17 @@ internal fun httpRequestTool(client: OkHttpClient): Tool = Tool(
                 .callTimeout(prepared.timeoutSeconds.toLong(), TimeUnit.SECONDS)
                 .connectTimeout(prepared.timeoutSeconds.toLong(), TimeUnit.SECONDS)
                 .readTimeout(prepared.timeoutSeconds.toLong(), TimeUnit.SECONDS)
-                .writeTimeout(prepared.timeoutSeconds.toLong(), TimeUnit.SECONDS).build()
+                .writeTimeout(prepared.timeoutSeconds.toLong(), TimeUnit.SECONDS)
+                // GET runs without approval, so the model must not reach the phone or the home network.
+                .dns(publicOnlyHttpDns(client.dns, isAllowedAddress)).addNetworkInterceptor { chain ->
+                    // OkHttp skips DNS for IP literals, so check the connected address too.
+                    val route = chain.connection()?.route()
+                    val address = route?.socketAddress?.address
+                    if (route?.proxy?.type() == Proxy.Type.DIRECT && address != null && !isAllowedAddress(address)) {
+                        throw PrivateHttpAddressException()
+                    }
+                    chain.proceed(chain.request())
+                }.build()
             executeHttpRequest(boundedClient, prepared)
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -92,6 +111,16 @@ internal fun httpRequestTool(client: OkHttpClient): Tool = Tool(
         listOf(UIMessagePart.Text(result.toString()))
     },
 )
+
+private const val PRIVATE_ADDRESS_ERROR =
+    "Адреса в локальной сети и на самом телефоне недоступны для http_request. Используйте публичный адрес."
+private class PrivateHttpAddressException : UnknownHostException(PRIVATE_ADDRESS_ERROR)
+
+private fun publicOnlyHttpDns(delegate: Dns, isAllowedAddress: (InetAddress) -> Boolean) = Dns { host ->
+    delegate.lookup(host).also { addresses ->
+        if (addresses.any { !isAllowedAddress(it) }) throw PrivateHttpAddressException()
+    }
+}
 
 private const val HTTP_DEFAULT_BYTES = 1024 * 1024
 private const val HTTP_MAX_BYTES = 8 * 1024 * 1024
@@ -117,9 +146,19 @@ private fun prepareHttpRequest(input: JsonElement): PreparedHttpRequest {
         return value
     }
     val url = string("url")
+    if (url.contains(HttpToolSecretSanitizer.MASK)) {
+        invalidHttp("Секретный параметр адреса скрыт в истории. Повторно передайте его значение перед выполнением HTTP-запроса.")
+    }
     val uri = try { URI(url) } catch (_: Exception) { invalidHttp("Укажите корректный адрес HTTP(S).") }
     if (uri.scheme?.lowercase(Locale.ROOT) !in setOf("http", "https") || uri.host.isNullOrBlank() || uri.rawUserInfo != null) {
         invalidHttp("Разрешены только адреса HTTP(S) без встроенного логина и пароля.")
+    }
+    // An echoed query credential is redacted from the response like a secret header.
+    val querySecrets = uri.rawQuery.orEmpty().split('&').flatMap { pair ->
+        val name = runCatching { java.net.URLDecoder.decode(pair.substringBefore('='), "UTF-8") }.getOrNull()
+        val raw = pair.substringAfter('=', "")
+        if (name == null || raw.isEmpty() || !HttpToolSecretSanitizer.isSecretHeader(name)) emptyList()
+        else listOfNotNull(raw, runCatching { java.net.URLDecoder.decode(raw, "UTF-8") }.getOrNull())
     }
     val method = string("method", "GET").uppercase(Locale.ROOT)
     if (method !in HTTP_METHODS) invalidHttp("Допустимы методы GET, POST, PUT, PATCH, DELETE и HEAD.")
@@ -132,7 +171,7 @@ private fun prepareHttpRequest(input: JsonElement): PreparedHttpRequest {
     val headers = args["headers"]?.let { it as? JsonObject ?: invalidHttp("Параметр headers должен быть объектом строковых заголовков.") }
         ?: JsonObject(emptyMap())
     val builder = Request.Builder().url(url)
-    val secrets = mutableListOf<String>()
+    val secrets = querySecrets.toMutableList()
     headers.forEach { (name, raw) ->
         val value = (raw as? JsonPrimitive)?.takeIf { it.isString }?.content
             ?: invalidHttp("Значения headers должны быть строками.")
@@ -182,7 +221,7 @@ private suspend fun executeHttpRequest(client: OkHttpClient, prepared: PreparedH
         }
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                if (continuation.isActive) continuation.resume(httpError(
+                if (continuation.isActive) continuation.resume(httpError(if (e is PrivateHttpAddressException) PRIVATE_ADDRESS_ERROR else
                     "Не удалось выполнить HTTP-запрос в отведённое время. Проверьте адрес и подключение; перед повтором изменяющего запроса проверьте его результат."
                 ))
             }

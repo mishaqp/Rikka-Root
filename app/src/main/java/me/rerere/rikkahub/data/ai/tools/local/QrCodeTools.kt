@@ -125,8 +125,11 @@ private suspend fun scanQrImage(bytes: ByteArray): List<Result> {
         require(bounds.outWidth.toLong() * bounds.outHeight <= 8_388_608L) {
             "Изображение превышает 8 миллионов пикселей. Выберите изображение меньшего размера."
         }
+        // Bitmap plus pixel array cost 8 bytes per pixel; halve large photos down to about 4 Mpx.
+        var sample = 1
+        while (bounds.outWidth.toLong() * bounds.outHeight / (sample.toLong() * sample) > 4_194_304L) sample *= 2
         val bitmap = requireNotNull(BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply {
-            inScaled = false; inPreferredConfig = Bitmap.Config.ARGB_8888
+            inScaled = false; inPreferredConfig = Bitmap.Config.ARGB_8888; inSampleSize = sample
         })) { "Не удалось прочитать изображение. Прикрепите исправный файл заново." }
         return try {
             val pixels = IntArray(bitmap.width * bitmap.height)

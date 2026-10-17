@@ -16,14 +16,31 @@ internal object HttpToolSecretSanitizer {
     fun isSecretHeader(name: String): Boolean {
         val lower = name.lowercase(Locale.ROOT)
         return lower in setOf("authorization", "proxy-authorization", "cookie", "set-cookie") ||
-            lower.contains("token") || lower.contains("key")
+            listOf("token", "key", "secret", "auth", "pass", "session", "signature").any { lower.contains(it) }
+    }
+
+    /** Masks values of secret-looking query parameters (?access_token=, ?apikey=, ?password=). */
+    fun sanitizeUrl(url: String): String {
+        val queryStart = url.indexOf('?')
+        if (queryStart < 0) return url
+        val fragmentStart = url.indexOf('#', queryStart).let { if (it < 0) url.length else it }
+        val query = url.substring(queryStart + 1, fragmentStart).split('&').joinToString("&") { pair ->
+            val name = pair.substringBefore('=')
+            val decoded = runCatching { java.net.URLDecoder.decode(name, "UTF-8") }.getOrDefault(name)
+            if ('=' in pair && isSecretHeader(decoded)) "$name=$MASK" else pair
+        }
+        return url.substring(0, queryStart + 1) + query + url.substring(fragmentStart)
     }
 
     fun sanitize(name: String, input: String): String {
         if (name != "http_request") return input
         return try {
-            val arguments = Json.parseToJsonElement(input) as? JsonObject ?: return incomplete()
-            val headers = arguments["headers"] ?: return input
+            val parsed = Json.parseToJsonElement(input) as? JsonObject ?: return incomplete()
+            val url = parsed["url"]
+            val arguments = if (url is JsonPrimitive && url.isString) {
+                JsonObject(parsed.toMutableMap().apply { put("url", JsonPrimitive(sanitizeUrl(url.content))) })
+            } else parsed
+            val headers = arguments["headers"] ?: return arguments.toString()
             if (headers !is JsonObject || headers.values.any { it !is JsonPrimitive || !it.isString }) return incomplete()
             JsonObject(arguments.toMutableMap().apply {
                 put("headers", JsonObject(headers.mapValues { (key, value) ->

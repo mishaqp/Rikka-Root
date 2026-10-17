@@ -3,7 +3,7 @@ package me.rerere.document
 import com.artifex.mupdf.fitz.PDFDocument
 import java.io.File
 
-data class PdfRangeResult(val text: String, val pages: Int)
+data class PdfRangeResult(val text: String, val pages: Int, val limited: Boolean = false)
 
 object PdfParser {
     /** Native-resource cleanup adapted from ExTV/rikkahub-agent (AGPL v3). */
@@ -12,6 +12,7 @@ object PdfParser {
         pageFrom: Int = 1,
         pageTo: Int? = null,
         checkActive: () -> Unit = {},
+        maxChars: Int = Int.MAX_VALUE,
     ): PdfRangeResult {
         require(pageFrom >= 1 && (pageTo == null || pageTo >= pageFrom)) { "Некорректный диапазон страниц PDF." }
         checkActive()
@@ -24,6 +25,8 @@ object PdfParser {
             require(pageFrom <= pages && last <= pages) { "Диапазон страниц выходит за пределы PDF-документа." }
             val result = StringBuilder()
             for (number in pageFrom..last) {
+                // A small file can expand to hundreds of MB of text; stop before that exhausts memory.
+                if (result.length > maxChars) return PdfRangeResult(result.substring(0, maxChars + 1), pages, limited = true)
                 checkActive()
                 val page = document.loadPage(number - 1)
                 try {
@@ -41,6 +44,7 @@ object PdfParser {
                 }
                 checkActive()
             }
+            if (result.length > maxChars) return PdfRangeResult(result.substring(0, maxChars + 1), pages, limited = true)
             return PdfRangeResult(result.toString(), pages)
         } finally {
             document.destroy()

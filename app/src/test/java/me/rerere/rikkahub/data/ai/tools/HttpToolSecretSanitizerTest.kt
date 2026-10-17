@@ -57,4 +57,13 @@ class HttpToolSecretSanitizerTest {
             }
         }
     }
+
+    @Test fun `query credentials and broader secret header names are masked`() {
+        val input = """{"url":"https://example.test/a?q=cats&access_token=private-q&api%5Fkey=private-k#top","headers":{"X-Api-Secret":"private-s","X-Password":"private-p","Accept":"*/*"}}"""
+        val safe = HttpToolSecretSanitizer.sanitize("http_request", input)
+        assertFalse(safe, safe.contains("private-"))
+        val url = Json.parseToJsonElement(safe).jsonObject.getValue("url").jsonPrimitive.content
+        assertEquals("https://example.test/a?q=cats&access_token=${HttpToolSecretSanitizer.MASK}&api%5Fkey=${HttpToolSecretSanitizer.MASK}#top", url)
+        assertEquals(safe, HttpToolSecretSanitizer.sanitize("http_request", safe))
+    }
 }

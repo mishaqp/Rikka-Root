@@ -111,7 +111,7 @@ class AlarmClockToolsTest {
     }
 
     @Test fun timerAcceptsIntegerBoundariesAndExplicitUi() = runBlocking {
-        for (seconds in listOf(1, Int.MAX_VALUE)) {
+        for (seconds in listOf(1, 86_400)) {
             execute("set_timer", """{"seconds":$seconds,"skip_ui":false}""")
             assertEquals(seconds, started.last().getIntExtra(AlarmClock.EXTRA_LENGTH, -1))
             assertFalse(started.last().getBooleanExtra(AlarmClock.EXTRA_SKIP_UI, true))
@@ -145,7 +145,7 @@ class AlarmClockToolsTest {
 
     @Test fun malformedTimerArgumentsNeverLaunchAnyActivity() = runBlocking {
         for (input in listOf(
-            "{}", """{"seconds":0}""", """{"seconds":-1}""", """{"seconds":2147483648}""",
+            "{}", """{"seconds":0}""", """{"seconds":-1}""", """{"seconds":86401}""", """{"seconds":2147483648}""",
             """{"seconds":"90"}""", """{"seconds":1.5}""", """{"seconds":null}""",
             """{"seconds":90,"skip_ui":1}""", """{"seconds":90,"skip_ui":null}""",
             """{"seconds":90,"message":false}""", """{"seconds":90,"message":null}""",

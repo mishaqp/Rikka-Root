@@ -46,8 +46,9 @@ class HttpRequestToolTest {
         Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(status).message("OK")
             .addHeader("Set-Cookie", "server-private-cookie").addHeader("X-Result", "ok").body(body).build()
 
+    // Loopback test servers stand in for public hosts; the private-address guard has its own test.
     private fun invoke(client: OkHttpClient, arguments: JsonObject): JsonObject = runBlocking {
-        val output = httpRequestTool(client).execute(arguments).filterIsInstance<UIMessagePart.Text>().single().text
+        val output = httpRequestTool(client, isAllowedAddress = { true }).execute(arguments).filterIsInstance<UIMessagePart.Text>().single().text
         Json.parseToJsonElement(output).jsonObject
     }
 
@@ -254,12 +255,31 @@ class HttpRequestToolTest {
                 }
             }
             val task = launch(Dispatchers.Default) {
-                httpRequestTool(OkHttpClient()).execute(buildJsonObject { put("url", "http://127.0.0.1:${server.localPort}") })
+                httpRequestTool(OkHttpClient(), isAllowedAddress = { true })
+                    .execute(buildJsonObject { put("url", "http://127.0.0.1:${server.localPort}") })
             }
             assertTrue(bodyStarted.await(3, TimeUnit.SECONDS))
             withTimeout(2000) { task.cancelAndJoin() }
             assertTrue(disconnected.await(2, TimeUnit.SECONDS))
             worker.join(1000)
         }
+    }
+
+    @Test fun `phone and home network addresses are refused before any request`() {
+        val calls = AtomicInteger()
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/") { exchange -> calls.incrementAndGet(); exchange.sendResponseHeaders(200, -1); exchange.close() }
+        server.start()
+        try {
+            for (host in listOf("127.0.0.1", "localhost")) {
+                val output = runBlocking {
+                    httpRequestTool(OkHttpClient()).execute(buildJsonObject { put("url", "http://$host:${server.address.port}/") })
+                        .filterIsInstance<UIMessagePart.Text>().single().text
+                }
+                val result = Json.parseToJsonElement(output).jsonObject
+                assertTrue(output, result["error"]?.jsonPrimitive?.content.orEmpty().contains("локальной сети"))
+            }
+            assertEquals(0, calls.get())
+        } finally { server.stop(0) }
     }
 }

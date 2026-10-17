@@ -131,15 +131,15 @@ internal fun alarmClockTools(context: Context): List<Tool> = listOf(
     personalJsonTool(
         context = context,
         name = "set_timer",
-        description = "Передать приложению часов запрос на таймер. seconds — положительное целое число секунд; message — необязательная подпись; skip_ui=true по умолчанию. Требуются подтверждение и открытое приложение; результат подтверждает только отправку запроса Android.",
+        description = "Передать приложению часов запрос на таймер. seconds — целое число секунд от 1 до 86400; message — необязательная подпись; skip_ui=true по умолчанию. Требуются подтверждение и открытое приложение; результат подтверждает только отправку запроса Android.",
         option = LocalToolOption.AlarmClock,
         schema = InputSchema.Obj(buildJsonObject {
-            put("seconds", clockField("integer", "Продолжительность в секундах: целое число от 1 до 2147483647."))
+            put("seconds", clockField("integer", "Продолжительность в секундах: целое число от 1 до 86400 (24 часа)."))
             put("message", clockMessageField())
             put("skip_ui", clockSkipUiField())
         }, required = listOf("seconds")),
         validate = { input ->
-            TimerArguments(clockInteger(input, "seconds", 1..Int.MAX_VALUE), clockMessage(input),
+            TimerArguments(clockInteger(input, "seconds", 1..86_400), clockMessage(input),
                 personalBoolean(input, "skip_ui", true))
         },
         read = { args ->

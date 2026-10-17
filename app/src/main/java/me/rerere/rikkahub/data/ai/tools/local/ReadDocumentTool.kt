@@ -24,8 +24,9 @@ import java.util.zip.ZipFile
 private const val MAX_DOCUMENT_BYTES = 32L * 1024 * 1024
 private const val MAX_DOCUMENT_EXPANDED_BYTES = 64L * 1024 * 1024
 private const val MAX_DOCUMENT_ENTRIES = 10_000
+private const val MAX_PDF_TEXT_CHARS = 4_000_000
 
-internal data class ReadDocumentExtraction(val text: String, val pages: Int? = null)
+internal data class ReadDocumentExtraction(val text: String, val pages: Int? = null, val limited: Boolean = false)
 
 internal fun interface ReadDocumentBackend {
     suspend fun extract(file: File, extension: String, pageFrom: Int?, pageTo: Int?): ReadDocumentExtraction
@@ -41,7 +42,8 @@ internal fun readDocumentTool(
     description = "Извлекает текст PDF, DOCX, PPTX или EPUB через разрешённый файловый доступ. " +
         "max_chars: по умолчанию 20000, максимум 65536 символов. page_from и page_to: " +
         "страницы PDF с 1 включительно. pages — общее число страниц PDF, для остальных форматов null. " +
-        "total_chars — размер текста выбранного диапазона до обрезки. Документ до 32 МиБ.",
+        "total_chars — размер текста выбранного диапазона до обрезки; если total_chars_is_lower_bound=true, " +
+        "текст PDF длиннее и читать его нужно меньшими диапазонами страниц. Документ до 32 МиБ.",
     parameters = { InputSchema.Obj(buildJsonObject {
         put("path", buildJsonObject { put("type", "string"); put("description", "Путь к документу или URI выбранной папки SAF.") })
         put("max_chars", buildJsonObject { put("type", "integer"); put("default", 20000); put("minimum", 1); put("maximum", 65536) })
@@ -104,6 +106,7 @@ internal fun readDocumentTool(
             buildJsonObject {
                 put("text", extracted.text.take(maxChars))
                 put("total_chars", extracted.text.length)
+                if (extracted.limited) put("total_chars_is_lower_bound", true)
                 put("truncated", extracted.text.length > maxChars)
                 put("pages", if (extension == "pdf") extracted.pages?.let(::JsonPrimitive) ?: JsonNull else JsonNull)
             }
@@ -126,9 +129,10 @@ internal fun readDocumentTool(
 private val defaultReadDocumentBackend = ReadDocumentBackend { file, extension, pageFrom, pageTo ->
     val coroutine = currentCoroutineContext()
     when (extension) {
-        "pdf" -> PdfParser.parseRange(file, pageFrom ?: 1, pageTo) { coroutine.ensureActive() }
-            .let { ReadDocumentExtraction(it.text, it.pages) }
-        "docx" -> ReadDocumentExtraction(DocxParser.parse(file))
+        "pdf" -> PdfParser.parseRange(file, pageFrom ?: 1, pageTo, { coroutine.ensureActive() }, MAX_PDF_TEXT_CHARS)
+            .let { ReadDocumentExtraction(it.text, it.pages, it.limited) }
+        // Parse the same central-directory entry that preflightDocumentArchive measured.
+        "docx" -> ReadDocumentExtraction(ZipFile(file).use(DocxParser::parse))
         "pptx" -> ReadDocumentExtraction(PptxParser.parse(file))
         "epub" -> ReadDocumentExtraction(EpubParser.parse(file))
         else -> error("Неподдерживаемый формат документа.")
