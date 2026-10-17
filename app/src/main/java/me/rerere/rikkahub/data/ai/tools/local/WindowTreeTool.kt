@@ -19,17 +19,24 @@ import me.rerere.ai.ui.UIMessagePart
 private const val DEFAULT_MAX_NODES = 500
 private const val MAX_NODES_HARD_CEILING = 2000
 
-private fun nodeIdentity(node: RootScreenNode): List<String> = listOf(
-    node.packageName.orEmpty(), node.className.orEmpty(), node.text.orEmpty(),
-    node.contentDescription.orEmpty(), node.viewIdResourceName.orEmpty(),
-    node.bounds.left.toString(), node.bounds.top.toString(), node.bounds.right.toString(), node.bounds.bottom.toString(),
-    node.isEnabled.toString(), node.isClickable.toString(), node.isEditable.toString(), node.isScrollable.toString(),
+private val NODE_TEXT_DIGITS = Regex("\\d+")
+
+/**
+ * What makes a node "the same element" for a later action. Bounds move when the keyboard
+ * opens, an edited field's own text changes, and timers ("Отправить код (59с)") tick, so
+ * none of those may invalidate the handle; a different element at the same index still does.
+ */
+private fun nodeIdentity(node: RootScreenNode, withText: Boolean): List<String> = listOf(
+    node.packageName.orEmpty(), node.className.orEmpty(),
+    if (withText && !node.isEditable) node.text.orEmpty().replace(NODE_TEXT_DIGITS, "#") else "",
+    node.contentDescription.orEmpty().replace(NODE_TEXT_DIGITS, "#"), node.viewIdResourceName.orEmpty(),
+    node.isClickable.toString(), node.isEditable.toString(), node.isScrollable.toString(),
 )
 
 /** Include the actual click/edit targets, since a child handle can promote to an ancestor. */
 internal fun nodeFingerprint(node: RootScreenNode): String = fnv1a64(buildList {
     add("node")
-    addAll(nodeIdentity(node))
+    addAll(nodeIdentity(node, withText = true))
     fun addActionTarget(kind: String, accepts: (RootScreenNode) -> Boolean) {
         var target: RootScreenNode? = node
         var depth = 0
@@ -42,7 +49,7 @@ internal fun nodeFingerprint(node: RootScreenNode): String = fnv1a64(buildList {
             add("none")
         } else {
             add(depth.toString())
-            addAll(nodeIdentity(target))
+            addAll(nodeIdentity(target, withText = false))
         }
     }
     addActionTarget("click") { it.isClickable }

@@ -60,13 +60,12 @@ class ScreenAuditRegressionTest {
         execute(findNodeTool(service), """{"by":"text","value":"Search"}""")
             .getValue("matches").jsonArray.single().jsonObject.getValue("node_id").jsonPrimitive.content
 
-    @Test fun `node handles change when text class or bounds change`() = runBlocking {
+    @Test fun `node handles change when the element is replaced`() = runBlocking {
         val svc = service()
         val original = nodeId(svc)
         listOf(
-            XML.replace("text=\"Search\"", "text=\"Replacement\""),
             XML.replace("android.widget.EditText", "org.test.CustomEditText"),
-            XML.replace("[20,100][220,300]", "[30,100][230,300]"),
+            XML.replace("org.test:id/search", "org.test:id/delete"),
         ).forEach { changed ->
             xml = changed
             val nodes = execute(readWindowTreeTool(svc), """{"verbose":true}""")
@@ -76,10 +75,32 @@ class ScreenAuditRegressionTest {
         }
     }
 
-    @Test fun `changed text refuses stale click without tapping replacement`() = runBlocking {
+    @Test fun `review handle survives keyboard shift and the field's own edits`() = runBlocking {
+        val svc = service()
+        val original = nodeId(svc)
+        for (changed in listOf(XML.replace("[20,100][220,300]", "[20,40][220,240]"), XML.replace("text=\"Search\"", "text=\"Searc\""))) {
+            xml = changed
+            val nodes = execute(readWindowTreeTool(svc), """{"verbose":true}""").getValue("nodes").jsonArray
+            assertEquals(original, nodes[2].jsonObject.getValue("node_id").jsonPrimitive.content)
+        }
+    }
+
+    @Test fun `review label text change is a new element but a ticking number is not`() = runBlocking {
+        xml = ancestorXml(editable = false).replace("text=\"Search\"", "text=\"Отправить код (59с)\"")
+        val svc = service()
+        fun labelId() = runBlocking { execute(readWindowTreeTool(svc), """{"verbose":true}""")
+            .getValue("nodes").jsonArray[2].jsonObject.getValue("node_id").jsonPrimitive.content }
+        val original = labelId()
+        xml = xml.replace("(59с)", "(58с)")
+        assertEquals(original, labelId())
+        xml = xml.replace("Отправить код (58с)", "Удалить всё")
+        assertNotEquals(original, labelId())
+    }
+
+    @Test fun `replaced element refuses stale click without tapping replacement`() = runBlocking {
         val svc = service()
         val id = nodeId(svc)
-        xml = XML.replace("text=\"Search\"", "text=\"Delete all\"")
+        xml = XML.replace("text=\"Search\"", "text=\"Delete all\"").replace("org.test:id/search", "org.test:id/delete")
         calls.clear()
         val result = execute(clickNodeTool(svc), buildJsonObject { put("node_id", id) }.toString())
         assertEquals(result.toString(), "stale_node_id", result["error"]?.jsonPrimitive?.content)
@@ -87,10 +108,10 @@ class ScreenAuditRegressionTest {
         assertTrue(calls.toString(), calls.none { it.startsWith("input ") })
     }
 
-    @Test fun `changed bounds refuses stale text edit before focus or deletion`() = runBlocking {
+    @Test fun `replaced field refuses stale text edit before focus or deletion`() = runBlocking {
         val svc = service()
         val id = nodeId(svc)
-        xml = XML.replace("[20,100][220,300]", "[30,100][230,300]")
+        xml = XML.replace("org.test:id/search", "org.test:id/password")
         calls.clear()
         val result = execute(setTextTool(svc), buildJsonObject { put("node_id", id); put("text", "replacement") }.toString())
         assertEquals(result.toString(), "stale_node_id", result["error"]?.jsonPrimitive?.content)

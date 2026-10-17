@@ -78,7 +78,7 @@ fun readSensorTool(context: Context): Tool = Tool(
         if (duration == null || duration !in 1..5000) return@deviceToolResult deviceToolError("duration_ms должен быть целым числом от 1 до 5000.")
         if (typeInt == Sensor.TYPE_STEP_COUNTER && Build.VERSION.SDK_INT >= 29 &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) {
-            return@deviceToolResult deviceToolError("Для шагомера разрешите физическую активность: Настройки Android → Приложения → Rikka-Root → Разрешения → Физическая активность.", Manifest.permission.ACTIVITY_RECOGNITION)
+            return@deviceToolResult deviceToolError("Для шагомера разрешите физическую активность: Настройки Android → Приложения → ${context.applicationInfo.loadLabel(context.packageManager)} → Разрешения → Физическая активность.", Manifest.permission.ACTIVITY_RECOGNITION)
         }
         val manager = context.getSystemService(SensorManager::class.java)
         val sensor = manager?.getDefaultSensor(typeInt)

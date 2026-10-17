@@ -182,7 +182,9 @@ class PhoneAuditRegressionTest {
         val emitted = mutableListOf<AppEvent>()
         val collector = launch(start = CoroutineStart.UNDISPATCHED) { bus.events.collect { emitted += it } }
         try {
-            val limit = TextToSpeech.getMaxSpeechInputLength()
+            // Long text is chunked by the app TTS, so the bound is the tool cap, not one Android utterance.
+            val limit = MAX_SPEAK_CHARS
+            assertTrue(limit > TextToSpeech.getMaxSpeechInputLength())
             assertTrue(limit > 0)
             val rejected = result(tool, buildJsonObject { put("text", "я".repeat(limit + 1)) })
             kotlinx.coroutines.yield()

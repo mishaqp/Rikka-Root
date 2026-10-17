@@ -399,7 +399,7 @@ fun zipFilesTool(context: Context, access: LocalFileAccess = LocalFileAccess(con
         if (references.isEmpty() || references.size > 10_000) throw ArchiveSafetyException("Укажите от 1 до 10 000 источников.")
         val destinationPlan = access.planWritePath(obj.archivePath("destination"))
         if (destinationPlan.existing?.let { access.isDirectory(it) } == true) throw ArchiveSafetyException("destination должен указывать файл ZIP, а не папку.")
-        val overwrite = obj["overwrite"]?.jsonPrimitive?.booleanOrNull ?: false
+        val overwrite = fileBoolean(obj, "overwrite")
         if (!overwrite && destinationPlan.existing?.let { access.exists(it) } == true) {
             throw ArchiveSafetyException("Файл назначения уже существует. Для замены ZIP укажите overwrite=true.")
         }

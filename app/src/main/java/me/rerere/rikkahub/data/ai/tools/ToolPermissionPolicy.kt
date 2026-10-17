@@ -197,7 +197,7 @@ object ToolPermissionPolicy {
         if (name == "ssh_forget_host_key") return true
         val args = input as? JsonObject
         fun text(key: String): String? = (args?.get(key) as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
-        if (name == "batch_delete" && (args?.get("recursive") as? JsonPrimitive)?.booleanOrNull == true) return true
+        if (name in setOf("batch_delete", "delete_file") && (args?.get("recursive") as? JsonPrimitive)?.booleanOrNull == true) return true
         if (name in setOf("move_file", "batch_move")) {
             val paths = listOfNotNull(text("src"), text("dst"), text("dst_dir"), text("root")) +
                 ((args?.get("paths") as? kotlinx.serialization.json.JsonArray)?.mapNotNull {

@@ -104,6 +104,11 @@ fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCan
         val selected = matches.take(limit).map { entry(it) }
         buildJsonObject {
             put("files", JsonArray(selected)); put("truncated", traversalTruncated || matches.size > limit)
+            if (traversalTruncated) {
+                // Not just "more matches than limit": entries past the walk cap were never examined.
+                put("scan_incomplete", true)
+                put("message", "Папка слишком большая: просмотрена только часть файлов. Укажите более узкую папку в ${if (find) "root" else "path"}.")
+            }
             if (skippedPrivatePaths > 0) {
                 put("skipped_restricted_count", skippedPrivatePaths)
                 put("warnings", buildJsonArray { add("Папки Android/data и Android/obb пропущены: доступ к личным данным других приложений запрещён.") })
@@ -328,14 +333,18 @@ private suspend fun decodeFileBase64(value: String): ByteArray {
     val encoded = StringBuilder(minOf(value.length - start, maximum))
     for (index in start until value.length) {
         if (index % 8192 == 0) currentCoroutineContext().ensureActive()
-        val character = value[index]
-        // MIME base64 ignores separators outside its alphabet, including all
-        // whitespace. Count only meaningful input to bound decoded allocation.
-        if (character !in 'A'..'Z' && character !in 'a'..'z' && character !in '0'..'9' &&
-            character != '+' && character != '/' && character != '=') continue
+        // Line breaks and spaces are formatting; base64url `-`/`_` is the same data. Any
+        // other character is corrupt input: skipping it would silently write wrong bytes.
+        val character = when (val raw = value[index]) { '-' -> '+'; '_' -> '/'; else -> raw }
+        if (character.isWhitespace()) continue
+        require(character in 'A'..'Z' || character in 'a'..'z' || character in '0'..'9' ||
+            character == '+' || character == '/' || character == '=') {
+            "Некорректные данные base64: недопустимый символ «${value[index]}». Передайте base64 без посторонних символов."
+        }
         require(encoded.length < maximum) { "Данные слишком велики." }
         encoded.append(character)
     }
+    require(encoded.isNotEmpty()) { "Данные base64 пусты." }
     return Base64.getMimeDecoder().decode(encoded.toString()).also {
         require(it.size <= LocalFileAccess.MAX_WRITE_BYTES) { "Данные слишком велики." }
     }
@@ -374,7 +383,11 @@ private fun showImageFileTool(access: LocalFileAccess, modelCanReadImages: Boole
                 listOf(UIMessagePart.Image(encoded.base64), UIMessagePart.Text(metadata.toString()))
             } finally {
                 withContext(kotlinx.coroutines.NonCancellable) {
-                    check(access.delete(saved)) { "Не удалось удалить временное изображение из scratch." }
+                    // Cleanup is best effort: a leftover temp copy must not discard the shown image
+                    // or replace the real error.
+                    runCatching { access.delete(saved) }.onFailure {
+                        android.util.Log.w("FileManagerTools", "Temporary shown image was not removed", it)
+                    }
                 }
             }
         } else listOf(UIMessagePart.Text(metadata.toString()))

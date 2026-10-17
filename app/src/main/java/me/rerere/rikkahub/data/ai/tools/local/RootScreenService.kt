@@ -89,16 +89,19 @@ class RootScreenService internal constructor(
                     if (lastFailure != null) return@withLock failure(lastFailure!!)
                     validateBeforeWake(this)?.let { return@withLock explainScreenResult(it) }
                 }
-                if (wakeBeforeSnapshot && !wakeIfNeeded()) {
-                    return@withLock failure(lastFailure ?: "root_input_failed")
-                }
+                // A failed wake (AOD, refused input) must not block a screen that is already readable;
+                // report it next to the result as before.
+                val wakeFailed = wakeBeforeSnapshot && !wakeIfNeeded()
+                if (wakeFailed) lastFailure = null
                 refreshSnapshot(treeRequired)
                 if (lastFailure != null) return@withLock failure(lastFailure!!)
                 operationStage = "screen_action"
                 val payload = block(this)
                 // Preserve the action result, while explaining the root backend's exact failure.
                 val result = if (lastFailure != null && payload["error"] == null) JsonObject(payload + failure(lastFailure!!)) else payload
-                val explained = explainScreenResult(result)
+                val explained = explainScreenResult(result).let {
+                    if (wakeFailed) JsonObject(it + ("wake_failed" to kotlinx.serialization.json.JsonPrimitive(true))) else it
+                }
                 if (result["error"] != null && exceptionDetail != null) JsonObject(explained + exceptionDiagnostic()) else explained
             } catch (error: CancellationException) {
                 throw error
