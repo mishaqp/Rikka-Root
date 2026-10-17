@@ -16,6 +16,9 @@ import me.rerere.rikkahub.data.repository.LightConversationEntity
 
 @Dao
 interface ConversationDAO {
+    @Query("SELECT COUNT(*) FROM conversationentity WHERE assistant_id = :assistantId")
+    suspend fun countOfAssistant(assistantId: String): Int
+
     @RawQuery(observedEntities = [ConversationEntity::class, MessageNodeEntity::class])
     fun getDrawerConversationsPaging(query: SupportSQLiteQuery): PagingSource<Int, DrawerConversationEntity>
 

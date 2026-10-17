@@ -76,8 +76,13 @@ class AndroidCronPayloadCipher : CronPayloadCipher {
     }
 }
 
-class ScheduledJobRepository(private val db: AppDatabase, private val cipher: CronPayloadCipher) {
+class ScheduledJobRepository(
+    private val db: AppDatabase,
+    private val cipher: CronPayloadCipher,
+    private val ownershipGuard: AssistantOwnershipGuard? = null,
+) {
     private val dao get() = db.scheduledJobDao()
+    suspend fun countOfAssistant(assistantId: String): Int = dao.countOfAssistant(assistantId)
     suspend fun getById(id: String): ScheduledJobEntity? = dao.getById(id)
     suspend fun getOwned(id: String, owner: String): ScheduledJobEntity? = dao.getById(id)?.takeIf { it.ownerAssistantId == owner && !it.deleted }
     suspend fun listOwned(owner: String): List<ScheduledJobEntity> = dao.listOwned(owner)
@@ -86,9 +91,11 @@ class ScheduledJobRepository(private val db: AppDatabase, private val cipher: Cr
     fun payload(job: ScheduledJobEntity): ScheduledJobPayload = JsonInstant.decodeFromString(cipher.open(binding(job), job.payloadCiphertext))
     suspend fun create(job: ScheduledJobEntity, payload: ScheduledJobPayload): ScheduledJobEntity {
         val encrypted = job.copy(payloadCiphertext = cipher.seal(binding(job), JsonInstant.encodeToString(payload)))
-        db.withTransaction {
-            require(dao.listOwned(job.ownerAssistantId).size < 100) { "Достигнут предел 100 заданий." }
-            dao.insert(encrypted)
+        withAssistantOwnership(ownershipGuard, job.ownerAssistantId) {
+            db.withTransaction {
+                require(dao.listOwned(job.ownerAssistantId).size < 100) { "Достигнут предел 100 заданий." }
+                dao.insert(encrypted)
+            }
         }
         return encrypted
     }

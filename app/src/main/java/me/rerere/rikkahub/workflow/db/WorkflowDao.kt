@@ -9,6 +9,11 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface WorkflowDao {
+    // Conservative reference check includes malformed definitions, without requiring JSON1.
+    // A UUID mentioned in prose can block removal too; retaining ownership is safer than data loss.
+    @Query("SELECT COUNT(*) FROM workflows WHERE instr(definitionJson, :assistantId) > 0")
+    suspend fun countReferencingAssistant(assistantId: String): Int
+
 
     @Query("SELECT * FROM workflows ORDER BY name COLLATE NOCASE ASC")
     fun observeAll(): Flow<List<WorkflowEntity>>

@@ -7,6 +7,10 @@ import me.rerere.rikkahub.data.db.entity.ScheduledJobEntity
 
 @Dao
 interface ScheduledJobDao {
+    // Tombstones still own persisted run/history data and must retain their assistant.
+    @Query("SELECT COUNT(*) FROM scheduled_jobs WHERE owner_assistant_id = :assistantId")
+    suspend fun countOfAssistant(assistantId: String): Int
+
     @Insert suspend fun insert(job: ScheduledJobEntity)
     @Query("SELECT * FROM scheduled_jobs WHERE id = :id") suspend fun getById(id: String): ScheduledJobEntity?
     @Query("SELECT * FROM scheduled_jobs WHERE owner_assistant_id = :owner AND deleted = 0 ORDER BY created_at_ms DESC LIMIT 100") suspend fun listOwned(owner: String): List<ScheduledJobEntity>

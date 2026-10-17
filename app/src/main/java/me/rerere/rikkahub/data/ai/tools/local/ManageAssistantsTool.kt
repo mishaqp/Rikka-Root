@@ -14,6 +14,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANTS_IDS
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Avatar
+import me.rerere.rikkahub.data.repository.AssistantOwnershipGuard
 import java.net.URI
 import java.net.URLDecoder
 import kotlin.uuid.Uuid
@@ -32,6 +33,14 @@ data class AssistantManagerCaller(
     val switchAssistant: suspend (Uuid) -> Unit,
 )
 
+/** Persisted records that must retain an assistant owner when the assistant is removed. */
+data class AssistantManagerDependencies(
+    val conversations: Int = 0,
+    val memories: Int = 0,
+    val cronJobs: Int = 0,
+    val workflows: Int = 0,
+)
+
 private const val MANUAL_ONLY = "Это можно изменить только вручную в настройках"
 private const val MASK = "••••"
 private val assistantJson = Json { encodeDefaults = true; explicitNulls = true; ignoreUnknownKeys = false }
@@ -44,7 +53,9 @@ fun manageAssistantsNeedsApproval(input: JsonElement): Boolean =
 
 fun manageAssistantsApprovalDescription(input: JsonElement): String {
     val args = input as? JsonObject ?: return "Управление ассистентами"
-    val target = (args["assistant_id"] as? JsonPrimitive)?.content.orEmpty()
+    val frozen = args["_approval_preview"] as? JsonObject
+    val target = (frozen?.get("assistant_name") as? JsonPrimitive)?.contentOrNull
+        ?: (args["assistant_id"] as? JsonPrimitive)?.content.orEmpty()
     val fields = ((args["settings"] as? JsonObject)?.keys.orEmpty() +
         ((args["clear"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content }.orEmpty()))
         .map { assistantSettingsSchema()[it]?.jsonObject?.get("title")?.jsonPrimitive?.content ?: it }
@@ -53,10 +64,19 @@ fun manageAssistantsApprovalDescription(input: JsonElement): String {
         "update" -> "Изменить ассистента $target"
         "duplicate" -> "Скопировать ассистента $target"
         "switch" -> "Выбрать ассистента $target для следующих чатов. Текущий чат и его конфигурация сохранятся"
-        "delete" -> "Удалить ассистента $target. История его чатов сохранится"
+        "delete" -> "Удалить ассистента $target. Удаление возможно только без связанных чатов, памяти, заданий и сценариев"
         else -> "Управление ассистентами"
     }
     val description = if (fields.isEmpty()) action else "$action. Поля: ${fields.joinToString()}"
+    if (frozen != null && frozen["before"] == args["_expected_before"]) {
+        val before = safeAssistantPatchPreview(frozen["before"] as? JsonObject ?: JsonObject(emptyMap()))
+        val after = safeAssistantPatchPreview(frozen["after"] as? JsonObject ?: JsonObject(emptyMap()))
+        val diff = after.entries.joinToString("\n") { (key, value) ->
+            val title = assistantSettingsSchema()[key]?.jsonObject?.get("title")?.jsonPrimitive?.content ?: key
+            "$title: ${before[key] ?: JsonNull} → $value"
+        }
+        return if (diff.isEmpty()) description else "$description\n$diff"
+    }
     val preview = buildJsonObject {
         (args["settings"] as? JsonObject)?.let { put("settings", safeAssistantPatchPreview(it)) }
         args["clear"]?.let { put("clear", it) }
@@ -64,12 +84,46 @@ fun manageAssistantsApprovalDescription(input: JsonElement): String {
     return if (preview.isEmpty()) description else "$description\n${preview}"
 }
 
+/** Called only by the runtime approval hook; model-provided snapshots are discarded. */
+internal fun prepareAssistantManagementApproval(input: JsonElement, settings: Settings): JsonElement {
+    val args = input as? JsonObject ?: return input
+    val clean = JsonObject(args - setOf("_expected_before", "_approval_preview"))
+    val action = clean.string("action")
+    if (action !in setOf("create", "update", "duplicate", "switch", "delete")) return clean
+    val assistant = settings.assistants.singleOrNull { it.id.toString() == clean.string("assistant_id") }
+    val before = if (assistant != null) assistantApprovalBefore(assistant, clean) else JsonObject(emptyMap())
+    val after = safeAssistantPatchPreview(JsonObject(
+        ((clean["settings"] as? JsonObject).orEmpty()) +
+            ((clean["clear"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+                .orEmpty().associateWith { JsonNull })
+    ))
+    return JsonObject(clean + mapOf(
+        "_expected_before" to before,
+        "_approval_preview" to buildJsonObject {
+            put("assistant_name", redact(JsonPrimitive(assistant?.name ?: "Новый ассистент")))
+            put("before", before)
+            put("after", after)
+        },
+    ))
+}
+
+private fun assistantApprovalBefore(assistant: Assistant, args: JsonObject): JsonObject {
+    val safe = safeAssistantPatchPreview(assistantSettingsJson(assistant))
+    val fields = if (args.string("action") == "update") {
+        (args["settings"] as? JsonObject)?.keys.orEmpty() +
+            (args["clear"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.orEmpty()
+    } else safe.keys
+    return JsonObject(safe.filterKeys { it in fields })
+}
+
 fun manageAssistantsTool(
     settingsStore: SettingsStore,
     catalog: suspend () -> AssistantManagerCatalog,
     caller: AssistantManagerCaller,
+    dependencies: (suspend (Uuid) -> AssistantManagerDependencies)? = null,
+    ownershipGuard: AssistantOwnershipGuard? = null,
 ): Tool {
-    val engine = AssistantManagerEngine({ settingsStore.settingsFlow.value }, { settingsStore.update(it) }, catalog, caller)
+    val engine = AssistantManagerEngine({ settingsStore.settingsFlow.value }, { settingsStore.update(it) }, catalog, caller, dependencies, ownershipGuard)
     return Tool(
         name = "manage_assistants",
         description = "Управляет ассистентами приложения: list — краткий список, get — все настройки, list_options — реальные идентификаторы и схемы полей, create/update/duplicate/switch/delete — изменения с обязательным одобрением пользователя. Перед настройкой вызовите list_options и get. Изменения ассистента применяются к следующим сообщениям с учётом закреплённой ConversationConfig текущего чата. switch выбирает ассистента для следующих чатов и сохраняет текущий чат. Нельзя удалять владельца текущего чата и последнего ассистента. Секреты и правила безопасности доступны только вручную в настройках.",
@@ -93,10 +147,12 @@ internal class AssistantManagerEngine(
     private val updateSettings: suspend ((Settings) -> Settings) -> Settings,
     private val catalog: suspend () -> AssistantManagerCatalog,
     private val caller: AssistantManagerCaller,
+    private val dependencies: (suspend (Uuid) -> AssistantManagerDependencies)? = null,
+    private val ownershipGuard: AssistantOwnershipGuard? = null,
 ) {
     suspend fun execute(input: JsonElement): JsonObject = try {
         val args = input as? JsonObject ?: fail("Аргументы должны быть объектом JSON.")
-        val unknown = args.keys - setOf("action", "assistant_id", "settings", "clear")
+        val unknown = args.keys - setOf("action", "assistant_id", "settings", "clear", "_expected_before", "_approval_preview")
         if (unknown.any(::securitySetting)) fail(MANUAL_ONLY, "MANUAL_ONLY")
         if (unknown.isNotEmpty()) fail("Неизвестные аргументы: ${unknown.joinToString()}.")
         val action = args.string("action") ?: fail("Укажите action. Допустимые действия: ${assistantManagerActions.joinToString()}.")
@@ -146,6 +202,12 @@ internal class AssistantManagerEngine(
     }
 
     private suspend fun mutate(action: String, args: JsonObject): JsonObject {
+        return if (action == "delete" && ownershipGuard != null) {
+            ownershipGuard.withDeletion { mutateWithOwnershipHeld(action, args) }
+        } else mutateWithOwnershipHeld(action, args)
+    }
+
+    private suspend fun mutateWithOwnershipHeld(action: String, args: JsonObject): JsonObject {
         val external = catalog()
         val patch = args["settings"]?.let { it as? JsonObject ?: fail("settings должен быть объектом JSON.") } ?: JsonObject(emptyMap())
         val clear = args["clear"]?.let { it as? JsonArray ?: fail("clear должен быть массивом строк.") }?.map {
@@ -156,16 +218,22 @@ internal class AssistantManagerEngine(
         if (invalidClear.isNotEmpty()) fail("Нельзя сбросить поля ${invalidClear.joinToString()}. Допустимые поля: ${clearableAssistantFields.joinToString()}.")
         if (clear.any { it in patch }) fail("Поле нельзя одновременно передать в settings и clear.")
         val changes = JsonObject(patch + clear.associateWith { JsonNull })
+        if (action == "delete") {
+            val current = readSettings()
+            val base = target(args, current)
+            verifyDeletable(base, current)
+            val check = dependencies ?: fail("Не удалось проверить связанные данные ассистента. Удаление отменено; повторите после загрузки данных.", "DEPENDENCIES_UNAVAILABLE")
+            val counts = check(base.id)
+            val values = listOf(counts.conversations, counts.memories, counts.cronJobs, counts.workflows)
+            if (values.any { it < 0 }) fail("Не удалось проверить связанные данные ассистента. Удаление отменено.", "DEPENDENCIES_UNAVAILABLE")
+            if (values.any { it > 0 }) fail("Нельзя удалить ассистента со связанными данными: чаты — ${counts.conversations}, память — ${counts.memories}, задания — ${counts.cronJobs}, сценарии — ${counts.workflows}. Сначала перенесите или удалите их вручную.", "ASSISTANT_HAS_DEPENDENCIES")
+        }
         var affected: Assistant? = null
         val committed = updateSettings { settings ->
             if (settings.init) fail("Настройки ещё загружаются. Повторите действие после загрузки.", "SETTINGS_UNAVAILABLE")
             val base = if (action == "create") Assistant() else target(args, settings)
             if (action == "delete") {
-                val owner = caller.currentAssistantId()
-                    ?: fail("Не удалось определить ассистента текущего чата. Откройте чат заново.", "PROTECTED_ASSISTANT")
-                if (base.id == owner) fail("Нельзя удалить ассистента текущего чата.", "PROTECTED_ASSISTANT")
-                if (settings.assistants.size <= 1) fail("Нельзя удалить последнего ассистента.", "PROTECTED_ASSISTANT")
-                if (base.id in DEFAULT_ASSISTANTS_IDS) fail("Встроенного ассистента нельзя удалить.", "PROTECTED_ASSISTANT")
+                verifyDeletable(base, settings)
                 affected = base
                 val remaining = settings.assistants.filterNot { it.id == base.id }
                 settings.copy(assistants = remaining, assistantId = if (settings.assistantId == base.id) remaining.first().id else settings.assistantId)
@@ -173,6 +241,13 @@ internal class AssistantManagerEngine(
                 if (action == "duplicate" && assistantHasSecrets(base)) fail(MANUAL_ONLY, "MANUAL_ONLY")
                 val source = if (action == "duplicate") base.copy(id = Uuid.random(), name = "${base.name} (копия)") else base
                 val updated = applyAssistantPatch(source, changes, settings, external)
+                if (action == "update" || action == "duplicate") {
+                    val expected = args["_expected_before"] as? JsonObject
+                        ?: fail("Изменение не подготовлено. Запросите новое подтверждение пользователя.", "APPROVAL_REQUIRED")
+                    if (expected != assistantApprovalBefore(base, args)) {
+                        fail("Настройки ассистента изменились после подтверждения. Обновите данные и запросите подтверждение заново.", "STALE_APPROVAL")
+                    }
+                }
                 if (action == "create" && updated.name.isBlank()) fail("Для создания ассистента укажите непустое name.")
                 affected = updated
                 settings.copy(assistants = if (action == "update") settings.assistants.map { if (it.id == updated.id) updated else it }
@@ -186,21 +261,37 @@ internal class AssistantManagerEngine(
             put("message", when (action) { "create" -> "Ассистент создан."; "update" -> "Настройки ассистента сохранены."; "duplicate" -> "Копия ассистента создана."; else -> "Ассистент удалён. История чатов сохранена." })
         }
     }
+
+    private fun verifyDeletable(base: Assistant, settings: Settings) {
+        val owner = caller.currentAssistantId()
+            ?: fail("Не удалось определить ассистента текущего чата. Откройте чат заново.", "PROTECTED_ASSISTANT")
+        if (base.id == owner) fail("Нельзя удалить ассистента текущего чата.", "PROTECTED_ASSISTANT")
+        if (settings.assistants.size <= 1) fail("Нельзя удалить последнего ассистента.", "PROTECTED_ASSISTANT")
+        if (base.id in DEFAULT_ASSISTANTS_IDS) fail("Встроенного ассистента нельзя удалить.", "PROTECTED_ASSISTANT")
+        if (assistantHasSecrets(base)) fail(MANUAL_ONLY, "MANUAL_ONLY")
+    }
 }
 
 private fun target(args: JsonObject, settings: Settings): Assistant {
     val id = args.string("assistant_id")
     return settings.assistants.singleOrNull { it.id.toString() == id }
-        ?: fail("Ассистент не найден. Допустимые идентификаторы: ${settings.assistants.joinToString { "${it.id} (${it.name})" }.ifEmpty { "нет" }}.", "NOT_FOUND")
+        ?: fail("Ассистент не найден. Допустимые идентификаторы: ${settings.assistants.joinToString { "${it.id} (${redact(JsonPrimitive(it.name)).jsonPrimitive.content})" }.ifEmpty { "нет" }}.", "NOT_FOUND")
 }
 private fun JsonObject.string(key: String): String? = (get(key) as? JsonPrimitive)?.takeIf { it.isString }?.content
 private fun success(block: JsonObjectBuilder.() -> Unit): JsonObject = buildJsonObject { put("success", true); block() }
 private fun shortAssistant(assistant: Assistant): JsonObject = buildJsonObject {
-    put("id", assistant.id.toString()); put("name", assistant.name); put("chatModelId", assistant.chatModelId?.let { JsonPrimitive(it.toString()) } ?: JsonNull)
+    put("id", assistant.id.toString()); put("name", redact(JsonPrimitive(assistant.name))); put("chatModelId", assistant.chatModelId?.let { JsonPrimitive(it.toString()) } ?: JsonNull)
 }
 
-internal fun assistantSettingsJson(assistant: Assistant): JsonObject {
-    // Mask before serialization: the unmasked Assistant must never be passed to a JSON encoder.
+/** Model-facing transport only. Never use this redacted object as an update baseline. */
+internal fun assistantSettingsJson(assistant: Assistant): JsonObject =
+    JsonObject(assistantPatchBaseline(assistant).mapValues { (key, value) ->
+        // Specialized wrappers have structural keys such as customBodies[].key; keep their restorers.
+        if (key in specializedAssistantSecretFields) value else redact(value)
+    })
+
+/** Private assembly preserves generic text; specialized credentials stay masked until restoration. */
+private fun assistantPatchBaseline(assistant: Assistant): JsonObject {
     val safe = assistant.copy(
         customHeaders = assistant.customHeaders.map { if (secretHeaderName(it.name) || credentialValue(it.value)) it.copy(value = MASK) else it },
         customBodies = assistant.customBodies.map { if (secretName(it.key)) it.copy(value = JsonPrimitive(MASK)) else it.copy(value = redact(it.value)) },
@@ -223,17 +314,44 @@ internal fun assistantSettingsJson(assistant: Assistant): JsonObject {
     ))
 }
 
-private fun applyAssistantPatch(base: Assistant, patch: JsonObject, settings: Settings, external: AssistantManagerCatalog): Assistant {
+private val specializedAssistantSecretFields = setOf("customHeaders", "customBodies", "avatar", "background")
+
+private fun protectedAssistantTextFields(assistant: Assistant, baseline: JsonObject): Set<String> = buildSet {
+    baseline.forEach { (key, value) ->
+        if (key !in specializedAssistantSecretFields && containsSecrets(value)) add(key)
+    }
+    // The tool's canonical text view omits native non-text parts. They must not be copied or lost.
+    if (containsSecrets(assistantJson.encodeToJsonElement(assistant.presetMessages))) add("presetMessages")
+}
+
+private fun applyAssistantPatch(base: Assistant, inputPatch: JsonObject, settings: Settings, external: AssistantManagerCatalog): Assistant {
     val schemas = assistantSettingsSchema()
-    for ((key, value) in patch) {
+    val baseline = assistantPatchBaseline(base)
+    val protectedTextFields = protectedAssistantTextFields(base, baseline)
+    for ((key, value) in inputPatch) {
         val schema = schemas[key] as? JsonObject ?: if (securitySetting(key)) fail(MANUAL_ONLY, "MANUAL_ONLY") else fail("Неизвестное поле $key. Допустимые поля: ${schemas.keys.joinToString()}.")
+        // Existing native values need not fit the tool's narrower creation schema (e.g. SYSTEM presets).
+        if (key in protectedTextFields && value == redact(baseline.getValue(key))) continue
         validateValue(value, schema, key)
     }
+    val patch = JsonObject(inputPatch.mapValues { (key, value) ->
+        when {
+            key in specializedAssistantSecretFields -> value // Existing per-field restorers below.
+            key in protectedTextFields -> {
+                val original = baseline.getValue(key)
+                if (value != redact(original)) fail(MANUAL_ONLY, "MANUAL_ONLY")
+                original
+            }
+            containsSecrets(value) -> fail(MANUAL_ONLY, "MANUAL_ONLY")
+            else -> value
+        }
+    })
     fun checkId(field: String, choices: List<Pair<String, String>>, multiple: Boolean = true) {
         val value = patch[field] ?: return
         if (value == JsonNull) return
         val provided = if (multiple) value.jsonArray.map { it.jsonPrimitive.content } else listOf(value.jsonPrimitive.content)
-        if (provided.any { id -> choices.none { it.first == id } }) fail("Неизвестный идентификатор в $field. Допустимые значения: ${choices.joinToString { "${it.first} (${it.second})" }.ifEmpty { "нет" }}.", "INVALID_ID")
+        fun safeChoiceValue(value: String): String = redactCatalogValues(JsonPrimitive(value)).jsonPrimitive.content
+        if (provided.any { id -> choices.none { it.first == id } }) fail("Неизвестный идентификатор в $field. Допустимые значения: ${choices.joinToString { "${safeChoiceValue(it.first)} (${safeChoiceValue(it.second)})" }.ifEmpty { "нет" }}.", "INVALID_ID")
     }
     checkId("chatModelId", settings.providers.flatMap { p -> p.models.map { it.id.toString() to "${p.name}: ${it.displayName}" } }, false)
     checkId("workspaceId", external.workspaces.map { it.id to it.name }, false)
@@ -244,7 +362,7 @@ private fun applyAssistantPatch(base: Assistant, patch: JsonObject, settings: Se
     checkId("modeInjectionIds", settings.modeInjections.map { it.id.toString() to it.name })
     checkId("lorebookIds", settings.lorebooks.map { it.id.toString() to it.name })
     checkId("localTools", allAssistantLocalTools().map { localToolId(it).let { id -> id to localToolMetadata(id, external).name } })
-    val merged = (assistantSettingsJson(base) + patch).toMutableMap()
+    val merged = (baseline + patch).toMutableMap()
     patch["name"]?.jsonPrimitive?.content?.let { if (it.isBlank()) fail("Имя ассистента не может быть пустым.") }
     val avatar = merged.getValue("avatar").jsonObject
     val requestedAvatar: Avatar = when (avatar.string("type")) {
@@ -271,33 +389,35 @@ private fun applyAssistantPatch(base: Assistant, patch: JsonObject, settings: Se
         val option = allAssistantLocalTools().singleOrNull { localToolId(it) == id } ?: fail("Неизвестный локальный инструмент: $id.")
         add(assistantJson.encodeToJsonElement(LocalToolOption.serializer(), option))
     } }
-    val messages = if ("presetMessages" in patch) patch.getValue("presetMessages").jsonArray.map { element ->
+    val patchMessages = "presetMessages" in patch && "presetMessages" !in protectedTextFields
+    val messages = if (patchMessages) patch.getValue("presetMessages").jsonArray.map { element ->
         val message = element.jsonObject
         val role = when (message.string("role")) { "USER" -> MessageRole.USER; "ASSISTANT" -> MessageRole.ASSISTANT; else -> fail("Роль предустановленного сообщения: USER или ASSISTANT.") }
         val content = message.string("content") ?: fail("Предустановленному сообщению нужен content.")
         UIMessage(id = message.string("id")?.let { parseId(it, "presetMessages.id") } ?: Uuid.random(), role = role, parts = listOf(UIMessagePart.Text(content)))
     } else base.presetMessages
-    if ("presetMessages" in patch && messages.map { it.id }.distinct().size != messages.size) {
+    if (patchMessages && messages.map { it.id }.distinct().size != messages.size) {
         fail("Идентификаторы предустановленных сообщений должны быть уникальными в presetMessages.")
     }
     merged["presetMessages"] = assistantJson.encodeToJsonElement(messages)
-    merged["regexes"] = if ("regexes" in patch) buildJsonArray { patch.getValue("regexes").jsonArray.forEach { element ->
+    val patchRegexes = "regexes" in patch && "regexes" !in protectedTextFields
+    merged["regexes"] = if (patchRegexes) buildJsonArray { patch.getValue("regexes").jsonArray.forEach { element ->
         val rule = element.jsonObject
         rule.string("findRegex")?.let { if (runCatching { Regex(it) }.isFailure) fail("Некорректное регулярное выражение в regexes.findRegex.") }
         rule.string("id")?.let { parseId(it, "regexes.id") }
         add(JsonObject(if ("id" in rule) rule else rule + ("id" to JsonPrimitive(Uuid.random().toString()))))
     } } else assistantJson.encodeToJsonElement(base.regexes)
-    if ("regexes" in patch) {
+    if (patchRegexes) {
         val ids = merged.getValue("regexes").jsonArray.map { parseId(it.jsonObject.getValue("id").jsonPrimitive.content, "regexes.id") }
         if (ids.distinct().size != ids.size) fail("Идентификаторы правил замены должны быть уникальными в regexes.")
     }
     val headers = patch["customHeaders"]?.jsonArray?.let { restoreHeaders(it, base.customHeaders) } ?: base.customHeaders
     val bodies = patch["customBodies"]?.jsonArray?.let { restoreBodies(it, base.customBodies) } ?: base.customBodies
-    // Decoder sees only redacted credentials; preserve the untouched originals after decoding.
+    // Specialized credentials are restored after decoding; generic raw fields never leave this assembler.
     val decoded = assistantJson.decodeFromJsonElement(Assistant.serializer(), JsonObject(merged))
     return decoded.copy(customHeaders = headers, customBodies = bodies, avatar = nativeAvatar,
         background = if (protectedBackground) base.background else decoded.background,
-        presetMessages = messages, regexes = if ("regexes" in patch) decoded.regexes else base.regexes)
+        presetMessages = messages, regexes = if (patchRegexes) decoded.regexes else base.regexes)
 }
 
 private fun parseId(value: String, field: String): Uuid = runCatching { Uuid.parse(value) }.getOrElse { fail("$field должен быть UUID.") }
@@ -347,6 +467,9 @@ private fun secretHeaderName(name: String): Boolean = secretName(name) ||
 
 private fun credentialValue(value: String): Boolean {
     val normalized = value.trim()
+    if (SensitiveContentDetector.scan(normalized).any {
+        it == SensitiveContentDetector.Category.API_KEY || it == SensitiveContentDetector.Category.JWT
+    }) return true
     if (Regex("""^(Bearer|Basic)\s+\S+""", RegexOption.IGNORE_CASE).containsMatchIn(normalized)) return true
     // Android/HTTP clients may accept spaces or repair malformed escapes rejected by URI.
     // Detect the credential-bearing components before relying on that strict parser.
@@ -365,7 +488,8 @@ private fun assistantHasSecrets(assistant: Assistant): Boolean =
     assistant.customHeaders.any { secretHeaderName(it.name) || credentialValue(it.value) } ||
         assistant.customBodies.any { secretName(it.key) || containsSecrets(it.value) } ||
         (assistant.avatar as? Avatar.Image)?.let { credentialValue(it.url) } == true ||
-        assistant.background?.let(::credentialValue) == true
+        assistant.background?.let(::credentialValue) == true ||
+        protectedAssistantTextFields(assistant, assistantPatchBaseline(assistant)).isNotEmpty()
 
 private fun safeAssistantPatchPreview(patch: JsonObject): JsonObject = JsonObject(patch.mapValues { (key, value) ->
     when (key) {
@@ -396,6 +520,13 @@ private fun securitySetting(name: String): Boolean {
 private fun redact(value: JsonElement): JsonElement = when (value) {
     is JsonObject -> JsonObject(value.mapValues { (key, item) -> if (secretName(key)) JsonPrimitive(MASK) else redact(item) })
     is JsonArray -> JsonArray(value.map(::redact))
+    is JsonPrimitive -> if (value.isString && credentialValue(value.content)) JsonPrimitive(MASK) else value
+    else -> value
+}
+/** Metadata is transport-only: structural keys and the private patch baseline stay intact. */
+private fun redactCatalogValues(value: JsonElement): JsonElement = when (value) {
+    is JsonObject -> JsonObject(value.mapValues { (_, item) -> redactCatalogValues(item) })
+    is JsonArray -> JsonArray(value.map(::redactCatalogValues))
     is JsonPrimitive -> if (value.isString && credentialValue(value.content)) JsonPrimitive(MASK) else value
     else -> value
 }
@@ -502,7 +633,7 @@ private fun options(settings: Settings, external: AssistantManagerCatalog): Json
     optionArray("lorebookIds", settings.lorebooks.map { AssistantManagerOption(it.id.toString(), it.name, it.description, it.enabled) })
     put("fields", assistantSettingsSchema()); put("clearable", buildJsonArray { clearableAssistantFields.forEach { add(it) } })
     put("security", "Секреты скрыты как ••••. Это можно изменить только вручную в настройках. Правила подтверждений, разрешений, HARDLINE, root и прочие параметры безопасности инструмент недоступны.")
-}
+}.let(::redactCatalogValues).jsonObject
 
 private fun references(assistant: Assistant, settings: Settings, external: AssistantManagerCatalog): JsonObject = buildJsonObject {
     assistant.chatModelId?.let { id -> put("chatModel", buildJsonObject {
@@ -521,4 +652,4 @@ private fun references(assistant: Assistant, settings: Settings, external: Assis
     names("modeInjectionIds", assistant.modeInjectionIds.map { it.toString() }, settings.modeInjections.map { it.id.toString() to it.name })
     names("lorebookIds", assistant.lorebookIds.map { it.toString() }, settings.lorebooks.map { it.id.toString() to it.name })
     names("enabledSkills", assistant.enabledSkills, external.skills.map { it.id to it.name })
-}
+}.let(::redactCatalogValues).jsonObject

@@ -7,6 +7,7 @@ import me.rerere.ai.provider.CustomHeader
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.ai.tools.prepareManagementToolApproval
 import me.rerere.rikkahub.data.model.Assistant
 import org.junit.Assert.*
 import org.junit.Test
@@ -25,10 +26,10 @@ class ManageAssistantsToolTest {
             transform(settings).also { settings = it; writes++ }
         }, catalog = { catalog }, caller = AssistantManagerCaller(currentAssistantId = { owner.id }, switchAssistant = { id ->
             require(settings.assistants.any { it.id == id }); settings = settings.copy(assistantId = id)
-        }))
-        suspend fun call(action: String, id: Uuid? = null, patch: JsonObject? = null): JsonObject = engine.execute(buildJsonObject {
+        }), dependencies = { AssistantManagerDependencies() })
+        suspend fun call(action: String, id: Uuid? = null, patch: JsonObject? = null): JsonObject = engine.execute(prepareManagementToolApproval("manage_assistants", buildJsonObject {
             put("action", action); id?.let { put("assistant_id", it.toString()) }; patch?.let { put("settings", it) }
-        })
+        }, settings))
     }
 
     @Test fun `schema and get cover every assistant field`() = runBlocking {
@@ -275,7 +276,7 @@ class ManageAssistantsToolTest {
         val raceEngine = AssistantManagerEngine(readSettings = { f.settings }, updateSettings = { transform ->
             f.settings = f.settings.copy(assistants = listOf(other), assistantId = other.id)
             transform(f.settings).also { f.settings = it }
-        }, catalog = { f.catalog }, caller = AssistantManagerCaller({ f.owner.id }, {}))
+        }, catalog = { f.catalog }, caller = AssistantManagerCaller({ f.owner.id }, {}), dependencies = { AssistantManagerDependencies() })
         val args = buildJsonObject { put("action", "delete"); put("assistant_id", other.id.toString()) }
         assertEquals("PROTECTED_ASSISTANT", raceEngine.execute(args)["error"]!!.jsonPrimitive.content)
         assertEquals(listOf(other), f.settings.assistants)

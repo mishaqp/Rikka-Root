@@ -24,7 +24,7 @@ internal object SensitiveContentDetector {
 
     /** Common API-key / token shapes (Stripe, GitHub, Slack, AWS, generic `sk-…`). */
     private val API_KEY_SHAPED = Regex(
-        """\b(?:sk-[A-Za-z0-9]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_\-]{20,})\b"""
+        """\b(?:sk-(?:proj|svcacct)-[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])|(?:sk-[A-Za-z0-9]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_\-]{20,})\b)"""
     )
 
     /** A long opaque base64-ish blob (>=40 chars). Catches generic encoded payloads. */
@@ -37,6 +37,10 @@ internal object SensitiveContentDetector {
     private val EMAIL_PASS = Regex("""[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}:\S{6,}""")
 
     enum class Category { JWT, API_KEY, CREDIT_CARD, EMAIL_PASSWORD, LONG_OPAQUE_BLOB }
+
+    /** Mask only recognized API keys and JWTs, leaving opaque identifiers and other data intact. */
+    fun maskApiAndJwt(text: String): String =
+        API_KEY_SHAPED.replace(JWT.replace(text, "••••"), "••••")
 
     /**
      * Scan [text] and return the categories matched. Caller decides what to do with

@@ -127,7 +127,15 @@ class LocalTools(
                             AssistantManagerOption(localToolId(it.option), it.title(context), it.description(context))
                         },
                     )
-                }, caller = caller))
+                }, caller = caller, dependencies = { id ->
+                    val owner = id.toString()
+                    AssistantManagerDependencies(
+                        conversations = get().get<me.rerere.rikkahub.data.repository.ConversationRepository>().countOfAssistant(id),
+                        memories = get().get<me.rerere.rikkahub.data.repository.MemoryRepository>().countOfAssistant(owner),
+                        cronJobs = get().get<me.rerere.rikkahub.data.repository.ScheduledJobRepository>().countOfAssistant(owner),
+                        workflows = get().get<me.rerere.rikkahub.workflow.repository.WorkflowRepository>().countReferencingAssistant(owner),
+                    )
+                }, ownershipGuard = get().get<me.rerere.rikkahub.data.repository.AssistantOwnershipGuard>()))
         }
         if (LocalToolOption.ManageAppSettings in options) {
             add(LocalToolOption.ManageAppSettings, buildManageAppSettingsTool(settingsStore, context))

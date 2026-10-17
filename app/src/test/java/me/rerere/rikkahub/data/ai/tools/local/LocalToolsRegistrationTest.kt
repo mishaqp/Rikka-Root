@@ -148,6 +148,12 @@ class LocalToolsRegistrationTest {
                 SshCredentialStore(File(appContext.noBackupFilesDir, "ssh.enc"), Json) { key })
             startKoin {
                 modules(module {
+                    single {
+                        me.rerere.rikkahub.data.repository.AssistantOwnershipGuard { owner ->
+                            val live = settings.settingsFlow.value
+                            !live.init && live.assistants.any { it.id.toString() == owner }
+                        }
+                    }
                     single { manager }
                     single { secrets }
                     single { McpToolSecretSanitizer(secrets) }

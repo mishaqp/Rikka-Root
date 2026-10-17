@@ -52,8 +52,11 @@ class ConversationRepository(
     private val messageFtsManager: MessageFtsManager,
     private val sshToolSecrets: SshToolSecretSanitizer? = null,
     private val mcpSecretSanitizer: McpToolSecretSanitizer? = null,
+    private val ownershipGuard: AssistantOwnershipGuard? = null,
 ) {
     private val historyLoads = java.util.concurrent.ConcurrentHashMap<String, HistoryLoadState>()
+    suspend fun countOfAssistant(assistantId: Uuid): Int = conversationDAO.countOfAssistant(assistantId.toString())
+
     internal val attachmentReferences = AttachmentReferenceCoordinator()
 
     /** Also reject reconstructed snapshots of an ID whose latest load failed. */
@@ -452,12 +455,14 @@ class ConversationRepository(
         requireWritableHistory(conversation)
         val safeConversation = sanitizeSshConversation(conversation, sshToolSecrets, mcpSecretSanitizer)
         attachmentReferences.withFileReservation(safeConversation.files.map { it.toString() }) {
-            database.withTransaction {
-                conversationDAO.insert(
-                    conversationToConversationEntity(safeConversation)
-                )
-                saveMessageNodes(safeConversation.id.toString(), safeConversation.messageNodes)
-                attachmentReferences.conversationWritten(safeConversation.id)
+            withAssistantOwnership(ownershipGuard, safeConversation.assistantId.toString()) {
+                database.withTransaction {
+                    conversationDAO.insert(
+                        conversationToConversationEntity(safeConversation)
+                    )
+                    saveMessageNodes(safeConversation.id.toString(), safeConversation.messageNodes)
+                    attachmentReferences.conversationWritten(safeConversation.id)
+                }
             }
             messageFtsManager.indexConversation(safeConversation)
         }
@@ -467,14 +472,16 @@ class ConversationRepository(
         requireWritableHistory(conversation)
         val safeConversation = sanitizeSshConversation(conversation, sshToolSecrets, mcpSecretSanitizer)
         attachmentReferences.withFileReservation(safeConversation.files.map { it.toString() }) {
-            database.withTransaction {
-                conversationDAO.update(
-                    conversationToConversationEntity(safeConversation)
-                )
-                // 删除旧的节点，插入新的节点
-                messageNodeDAO.deleteByConversation(conversation.id.toString())
-                saveMessageNodes(safeConversation.id.toString(), safeConversation.messageNodes)
-                attachmentReferences.conversationWritten(safeConversation.id)
+            withAssistantOwnership(ownershipGuard, safeConversation.assistantId.toString()) {
+                database.withTransaction {
+                    conversationDAO.update(
+                        conversationToConversationEntity(safeConversation)
+                    )
+                    // 删除旧的节点，插入新的节点
+                    messageNodeDAO.deleteByConversation(conversation.id.toString())
+                    saveMessageNodes(safeConversation.id.toString(), safeConversation.messageNodes)
+                    attachmentReferences.conversationWritten(safeConversation.id)
+                }
             }
             messageFtsManager.indexConversation(safeConversation)
         }
@@ -487,21 +494,23 @@ class ConversationRepository(
         val previous = previousNodes.orEmpty().withIndex().associateBy { it.value.id }
         val retainedIds = safe.messageNodes.mapTo(hashSetOf()) { it.id }
         attachmentReferences.withFileReservation(safe.files.map { it.toString() }) {
-            database.withTransaction {
-                conversationDAO.update(conversationToConversationEntity(safe))
-                if (previousNodes == null) {
-                    // The first chunk can include repairs not yet committed to Room. Replace
-                    // those rows transactionally, but defer the derived search index to final save.
-                    messageNodeDAO.deleteByConversation(safe.id.toString())
-                } else for (removed in previousNodes) if (removed.id !in retainedIds) messageNodeDAO.deleteById(removed.id.toString())
-                val changed = safe.messageNodes.mapIndexedNotNull { index, node ->
-                    val old = previous[node.id]
-                    if (old?.index == index && old.value == node) null else MessageNodeEntity(
-                        id = node.id.toString(), conversationId = safe.id.toString(), nodeIndex = index,
-                        messages = JsonInstant.encodeToString(node.messages), selectIndex = node.selectIndex)
+            withAssistantOwnership(ownershipGuard, safe.assistantId.toString()) {
+                database.withTransaction {
+                    conversationDAO.update(conversationToConversationEntity(safe))
+                    if (previousNodes == null) {
+                        // The first chunk can include repairs not yet committed to Room. Replace
+                        // those rows transactionally, but defer the derived search index to final save.
+                        messageNodeDAO.deleteByConversation(safe.id.toString())
+                    } else for (removed in previousNodes) if (removed.id !in retainedIds) messageNodeDAO.deleteById(removed.id.toString())
+                    val changed = safe.messageNodes.mapIndexedNotNull { index, node ->
+                        val old = previous[node.id]
+                        if (old?.index == index && old.value == node) null else MessageNodeEntity(
+                            id = node.id.toString(), conversationId = safe.id.toString(), nodeIndex = index,
+                            messages = JsonInstant.encodeToString(node.messages), selectIndex = node.selectIndex)
+                    }
+                    if (changed.isNotEmpty()) messageNodeDAO.insertAll(changed)
+                    attachmentReferences.conversationWritten(safe.id)
                 }
-                if (changed.isNotEmpty()) messageNodeDAO.insertAll(changed)
-                attachmentReferences.conversationWritten(safe.id)
             }
         }
     }
@@ -620,7 +629,9 @@ class ConversationRepository(
 
     suspend fun updateConversationAssistant(conversationId: Uuid, assistantId: Uuid) {
         requireWritableId(conversationId)
-        conversationDAO.updateAssistantId(conversationId.toString(), assistantId.toString())
+        withAssistantOwnership(ownershipGuard, assistantId.toString()) {
+            conversationDAO.updateAssistantId(conversationId.toString(), assistantId.toString())
+        }
     }
 
     /**

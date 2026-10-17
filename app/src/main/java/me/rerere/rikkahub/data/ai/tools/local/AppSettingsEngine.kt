@@ -24,10 +24,10 @@ internal data class AppSettingChange(
     val beforeLabel: String = readableSettingValue(before),
     val afterLabel: String = readableSettingValue(after),
 ) {
-    val description: String get() = "$title: $beforeLabel → $afterLabel"
+    val description: String get() = "$title: ${publicAppSettingText(beforeLabel)} → ${publicAppSettingText(afterLabel)}"
     fun toJson(): JsonObject = buildJsonObject {
-        put("key", key); put("title", title); put("before", before); put("after", after)
-        put("before_label", beforeLabel); put("after_label", afterLabel); put("description", description)
+        put("key", key); put("title", title); put("before", publicAppSettingValue(before)); put("after", publicAppSettingValue(after))
+        put("before_label", publicAppSettingText(beforeLabel)); put("after_label", publicAppSettingText(afterLabel)); put("description", description)
     }
 }
 
@@ -42,8 +42,8 @@ internal data class AppSettingsChangePreview(
 ) {
     val description: String get() = changes.joinToString("\n") { it.description }
     fun toJson(): JsonObject = buildJsonObject {
-        put("key", key); put("title", title); put("before", before); put("after", after)
-        put("before_label", beforeLabel); put("after_label", afterLabel); put("description", description)
+        put("key", key); put("title", title); put("before", publicAppSettingValue(before)); put("after", publicAppSettingValue(after))
+        put("before_label", publicAppSettingText(beforeLabel)); put("after_label", publicAppSettingText(afterLabel)); put("description", description)
         put("changes", JsonArray(changes.map { it.toJson() }))
     }
 }
@@ -52,7 +52,7 @@ private fun readableSettingValue(value: JsonElement): String = when (value) {
     JsonNull -> "По умолчанию"
     JsonPrimitive(true) -> "Включено"
     JsonPrimitive(false) -> "Выключено"
-    else -> (value as? JsonPrimitive)?.content?.ifEmpty { "Пусто" } ?: value.toString()
+    else -> publicAppSettingText((value as? JsonPrimitive)?.content?.ifEmpty { "Пусто" } ?: value.toString())
 }
 
 private class AppSettingsValidationException(val code: String, message: String) : IllegalArgumentException(message)
@@ -98,9 +98,9 @@ private data class AppSettingField(
     fun toJson(settings: Settings): JsonObject = buildJsonObject {
         put("key", key); put("title", title); put("type", type); put("nullable", nullable)
         val value = read(settings)
-        put("value", value); put("value_label", label(settings, value))
+        put("value", publicAppSettingValue(value)); put("value_label", publicAppSettingText(label(settings, value)))
         minimum?.let { put("minimum", it) }; maximum?.let { put("maximum", it) }
-        choices?.let { put("choices", JsonArray(it(settings))) }
+        choices?.let { put("choices", JsonArray(it(settings).map(::publicAppSettingValue))) }
     }
 }
 
@@ -312,16 +312,29 @@ private fun appSettingFields(themePreferences: AppThemePreferences?): List<AppSe
 private fun appSettingField(key: String, themePreferences: AppThemePreferences?): AppSettingField =
     appSettingFields(themePreferences).find { it.key == key } ?: manualSetting()
 
+internal fun appSettingsSecretMutationBlocked(settings: Settings, key: String, value: JsonElement, themePreferences: AppThemePreferences? = null): Boolean {
+    if (appSettingsContainsCredential(value)) return true
+    val before = runCatching { appSettingField(key, themePreferences).read(settings) }.getOrNull() ?: return false
+    return appSettingsContainsCredential(before) && value != APP_SETTINGS_SECRET_MASK
+}
+
 internal fun previewAppSettingsChange(settings: Settings, key: String, value: JsonElement, themePreferences: AppThemePreferences? = null): AppSettingsChangePreview {
     if (settings.init) rejectSetting("settings_not_ready", "Настройки ещё загружаются. Повторите вызов после загрузки приложения.")
     val field = appSettingField(key, themePreferences)
-    field.validate(settings, value)
-    val before = field.read(settings)
-    val primary = AppSettingChange(key, field.title, before, value, field.label(settings, before), field.label(settings, value))
+    val rawBefore = field.read(settings)
+    if (appSettingsSecretMutationBlocked(settings, key, value, themePreferences)) manualSetting()
+    val protectedBefore = appSettingsContainsCredential(rawBefore)
+    if (!protectedBefore) field.validate(settings, value)
+    // A masked roundtrip is a no-op. Raw values stay in typed settings and never enter approval markers.
+    val effectiveValue = if (protectedBefore) rawBefore else value
+    val before = publicAppSettingValue(rawBefore)
+    val after = publicAppSettingValue(effectiveValue)
+    val primary = AppSettingChange(key, field.title, before, after,
+        publicAppSettingText(field.label(settings, rawBefore)), publicAppSettingText(field.label(settings, effectiveValue)))
     val changes = mutableListOf(primary)
     if (key.startsWith("display.") || key == "theme.glassTheme" || key == "language.appLanguageTag") {
         // Serialize only the ordinary display settings, never the complete Settings (credentials).
-        val changed = field.write(settings, value)
+        val changed = if (protectedBefore) settings else field.write(settings, value)
         val oldDisplay = JsonInstant.encodeToJsonElement(DisplaySetting.serializer(), settings.displaySetting)
         val newDisplay = JsonInstant.encodeToJsonElement(DisplaySetting.serializer(), changed.displaySetting)
         val fields = appSettingFields(themePreferences).associateBy { it.key }
@@ -346,13 +359,13 @@ internal fun previewAppSettingsChange(settings: Settings, key: String, value: Js
                         path.startsWith("display.assistantChatBubbleStyleOverrides") -> "Оформление ответов (${path.substringAfterLast('.')})"
                         else -> "Параметр оформления (${path.removePrefix("display.")})"
                     }
-                    changes += AppSettingChange(equivalentKey, title, old, new)
+                    changes += AppSettingChange(equivalentKey, title, publicAppSettingValue(old), publicAppSettingValue(new))
                 }
             }
         }
         collect("display", oldDisplay, newDisplay)
     }
-    return AppSettingsChangePreview(key, field.title, before, value, primary.beforeLabel, primary.afterLabel, changes)
+    return AppSettingsChangePreview(key, field.title, before, after, primary.beforeLabel, primary.afterLabel, changes)
 }
 
 /** Functional update always receives the latest persisted snapshot, including after approval. */
@@ -376,24 +389,24 @@ internal class AppSettingsEngine(
         val settings = snapshot()
         if (key != null) {
             val field = appSettingFields(themePreferences).find { it.key == key }
-            if (field == null) return@safely buildJsonObject { put("status", "error"); put("code", "manual_only"); put("key", key); put("value", "••••"); put("message", APP_SETTINGS_MANUAL_ONLY) }
+            if (field == null) return@safely buildJsonObject { put("status", "error"); put("code", "manual_only"); put("key", publicAppSettingText(key)); put("value", "••••"); put("message", APP_SETTINGS_MANUAL_ONLY) }
             return@safely buildJsonObject { put("status", "ok"); put("setting", field.toJson(settings)) }
         }
-        if (section !in appSettingsSections) return@safely buildJsonObject { put("status", "error"); put("code", "manual_only"); put("section", section); put("value", "••••"); put("message", APP_SETTINGS_MANUAL_ONLY) }
+        if (section !in appSettingsSections) return@safely buildJsonObject { put("status", "error"); put("code", "manual_only"); put("section", section?.let(::publicAppSettingText)); put("value", "••••"); put("message", APP_SETTINGS_MANUAL_ONLY) }
         buildJsonObject {
             put("status", "ok"); put("section", section); put("title", appSettingsSections.getValue(section!!))
             put("settings", JsonArray(appSettingFields(themePreferences).filter { it.section == section }.map { it.toJson(settings) }))
             when (section) {
                 "models" -> put("available_models", buildJsonArray { settings.providers.forEach { provider -> provider.models.forEach { model -> add(buildJsonObject {
-                    put("id", model.id.toString()); put("name", model.displayName.ifBlank { model.modelId }); put("model_id", model.modelId)
-                    put("provider_id", provider.id.toString()); put("provider_name", provider.name)
+                    put("id", model.id.toString()); put("name", publicAppSettingText(model.displayName.ifBlank { model.modelId })); put("model_id", publicAppSettingText(model.modelId))
+                    put("provider_id", provider.id.toString()); put("provider_name", publicAppSettingText(provider.name))
                 }) } } })
-                "search" -> put("available_services", buildJsonArray { settings.searchServices.forEach { add(buildJsonObject { put("id", it.id.toString()); put("name", it.displayName) }) } })
+                "search" -> put("available_services", buildJsonArray { settings.searchServices.forEach { add(buildJsonObject { put("id", it.id.toString()); put("name", publicAppSettingText(it.displayName)) }) } })
                 "speech" -> {
-                    put("available_tts", buildJsonArray { settings.ttsProviders.forEach { add(buildJsonObject { put("id", it.id.toString()); put("name", it.name) }) } })
-                    put("available_asr", buildJsonArray { settings.asrProviders.forEach { add(buildJsonObject { put("id", it.id.toString()); put("name", it.name) }) } })
+                    put("available_tts", buildJsonArray { settings.ttsProviders.forEach { add(buildJsonObject { put("id", it.id.toString()); put("name", publicAppSettingText(it.name)) }) } })
+                    put("available_asr", buildJsonArray { settings.asrProviders.forEach { add(buildJsonObject { put("id", it.id.toString()); put("name", publicAppSettingText(it.name)) }) } })
                 }
-                "theme" -> put("available_custom_themes", buildJsonArray { settings.customThemes.forEach { add(buildJsonObject { put("id", it.id); put("name", it.name) }) } })
+                "theme" -> put("available_custom_themes", buildJsonArray { settings.customThemes.forEach { add(buildJsonObject { put("id", publicAppSettingText(it.id)); put("name", publicAppSettingText(it.name)) }) } })
             }
         }
     }
@@ -401,6 +414,7 @@ internal class AppSettingsEngine(
     fun previewSet(key: String, value: JsonElement): AppSettingsChangePreview = previewAppSettingsChange(snapshot(), key, value, themePreferences)
 
     suspend fun set(key: String, value: JsonElement, expectedBefore: JsonElement?, expectedPreview: JsonObject? = null): JsonObject = safelySuspend {
+        if (expectedPreview?.get(APP_SETTINGS_SECRET_EDIT_BLOCKED) == JsonPrimitive(true)) manualSetting()
         val preview = previewSet(key, value)
         if (expectedBefore == null) rejectSetting("approval_required", "Изменение настроек требует нового одобрения пользователя.")
         if (preview.before != expectedBefore) stalePreview()
@@ -409,6 +423,13 @@ internal class AppSettingsEngine(
     }
 
     suspend fun applyApproved(preview: AppSettingsChangePreview): JsonObject = safelySuspend {
+        val current = snapshot()
+        if (preview.after == APP_SETTINGS_SECRET_MASK && appSettingsContainsCredential(appSettingField(preview.key, themePreferences).read(current))) {
+            val fresh = previewAppSettingsChange(current, preview.key, preview.after, themePreferences)
+            if (fresh.changes != preview.changes) stalePreview()
+            // Preserve even a freshly rotated secret; a masked no-op performs no Settings write.
+            return@safelySuspend savedResult(current, fresh, unchanged = true)
+        }
         val saved = if (preview.key in setOf("theme.colorMode", "theme.amoledDark")) {
             val preferences = themePreferences ?: manualSetting()
             val current = snapshot()
@@ -418,12 +439,19 @@ internal class AppSettingsEngine(
         } else update { current ->
             val fresh = previewAppSettingsChange(current, preview.key, preview.after, themePreferences)
             if (fresh.changes != preview.changes) stalePreview()
-            appSettingField(preview.key, themePreferences).write(current, fresh.after)
+            val field = appSettingField(preview.key, themePreferences)
+            // A literal mask can become a protected value between snapshot and this transaction.
+            // The public diff may still match; preserve the trusted current value instead of writing the mask.
+            if (preview.after == APP_SETTINGS_SECRET_MASK && appSettingsContainsCredential(field.read(current))) current
+            else field.write(current, fresh.after)
         }
-        buildJsonObject {
+        savedResult(saved, preview)
+    }
+
+    private fun savedResult(saved: Settings, preview: AppSettingsChangePreview, unchanged: Boolean = false): JsonObject = buildJsonObject {
             put("status", "ok"); put("change", preview.toJson())
-            put("setting", appSettingField(preview.key, themePreferences).toJson(saved)); put("message", "Настройка сохранена.")
-        }
+            put("setting", appSettingField(preview.key, themePreferences).toJson(saved))
+            put("message", if (unchanged) "Скрытое значение сохранено без изменений." else "Настройка сохранена.")
     }
 }
 

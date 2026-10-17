@@ -6,7 +6,11 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import me.rerere.rikkahub.data.ai.tools.local.previewAppSettingsChange
 import me.rerere.rikkahub.data.ai.tools.local.manageAssistantsApprovalDescription
+import me.rerere.rikkahub.data.ai.tools.local.prepareAssistantManagementApproval
 import me.rerere.rikkahub.data.ai.tools.local.AppThemePreferences
+import me.rerere.rikkahub.data.ai.tools.local.APP_SETTINGS_SECRET_EDIT_BLOCKED
+import me.rerere.rikkahub.data.ai.tools.local.appSettingsSecretMutationBlocked
+import me.rerere.rikkahub.data.ai.tools.local.publicAppSettingValue
 import me.rerere.rikkahub.data.datastore.Settings
 
 internal fun isManagementTool(name: String): Boolean =
@@ -27,15 +31,22 @@ internal fun managementToolNeedsApproval(name: String, input: JsonElement): Bool
 internal fun prepareManagementToolApproval(
     name: String, input: JsonElement, settings: Settings, themePreferences: AppThemePreferences? = null,
 ): JsonElement {
+    if (name == "manage_assistants") return prepareAssistantManagementApproval(input, settings)
     if (name != "manage_app_settings") return input
     val args = input as? JsonObject ?: return input
     val clean = args - setOf("_expected_before", "_approval_preview")
     if ((clean["action"] as? JsonPrimitive)?.contentOrNull != "set") return JsonObject(clean)
+    val key = (clean["key"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+    val value = clean["value"]
+    if (key != null && value != null && appSettingsSecretMutationBlocked(settings, key, value, themePreferences)) {
+        // Never store rejected incoming credentials or accidentally turn their public mask into a write.
+        return JsonObject((publicAppSettingValue(JsonObject(clean)) as JsonObject) + mapOf(
+            "_approval_preview" to JsonObject(mapOf(APP_SETTINGS_SECRET_EDIT_BLOCKED to JsonPrimitive(true))),
+        ))
+    }
     val preview = runCatching {
-        val key = (clean["key"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
-            ?: error("Укажите ключ настройки.")
-        val value = clean["value"] ?: error("Укажите новое значение.")
-        previewAppSettingsChange(settings, key, value, themePreferences)
+        previewAppSettingsChange(settings, key ?: error("Укажите ключ настройки."),
+            value ?: error("Укажите новое значение."), themePreferences)
     }.getOrNull() ?: return JsonObject(clean)
     return JsonObject(clean + mapOf(
         "_expected_before" to preview.before,

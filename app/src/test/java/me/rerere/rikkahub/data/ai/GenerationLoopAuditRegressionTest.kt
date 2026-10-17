@@ -54,6 +54,32 @@ import org.junit.rules.TemporaryFolder
 class GenerationLoopAuditRegressionTest {
     @get:Rule val folder = TemporaryFolder()
 
+    @Test fun `assistant mutations prepare a trusted snapshot before automatic execution`() = runBlocking {
+        Fixture(folder.newFolder(), call("manage_assistants", """{"action":"update"}""")).use { fixture ->
+            var executed = false
+            fixture.collect(listOf(Tool("manage_assistants", "Управление ассистентами", needsApproval = { true }, execute = { args ->
+                assertTrue(args.toString(), args.toString().contains("trusted-snapshot"))
+                executed = true
+                listOf(UIMessagePart.Text("Готово"))
+            })), approveEverything = true,
+                prepareApproval = { _, _ -> buildJsonObject { put("_expected_before", "trusted-snapshot") } })
+            assertTrue(executed)
+        }
+    }
+
+    @Test fun `assistant mutations prepare a trusted snapshot in a pending approval card`() = runBlocking {
+        Fixture(folder.newFolder(), call("manage_assistants", """{"action":"update"}""")).use { fixture ->
+            fixture.collect(listOf(Tool("manage_assistants", "Управление ассистентами", needsApproval = { true }, execute = {
+                fail("Pending mutation must not execute")
+                emptyList()
+            })), autoApproved = { _, _ -> false },
+                prepareApproval = { _, _ -> buildJsonObject { put("_expected_before", "trusted-snapshot") } })
+            val tool = fixture.latest.last().getTools().single()
+            assertTrue(tool.isPending)
+            assertTrue(tool.input, tool.input.contains("trusted-snapshot"))
+        }
+    }
+
     @Test fun `1 headless prompt tool then final text succeeds and counts actual steps`() = runBlocking {
         for (origin in listOf(RunOrigin.CRON, RunOrigin.SUB_AGENT, RunOrigin.WORKFLOW)) {
             Fixture(folder.newFolder(), call("read_only_tool")).use { fixture ->
@@ -400,10 +426,12 @@ class GenerationLoopAuditRegressionTest {
         private val loop = GenerationLoop(context, ProviderManager(client, context), Json { ignoreUnknownKeys = true })
         suspend fun collect(tools: List<Tool>, messages: List<UIMessage> = listOf(UIMessage.user("Проверь")),
             maxSteps: Int = 3, autoApproved: suspend (String, JsonElement) -> Boolean = { _, _ -> true },
-            approveEverything: Boolean = false) {
+            approveEverything: Boolean = false,
+            prepareApproval: (String, JsonElement) -> JsonElement = { _, args -> args }) {
             latest = messages
             loop.generateText(settings, model, messages, assistant = owner, tools = tools, maxSteps = maxSteps,
-                isToolAutoApproved = autoApproved, approveEverything = { approveEverything }).collect { chunk -> when (chunk) {
+                isToolAutoApproved = autoApproved, approveEverything = { approveEverything },
+                prepareToolApproval = prepareApproval).collect { chunk -> when (chunk) {
                 is GenerationChunk.Messages -> { latest = chunk.messages; snapshots += latest }
                 is GenerationChunk.RootExecutionCheckpoint -> { latest = chunk.messages; chunk.ack.complete(Unit) }
             } }

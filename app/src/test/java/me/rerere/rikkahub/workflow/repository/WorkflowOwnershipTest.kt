@@ -81,6 +81,8 @@ class WorkflowOwnershipTest {
 
 internal class MemoryWorkflowDao : WorkflowDao {
     val rows = MutableStateFlow<List<WorkflowEntity>>(emptyList())
+    override suspend fun countReferencingAssistant(assistantId: String) =
+        rows.value.count { it.definitionJson.contains(assistantId) }
     override fun observeAll(): Flow<List<WorkflowEntity>> = rows
     override suspend fun listAll() = rows.value
     override suspend fun listEnabled() = rows.value.filter { it.enabled }

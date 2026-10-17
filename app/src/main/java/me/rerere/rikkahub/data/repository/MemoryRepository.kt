@@ -8,7 +8,12 @@ import me.rerere.rikkahub.data.model.AssistantMemory
 
 class MemoryNotFoundException : IllegalStateException("Запись памяти не найдена. Проверьте id в памяти текущего ассистента.")
 
-class MemoryRepository(private val memoryDAO: MemoryDAO) {
+class MemoryRepository(
+    private val memoryDAO: MemoryDAO,
+    private val ownershipGuard: AssistantOwnershipGuard? = null,
+) {
+    suspend fun countOfAssistant(assistantId: String): Int = memoryDAO.countOfAssistant(assistantId)
+
     companion object {
         const val GLOBAL_MEMORY_ID = "__global__"
     }
@@ -63,12 +68,12 @@ class MemoryRepository(private val memoryDAO: MemoryDAO) {
             content = content,
         )
         val newMemory = memory.copy(
-            id = memoryDAO.insertMemory(
+            id = withAssistantOwnership(ownershipGuard, assistantId.takeUnless { it == GLOBAL_MEMORY_ID }) { memoryDAO.insertMemory(
                 MemoryEntity(
                     assistantId = assistantId,
                     content = memory.content
                 )
-            ).toInt()
+            ).toInt() }
         )
         return newMemory
     }
@@ -76,9 +81,11 @@ class MemoryRepository(private val memoryDAO: MemoryDAO) {
     suspend fun copyMemories(fromAssistantId: String, toAssistantId: String) {
         val memories = memoryDAO.getMemoriesOfAssistant(fromAssistantId)
         if (memories.isEmpty()) return
-        memoryDAO.insertMemories(
-            memories.map { MemoryEntity(assistantId = toAssistantId, content = it.content) }
-        )
+        withAssistantOwnership(ownershipGuard, toAssistantId.takeUnless { it == GLOBAL_MEMORY_ID }) {
+            memoryDAO.insertMemories(
+                memories.map { MemoryEntity(assistantId = toAssistantId, content = it.content) }
+            )
+        }
     }
 
     suspend fun deleteMemory(id: Int) {

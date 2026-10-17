@@ -21,6 +21,22 @@ class SensitiveContentDetectorTest {
         assertTrue(cats(k).contains(SensitiveContentDetector.Category.API_KEY))
     }
 
+    @Test fun `modern OpenAI project and service account keys are API keys and fully masked`() {
+        for (key in listOf("sk-proj-" + "a".repeat(48), "sk-svcacct-" + "aB9_".repeat(12) + "-Zx7")) {
+            val hits = cats("Value: $key.")
+            assertTrue("Modern key must be classified as API_KEY", hits.contains(SensitiveContentDetector.Category.API_KEY))
+            assertFalse("API_KEY must suppress generic blob classification", hits.contains(SensitiveContentDetector.Category.LONG_OPAQUE_BLOB))
+            assertEquals("Value: ••••.", SensitiveContentDetector.mask("Value: $key."))
+        }
+    }
+
+    @Test fun `modern OpenAI prefixes without key material are not API keys`() {
+        for (text in listOf("sk-proj-", "sk-svcacct-", "sk-proj-short", "sk-svcacct-short")) {
+            assertFalse(text, cats(text).contains(SensitiveContentDetector.Category.API_KEY))
+            assertEquals(text, SensitiveContentDetector.mask(text))
+        }
+    }
+
     @Test fun `detects GitHub token`() {
         val k = "ghp_aZbYcXdWeVfUgThSiRjQkPlOmNnMlOkPj"
         assertTrue(cats(k).contains(SensitiveContentDetector.Category.API_KEY))

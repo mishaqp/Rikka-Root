@@ -14,6 +14,8 @@ import me.rerere.rikkahub.workflow.model.WorkflowDefinition
 import me.rerere.rikkahub.workflow.model.WorkflowJson
 import me.rerere.rikkahub.workflow.model.WorkflowRun
 import me.rerere.rikkahub.workflow.model.WorkflowRunStatus
+import me.rerere.rikkahub.data.repository.AssistantOwnershipGuard
+import me.rerere.rikkahub.data.repository.withAssistantOwnership
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -34,6 +36,7 @@ class WorkflowRepository(
     private val workflowDao: WorkflowDao,
     private val workflowRunDao: WorkflowRunDao,
     private val database: me.rerere.rikkahub.workflow.db.WorkflowDatabase? = null,
+    private val ownershipGuard: AssistantOwnershipGuard? = null,
     private val sanitizeDefinition: (WorkflowDefinition) -> WorkflowDefinition,
 ) {
 
@@ -61,6 +64,8 @@ class WorkflowRepository(
     }
 
     data class Loaded(val entity: WorkflowEntity, val definition: WorkflowDefinition)
+
+    suspend fun countReferencingAssistant(assistantId: String): Int = workflowDao.countReferencingAssistant(assistantId)
 
     /** (id, updatedAtMs) → parsed definition. */
     private val parseCache = androidx.collection.LruCache<String, Pair<Long, WorkflowDefinition>>(200)
@@ -114,16 +119,18 @@ class WorkflowRepository(
             // Preserve last-run state across upsert by reading the current row first; a fresh
             // create will simply find null and use defaults below.
         )
-        val existing = workflowDao.getById(definition.id)
-        val merged = if (existing != null) entity.copy(
-            createdAtMs = existing.createdAtMs,    // creation time is immutable
-            lastRunAtMs = existing.lastRunAtMs,
-            lastRunStatus = existing.lastRunStatus,
-            lastRunError = existing.lastRunError,
-            runsTodayCount = existing.runsTodayCount,
-            runsTodayDate = existing.runsTodayDate,
-        ) else entity
-        workflowDao.upsert(merged)
+        withAssistantOwnership(ownershipGuard, definition.authoringAssistantId) {
+            val existing = workflowDao.getById(definition.id)
+            val merged = if (existing != null) entity.copy(
+                createdAtMs = existing.createdAtMs,    // creation time is immutable
+                lastRunAtMs = existing.lastRunAtMs,
+                lastRunStatus = existing.lastRunStatus,
+                lastRunError = existing.lastRunError,
+                runsTodayCount = existing.runsTodayCount,
+                runsTodayDate = existing.runsTodayDate,
+            ) else entity
+            workflowDao.upsert(merged)
+        }
     }
 
     suspend fun setEnabled(id: String, enabled: Boolean) {

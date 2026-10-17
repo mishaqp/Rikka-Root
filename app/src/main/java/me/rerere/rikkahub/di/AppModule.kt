@@ -68,7 +68,7 @@ val appModule = module {
         val context = get<android.content.Context>().applicationContext
         me.rerere.rikkahub.service.MessageQueueStore({ java.io.File(context.noBackupFilesDir, "pending-messages") }, get<CronPayloadCipher>())
     }
-    single { ScheduledJobRepository(get(), get()) }
+    single { ScheduledJobRepository(get(), get(), ownershipGuard = get()) }
     single { ScheduledJobRunRepository(get()) }
     single { CronJobScheduler(get(), get(), get(), get()) }
     single { me.rerere.rikkahub.automation.ExternalAutomationConfig(get()) }

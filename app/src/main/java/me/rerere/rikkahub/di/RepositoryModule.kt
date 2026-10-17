@@ -1,6 +1,11 @@
 package me.rerere.rikkahub.di
 
 import android.content.Context
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.repository.AssistantOwnershipGuard
 import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.SkillManager
@@ -21,7 +26,14 @@ import java.io.File
 
 val repositoryModule = module {
     single {
-        ConversationRepository(get(), get(), get(), get(), get(), get(), get(), get())
+        // Resolve SettingsStore only during a write; guard construction has no repository cycle.
+        AssistantOwnershipGuard { owner ->
+            val live = withContext(Dispatchers.IO) { get<SettingsStore>().settingsFlowRaw.first() }
+            !live.init && live.assistants.any { it.id.toString() == owner }
+        }
+    }
+    single {
+        ConversationRepository(get(), get(), get(), get(), get(), get(), get(), get(), ownershipGuard = get())
     }
 
     single {
@@ -29,7 +41,7 @@ val repositoryModule = module {
     }
 
     single {
-        MemoryRepository(get())
+        MemoryRepository(get(), ownershipGuard = get())
     }
 
     single {

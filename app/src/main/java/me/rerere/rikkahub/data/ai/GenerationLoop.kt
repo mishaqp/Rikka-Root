@@ -324,7 +324,7 @@ class GenerationLoop(
                         tool.approvalState is ToolApprovalState.Auto && toolDef != null && needsApproval(tool, toolDef) -> {
                             hasPendingApproval = true
                             tool.copy(
-                                input = if (tool.toolName == "manage_app_settings")
+                                input = if (tool.toolName in setOf("manage_app_settings", "manage_assistants"))
                                     prepareToolApproval(tool.toolName, tool.inputAsJson()).toString() else tool.input,
                                 approvalState = ToolApprovalState.Pending,
                             )
@@ -441,14 +441,14 @@ class GenerationLoop(
                             ) {
                                 // Live revocation must also cover resumed/mixed batches.
                                 executedTools += tool.copy(
-                                    input = if (tool.toolName == "manage_app_settings")
+                                    input = if (tool.toolName in setOf("manage_app_settings", "manage_assistants"))
                                         prepareToolApproval(tool.toolName, parsedArgs).toString() else tool.input,
                                     approvalState = ToolApprovalState.Pending,
                                 )
                                 return@forEach
                             }
                             // Automatic settings changes still need the runtime-built preview it verifies.
-                            val args = if (tool.toolName == "manage_app_settings" && tool.approvalState == ToolApprovalState.Auto)
+                            val args = if (tool.toolName in setOf("manage_app_settings", "manage_assistants") && tool.approvalState == ToolApprovalState.Auto)
                                 prepareToolApproval(tool.toolName, parsedArgs) else parsedArgs
                             Log.i(TAG, "generateText: executing tool ${toolDef.name}")
                             suspend fun persistStarted(started: UIMessagePart.Tool) {

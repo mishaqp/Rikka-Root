@@ -9,6 +9,9 @@ import me.rerere.rikkahub.data.db.entity.MemoryEntity
 
 @Dao
 interface MemoryDAO {
+    @Query("SELECT COUNT(*) FROM memoryentity WHERE assistant_id = :assistantId")
+    suspend fun countOfAssistant(assistantId: String): Int
+
     @Query("SELECT * FROM memoryentity WHERE assistant_id = :assistantId")
     fun getMemoriesOfAssistantFlow(assistantId: String): Flow<List<MemoryEntity>>
 
