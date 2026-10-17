@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="setting_mcp_page_additional_server_approval">Дополнительное подтверждение сервера</string>
+    <string name="setting_mcp_page_additional_server_approval_explanation">Выключение этого флага не отменяет общую политику разрешений инструментов. Сохранённые разрешения и режим «Я ГЛУПЫЙ» работают как прежде.</string>
+</resources>
