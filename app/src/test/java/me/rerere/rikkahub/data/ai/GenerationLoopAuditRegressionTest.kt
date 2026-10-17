@@ -91,6 +91,28 @@ class GenerationLoopAuditRegressionTest {
         }
     }
 
+    @Test fun `review I am stupid mode runs mandatory confirmations without asking`() = runBlocking {
+        Fixture(folder.newFolder(), call("send_sms", """{"phone":"+70000000000","body":"тест"}""")).use { fixture ->
+            var sent = 0
+            fixture.collect(listOf(Tool("send_sms", "test", needsApproval = { true }, execute = {
+                sent++; listOf(UIMessagePart.Text("sent"))
+            })), autoApproved = { _, _ -> false }, approveEverything = true)
+            assertEquals(1, sent)
+            assertTrue(fixture.snapshots.none { messages -> messages.any { m -> m.getTools().any { it.isPending } } })
+        }
+    }
+
+    @Test fun `review protected root commands still ask in I am stupid mode`() = runBlocking {
+        Fixture(folder.newFolder(), call("root_exec", """{"command":"setenforce 0"}""")).use { fixture ->
+            var effects = 0
+            fixture.collect(listOf(Tool("root_exec", "test", needsApproval = { true }, execute = {
+                effects++; listOf(UIMessagePart.Text("done"))
+            })), autoApproved = { _, _ -> true }, approveEverything = true)
+            assertEquals(0, effects)
+            assertTrue(fixture.latest.last().getTools().single().isPending)
+        }
+    }
+
     @Test fun `1 exhausted headless step limit remains a failure after tool execution`() = runBlocking {
         Fixture(folder.newFolder(), call("read_only_tool")).use { fixture ->
             val result = fixture.headless(listOf(Tool("read_only_tool", "test", execute = {
@@ -377,10 +399,11 @@ class GenerationLoopAuditRegressionTest {
         private val settings = Settings(providers = listOf(provider), assistants = listOf(owner))
         private val loop = GenerationLoop(context, ProviderManager(client, context), Json { ignoreUnknownKeys = true })
         suspend fun collect(tools: List<Tool>, messages: List<UIMessage> = listOf(UIMessage.user("Проверь")),
-            maxSteps: Int = 3, autoApproved: suspend (String, JsonElement) -> Boolean = { _, _ -> true }) {
+            maxSteps: Int = 3, autoApproved: suspend (String, JsonElement) -> Boolean = { _, _ -> true },
+            approveEverything: Boolean = false) {
             latest = messages
             loop.generateText(settings, model, messages, assistant = owner, tools = tools, maxSteps = maxSteps,
-                isToolAutoApproved = autoApproved).collect { chunk -> when (chunk) {
+                isToolAutoApproved = autoApproved, approveEverything = { approveEverything }).collect { chunk -> when (chunk) {
                 is GenerationChunk.Messages -> { latest = chunk.messages; snapshots += latest }
                 is GenerationChunk.RootExecutionCheckpoint -> { latest = chunk.messages; chunk.ack.complete(Unit) }
             } }

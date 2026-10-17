@@ -1096,6 +1096,7 @@ class ChatService(
                         me.rerere.rikkahub.data.ai.tools.local.appThemePreferences(context),
                     )
                 },
+                approveEverything = { toolApprovalPreferences.currentYolo() },
                 isToolAutoApproved = { toolName, input ->
                     resolveToolAutoApproval(toolApprovalPreferences, conversationId, toolName,
                         webContentSeen = chatToolFactory.hasWebContent(conversationId.toString()),

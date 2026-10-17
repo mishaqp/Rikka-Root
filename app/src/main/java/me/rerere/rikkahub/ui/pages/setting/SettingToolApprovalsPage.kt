@@ -223,7 +223,7 @@ fun SettingToolApprovalsPage(focusTool: String? = null) {
                         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text("Я ГЛУПЫЙ — автоодобрять всё", style = MaterialTheme.typography.titleMedium)
-                                Text(if (yolo) "Вкл. Инструменты выполняются автоматически. Запретные root-команды и вопросы пользователю требуют ответа."
+                                Text(if (yolo) "Вкл. В чате почти ничего не спрашивается. Остаются только защищённые root/Termux/SSH-команды и вопросы ИИ к вам."
                                     else "Выкл. Инструменты с побочными эффектами запрашивают одобрение перед запуском.",
                                     style = MaterialTheme.typography.bodySmall)
                             }

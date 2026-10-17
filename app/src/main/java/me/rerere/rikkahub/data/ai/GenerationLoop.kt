@@ -79,6 +79,9 @@ import kotlin.uuid.Uuid
 
 private const val TAG = "GenerationHandler"
 private const val MAX_TOOL_OUTPUT_CHARS = 32 * 1024
+private val PROTECTED_SHELL_TOOLS = setOf(
+    "root_exec", "ssh_exec", "ssh_exec_saved", "termux_run_command", "termux_session_start", "termux_session_send",
+)
 private const val TOOL_OUTPUT_PREVIEW_CHARS = 4 * 1024
 
 // 搜索结果的体积由用户设置的结果数决定，且结果列表 UI 与引用跳转都依赖完整的 JSON 结构，不参与截断
@@ -123,6 +126,9 @@ class GenerationLoop(
         onWebContentRead: suspend () -> Unit = {},
         onAutoCompress: suspend (List<UIMessage>) -> List<UIMessage>? = { null },
         isToolAutoApproved: suspend (toolName: String, input: JsonElement) -> Boolean = { _, _ -> false },
+        // «Я ГЛУПЫЙ» in an interactive chat: the user chose to never be asked, including for
+        // mandatory confirmations. HARDLINE blocks and ask_user questions still apply.
+        approveEverything: suspend () -> Boolean = { false },
         tokenBudget: TokenBudgetLedger? = null,
         prepareToolApproval: (String, JsonElement) -> JsonElement = { _, input -> input },
         beforeModelRequest: suspend () -> Unit = {},
@@ -144,8 +150,14 @@ class GenerationLoop(
 
         suspend fun needsApproval(tool: UIMessagePart.Tool, definition: Tool): Boolean {
             val args = tool.inputAsJson()
-            // These exceptions cannot be bypassed by YOLO, chat grants or Always.
-            if (tool.toolName == "ask_user" || ToolPermissionPolicy.mandatoryConfirmation(tool.toolName, args)) return true
+            // A question to the user is never an approval; it always waits for the answer.
+            if (tool.toolName == "ask_user") return true
+            val mandatory = ToolPermissionPolicy.mandatoryConfirmation(tool.toolName, args)
+            // Protected shell commands (remount, SELinux, bootloader, formatting) always ask.
+            if (mandatory && tool.toolName in PROTECTED_SHELL_TOOLS) return true
+            if (approveEverything()) return false
+            // These exceptions cannot be bypassed by chat grants or Always.
+            if (mandatory) return true
             return definition.needsApproval(args) && !isToolAutoApproved(tool.toolName, args)
         }
 
@@ -417,7 +429,7 @@ class GenerationLoop(
                         runCatching {
                             val toolDef = tools.find { toolDef -> toolDef.name == tool.toolName }
                                 ?: error("Инструмент недоступен. Начните новый ответ после изменения настроек инструментов.")
-                            val args = runCatching {
+                            val parsedArgs = runCatching {
                                 json.parseToJsonElement(tool.input.ifBlank { "{}" })
                             }.getOrElse {
                                 error("Некорректные аргументы инструмента. Проверьте формат JSON и типы значений.")
@@ -427,11 +439,14 @@ class GenerationLoop(
                                 // Live revocation must also cover resumed/mixed batches.
                                 executedTools += tool.copy(
                                     input = if (tool.toolName == "manage_app_settings")
-                                        prepareToolApproval(tool.toolName, args).toString() else tool.input,
+                                        prepareToolApproval(tool.toolName, parsedArgs).toString() else tool.input,
                                     approvalState = ToolApprovalState.Pending,
                                 )
                                 return@forEach
                             }
+                            // Automatic settings changes still need the runtime-built preview it verifies.
+                            val args = if (tool.toolName == "manage_app_settings" && tool.approvalState == ToolApprovalState.Auto)
+                                prepareToolApproval(tool.toolName, parsedArgs) else parsedArgs
                             Log.i(TAG, "generateText: executing tool ${toolDef.name}")
                             suspend fun persistStarted(started: UIMessagePart.Tool) {
                                 val last = messages.last()

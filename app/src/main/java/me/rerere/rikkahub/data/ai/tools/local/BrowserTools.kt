@@ -1331,21 +1331,6 @@ private fun openedPageEnvelope(loaded: Boolean, currentUrl: String, title: Strin
 private val HOST_WITH_PORT = Regex("^[A-Za-z0-9.-]+:\\d{1,5}(?:[/?#].*)?$")
 private val BARE_HOST = Regex("^(?:localhost|[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+)(?:[/?#].*)?$")
 
-private val LOCAL_HOST_SUFFIXES = listOf(".localhost", ".local", ".lan", ".home", ".internal", ".home.arpa", ".localdomain")
-
-/**
- * True for the phone itself and home-network targets (router admin pages, local servers). Only
- * literal addresses and local names are recognised here, without DNS: browser_open asks first.
- */
-internal fun isLocalNetworkBrowserUrl(raw: String?): Boolean {
-    val host = raw?.let { runCatching { java.net.URI(normalizeBrowserToolUrl(it)).host }.getOrNull() }
-        ?.lowercase()?.removePrefix("[")?.removeSuffix("]") ?: return false
-    if (host == "localhost" || LOCAL_HOST_SUFFIXES.any(host::endsWith) || !host.contains('.') && !host.contains(':')) return true
-    if (!host.matches(Regex("[0-9.]+")) && !host.contains(':')) return false
-    val address = runCatching { java.net.InetAddress.getByName(host) }.getOrNull() ?: return false
-    return !me.rerere.rikkahub.data.ai.mcp.control.McpUrlGuard.isPublicAddress(address)
-}
-
 /** Models often omit the scheme; WebView does not add one and `host:8080` parses as scheme "host". */
 internal fun normalizeBrowserToolUrl(raw: String): String {
     val url = raw.trim()
