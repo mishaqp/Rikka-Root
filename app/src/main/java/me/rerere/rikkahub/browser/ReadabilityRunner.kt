@@ -39,6 +39,7 @@ object ReadabilityRunner {
 
     private const val ASSET_PATH = "browser/readability.js"
     private const val PINNED_SHA = "08be6b4bdb204dd333c9b7a0cfbc0e730b257252"
+    private const val MAX_READABILITY_ELEMENTS = 15_000
 
     /** Cached library text — read once from assets, reused for every injection. */
     @Volatile
@@ -73,6 +74,9 @@ object ReadabilityRunner {
             // under any subsequent browser_get_dom / browser_click call.
             val payload = """(function(){
                 try {
+                    // Cloning and scoring a huge DOM (large GitHub diffs, listings) outlives the
+                    // timeout and blocks the renderer for the raw fallback, so skip it.
+                    if (document.getElementsByTagName && document.getElementsByTagName('*').length > $MAX_READABILITY_ELEMENTS) return JSON.stringify(null);
                     if (typeof Readability === 'undefined') { $library }
                     var doc = document.cloneNode(true);
                     var article = new Readability(doc).parse();

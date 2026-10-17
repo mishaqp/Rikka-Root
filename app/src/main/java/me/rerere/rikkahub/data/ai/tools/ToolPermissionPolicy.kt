@@ -220,6 +220,9 @@ object ToolPermissionPolicy {
 
     fun sideEffect(name: String, input: JsonElement): Boolean = when (name) {
         "manage_assistants", "manage_app_settings" -> managementToolNeedsApproval(name, input)
+        // Public pages open freely; the phone itself and the home network (router) ask first.
+        "browser_open" -> me.rerere.rikkahub.data.ai.tools.local.isLocalNetworkBrowserUrl(
+            ((input as? JsonObject)?.get("url") as? JsonPrimitive)?.contentOrNull)
         // Reading is free while sensitive values are masked; reveal hands them over unmasked.
         "clipboard_tool" -> ((input as? JsonObject)?.get("action") as? JsonPrimitive)?.contentOrNull != "read" ||
             ((input as? JsonObject)?.get("reveal") as? JsonPrimitive)?.booleanOrNull == true

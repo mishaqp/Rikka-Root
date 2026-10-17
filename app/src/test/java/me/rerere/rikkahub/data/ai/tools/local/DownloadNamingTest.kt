@@ -1,0 +1,69 @@
+package me.rerere.rikkahub.data.ai.tools.local
+
+import android.content.Context
+import com.sun.net.httpserver.HttpServer
+import io.mockk.every
+import io.mockk.mockk
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.*
+import me.rerere.ai.ui.UIMessagePart
+import org.junit.Assert.*
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import java.io.File
+import java.net.InetSocketAddress
+import java.util.concurrent.atomic.AtomicInteger
+
+/** A repeated module-update check must not fail with "file already exists". */
+class DownloadNamingTest {
+    @get:Rule val temp = TemporaryFolder()
+
+    @Test fun `url names are decoded and bounded`() {
+        assertEquals("my file.zip", downloadNameFromUrl("https://example.com/a/my%20file.zip"))
+        assertEquals("latest", downloadNameFromUrl("https://api.github.com/repos/o/r/releases/latest"))
+        assertNull(downloadNameFromUrl("https://example.com/"))
+        val long = downloadNameFromUrl("https://example.com/" + "a".repeat(300) + ".json")!!
+        assertTrue(long.length <= 100)
+        assertTrue(long.endsWith(".json"))
+    }
+
+    @Test fun `numbered names keep the extension`() {
+        assertEquals("module-update.json", numberedDownloadName("module-update.json", 1))
+        assertEquals("module-update (2).json", numberedDownloadName("module-update.json", 2))
+        assertEquals("latest (3)", numberedDownloadName("latest", 3))
+    }
+
+    @Test fun `repeated download gets a free name and overwrite replaces only in scratch`() = runBlocking {
+        val version = AtomicInteger()
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/repos/o/r/releases/latest") { exchange ->
+            val bytes = """{"version":${version.incrementAndGet()}}""".toByteArray()
+            exchange.responseHeaders.add("Content-Type", "application/json")
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.start()
+        try {
+            val context = mockk<Context> { every { cacheDir } returns temp.newFolder("cache") }
+            val scratch = temp.newFolder("scratch")
+            val tool = downloadTool(context, LocalFileAccess(scratch, temp.newFolder("upload")))
+            suspend fun download(overwrite: Boolean? = null): JsonObject {
+                val parts = tool.execute(buildJsonObject {
+                    put("url", "http://127.0.0.1:${server.address.port}/repos/o/r/releases/latest")
+                    put("directory", "/scratch")
+                    overwrite?.let { put("overwrite", it) }
+                })
+                return Json.parseToJsonElement((parts.single() as UIMessagePart.Text).text).jsonObject
+            }
+            assertEquals("latest.json", download()["filename"]?.jsonPrimitive?.content)
+            val second = download()
+            assertEquals(true, second["success"]?.jsonPrimitive?.booleanOrNull)
+            assertEquals("latest (2).json", second["filename"]?.jsonPrimitive?.content)
+            assertEquals("""{"version":1}""", File(scratch, "latest.json").readText())
+            val replaced = download(overwrite = true)
+            assertEquals("latest.json", replaced["filename"]?.jsonPrimitive?.content)
+            assertEquals("""{"version":3}""", File(scratch, "latest.json").readText())
+        } finally { server.stop(0) }
+    }
+}

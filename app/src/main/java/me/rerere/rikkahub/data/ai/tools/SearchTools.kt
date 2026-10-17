@@ -18,6 +18,11 @@ import kotlin.time.Clock
 import kotlin.uuid.Uuid
 
 fun createSearchTools(settings: Settings): Set<Tool> {
+    // Only some search services can read a page; otherwise point the model at the browser.
+    val selectedOptions = settings.searchServices.getOrElse(
+        index = settings.searchServiceSelected, defaultValue = { SearchServiceOptions.DEFAULT })
+    val canScrape = SearchService.getService(selectedOptions).scrapingParameters(selectedOptions) != null
+    val verifyTool = if (canScrape) "scrape_web" else "browser_open + browser_get_text (if available)"
     return buildSet {
         add(
             Tool(
@@ -29,7 +34,7 @@ fun createSearchTools(settings: Settings): Set<Tool> {
                     each result's title, URL, publication date, and content before making a current claim.
                     Use the optional publication-date and domain filters only when they match the question.
                     If a date or primary source is missing, or sources conflict, run another focused search
-                    or use scrape_web to verify the most relevant source before answering.
+                    or use $verifyTool to verify the most relevant source before answering.
                     Generate focused keywords and run multiple searches if needed.
                     Today is ${LocalDate.now().toLocalString(true)}.
 

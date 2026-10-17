@@ -180,6 +180,7 @@ fun browserOpenTool(context: Context, invocationContext: ToolInvocationContext? 
     },
     execute = { input ->
         val url = input.jsonObject["url"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+            ?.let(::normalizeBrowserToolUrl)
         // Heuristic exfil-shape check: if the URL's QUERY (not path — CDN asset hashes
         // would false-positive) carries something that looks like an opaque blob, JWT,
         // API key, or credit-card-shaped digit run, attach a warning so the LLM treats
@@ -191,7 +192,7 @@ fun browserOpenTool(context: Context, invocationContext: ToolInvocationContext? 
         // app-private files (datastore, DB, known_hosts) into the conversation —
         // including via prompt injection from a browsed page. file://, content://,
         // javascript:, intent: etc. are therefore rejected at the tool boundary.
-        // Scheme-less input is passed through unchanged (pre-existing behaviour).
+        // Scheme-less host input (`github.com/x`, `host:8080/p`) is normalised to https first.
         val scheme = url?.let { android.net.Uri.parse(it.trim()).scheme?.lowercase() }
         val rawOut = if (url == null) {
             missingArgEnvelope("url", "url is required and must be a non-empty string")
@@ -238,12 +239,7 @@ fun browserOpenTool(context: Context, invocationContext: ToolInvocationContext? 
                     BrowserController.startTaskWindow()
                     val result = trackJsonAction(BrowserAiActionKind.OPEN, url) {
                         BrowserControllerHandle.withController {
-                            webView.loadUrlAndAwaitReady(url, 8_000L)
-                            buildJsonObject {
-                                put("success", true)
-                                put("current_url", webView.url ?: url)
-                                put("title", webView.title.orEmpty())
-                            }
+                            openedPageEnvelope(webView.loadUrlAndAwaitReady(url, 8_000L), webView.url ?: url, webView.title)
                         }
                     }
                     // Stream the landing-page screenshot so the user sees we arrived.
@@ -307,16 +303,12 @@ fun browserOpenTool(context: Context, invocationContext: ToolInvocationContext? 
                             // passed as EXTRA_INITIAL_URL and the WebView began loading it
                             // before bind() returned. Skip a redundant second loadUrl — it
                             // would abort the in-flight load and restart from the top.
-                            if (wasAlreadyBound) {
+                            val loaded = if (wasAlreadyBound) {
                                 webView.loadUrlAndAwaitReady(url, 8_000L)
                             } else {
                                 webView.awaitReadyState(8_000L, previousDocument = null, requestedUrl = url)
                             }
-                            buildJsonObject {
-                                put("success", true)
-                                put("current_url", webView.url ?: url)
-                                put("title", webView.title.orEmpty())
-                            }
+                            openedPageEnvelope(loaded, webView.url ?: url, webView.title)
                         }
                     }
                 }
@@ -425,7 +417,8 @@ fun browserGetDomTool(): Tool = Tool(
     execute = { input -> textPart(runReadHelper(input, BrowserToolDefaults.GET_DOM, defaultMax = 4000) { selector, maxChars ->
         """(function(){
             try {
-                var el = document.querySelector(${jsString(selector)});
+                var el = ${jsString(selector)} === 'body' ? (document.body || document.documentElement)
+                    : document.querySelector(${jsString(selector)});
                 if (!el) return JSON.stringify({error:'selector_not_found', selector:${jsString(selector)}});
                 var clone = el.cloneNode(true);
                 clone.querySelectorAll('script,style,noscript').forEach(function(n){n.remove();});
@@ -441,7 +434,7 @@ fun browserGetDomTool(): Tool = Tool(
 
 fun browserGetLinksTool(): Tool = Tool(
     name = BrowserToolDefaults.GET_LINKS,
-    description = "List up to 100 anchor links inside a CSS selector (default 'body') as {links:[{href, text}], count}. {error:'selector_not_found'} if the root selector doesn't match.$TELEGRAM_HEADLESS_CUE",
+    description = "List up to 100 anchor links inside a CSS selector (default 'body') as {links:[{href, text}], count, total, truncated}; use a narrower selector when truncated. {error:'selector_not_found'} if the root selector doesn't match.$TELEGRAM_HEADLESS_CUE",
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {
             put("selector", buildJsonObject {
@@ -457,7 +450,8 @@ fun browserGetLinksTool(): Tool = Tool(
             BrowserControllerHandle.withController {
                 val js = """(function(){
                     try {
-                        var root = document.querySelector(${jsString(selector)});
+                        var root = ${jsString(selector)} === 'body' ? (document.body || document.documentElement)
+                            : document.querySelector(${jsString(selector)});
                         if (!root) return JSON.stringify({error:'selector_not_found', selector:${jsString(selector)}});
                         var anchors = root.querySelectorAll('a[href]');
                         var out = [];
@@ -468,11 +462,12 @@ fun browserGetLinksTool(): Tool = Tool(
                             if (text.length>200) text = text.substring(0,200);
                             out.push({href:href, text:text});
                         }
-                        return JSON.stringify({links:out, count:out.length});
+                        return JSON.stringify({links:out, count:out.length, total:anchors.length,
+                            truncated:anchors.length > out.length});
                     } catch(e) { return JSON.stringify({error:'js_failed', detail:String(e)}); }
                 })()"""
                 webView.awaitReadyState(8_000L)
-                evaluateReadResult(js)
+                withDocumentUrl(evaluateReadResult(js), webView.url)
             }
         } ?: timeoutEnvelope(BrowserToolDefaults.GET_LINKS)
         textPart(out)
@@ -589,7 +584,7 @@ fun browserWaitForTool(): Tool = Tool(
                 // user-configured per-tool timeout (Settings → Browser).
                 val timeoutMs = (input.jsonObject["timeout_ms"]?.jsonPrimitive?.intOrNull ?: 10_000)
                     .toLong()
-                    .coerceIn(200L, toolTimeoutMs)
+                    .coerceIn(200L, (toolTimeoutMs - 2_000L).coerceAtLeast(200L))
                 withTimeoutOrNull(toolTimeoutMs) {
                     BrowserControllerHandle.withController {
                         val started = System.currentTimeMillis()
@@ -885,7 +880,11 @@ fun browserSelectTool(): Tool = Tool(
                                     var el = document.querySelector(${jsString(selector)});
                                     if (!el) return JSON.stringify({error:'selector_not_found', selector:${jsString(selector)}});
                                     if (el.tagName !== 'SELECT') return JSON.stringify({error:'not_a_select'});
-                                    el.value = ${jsString(value)};
+                                    var wanted = ${jsString(value)};
+                                    var match = Array.prototype.some.call(el.options, function(o){ return o.value === wanted; });
+                                    if (!match) return JSON.stringify({error:'option_not_found', value:wanted,
+                                        options:Array.prototype.slice.call(el.options, 0, 30).map(function(o){ return o.value; })});
+                                    el.value = wanted;
                                     el.dispatchEvent(new Event('change', {bubbles:true}));
                                     return JSON.stringify({selected:true});
                                 } catch(e) { return JSON.stringify({error:'js_failed', detail:String(e)}); }
@@ -907,7 +906,7 @@ fun browserSelectTool(): Tool = Tool(
 
 fun browserPressKeyTool(): Tool = Tool(
     name = BrowserToolDefaults.PRESS_KEY,
-    description = "Synthesize keydown + keyup events on the active element. Use KeyboardEvent.key values like 'Enter', 'Escape', 'ArrowDown', 'Tab'. Returns the diff between the page before and after by default; pass full:true to skip the diff (recommended when Enter triggers a navigation). {success, [diff]}.$TELEGRAM_HEADLESS_CUE",
+    description = "Synthesize keydown + keyup events on the active element. Use KeyboardEvent.key values like 'Enter', 'Escape', 'ArrowDown', 'Tab'. Returns the diff between the page before and after by default; pass full:true to skip the diff (recommended when Enter triggers a navigation). Enter in a form field submits that form. {success, [submitted, current_url], [diff]}.$TELEGRAM_HEADLESS_CUE",
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {
             put("key", buildJsonObject {
@@ -934,14 +933,25 @@ fun browserPressKeyTool(): Tool = Tool(
                                     var el = document.activeElement || document.body;
                                     var down = new KeyboardEvent('keydown', {key:${jsString(key)}, bubbles:true, cancelable:true});
                                     var up = new KeyboardEvent('keyup', {key:${jsString(key)}, bubbles:true, cancelable:true});
-                                    el.dispatchEvent(down);
+                                    var proceed = el.dispatchEvent(down);
                                     el.dispatchEvent(up);
-                                    return JSON.stringify({pressed:true});
+                                    // Synthetic key events are untrusted, so Enter never submits by itself.
+                                    var submitted = false;
+                                    if (proceed && ${jsString(key)} === 'Enter' && el.form && el.tagName !== 'TEXTAREA') {
+                                        if (el.form.requestSubmit) el.form.requestSubmit(); else el.form.submit();
+                                        submitted = true;
+                                    }
+                                    return JSON.stringify({pressed:true, submitted:submitted});
                                 } catch(e) { return JSON.stringify({error:'js_failed', detail:String(e)}); }
                             })()"""
                             val res = parseJsResult(webView.evaluateJavascriptAsync(js))
                             if (res.containsKey("error")) return@withDiff res
-                            buildJsonObject { put("success", true) }
+                            val submitted = res["submitted"]?.jsonPrimitive?.booleanOrNull == true
+                            if (submitted) { delay(300L); webView.awaitReadyState(8_000L) }
+                            buildJsonObject {
+                                put("success", true)
+                                if (submitted) { put("submitted", true); put("current_url", webView.url.orEmpty()) }
+                            }
                         }
                     }
                 }
@@ -1238,7 +1248,9 @@ private data class BrowserTextSnapshot(val text: String, val totalChars: Int, va
 private suspend fun BrowserControllerHandle.WithControllerScope.captureBodyText(): BrowserTextSnapshot {
     val result = parseJsResult(webView.evaluateJavascriptAsync("""(function(){
         try {
-            var text = document.body.innerText || '';
+            // RSS/Atom and other XML documents have no body.
+            var text = document.body ? (document.body.innerText || '')
+                : ((document.documentElement && document.documentElement.textContent) || '');
             return JSON.stringify({text:text.substring(0, $MAX_DIFF_SNAPSHOT_CHARS),total_chars:text.length});
         } catch(e) { return JSON.stringify({error:'js_failed'}); }
     })()""", 4_000L))
@@ -1301,6 +1313,47 @@ private suspend fun BrowserControllerHandle.WithControllerScope.withDiff(
 }
 
 /**
+ * A page that never finished loading must not be reported as opened: the next read would
+ * return the previous document under the new URL.
+ */
+private fun openedPageEnvelope(loaded: Boolean, currentUrl: String, title: String?): JsonObject = buildJsonObject {
+    if (loaded) {
+        put("success", true)
+    } else {
+        put("success", false)
+        put("error", "page_load_timeout")
+        put("message", "Страница не загрузилась за 8 секунд. Подождите через browser_wait_for и проверьте url в ответе browser_get_text или повторите browser_open.")
+    }
+    put("current_url", currentUrl)
+    put("title", title.orEmpty())
+}
+
+private val HOST_WITH_PORT = Regex("^[A-Za-z0-9.-]+:\\d{1,5}(?:[/?#].*)?$")
+private val BARE_HOST = Regex("^(?:localhost|[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+)(?:[/?#].*)?$")
+
+private val LOCAL_HOST_SUFFIXES = listOf(".localhost", ".local", ".lan", ".home", ".internal", ".home.arpa", ".localdomain")
+
+/**
+ * True for the phone itself and home-network targets (router admin pages, local servers). Only
+ * literal addresses and local names are recognised here, without DNS: browser_open asks first.
+ */
+internal fun isLocalNetworkBrowserUrl(raw: String?): Boolean {
+    val host = raw?.let { runCatching { java.net.URI(normalizeBrowserToolUrl(it)).host }.getOrNull() }
+        ?.lowercase()?.removePrefix("[")?.removeSuffix("]") ?: return false
+    if (host == "localhost" || LOCAL_HOST_SUFFIXES.any(host::endsWith) || !host.contains('.') && !host.contains(':')) return true
+    if (!host.matches(Regex("[0-9.]+")) && !host.contains(':')) return false
+    val address = runCatching { java.net.InetAddress.getByName(host) }.getOrNull() ?: return false
+    return !me.rerere.rikkahub.data.ai.mcp.control.McpUrlGuard.isPublicAddress(address)
+}
+
+/** Models often omit the scheme; WebView does not add one and `host:8080` parses as scheme "host". */
+internal fun normalizeBrowserToolUrl(raw: String): String {
+    val url = raw.trim()
+    if (HOST_WITH_PORT.matches(url) || !url.contains(':') && BARE_HOST.matches(url)) return "https://$url"
+    return url
+}
+
+/**
  * Read the optional `full` arg uniformly across the state-changing tools. Default
  * false → diff path; true → preserve legacy envelope (post_*_url only). The arg
  * name matches the spec verbatim so the LLM has one concept to learn.
@@ -1325,7 +1378,11 @@ private fun parseJsResult(raw: String?): JsonObject {
         val outer = Json.parseToJsonElement(raw)
         val inner = if (outer is JsonPrimitive && outer.isString) outer.contentOrNull.orEmpty() else outer.toString()
         Json.parseToJsonElement(inner).jsonObject
-    }.getOrElse { buildJsonObject { put("error", "js_parse_failed"); put("raw", raw) } }
+    }.getOrElse { failure ->
+        android.util.Log.w("BrowserTools", "js_parse_failed: ${failure.javaClass.simpleName}, ${raw.length} chars")
+        // The whole page payload can be ~64 KB; a preview is enough to diagnose it.
+        buildJsonObject { put("error", "js_parse_failed"); put("raw_preview", raw.take(300)) }
+    }
     val code = result["error"]?.jsonPrimitive?.contentOrNull ?: return result
     return buildJsonObject {
         result.forEach { (key, value) -> put(key, value) }
@@ -1333,6 +1390,7 @@ private fun parseJsResult(raw: String?): JsonObject {
             "selector_not_found" -> "Элемент страницы не найден. Проверьте selector или дождитесь загрузки страницы."
             "no_enclosing_form" -> "У элемента нет формы для отправки. Укажите selector формы или её поля."
             "not_a_select" -> "Элемент не является списком выбора. Укажите selector элемента select."
+            "option_not_found" -> "В списке нет такого значения. Выберите value из options в ответе."
             "js_no_result" -> "Страница ещё загружается или её ответ был прерван переходом. Дождитесь загрузки и повторите чтение."
             "js_parse_failed" -> "Не удалось прочитать ответ страницы. Повторите вызов или откройте страницу заново."
             else -> "Не удалось выполнить действие на странице. Проверьте параметры и повторите вызов."
@@ -1360,7 +1418,7 @@ private suspend fun runReadHelper(
     return withTimeoutOrNull(toolTimeoutMs) {
         BrowserControllerHandle.withController {
             webView.awaitReadyState(8_000L)
-            withContentSize(evaluateReadResult(jsBuilder(selector, maxChars)), "html")
+            withDocumentUrl(withContentSize(evaluateReadResult(jsBuilder(selector, maxChars)), "html"), webView.url)
         }
     } ?: timeoutEnvelope(toolName)
 }
@@ -1392,8 +1450,9 @@ private suspend fun runGetText(input: kotlinx.serialization.json.JsonElement): J
         BrowserControllerHandle.withController {
             webView.awaitReadyState(8_000L)
             // Explicit selectors retain priority over Readability.
-            if (explicitSelector != null) runRawText(explicitSelector, maxChars, mode = "raw_selector")
+            val result = if (explicitSelector != null) runRawText(explicitSelector, maxChars, mode = "raw_selector")
             else runExtractedText(mode, maxChars)
+            withDocumentUrl(result, webView.url)
         }
     } ?: timeoutEnvelope(BrowserToolDefaults.GET_TEXT)
 }
@@ -1426,7 +1485,9 @@ private suspend fun BrowserControllerHandle.WithControllerScope.runRawText(
 ): JsonObject {
     val js = """(function(){
         try {
-            var el = document.querySelector(${jsString(selector)});
+            // RSS/Atom and other XML documents have no body; read the root element instead.
+            var el = ${jsString(selector)} === 'body' ? (document.body || document.documentElement)
+                : document.querySelector(${jsString(selector)});
             if (!el) return JSON.stringify({error:'selector_not_found', selector:${jsString(selector)}});
             var t = (el.innerText || el.textContent || '').replace(/\s+/g,' ').trim();
             var total = t.length;
@@ -1441,6 +1502,11 @@ private suspend fun BrowserControllerHandle.WithControllerScope.runRawText(
         put("extract_mode", mode)
     }
 }
+
+/** Lets the model notice that a read returned another page than the one it opened. */
+private fun withDocumentUrl(result: JsonObject, url: String?): JsonObject =
+    if (url.isNullOrBlank() || result.containsKey("url")) result
+    else buildJsonObject { result.forEach { (key, value) -> put(key, value) }; put("url", url) }
 
 private fun clipText(text: String, maxChars: Int): Pair<String, Boolean> =
     if (text.length <= maxChars) text to false

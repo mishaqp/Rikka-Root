@@ -271,6 +271,18 @@ class BrowserReadReliabilityTest {
         assertEquals(1, view.navigationCount)
     }
 
+    @Test fun `open reports a page that never finished loading instead of success`() = runTest {
+        view.ready = { false }
+        val result = execute(BrowserToolDefaults.OPEN, """{"url":"https://example.test/slow"}""")
+        assertEquals(result.toString(), false, result["success"]?.jsonPrimitive?.booleanOrNull)
+        assertEquals("page_load_timeout", result["error"]?.jsonPrimitive?.content)
+    }
+
+    @Test fun `reads report the document url so a stale page is visible`() = runTest {
+        val result = execute(BrowserToolDefaults.GET_TEXT, """{"extract_mode":"raw"}""")
+        assertEquals("https://example.test/releases", result["url"]?.jsonPrimitive?.content)
+    }
+
     @Test fun `ready state timeout includes an unresponsive JavaScript callback`() = runTest {
         view.dropAllCallbacks = true
         assertFalse(view.awaitReadyState(1000L))

@@ -4,6 +4,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 import java.io.IOException
+import java.net.InetAddress
+import java.net.UnknownHostException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CancellationException
@@ -19,6 +21,8 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.search.SearchService.Companion.httpClient
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.Dns
+import okhttp3.OkHttpClient
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
@@ -65,9 +69,19 @@ object DuckDuckGoSearchService : SearchService<SearchServiceOptions.DuckDuckGoOp
             require(!query.isNullOrBlank()) { "query is required" }
             val url = "https://html.duckduckgo.com/html/".toHttpUrl().newBuilder()
                 .addQueryParameter("q", query).build()
-            val page = fetch(Request.Builder().url(url).headersForPage().build())
+            // A model-chosen page must not reach the phone's own or home-network services.
+            val page = fetch(Request.Builder().url(url).headersForPage().build(),
+                httpClient.newBuilder().dns(publicOnlyDns(httpClient.dns)).addNetworkInterceptor { chain ->
+                    // OkHttp skips DNS for IP literals, so check the connected address too.
+                    val address = chain.connection()?.route()?.socketAddress?.address
+                    if (address != null && !isPublicAddress(address)) throw UnknownHostException(
+                        "Адрес в локальной сети или на самом телефоне недоступен для чтения страниц: ${chain.request().url.host}")
+                    chain.proceed(chain.request())
+                }.build())
             check(page.code == 200) { "DuckDuckGo search failed: HTTP ${page.code}; retry later" }
-            val doc = Jsoup.parse(page.body, page.url)
+            // Without a charset header, let Jsoup read <meta charset> (old windows-1251 sites).
+        val doc = if (page.declaredCharset) Jsoup.parse(page.body, page.url)
+        else Jsoup.parse(java.io.ByteArrayInputStream(page.bytes), null, page.url)
             check(doc.select(".anomaly-modal, [class*=anomaly-modal]").isEmpty() &&
                 !page.body.contains("confirm this search was made by a human", ignoreCase = true)
             ) { "DuckDuckGo returned an anti-bot challenge; retry later" }
@@ -105,7 +119,15 @@ object DuckDuckGoSearchService : SearchService<SearchServiceOptions.DuckDuckGoOp
         resultOf {
             val url = params["url"]?.jsonPrimitive?.contentOrNull?.trim()?.toHttpUrlOrNull()
             require(url != null) { "url must be an absolute HTTP or HTTPS URL" }
-            val page = fetch(Request.Builder().url(url).headersForPage().build())
+            // A model-chosen page must not reach the phone's own or home-network services.
+            val page = fetch(Request.Builder().url(url).headersForPage().build(),
+                httpClient.newBuilder().dns(publicOnlyDns(httpClient.dns)).addNetworkInterceptor { chain ->
+                    // OkHttp skips DNS for IP literals, so check the connected address too.
+                    val address = chain.connection()?.route()?.socketAddress?.address
+                    if (address != null && !isPublicAddress(address)) throw UnknownHostException(
+                        "Адрес в локальной сети или на самом телефоне недоступен для чтения страниц: ${chain.request().url.host}")
+                    chain.proceed(chain.request())
+                }.build())
             check(page.code in 200..299) { "Page read failed: HTTP ${page.code}" }
             val item = if (page.contentType == "text/plain") {
                 ScrapedResultUrl(page.url, page.body.take(MAX_CONTENT_CHARS))
@@ -121,7 +143,9 @@ object DuckDuckGoSearchService : SearchService<SearchServiceOptions.DuckDuckGoOp
     }
 
     private fun readablePage(page: FetchedPage): ScrapedResultUrl {
-        val doc = Jsoup.parse(page.body, page.url)
+        // Without a charset header, let Jsoup read <meta charset> (old windows-1251 sites).
+        val doc = if (page.declaredCharset) Jsoup.parse(page.body, page.url)
+        else Jsoup.parse(java.io.ByteArrayInputStream(page.bytes), null, page.url)
         fun meta(selector: String) = doc.selectFirst(selector)?.attr("content")?.takeIf { it.isNotBlank() }
         val metadata = ScrapedResultMetadata(
             title = meta("meta[property=og:title]") ?: doc.title().takeIf { it.isNotBlank() },
@@ -143,11 +167,33 @@ object DuckDuckGoSearchService : SearchService<SearchServiceOptions.DuckDuckGoOp
     private fun Request.Builder.headersForPage() =
         header("User-Agent", USER_AGENT).header("Accept", "text/html,text/plain,application/xhtml+xml")
 
-    private data class FetchedPage(val code: Int, val url: String, val contentType: String?, val body: String)
+    private class FetchedPage(
+        val code: Int, val url: String, val contentType: String?, val body: String,
+        val bytes: ByteArray, val declaredCharset: Boolean,
+    )
+
+    private fun publicOnlyDns(delegate: Dns) = Dns { host ->
+        delegate.lookup(host).also { addresses ->
+            if (addresses.any { !isPublicAddress(it) }) {
+                throw UnknownHostException("Адрес в локальной сети или на самом телефоне недоступен для чтения страниц: $host")
+            }
+        }
+    }
+
+    private fun isPublicAddress(address: InetAddress): Boolean {
+        if (address.isAnyLocalAddress || address.isLoopbackAddress || address.isLinkLocalAddress ||
+            address.isSiteLocalAddress || address.isMulticastAddress) return false
+        val bytes = address.address.map { it.toInt() and 255 }
+        if (bytes.size == 4) return !(bytes[0] == 0 || bytes[0] == 10 || bytes[0] == 127 ||
+            bytes[0] == 100 && bytes[1] in 64..127 || bytes[0] == 169 && bytes[1] == 254 ||
+            bytes[0] == 172 && bytes[1] in 16..31 || bytes[0] == 192 && bytes[1] == 168)
+        // IPv6 unique-local fc00::/7 is the home-network equivalent of 192.168.x.x.
+        return (bytes[0] and 0xfe) != 0xfc
+    }
 
     /** Keep cancellation attached until body consumption ends, and close every response. */
-    private suspend fun fetch(request: Request): FetchedPage = suspendCancellableCoroutine { continuation ->
-        val call = httpClient.newCall(request)
+    private suspend fun fetch(request: Request, client: OkHttpClient = httpClient): FetchedPage = suspendCancellableCoroutine { continuation ->
+        val call = client.newCall(request)
         continuation.invokeOnCancellation { call.cancel() }
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
@@ -165,8 +211,9 @@ object DuckDuckGoSearchService : SearchService<SearchServiceOptions.DuckDuckGoOp
                             require(buffer.size <= MAX_BODY_BYTES) { "Page exceeds the 1 MiB download limit" }
                         }
                         val type = body.contentType()
+                        val bytes = buffer.readByteArray()
                         FetchedPage(it.code, it.request.url.toString(), type?.let { "${it.type}/${it.subtype}" },
-                            buffer.readString(type?.charset(Charsets.UTF_8) ?: Charsets.UTF_8))
+                            String(bytes, type?.charset(Charsets.UTF_8) ?: Charsets.UTF_8), bytes, type?.charset() != null)
                     }
                     if (continuation.isActive) continuation.resume(page)
                 } catch (e: Exception) {

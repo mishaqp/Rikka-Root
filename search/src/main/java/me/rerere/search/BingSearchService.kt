@@ -42,7 +42,7 @@ object BingSearchService : SearchService<SearchServiceOptions.BingLocalOptions> 
         serviceOptions: SearchServiceOptions.BingLocalOptions
     ): Result<SearchResult> = withContext(Dispatchers.IO) {
         runCatching {
-            val query = params["query"]?.jsonPrimitive?.content ?: error("query is required")
+            val query = params["query"]?.jsonPrimitive?.content ?: error("Укажите поисковый запрос в query.")
             val url = "https://www.bing.com/search?q=" + URLEncoder.encode(query, "UTF-8")
             val locale = Locale.getDefault()
             val acceptLanguage = "${locale.language}-${locale.country},${locale.language}"
@@ -71,10 +71,10 @@ object BingSearchService : SearchService<SearchServiceOptions.BingLocalOptions> 
                     url = link,
                     text = snippet
                 )
-            }
+            }.take(commonOptions.resultSize.coerceIn(1, 50))
 
             require(results.isNotEmpty()) {
-                "Search failed: no results found"
+                "Bing не вернул результатов. Измените запрос или выберите другой поисковый сервис в настройках."
             }
 
             SearchResult(items = results)
@@ -86,6 +86,6 @@ object BingSearchService : SearchService<SearchServiceOptions.BingLocalOptions> 
         commonOptions: SearchCommonOptions,
         serviceOptions: SearchServiceOptions.BingLocalOptions
     ): Result<ScrapedResult> {
-        return Result.failure(Exception("Scraping is not supported for Bing"))
+        return Result.failure(Exception("Bing не умеет читать страницы. Используйте браузер или другой поисковый сервис."))
     }
 }

@@ -5,6 +5,11 @@ import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.ai.tools.local.deviceToolFailureReason
 import me.rerere.rikkahub.data.files.SkillMetadata
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.withContext
+import me.rerere.rikkahub.data.ai.mcp.control.McpUrlGuard
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.InetAddress
@@ -152,17 +157,41 @@ class SkillUrlImporter(
         return rewritten + rest
     }
 
-    private fun fetch(url: String): String {
+    /**
+     * Reads at most [MAX_BODY_BYTES] + 1 bytes (a release asset must not exhaust memory),
+     * cancels the call with the coroutine, and refuses every redirect hop that resolves to
+     * the phone itself or the home network.
+     */
+    private suspend fun fetch(url: String): String = withContext(Dispatchers.IO) {
         val req = Request.Builder()
             .url(url)
             .header("User-Agent", "rikkahub-agent/skill-importer")
             .header("Accept", "text/markdown, text/plain, application/json, */*")
             .build()
-        httpClient.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) {
-                throw RuntimeException("HTTP ${resp.code}")
+        val client = httpClient.newBuilder()
+            .callTimeout(60, TimeUnit.SECONDS)
+            .addNetworkInterceptor { chain ->
+                val address = chain.connection()?.route()?.socketAddress?.address
+                if (address != null && !McpUrlGuard.isPublicAddress(address)) {
+                    throw java.io.IOException("Адрес навыка ведёт в локальную сеть или на сам телефон.")
+                }
+                chain.proceed(chain.request())
             }
-            return resp.body.string()
+            .build()
+        val call = client.newCall(req)
+        val cancelOnStop = currentCoroutineContext()[Job]?.invokeOnCompletion { if (it != null) call.cancel() }
+        try {
+            call.execute().use { resp ->
+                if (!resp.isSuccessful) throw RuntimeException("HTTP ${resp.code}")
+                val source = resp.body.source()
+                source.request(MAX_BODY_BYTES + 1L)
+                if (source.buffer.size > MAX_BODY_BYTES) {
+                    throw RuntimeException("Файл навыка больше ${MAX_BODY_BYTES / 1024} КБ. Укажите ссылку на SKILL.md, а не на архив или релиз.")
+                }
+                source.buffer.readUtf8()
+            }
+        } finally {
+            cancelOnStop?.dispose()
         }
     }
 
