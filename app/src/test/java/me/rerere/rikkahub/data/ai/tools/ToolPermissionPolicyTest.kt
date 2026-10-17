@@ -32,7 +32,11 @@ class ToolPermissionPolicyTest {
 
     @Test fun eachRegisteredCapabilityAndJavascriptUsesDefaultApprovalGate() {
         for (name in ToolApprovalDefaults.ALWAYS_ASK) {
-            val args = if (name == "root_exec") buildJsonObject { put("command", "id -u") } else empty
+            val args = when (name) {
+                "root_exec" -> buildJsonObject { put("command", "id -u") }
+                "http_request" -> buildJsonObject { put("method", "POST") }
+                else -> empty
+            }
             val tool = ToolPermissionPolicy.apply(Tool(name, "test", execute = { emptyList() }))
             assertTrue(name, tool.needsApproval(args))
         }

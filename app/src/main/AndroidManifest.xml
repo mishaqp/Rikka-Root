@@ -3,6 +3,7 @@
   xmlns:tools="http://schemas.android.com/tools">
 
   <uses-permission android:name="android.permission.INTERNET" />
+  <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
   <!-- Explicit user request: optional direct shared storage, separately disabled in app settings. -->
   <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
   <!-- Package F: request only when enabling Termux for an assistant. -->

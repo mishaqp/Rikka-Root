@@ -25,5 +25,6 @@ internal fun protectToolArguments(
     mcp: McpToolSecretSanitizer?,
 ): String = sanitizeNestedToolArguments(name, input) { tool, args ->
     val safe = ssh?.sanitizeForPersistence(tool, args) ?: SshToolSecretSanitizer.sanitizeForExport(tool, args)
-    mcp?.sanitizeForPersistence(tool, safe) ?: McpToolSecretSanitizer.sanitizeForExport(tool, safe)
+    val safeMcp = mcp?.sanitizeForPersistence(tool, safe) ?: McpToolSecretSanitizer.sanitizeForExport(tool, safe)
+    HttpToolSecretSanitizer.sanitize(tool, safeMcp)
 }

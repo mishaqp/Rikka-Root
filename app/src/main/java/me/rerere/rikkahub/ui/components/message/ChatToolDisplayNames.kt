@@ -24,6 +24,14 @@ internal fun timelineToolNameResource(toolName: String): Int? =
 private val remoteMcpToolName = Regex("mcp__[0-9a-fA-F]{8}_(?:.+__.+|[a-zA-Z0-9_-]+_[0-9a-f]{16})", RegexOption.DOT_MATCHES_ALL)
 
 private val nativeTimelineToolNames = mapOf(
+    "http_request" to R.string.chat_timeline_tool_http_request,
+    "set_alarm" to R.string.chat_timeline_tool_set_alarm,
+    "set_timer" to R.string.chat_timeline_tool_set_timer,
+    "show_alarms" to R.string.chat_timeline_tool_show_alarms,
+    "qr_generate" to R.string.chat_timeline_tool_qr_generate,
+    "qr_scan" to R.string.chat_timeline_tool_qr_scan,
+    "read_document" to R.string.chat_timeline_tool_read_document,
+
     "web_search" to R.string.chat_timeline_server_tool_web_search,
     "file_search" to R.string.chat_timeline_server_tool_file_search,
     "code_interpreter" to R.string.chat_timeline_server_tool_code_interpreter,

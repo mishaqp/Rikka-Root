@@ -206,6 +206,10 @@ internal fun timelineToolIcon(toolName: String): ImageVector? = when {
 }
 
 private val exactToolIcons: Map<String, ImageVector> = buildMap {
+    put("http_request", HugeIcons.Internet)
+    listOf("set_alarm", "set_timer", "show_alarms").forEach { put(it, HugeIcons.Clock02) }
+    listOf("qr_generate", "qr_scan").forEach { put(it, HugeIcons.Image02) }
+    put("read_document", HugeIcons.Files02)
     listOf("schedule_job", "list_jobs", "get_job_history", "pause_job", "resume_job", "delete_job",
         "trigger_job_now", "get_time_info").forEach { put(it, HugeIcons.Clock02) }
     listOf("tap", "long_press", "swipe", "scroll", "find_node", "click_node", "set_text", "global_action",

@@ -18,6 +18,14 @@ object ToolPermissionPolicy {
             tool.toolName != "ask_user"
 
     val registry: Map<String, String> = linkedMapOf(
+        "http_request" to "HTTP-запросы",
+        "set_alarm" to "создание будильника",
+        "set_timer" to "создание таймера",
+        "show_alarms" to "открытие будильников",
+        "qr_generate" to "создание QR-кода",
+        "qr_scan" to "чтение QR-кода",
+        "read_document" to "чтение документов",
+
         "manage_assistants" to "управление ассистентами",
         "manage_app_settings" to "настройки приложения",
         "browser_open" to "открытие страницы браузера",
@@ -231,6 +239,13 @@ object ToolPermissionPolicy {
     }
 
     fun sideEffect(name: String, input: JsonElement): Boolean = when (name) {
+        "http_request" -> {
+            val args = input as? JsonObject
+            val method = args?.get("method")
+            val normalized = if (args != null && method == null) "GET" else
+                (method as? JsonPrimitive)?.takeIf { it.isString }?.content?.uppercase(java.util.Locale.ROOT)
+            normalized !in setOf("GET", "HEAD")
+        }
         "manage_assistants", "manage_app_settings" -> managementToolNeedsApproval(name, input)
         // Reading is free while sensitive values are masked; reveal hands them over unmasked.
         "clipboard_tool" -> ((input as? JsonObject)?.get("action") as? JsonPrimitive)?.contentOrNull != "read" ||

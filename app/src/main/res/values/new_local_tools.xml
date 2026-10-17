@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="new_local_tools_http_title" translatable="false">HTTP-запросы</string>
+    <string name="new_local_tools_http_desc" translatable="false">Отправка HTTP-запросов и чтение ответов API и сайтов.</string>
+    <string name="new_local_tools_alarm_title" translatable="false">Будильники и таймеры</string>
+    <string name="new_local_tools_alarm_desc" translatable="false">Создание будильников и таймеров, открытие списка будильников в приложении часов.</string>
+    <string name="new_local_tools_qr_title" translatable="false">QR-коды</string>
+    <string name="new_local_tools_qr_desc" translatable="false">Создание QR-кодов и чтение кодов из изображений в доступных файлах.</string>
+    <string name="new_local_tools_document_title" translatable="false">Чтение документов</string>
+    <string name="new_local_tools_document_desc" translatable="false">Извлечение текста из документов в доступных файлах.</string>
+</resources>

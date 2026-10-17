@@ -49,6 +49,8 @@ internal fun LocalToolDetailSettings(
         val visibleOptions = setOf(option)
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             when (option) {
+                LocalToolOption.HttpRequest, LocalToolOption.AlarmClock,
+                LocalToolOption.QrCodes, LocalToolOption.ReadDocument -> Unit
                 LocalToolOption.Root -> RootLocalToolDetailSettings(assistant, onUpdate, onEnabledChange, controlsEnabled)
                 LocalToolOption.JavascriptEngine, LocalToolOption.TimeInfo,
                 LocalToolOption.Clipboard, LocalToolOption.Tts, LocalToolOption.AskUser,

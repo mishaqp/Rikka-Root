@@ -44,6 +44,7 @@ class LocalFileAccess internal constructor(
     private val context: Context? = null,
     private val primaryStorageAliases: List<File> = listOf(File("/sdcard"), File("/mnt/sdcard"), File("/storage/self/primary")),
     private val sharedStorageAccess: SharedStorageAccess? = context?.let { SharedStorageAccess.forContext(it) },
+    private val qrScreenshotCacheRoot: File? = null,
 ) {
     constructor(context: Context, workspaceCwd: String? = null, chatImages: List<String> = emptyList(),
         resolveWorkspacePath: (suspend (String) -> File)? = null) : this(
@@ -105,6 +106,17 @@ class LocalFileAccess internal constructor(
     @Volatile private var workspaceRoot: File? = null
     init { require(scratchRoot.mkdirs() || scratchRoot.isDirectory) { "Не удалось создать scratch." } }
     val androidContext: Context get() = requireNotNull(context) { "Нужен Android Context." }
+
+    /** QR alone may read the two existing screenshot outputs; regular file tools keep their scopes. */
+    internal fun withQrScreenshotReads(android: Context): LocalFileAccess = LocalFileAccess(
+        scratchDir, uploadDir, workspaceCwd, chatImages, resolveWorkspacePath,
+        context ?: android.applicationContext, primaryStorageAliases, sharedStorageAccess,
+        qrScreenshotCacheRoot = android.cacheDir.absoluteFile,
+    ).also { it.workspaceRoot = workspaceRoot }
+
+    internal fun imageSources(): LocalImageSources = LocalImageSources(
+        uploadDir, workspaceCwd, chatImages, resolveWorkspacePath, fileAccess = this,
+    )
 
     internal fun isDirectSharedStorage(file: File): Boolean = sharedStorageAccess?.resolve(file.absolutePath) != null
 
@@ -325,6 +337,20 @@ class LocalFileAccess internal constructor(
             parent = parent.parent
         }
         val canonical = file.canonicalFile
+        // No directories, arbitrary cache files, links or writes enter this opt-in capability.
+        // The ancestor symlink walk above applies equally to screenshot reads.
+        if (!write && qrScreenshotCacheRoot != null && canonical.isFile) {
+            var cacheAncestor = qrScreenshotCacheRoot.absoluteFile.toPath().normalize()
+            while (cacheAncestor.parent != null) {
+                require(!Files.isSymbolicLink(cacheAncestor)) { "Символические ссылки недоступны файловым инструментам." }
+                cacheAncestor = cacheAncestor.parent
+            }
+            val cache = qrScreenshotCacheRoot.canonicalFile
+            val parent = canonical.parentFile
+            val screenshot = parent == File(cache, "screenshots") && canonical.name.matches(Regex("screen-[0-9]+\\.png"))
+            val browser = parent == File(cache, "browser-shots") && canonical.name.matches(Regex("screenshot-[0-9]+\\.png"))
+            if (screenshot || browser) return canonical
+        }
         val roots = listOfNotNull(scratchRoot, uploadRoot, workspaceRoot)
         val root = roots.firstOrNull { canonical.toPath().startsWith(it.toPath()) }
         require(root != null) { "Путь вне scratch, upload или выбранного workspace. $NO_STORAGE_GRANT_MESSAGE" }

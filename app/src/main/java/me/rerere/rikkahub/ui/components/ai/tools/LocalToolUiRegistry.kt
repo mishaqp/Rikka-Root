@@ -117,11 +117,14 @@ object LocalToolUiRegistry {
         tool(Category.RootTerminal, LocalToolOption.Ssh, R.string.assistant_page_local_tools_ssh_title, R.string.assistant_page_local_tools_ssh_desc, HugeIcons.ServerStack01),
         tool(Category.RootTerminal, LocalToolOption.ScreenAutomation, R.string.assistant_page_local_tools_screen_automation_title, R.string.assistant_page_local_tools_screen_automation_desc, HugeIcons.CursorPointer01, requiresRoot = true),
 
+        tool(Category.Internet, LocalToolOption.HttpRequest, R.string.new_local_tools_http_title, R.string.new_local_tools_http_desc, HugeIcons.Internet, background = true),
         tool(Category.Internet, LocalToolOption.Browser, R.string.assistant_page_local_tools_browser_title, R.string.assistant_page_local_tools_browser_desc, HugeIcons.Earth),
         tool(Category.Internet, LocalToolOption.McpControl, R.string.assistant_page_local_tools_mcp_control_title, R.string.assistant_page_local_tools_mcp_control_desc, HugeIcons.McpServer),
         tool(Category.Internet, LocalToolOption.ExternalAutomation, R.string.assistant_page_local_tools_external_automation_title, R.string.assistant_page_local_tools_external_automation_desc, HugeIcons.Connect),
         tool(Category.Internet, LocalToolOption.Download, R.string.tool_ui_download_title, R.string.file_tools_download_desc, HugeIcons.Download01),
 
+        tool(Category.FilesMedia, LocalToolOption.QrCodes, R.string.new_local_tools_qr_title, R.string.new_local_tools_qr_desc, HugeIcons.Image02, background = true),
+        tool(Category.FilesMedia, LocalToolOption.ReadDocument, R.string.new_local_tools_document_title, R.string.new_local_tools_document_desc, HugeIcons.Files02, background = true),
         tool(Category.FilesMedia, LocalToolOption.Files, R.string.tool_ui_files_title, R.string.file_tools_files_desc, HugeIcons.Files02),
         tool(Category.FilesMedia, LocalToolOption.ExternalStorage, R.string.tool_ui_storage_title, R.string.file_tools_storage_desc, HugeIcons.Folder01),
         tool(Category.FilesMedia, LocalToolOption.Archive, R.string.file_tools_archive_title, R.string.file_tools_archive_desc, HugeIcons.Package01),
@@ -137,6 +140,7 @@ object LocalToolUiRegistry {
         tool(Category.Device, LocalToolOption.TimeInfo, R.string.assistant_page_local_tools_time_info_title, R.string.assistant_page_local_tools_time_info_desc, HugeIcons.Clock02),
         tool(Category.Device, LocalToolOption.ScreenTime, R.string.assistant_page_local_tools_screen_time_title, R.string.assistant_page_local_tools_screen_time_desc, HugeIcons.Time02),
 
+        tool(Category.Phone, LocalToolOption.AlarmClock, R.string.new_local_tools_alarm_title, R.string.new_local_tools_alarm_desc, HugeIcons.Clock02),
         tool(Category.Phone, LocalToolOption.Torch, R.string.assistant_page_local_tools_torch_title, R.string.assistant_page_local_tools_torch_desc, HugeIcons.Zap),
         tool(Category.Phone, LocalToolOption.Vibrate, R.string.assistant_page_local_tools_vibrate_title, R.string.assistant_page_local_tools_vibrate_desc, HugeIcons.SmartPhone01),
         tool(Category.Phone, LocalToolOption.Brightness, R.string.assistant_page_local_tools_brightness_title, R.string.assistant_page_local_tools_brightness_desc, HugeIcons.Sun01),

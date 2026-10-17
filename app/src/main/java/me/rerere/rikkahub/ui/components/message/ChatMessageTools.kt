@@ -172,6 +172,10 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String, scope: ApprovalScope, toolName: String) -> kotlinx.coroutines.Job)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
 ) {
+    // The session keeps the actual headers for approval/execution; only this presentation copy is masked.
+    val tool = remember(tool) {
+        me.rerere.rikkahub.data.ai.tools.HttpToolSecretSanitizer.presentation(tool)
+    }
     // ask_user 是交互式问答流程, 不走注册式渲染框架
     if (tool.toolName == ASK_USER_TOOL_NAME) {
         AskUserToolStep(tool = tool, loading = loading, fontSizeRatio = fontSizeRatio, onToolAnswer = onToolAnswer)

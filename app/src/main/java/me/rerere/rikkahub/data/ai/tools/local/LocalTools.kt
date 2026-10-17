@@ -16,6 +16,7 @@ import me.rerere.rikkahub.costguards.TokenBudgetLedger
 import me.rerere.rikkahub.costguards.checkTokenUsageTool
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.repository.ConversationRepository
+import okhttp3.OkHttpClient
 import org.koin.core.context.GlobalContext.get
 import kotlin.uuid.Uuid
 import me.rerere.rikkahub.reliability.generateBugReportTool
@@ -34,8 +35,11 @@ internal fun scopedFileTools(
     guard: (LocalToolOption, Tool) -> Tool = { _, tool -> tool },
 ): List<Tool> = buildList {
     if (options.any { it in listOf(LocalToolOption.Files, LocalToolOption.Archive,
-            LocalToolOption.MediaPlayer, LocalToolOption.MediaScanner, LocalToolOption.Download) }) {
+            LocalToolOption.MediaPlayer, LocalToolOption.MediaScanner, LocalToolOption.Download,
+            LocalToolOption.QrCodes, LocalToolOption.ReadDocument) }) {
         val access = LocalFileAccess(context, workspaceCwd, chatImages, resolveWorkspacePath)
+        if (LocalToolOption.QrCodes in options) addAll(qrCodeTools(context, access, modelCanReadImages).map { guard(LocalToolOption.QrCodes, it) })
+        if (LocalToolOption.ReadDocument in options) add(guard(LocalToolOption.ReadDocument, readDocumentTool(context, access)))
         if (LocalToolOption.Files in options) addAll(fileManagerTools(access, context, modelCanReadImages).map { guard(LocalToolOption.Files, it) })
         if (LocalToolOption.Archive in options) addAll(listOf(zipFilesTool(context, access), unzipFileTool(context, access), listZipContentsTool(context, access)).map { guard(LocalToolOption.Archive, it) })
         if (LocalToolOption.MediaPlayer in options) addAll(listOf(playMediaTool(context, access), stopMediaTool(context), pauseMediaTool(context), resumeMediaTool(context, access), seekMediaTool(context), getMediaStatusTool()).map { guard(LocalToolOption.MediaPlayer, it) })
@@ -213,6 +217,8 @@ class LocalTools(
                 tokenBudget = tokenBudget,
                 loadConversation = { id -> get().get<ConversationRepository>().getConversationById(id) }))
         }
+        if (LocalToolOption.HttpRequest in options) add(LocalToolOption.HttpRequest, httpRequestTool(get().get<OkHttpClient>()))
+        if (LocalToolOption.AlarmClock in options) addAll(LocalToolOption.AlarmClock, alarmClockTools(context))
         tools.addAll(scopedFileTools(context, options, workspaceCwd, chatImages, resolveWorkspacePath, modelCanReadImages, ::guard))
         if (LocalToolOption.ExternalStorage in options) addAll(LocalToolOption.ExternalStorage, listOf(listStorageVolumesTool(context), listGrantedDirectoriesTool(context), grantDirectoryAccessTool(context), revokeDirectoryAccessTool(context)))
         if (LocalToolOption.SystemIntents in options) addAll(LocalToolOption.SystemIntents, systemIntentTools(context))

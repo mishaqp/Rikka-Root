@@ -175,6 +175,10 @@ internal fun isHeadlessMcpToolEnabled(settings: Settings, assistant: Assistant, 
 
 /** Current capability switch is rechecked even when the tools were created before a settings change. */
 internal fun localOptionForHeadlessTool(name: String): LocalToolOption? = when (name) {
+    "http_request" -> LocalToolOption.HttpRequest
+    "set_alarm", "set_timer", "show_alarms" -> LocalToolOption.AlarmClock
+    "qr_generate", "qr_scan" -> LocalToolOption.QrCodes
+    "read_document" -> LocalToolOption.ReadDocument
     "manage_assistants" -> LocalToolOption.ManageAssistants
     "manage_app_settings" -> LocalToolOption.ManageAppSettings
     "browser_open", "browser_current_url", "browser_get_text", "browser_get_dom", "browser_screenshot", "browser_eval_js",

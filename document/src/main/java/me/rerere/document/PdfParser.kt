@@ -3,7 +3,50 @@ package me.rerere.document
 import com.artifex.mupdf.fitz.PDFDocument
 import java.io.File
 
+data class PdfRangeResult(val text: String, val pages: Int)
+
 object PdfParser {
+    /** Native-resource cleanup adapted from ExTV/rikkahub-agent (AGPL v3). */
+    fun parseRange(
+        file: File,
+        pageFrom: Int = 1,
+        pageTo: Int? = null,
+        checkActive: () -> Unit = {},
+    ): PdfRangeResult {
+        require(pageFrom >= 1 && (pageTo == null || pageTo >= pageFrom)) { "Некорректный диапазон страниц PDF." }
+        checkActive()
+        val document = PDFDocument.openDocument(file.absolutePath)
+        try {
+            require(document.isPDF) { "Файл не является PDF-документом." }
+            require(!document.needsPassword()) { "PDF защищён паролем. Откройте незашифрованную копию документа." }
+            val pages = document.countPages()
+            val last = pageTo ?: pages
+            require(pageFrom <= pages && last <= pages) { "Диапазон страниц выходит за пределы PDF-документа." }
+            val result = StringBuilder()
+            for (number in pageFrom..last) {
+                checkActive()
+                val page = document.loadPage(number - 1)
+                try {
+                    val structuredText = page.toStructuredText()
+                    try {
+                        checkActive()
+                        result.append("---Страница $number:\n")
+                        result.append(structuredText.asText())
+                        result.appendLine()
+                    } finally {
+                        structuredText.destroy()
+                    }
+                } finally {
+                    page.destroy()
+                }
+                checkActive()
+            }
+            return PdfRangeResult(result.toString(), pages)
+        } finally {
+            document.destroy()
+        }
+    }
+
     fun parserPdf(file: File): String {
         val document = PDFDocument.openDocument(file.absolutePath).asPDF()
         val pages = document.countPages()

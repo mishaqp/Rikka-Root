@@ -56,6 +56,7 @@ object HeadlessToolPolicy {
         "workflow_create", "workflow_update", "workflow_delete", "workflow_set_enabled", "workflow_run",
     )
     private val interactive = setOf(
+        "set_alarm", "set_timer", "show_alarms",
         "ask_user", "grant_directory_access", "verify_fingerprint", "take_photo", "record_audio",
         "speech_to_text", "share", "open_file", "open_url", "launch_app", "launch_activity",
         "create_calendar_event", "create_contact", "send_email_intent", "send_sms_intent",

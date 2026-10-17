@@ -70,6 +70,7 @@ class LocalToolMetadata(context: Context) {
     private val files by lazy { koin.get<FilesManager>() }
     private val skills by lazy { koin.get<SkillManager>() }
     private val ssh by lazy { koin.get<SshHostRepository>() }
+    private val plainOkHttpClient by lazy { OkHttpClient() }
     private val eventBus = AppEventBus()
     private val rootManager = RootShellManager()
     private val cancelledScope = AppScope().apply { cancel() }
@@ -153,6 +154,10 @@ class LocalToolMetadata(context: Context) {
         val knownToolNames = { emptyList<String>() }
         return LocalToolUiRegistry.entries.associate { entry ->
             val tools = when (entry.option) {
+                LocalToolOption.HttpRequest -> listOf(httpRequestTool(plainOkHttpClient))
+                LocalToolOption.AlarmClock -> alarmClockTools(context)
+                LocalToolOption.QrCodes -> qrCodeTools(context, access, canReadImages)
+                LocalToolOption.ReadDocument -> listOf(readDocumentTool(context, access))
                 LocalToolOption.Browser -> BrowserToolDefaults.ALL_TOOLS
                     .filter { activeBrowserPreferences == null || activeBrowserPreferences[it] == true }
                     .mapNotNull { name -> createBrowserTool(name, context,

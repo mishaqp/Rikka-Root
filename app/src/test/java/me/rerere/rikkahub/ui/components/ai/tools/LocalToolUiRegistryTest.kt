@@ -14,7 +14,7 @@ class LocalToolUiRegistryTest {
         val registered = LocalToolUiRegistry.entries.map { it.option }
         val categorized = LocalToolUiRegistry.categories.flatMap { it.options }
 
-        assertEquals(57, discovered.size)
+        assertEquals(61, discovered.size)
         assertEquals(discovered, registered.toSet())
         assertEquals(registered.size, registered.toSet().size)
         assertEquals(discovered, categorized.toSet())
@@ -36,14 +36,14 @@ class LocalToolUiRegistryTest {
                 LocalToolOption.ManageAppSettings),
             "root_terminal" to listOf(LocalToolOption.Root, LocalToolOption.Termux,
                 LocalToolOption.Ssh, LocalToolOption.ScreenAutomation),
-            "internet" to listOf(LocalToolOption.Browser, LocalToolOption.McpControl,
+            "internet" to listOf(LocalToolOption.HttpRequest, LocalToolOption.Browser, LocalToolOption.McpControl,
                 LocalToolOption.ExternalAutomation, LocalToolOption.Download),
-            "files_media" to listOf(LocalToolOption.Files, LocalToolOption.ExternalStorage,
+            "files_media" to listOf(LocalToolOption.QrCodes, LocalToolOption.ReadDocument, LocalToolOption.Files, LocalToolOption.ExternalStorage,
                 LocalToolOption.Archive, LocalToolOption.MediaPlayer, LocalToolOption.MediaScanner),
             "device" to listOf(LocalToolOption.Battery, LocalToolOption.AudioInfo,
                 LocalToolOption.TelephonyInfo, LocalToolOption.WifiInfo, LocalToolOption.Sensors,
                 LocalToolOption.StorageInfo, LocalToolOption.TimeInfo, LocalToolOption.ScreenTime),
-            "phone" to listOf(LocalToolOption.Torch, LocalToolOption.Vibrate,
+            "phone" to listOf(LocalToolOption.AlarmClock, LocalToolOption.Torch, LocalToolOption.Vibrate,
                 LocalToolOption.Brightness, LocalToolOption.Volume, LocalToolOption.Wallpaper,
                 LocalToolOption.Nfc, LocalToolOption.SystemIntents, LocalToolOption.AppLauncher,
                 LocalToolOption.Clipboard),
