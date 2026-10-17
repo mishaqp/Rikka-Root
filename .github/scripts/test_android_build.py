@@ -31,11 +31,34 @@ class AndroidBuildTest(unittest.TestCase):
                         + '<issue severity="Warning"/>' * warnings + "</issues>")
         return file
 
-    def test_inherited_51_errors_accept_nonzero_lint_exit(self):
+    def test_inherited_51_errors_are_no_longer_accepted(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self.report(root, 51, 500)
-            self.assertEqual(51, check_lint(root, 1))
+            with self.assertRaises(BuildError):
+                check_lint(root, 1)
+
+    def test_zero_errors_accept_clean_lint_exit_with_warnings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.report(root, 0, 500)
+            self.assertEqual(0, check_lint(root, 0))
+
+    def test_even_one_error_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.report(root, 1)
+            for exit_code in (0, 1):
+                with self.subTest(exit_code=exit_code), self.assertRaises(BuildError):
+                    check_lint(root, exit_code)
+
+    def test_nonzero_process_exit_fails_even_with_clean_reports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.report(root, 0)
+            for exit_code in (1, 2):
+                with self.subTest(exit_code=exit_code), self.assertRaises(BuildError):
+                    check_lint(root, exit_code)
 
     def test_52_errors_fail(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -50,6 +73,8 @@ class AndroidBuildTest(unittest.TestCase):
             file = self.report(root, 0, 2000)
             file.write_text(file.read_text().replace("</issues>", '<issue severity="Fatal"/></issues>'))
             self.assertEqual(1, lint_errors(root))
+            with self.assertRaises(BuildError):
+                check_lint(root, 1)
 
     def test_missing_lint_report_cannot_silently_pass(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -28,9 +28,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.serialization.json.Json
@@ -218,7 +219,7 @@ fun CustomHeaders(headers: List<CustomHeader>, onUpdate: ((List<CustomHeader>) -
 fun CustomBodies(customBodies: List<CustomBody>, onUpdate: ((List<CustomBody>) -> List<CustomBody>) -> Unit) {
     val pending = remember { PendingPropertyRows(customBodies) }
     pending.receive(customBodies)
-    val context = LocalContext.current
+    val resources by rememberUpdatedState(LocalResources.current)
     Column(
         modifier = Modifier.padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -266,7 +267,7 @@ fun CustomBodies(customBodies: List<CustomBody>, onUpdate: ((List<CustomBody>) -
                                             jsonParseError = null
                                         } catch (e: Exception) {
                                             jsonParseError =
-                                                context.getString(
+                                                resources.getString(
                                                     R.string.assistant_page_invalid_json,
                                                     e.message?.take(100) ?: ""
                                                 )

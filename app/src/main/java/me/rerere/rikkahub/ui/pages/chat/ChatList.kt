@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.pages.chat
 
+import androidx.activity.compose.LocalActivity
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.ArrowDown01
@@ -70,7 +71,6 @@ import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalScrollCaptureInProgress
 import androidx.compose.ui.platform.testTag
@@ -224,7 +224,7 @@ private fun ChatListNormal(
     val scrollNavigation = rememberChatScrollNavigationVisibility(state)
     val conversationUpdated by rememberUpdatedState(conversation)
     val density = LocalDensity.current
-    val activity = LocalContext.current as? me.rerere.rikkahub.RouteActivity
+    val activity = LocalActivity.current as? me.rerere.rikkahub.RouteActivity
     val volumeScrollSettings by rememberUpdatedState(settings.displaySetting)
     val captureProgress = LocalScrollCaptureInProgress.current
     val navigationEnabled = settings.displaySetting.showMessageJumper &&

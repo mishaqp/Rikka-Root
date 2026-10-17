@@ -42,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -85,6 +86,7 @@ fun LanguageSelectionDialog(
     // 语言名称映射函数，原有的 locale.displayName 方法无法获取 emoji
     @Composable
     fun getLanguageDisplayName(locale: Locale): String {
+        val displayLocale = LocalConfiguration.current.locales[0]
         return when (locale) {
             Locale.SIMPLIFIED_CHINESE -> stringResource(R.string.language_simplified_chinese)
             Locale.ENGLISH -> stringResource(R.string.language_english)
@@ -95,7 +97,7 @@ fun LanguageSelectionDialog(
             Locale.GERMAN -> stringResource(R.string.language_german)
             Locale.ITALIAN -> stringResource(R.string.language_italian)
             Locale("es", "ES") -> stringResource(R.string.language_spanish)
-            else -> locale.getDisplayLanguage(Locale.getDefault())
+            else -> locale.getDisplayLanguage(displayLocale)
         }
     }
 

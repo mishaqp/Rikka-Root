@@ -31,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -82,6 +83,8 @@ fun TextArea(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
+    val importSuccessMessage by rememberUpdatedState(stringResource(R.string.text_area_import_success))
+    val importFailedMessage by rememberUpdatedState(stringResource(R.string.text_area_import_failed))
     var isFullScreen by remember { mutableStateOf(false) }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
@@ -96,10 +99,10 @@ fun TextArea(
                             ?: error("Failed to read file")
                     }
                     state.setTextAndPlaceCursorAtEnd(content)
-                    toaster.show(context.getString(R.string.text_area_import_success), type = ToastType.Success)
+                    toaster.show(importSuccessMessage, type = ToastType.Success)
                 } catch (e: Exception) {
                     e.printStackTrace()
-                    val errorMessage = e.message ?: context.getString(R.string.text_area_import_failed)
+                    val errorMessage = e.message ?: importFailedMessage
                     onImportError?.invoke(errorMessage) ?: toaster.show(
                         message = errorMessage,
                         type = ToastType.Error

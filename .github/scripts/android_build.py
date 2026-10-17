@@ -15,7 +15,7 @@ import zipfile
 from pathlib import Path
 
 EXPECTED_CERT = "7050d80a9edd3e66b26df1890fe8f0b0d88f06259faa5c04bf68192262a0db16"
-MAX_LINT_ERRORS = 51  # Upstream 4a7a39c4; this does not suppress any lint finding.
+MAX_LINT_ERRORS = 0  # Все унаследованные ошибки исправлены.
 REPOSITORY = "mishaqp/Rikka-Root"
 
 
@@ -34,8 +34,8 @@ def lint_errors(root):
 def check_lint(root, exit_code):
     count = lint_errors(root)
     if count > MAX_LINT_ERRORS:
-        raise BuildError(f"Lint: {count} errors, allowed inherited count: {MAX_LINT_ERRORS}.")
-    if exit_code not in (0, 1):
+        raise BuildError(f"Lint: {count} errors, allowed count: {MAX_LINT_ERRORS}.")
+    if exit_code != 0:
         raise BuildError("Lint process did not finish normally.")
     return count
 
@@ -167,7 +167,7 @@ def main():
             report.unlink()
     elif args.command == "check-lint":
         count = check_lint(root, args.exit_code)
-        print(f"Lint: {count} errors; inherited limit {MAX_LINT_ERRORS} (4a7a39c4). Reports are published without suppression.")
+        print(f"Lint: {count} errors; limit {MAX_LINT_ERRORS}. All inherited errors are fixed; reports are published without suppression.")
     elif args.command == "prepare-apk":
         metadata = json.loads((root / "app/build/outputs/apk/release/output-metadata.json").read_text())
         entry = release_element(metadata)

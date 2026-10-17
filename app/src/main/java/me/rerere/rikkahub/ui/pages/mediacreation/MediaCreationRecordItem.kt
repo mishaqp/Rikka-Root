@@ -40,6 +40,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -393,6 +394,9 @@ private fun OutputMenu(
 ) {
     val context = LocalContext.current
     val toaster = LocalToaster.current
+    val savedToGalleryMessage by rememberUpdatedState(stringResource(R.string.media_creation_page_saved_to_gallery))
+    val saveFailedMessage by rememberUpdatedState(stringResource(R.string.media_creation_page_save_failed))
+    val shareFailedMessage by rememberUpdatedState(stringResource(R.string.media_creation_page_share_failed))
     val scope = rememberCoroutineScope()
     var expanded by remember { mutableStateOf(false) }
 
@@ -449,13 +453,13 @@ private fun OutputMenu(
                     runCatching { saveMediaToGallery(context, file, output.mimeType) }
                         .onSuccess {
                             toaster.show(
-                                context.getString(R.string.media_creation_page_saved_to_gallery),
+                                savedToGalleryMessage,
                                 type = ToastType.Success,
                             )
                         }
                         .onFailure {
                             toaster.show(
-                                it.message ?: context.getString(R.string.media_creation_page_save_failed),
+                                it.message ?: saveFailedMessage,
                                 type = ToastType.Error,
                             )
                         }
@@ -465,7 +469,7 @@ private fun OutputMenu(
                 runCatching { shareMedia(context, file, output.mimeType) }
                     .onFailure {
                         toaster.show(
-                            it.message ?: context.getString(R.string.media_creation_page_share_failed),
+                            it.message ?: shareFailedMessage,
                             type = ToastType.Error,
                         )
                     }
@@ -483,6 +487,7 @@ private fun RecordActions(
     val hasVersions = node.versionCount > 1
     val context = LocalContext.current
     val toaster = LocalToaster.current
+    val promptCopiedMessage by rememberUpdatedState(stringResource(R.string.media_creation_page_prompt_copied))
     var confirmCancel by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
 
@@ -551,7 +556,7 @@ private fun RecordActions(
                 ActionIcon(stringResource(R.string.media_creation_page_copy_prompt), HugeIcons.Copy01) {
                     context.writeClipboardText(record.prompt)
                     toaster.show(
-                        context.getString(R.string.media_creation_page_prompt_copied),
+                        promptCopiedMessage,
                         type = ToastType.Success,
                     )
                 }
