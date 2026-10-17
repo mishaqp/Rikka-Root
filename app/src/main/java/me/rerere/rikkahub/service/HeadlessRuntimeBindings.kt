@@ -166,9 +166,11 @@ internal suspend fun headlessFeatureEnabled(
 
 internal fun isHeadlessMcpToolEnabled(settings: Settings, assistant: Assistant, execution: RunExecutionContext, name: String): Boolean {
     val enabled = execution.callerConversationConfig?.mcpServers ?: assistant.mcpServers
+    val configuredServerIds = settings.mcpServers.map { it.id }
     return settings.mcpServers.any { server ->
         server.id in enabled && server.commonOptions.enable && server.commonOptions.tools.any { tool ->
-            tool.enable && name == buildMcpToolName(server.id, server.commonOptions.name, tool.name)
+            tool.enable && name == buildMcpToolName(server.id, server.commonOptions.name, tool.name,
+                configuredServerIds, settings.mcpToolNameCollisionPrefixes)
         }
     }
 }

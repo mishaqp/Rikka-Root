@@ -47,12 +47,12 @@ object McpHeaderRedactor {
     /**
      * Redact the value of one header. For sensitive names, returns `…<last4>` if the value
      * is long enough; otherwise just `…`. Pure function, no logging side effects. Plain
-     * (non-sensitive) headers pass through unchanged so the LLM can see e.g. `Content-Type:
-     * application/json` plainly.
+     * (non-sensitive) headers preserve ordinary values such as `Content-Type: application/json`;
+     * recognized API keys and JWTs are masked regardless of the header name.
      */
     fun redactHeaderValue(name: String, value: String): String {
         if (value.contains(McpControlSecretStore.REFERENCE_PREFIX)) return "…"
-        if (!isSensitive(name)) return value
+        if (!isSensitive(name)) return maskMcpCredentialShapes(value)
         return if (value.length >= 4) "…${value.takeLast(4)}" else "…"
     }
 

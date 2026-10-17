@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.ai.mcp.control
 
 import me.rerere.rikkahub.reliability.SecretRedactor
+import me.rerere.rikkahub.data.ai.tools.local.SensitiveContentDetector
 import java.net.URI
 
 /** Legacy configs can contain credentials anywhere in a URL; never display them verbatim. */
@@ -8,12 +9,35 @@ internal fun redactedMcpUrl(value: String): String = runCatching {
     val uri = URI(value)
     require(uri.host != null && uri.scheme?.lowercase() in setOf("http", "https"))
     val safe = URI(uri.scheme, null, uri.host, uri.port, uri.path, null, null).toASCIIString()
-    SecretRedactor.redact(safe) +
+    SecretRedactor.redact(maskMcpCredentialShapes(safe)) +
         (if (uri.rawQuery != null) "?[скрыто]" else "") +
         (if (uri.rawFragment != null) "#[скрыто]" else "")
 }.getOrDefault("[некорректный URL MCP скрыт]")
 
 /** Diagnostics can embed legacy URLs too, including values from transport exceptions. */
 internal fun redactedMcpText(value: String): String = SecretRedactor.redact(
-    Regex("https?://[^\\s<>\"']+", RegexOption.IGNORE_CASE).replace(value) { redactedMcpUrl(it.value) }
+    maskMcpCredentialShapes(Regex("https?://[^\\s<>\"']+", RegexOption.IGNORE_CASE).replace(value) { redactedMcpUrl(it.value) })
 )
+
+/** Specific credentials only: neutral headers may legitimately contain opaque identifiers. */
+internal fun maskMcpCredentialShapes(value: String): String =
+    MCP_AUTH_CREDENTIAL_SHAPE.replace(
+        MCP_KNOWN_CREDENTIAL_SHAPE.replace(SensitiveContentDetector.maskApiAndJwt(value), "••••")
+    ) { "${it.groupValues[1]} ••••" }
+
+/** Share the same narrow credential boundary across display, tool input and origin changes. */
+internal fun isMcpKnownCredentialValue(value: String): Boolean = maskMcpCredentialShapes(value) != value
+
+/** Display placeholders are never usable as replacement header values or vault secrets. */
+internal fun isMcpRedactionPlaceholder(value: String): Boolean {
+    val trimmed = value.trim()
+    return trimmed.equals("MASK", ignoreCase = true) || trimmed == "***" || trimmed.startsWith("…") ||
+        value.contains("••••") || MCP_REDACTION_PLACEHOLDER.containsMatchIn(value)
+}
+
+// Underscores decorate remote names and header values; unlike word boundaries they must delimit known keys.
+private val MCP_KNOWN_CREDENTIAL_SHAPE = Regex(
+    """(?<![A-Za-z0-9])(?:(?:tp-|gsk_|xai-)[A-Za-z0-9._-]{20,}|sk-(?:proj|svcacct)-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{20,})(?![A-Za-z0-9])"""
+)
+private val MCP_AUTH_CREDENTIAL_SHAPE = Regex("""(?i)^(\s*(?:Bearer|Basic))\s+\S+""")
+private val MCP_REDACTION_PLACEHOLDER = Regex("""(?i)\[(?:redacted[^\]]*|masked|mask|скрыто)\]""")

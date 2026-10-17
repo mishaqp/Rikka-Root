@@ -32,6 +32,7 @@ import me.rerere.rikkahub.data.ai.mcp.secureMcpConfigForPersistence
 import me.rerere.rikkahub.data.ai.mcp.serverUrl
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.model.Assistant
+import java.net.URI
 import kotlin.uuid.Uuid
 
 /**
@@ -51,6 +52,33 @@ import kotlin.uuid.Uuid
  */
 private const val DEFAULT_CONNECT_TIMEOUT_SECONDS = 15
 private const val MAX_CONNECT_TIMEOUT_SECONDS = 60
+
+private const val MANUAL_PROTECTED_FIELD_DETAIL = "Защищённое имя или адрес MCP нельзя заменить через инструмент. Откройте настройки MCP и введите исходное значение вручную. Маскированные значения не сохраняются."
+private const val MANUAL_LEGACY_HEADER_DETAIL = "Секретный заголовок сохранён в старом формате. Откройте защищённые настройки MCP, введите секрет заново и повторите изменение. Через инструмент нельзя заменить или удалить это значение."
+
+private class ManualLegacyHeaderUpdateRequired : IllegalStateException()
+private class ManualProtectedFieldUpdateRequired : IllegalStateException()
+
+private fun hasLegacySecretHeaders(config: McpServerConfig): Boolean =
+    config.commonOptions.headers.any { (name, value) ->
+        value.isNotBlank() && !McpControlSecretStore.isReference(value) &&
+            (McpHeaderRedactor.isSensitive(name) || isMcpKnownCredentialValue(value))
+    }
+
+private fun hasProtectedMcpInput(value: String): Boolean =
+    isMcpRedactionPlaceholder(value) || isMcpKnownCredentialValue(value)
+
+private fun hasProtectedMcpUrlInput(value: String): Boolean =
+    hasProtectedMcpInput(value) || runCatching {
+        val uri = URI(value)
+        listOfNotNull(uri.path, uri.query, uri.fragment, uri.userInfo).any(::hasProtectedMcpInput)
+    }.getOrDefault(false)
+
+private fun withoutCrossOriginCredentials(headers: List<Pair<String, String>>): List<Pair<String, String>> =
+    headers.filterNot { (name, value) ->
+        McpHeaderRedactor.isSensitive(name) || value.contains(McpControlSecretStore.REFERENCE_PREFIX) ||
+            isMcpKnownCredentialValue(value)
+    }
 
 /** ---------- Shared helpers ---------- */
 
@@ -79,7 +107,7 @@ private fun serverViewEnvelope(
     builder: kotlinx.serialization.json.JsonObjectBuilder.() -> Unit = {},
 ): JsonObject = buildJsonObject {
     put("id", config.id.toString())
-    put("name", config.commonOptions.name)
+    put("name", redactedMcpText(config.commonOptions.name))
     put("transport", transportLabel(config))
     put("url", redactedMcpUrl(urlOf(config)))
     put("enabled", config.commonOptions.enable)
@@ -362,8 +390,8 @@ fun mcpGetTool(settingsStore: SettingsStore, manager: McpManager, caller: McpCon
         val toolList = buildJsonArray {
             config.commonOptions.tools.forEach { tool ->
                 addJsonObject {
-                    put("name", tool.name)
-                    put("description", tool.description ?: "")
+                    put("name", redactedMcpText(tool.name))
+                    put("description", redactedMcpText(tool.description ?: ""))
                     put("enabled", tool.enable)
                     put("needs_approval", tool.needsApproval)
                 }
@@ -442,6 +470,9 @@ fun mcpAddTool(settingsStore: SettingsStore, manager: McpManager, caller: McpCon
         val timeoutSec = (params["connect_timeout_seconds"]?.jsonPrimitive?.intOrNull ?: DEFAULT_CONNECT_TIMEOUT_SECONDS)
             .coerceIn(1, MAX_CONNECT_TIMEOUT_SECONDS)
 
+        if (hasProtectedMcpInput(rawName) || hasProtectedMcpUrlInput(rawUrl)) {
+            return@Tool errEnv("manual_protected_field_update_required", MANUAL_PROTECTED_FIELD_DETAIL)
+        }
         val urlCheck = withContext(Dispatchers.IO) { McpUrlGuard.check(rawUrl, headless = false) }
         if (urlCheck is McpUrlGuard.Result.Reject) {
             return@Tool errEnv(urlCheck.error, urlCheck.detail)
@@ -566,25 +597,57 @@ fun mcpUpdateTool(settingsStore: SettingsStore, manager: McpManager, secretStore
         val all = settingsStore.settingsFlow.value.mcpServers
         val old = all.firstOrNull { it.id == serverId }
             ?: return@Tool errEnv("unknown_mcp_server_id", "Сервер MCP с id $serverId не найден")
-        val urlCheck = withContext(Dispatchers.IO) { McpUrlGuard.check(rawUrl, headless = false) }
-        if (urlCheck is McpUrlGuard.Result.Reject) {
-            return@Tool errEnv(urlCheck.error, urlCheck.detail)
+        // A model may repeat our masked view, but only the exact trusted projection is reversible.
+        val oldName = old.commonOptions.name
+        val oldNameProjection = redactedMcpText(oldName)
+        val unchangedName = rawName == oldName || rawName == oldNameProjection
+        if ((!unchangedName && oldNameProjection != oldName) ||
+            (!unchangedName && hasProtectedMcpInput(rawName))) {
+            return@Tool errEnv("manual_protected_field_update_required", MANUAL_PROTECTED_FIELD_DETAIL)
         }
-        // A malformed saved URL has no trusted origin, so its credentials are treated as moving.
-        val oldOrigin = runCatching { mcpCredentialOrigin(old.serverUrl) }.getOrNull()
-        val newOrigin = runCatching { mcpCredentialOrigin(rawUrl.trim()) }.getOrNull()
-            ?: return@Tool errEnv("invalid_url", "Некорректный адрес сервера MCP. Укажите адрес вида https://example.com/mcp.")
-        val originChanged = oldOrigin != newOrigin
-        val enabled = enabledArg ?: old.commonOptions.enable
-        val requestedHeaders = if (params.containsKey("headers")) parseHeaders(params["headers"]) else old.commonOptions.headers
-        // Never carry credentials to a new origin, including explicitly repeated old references.
-        val headers = if (originChanged) requestedHeaders.filterNot { (name, value) ->
-            McpHeaderRedactor.isSensitive(name) || value.contains(McpControlSecretStore.REFERENCE_PREFIX)
-        } else requestedHeaders
-        val nameCheck = McpControlValidation.validateName(rawName, all, excludingId = serverId.toString())
+        val nameCheck = if (unchangedName) McpControlValidation.Result.Ok(oldName)
+            else McpControlValidation.validateName(rawName, all, excludingId = serverId.toString())
         if (nameCheck is McpControlValidation.Result.Reject) {
             return@Tool errEnv(nameCheck.error, nameCheck.detail)
         }
+        val name = (nameCheck as McpControlValidation.Result.Ok).value
+
+        // A malformed saved URL has no trusted origin, so it remains replaceable.
+        val oldOrigin = runCatching { mcpCredentialOrigin(old.serverUrl) }.getOrNull()
+        val oldUrlProjection = redactedMcpUrl(old.serverUrl)
+        val protectedOldUrl = oldOrigin != null && oldUrlProjection != old.serverUrl
+        val unchangedUrl = rawUrl == old.serverUrl || (protectedOldUrl && rawUrl == oldUrlProjection)
+        if ((!unchangedUrl && protectedOldUrl) || (!unchangedUrl && hasProtectedMcpUrlInput(rawUrl))) {
+            return@Tool errEnv("manual_protected_field_update_required", MANUAL_PROTECTED_FIELD_DETAIL)
+        }
+        val url = if (unchangedUrl) old.serverUrl else rawUrl.trim()
+        // Validate the public endpoint even when an exact legacy projection restores its private query.
+        val checkedUrl = if (unchangedUrl && protectedOldUrl) runCatching {
+            val uri = URI(url)
+            URI(uri.scheme, null, uri.host, uri.port, uri.path, null, null).toASCIIString()
+        }.getOrDefault(url) else url
+        val urlCheck = withContext(Dispatchers.IO) { McpUrlGuard.check(checkedUrl, headless = false) }
+        if (urlCheck is McpUrlGuard.Result.Reject) {
+            return@Tool errEnv(urlCheck.error, urlCheck.detail)
+        }
+        val newOrigin = runCatching { mcpCredentialOrigin(url) }.getOrNull()
+            ?: return@Tool errEnv("invalid_url", "Некорректный адрес сервера MCP. Укажите адрес вида https://example.com/mcp.")
+        val originChanged = oldOrigin != newOrigin
+        if (!originChanged && hasLegacySecretHeaders(old)) {
+            return@Tool errEnv("manual_secret_update_required", MANUAL_LEGACY_HEADER_DETAIL)
+        }
+        val enabled = enabledArg ?: old.commonOptions.enable
+        val requestedHeaders = if (params.containsKey("headers")) parseHeaders(params["headers"]) else old.commonOptions.headers
+        if (originChanged && params.containsKey("headers")) {
+            // Old trusted credentials may be repeated for removal, never new plaintext secrets.
+            val newHeaders = requestedHeaders.filter { it !in old.commonOptions.headers }
+            val newHeaderCheck = McpControlValidation.validateSecureHeaders(newHeaders)
+            if (newHeaderCheck is McpControlValidation.Result.Reject) {
+                return@Tool errEnv(newHeaderCheck.error, newHeaderCheck.detail)
+            }
+        }
+        // Never carry credentials to a new origin, including explicitly repeated old references.
+        val headers = if (originChanged) withoutCrossOriginCredentials(requestedHeaders) else requestedHeaders
         val headerCheck = McpControlValidation.validateSecureHeaders(headers)
         if (headerCheck is McpControlValidation.Result.Reject) {
             return@Tool errEnv(headerCheck.error, headerCheck.detail)
@@ -595,32 +658,51 @@ fun mcpUpdateTool(settingsStore: SettingsStore, manager: McpManager, secretStore
                 if (old.commonOptions.headers.any { it.second == reference }) {
                     secretStore.bind(reference, old.id, old.serverUrl)
                 }
-                secretStore.resolve(reference, serverId, rawUrl.trim())
+                secretStore.resolve(reference, serverId, url)
             }
         } }
         if (secretCheck.isFailure) return@Tool errEnv("missing_mcp_secret", "Секрет MCP недоступен. Введите его на экране настроек MCP этого устройства.")
-        val name = (nameCheck as McpControlValidation.Result.Ok).value
         val newConfig = buildConfig(
             id = serverId,
             transport = transport,
             name = name,
-            url = rawUrl.trim(),
+            url = url,
             enabled = enabled,
             headers = headers,
             existingTools = old.commonOptions.tools, // preserve known tools across update
         )
         manager.removeClient(old)
-        val committed = settingsStore.update { s ->
-            s.copy(mcpServers = s.mcpServers.map { row ->
-                if (row.id == serverId) newConfig.clone(commonOptions = newConfig.commonOptions.copy(
-                    tools = row.commonOptions.tools,
-                    oauth = if (originChanged || runCatching { mcpCredentialOrigin(row.serverUrl) }.getOrNull() != newOrigin) null else row.commonOptions.oauth,
-                )) else row
-            })
+        val committed = try {
+            settingsStore.update { s ->
+                s.copy(mcpServers = s.mcpServers.map { row ->
+                    if (row.id != serverId) row else {
+                        val rowOrigin = runCatching { mcpCredentialOrigin(row.serverUrl) }.getOrNull()
+                        val rowOriginChanged = rowOrigin != newOrigin
+                        // Required plain arguments must not erase a protected value entered after the first read.
+                        if ((row.commonOptions.name != name && redactedMcpText(row.commonOptions.name) != row.commonOptions.name) ||
+                            (row.serverUrl != url && rowOrigin != null && redactedMcpUrl(row.serverUrl) != row.serverUrl)) {
+                            throw ManualProtectedFieldUpdateRequired()
+                        }
+                        // Recheck trusted live data inside the atomic update: a UI edit may precede this commit.
+                        if (!rowOriginChanged && hasLegacySecretHeaders(row)) throw ManualLegacyHeaderUpdateRequired()
+                        val liveHeaders = if (params.containsKey("headers")) headers else row.commonOptions.headers
+                        newConfig.clone(commonOptions = newConfig.commonOptions.copy(
+                            enable = enabledArg ?: row.commonOptions.enable,
+                            headers = if (rowOriginChanged) withoutCrossOriginCredentials(liveHeaders) else liveHeaders,
+                            tools = row.commonOptions.tools,
+                            oauth = if (rowOriginChanged) null else row.commonOptions.oauth,
+                        ))
+                    }
+                })
+            }
+        } catch (_: ManualLegacyHeaderUpdateRequired) {
+            return@Tool errEnv("manual_secret_update_required", MANUAL_LEGACY_HEADER_DETAIL)
+        } catch (_: ManualProtectedFieldUpdateRequired) {
+            return@Tool errEnv("manual_protected_field_update_required", MANUAL_PROTECTED_FIELD_DETAIL)
         }
         val savedConfig = committed.mcpServers.find { it.id == serverId }
             ?: return@Tool errEnv("unknown_mcp_server_id", "Сервер MCP с id $serverId не найден")
-        if (enabled) {
+        if (savedConfig.commonOptions.enable) {
             manager.addClient(savedConfig)
             awaitTerminal(manager, serverId, timeoutSec * 1000L)
         }
@@ -665,7 +747,7 @@ fun mcpDeleteTool(settingsStore: SettingsStore, manager: McpManager, caller: Mcp
         okEnv {
             put("deleted", true)
             put("id", serverId.toString())
-            put("name", old.commonOptions.name)
+            put("name", redactedMcpText(old.commonOptions.name))
         }
     },
 )
@@ -783,6 +865,7 @@ fun mcpListToolsTool(settingsStore: SettingsStore, manager: McpManager, caller: 
         val rawId = params["id"]?.jsonPrimitive?.contentOrNull
         val settings = settingsStore.settingsFlow.value
         val all = settings.mcpServers
+        val configuredServerIds = all.map { it.id }
         val targets = if (rawId.isNullOrBlank()) {
             all.filter { it.commonOptions.enable }
         } else {
@@ -802,14 +885,15 @@ fun mcpListToolsTool(settingsStore: SettingsStore, manager: McpManager, caller: 
                 for (tool in server.commonOptions.tools) {
                     addJsonObject {
                         put("server_id", server.id.toString())
-                        put("server_name", server.commonOptions.name)
-                        put("tool_name", tool.name)
+                        put("server_name", redactedMcpText(server.commonOptions.name))
+                        put("tool_name", redactedMcpText(tool.name))
                         // The name to actually call this tool by — built by the exact same
                         // helper the registration path uses, so a model can never end up
                         // with a name that was never offered (#88).
-                        put("dispatchable_name", buildMcpToolName(server.id, server.commonOptions.name, tool.name))
+                        put("dispatchable_name", buildMcpToolName(server.id, server.commonOptions.name, tool.name,
+                            configuredServerIds, settings.mcpToolNameCollisionPrefixes))
                         put("enabled_for_assistant", enabledForAssistant)
-                        put("description", tool.description ?: "")
+                        put("description", redactedMcpText(tool.description ?: ""))
                         put("enabled", tool.enable)
                         put("needs_approval", tool.needsApproval)
                         // Pass the MCP server's per-tool inputSchema through so the LLM

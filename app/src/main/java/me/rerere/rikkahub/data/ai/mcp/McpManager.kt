@@ -26,6 +26,7 @@ import me.rerere.oauth.OAuthHttpClient
 import me.rerere.oauth.OAuthLoopbackCallbackServer
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.saveUploadFromBytes
 import me.rerere.rikkahub.data.model.Assistant
@@ -33,6 +34,7 @@ import me.rerere.rikkahub.data.runtime.SettingsDashboardRuntimeStatusStore
 import me.rerere.rikkahub.data.ai.mcp.control.McpControlSecretStore
 import me.rerere.rikkahub.data.ai.mcp.control.classifyMcpError
 import me.rerere.rikkahub.data.ai.mcp.control.guardedMcpHttpClient
+import me.rerere.rikkahub.data.ai.mcp.control.isMcpKnownCredentialValue
 import me.rerere.rikkahub.reliability.SecretRedactor
 import me.rerere.rikkahub.utils.JsonInstant
 import okhttp3.Interceptor
@@ -139,8 +141,9 @@ class McpManager(
 
     fun getStatus(config: McpServerConfig): Flow<McpStatus> = sessionRegistry.getStatus(config.id)
 
-    fun getAllAvailableTools(assistant: Assistant): List<Triple<Uuid, String, McpTool>> {
-        val settings = settingsStore.settingsFlow.value
+    fun getAllAvailableTools(assistant: Assistant, settingsSnapshot: Settings? = null): List<Triple<Uuid, String, McpTool>> {
+        // Registration must enumerate the same immutable snapshot used for callable names.
+        val settings = settingsSnapshot ?: settingsStore.settingsFlow.value
         return settings.mcpServers
             .filter { it.commonOptions.enable && it.id in assistant.mcpServers }
             .flatMap { server ->
@@ -239,20 +242,38 @@ class McpManager(
 
 // Adapted from ExTV/rikkahub-agent McpManager.kt (AGPL v3), shared with mcp_list_tools.
 // Registration retains the exact remote name in its execute closure, never decodes this name.
-fun buildMcpToolName(serverId: Uuid, serverName: String, toolName: String): String {
+fun buildMcpToolName(
+    serverId: Uuid,
+    serverName: String,
+    toolName: String,
+    configuredServerIds: Collection<Uuid> = emptyList(),
+    rememberedCollisionPrefixes: Set<String> = emptySet(),
+): String {
     val serverSlug = serverId.toString().take(8).replace("-", "")
     val original = "mcp__" + serverSlug + "_" + serverName + "__" + toolName
-    // Valid names stay unchanged so saved approvals and scheduled-task tool lists keep matching.
-    if (original.length <= MCP_TOOL_NAME_MAX && MCP_TOOL_NAME_VALID.matches(original)) return original
+    // Include disabled/unselected configured siblings: toggling a capability must not
+    // change an alias back to an ambiguous name or redirect an existing grant.
+    val hasCollidingPrefix = serverSlug in rememberedCollisionPrefixes || configuredServerIds.any {
+        it != serverId && it.toString().take(8) == serverSlug
+    }
+    // Inspect components before alias underscores can hide API-key word boundaries.
+    val hasSecret = sequenceOf(serverName, toolName).any(::isMcpKnownCredentialValue)
+    // Ordinary valid names stay unchanged so saved approvals and task tool lists keep matching.
+    if (!hasSecret && !hasCollidingPrefix && original.length <= MCP_TOOL_NAME_MAX && MCP_TOOL_NAME_VALID.matches(original)) return original
     val identity = "$serverId\u0000$serverName\u0000$toolName"
     val suffix = java.security.MessageDigest.getInstance("SHA-256")
         .digest(identity.toByteArray(Charsets.UTF_8)).take(8).joinToString("") { "%02x".format(it) }
+    if (hasSecret) return "mcp__${serverSlug}_private_$suffix"
     return original.replace(MCP_TOOL_NAME_INVALID_CHAR, "_").take(MCP_TOOL_NAME_MAX - suffix.length - 1) + "_" + suffix
 }
 
 private const val MCP_TOOL_NAME_MAX = 64
 private val MCP_TOOL_NAME_VALID = Regex("[a-zA-Z0-9_-]+")
 private val MCP_TOOL_NAME_INVALID_CHAR = Regex("[^a-zA-Z0-9_-]")
+
+/** Distinct server identities sharing the legacy eight-character namespace. */
+internal fun mcpToolNameCollisionPrefixes(serverIds: Collection<Uuid>): Set<String> = serverIds.distinct()
+    .groupingBy { it.toString().take(8) }.eachCount().filterValues { it > 1 }.keys
 
 private val MCP_REDIRECT_CODES = setOf(301, 302, 303, 307, 308)
 

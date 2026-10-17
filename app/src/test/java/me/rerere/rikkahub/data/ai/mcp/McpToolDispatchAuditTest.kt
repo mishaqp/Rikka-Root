@@ -22,7 +22,7 @@ class McpToolDispatchAuditTest {
         val serverId = Uuid.random()
         val originalName = "прочитать/" + "very-long-tool-name".repeat(12)
         val manager = mockk<McpManager>()
-        every { manager.getAllAvailableTools(any()) } returns listOf(Triple(serverId, "Мой сервер", McpTool(name = originalName)))
+        every { manager.getAllAvailableTools(any(), any()) } returns listOf(Triple(serverId, "Мой сервер", McpTool(name = originalName)))
         coEvery { manager.callTool(serverId, originalName, any()) } returns listOf(UIMessagePart.Text("remote-result"))
         val localTools = mockk<LocalTools>(relaxed = true)
         val factory = ChatToolFactory(

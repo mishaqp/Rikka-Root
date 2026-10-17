@@ -15,6 +15,7 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStoreFile
 import io.pebbletemplates.pebble.PebbleEngine
 import kotlinx.coroutines.delay
@@ -33,6 +34,7 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
+import me.rerere.rikkahub.data.ai.mcp.mcpToolNameCollisionPrefixes
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_COMPRESS_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_OCR_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
@@ -161,6 +163,8 @@ class SettingsStore(
 
         // MCP
         val MCP_SERVERS = stringPreferencesKey("mcp_servers")
+        val MCP_TOOL_NAME_COLLISION_PREFIXES = stringSetPreferencesKey("mcp_tool_name_collision_prefixes")
+        val MCP_TOOL_NAME_SEEN_SERVER_IDS = stringSetPreferencesKey("mcp_tool_name_seen_server_ids")
         val DELETED_BUNDLED_SKILLS = stringPreferencesKey("deleted_bundled_skills")
 
         // WebDAV
@@ -212,8 +216,28 @@ class SettingsStore(
         private suspend fun persistSettings(dataStore: DataStore<Preferences>, settings: Settings, secretStore: McpControlSecretStore) {
             val protectedMcpServers = protectLegacyMcpConfigs(settings.mcpServers, secretStore)
             dataStore.edit { preferences ->
-                writeSettings(preferences, settings.copy(mcpServers = protectedMcpServers))
+                writeSettings(preferences, rememberMcpCollisionNamespaces(preferences,
+                    settings.copy(mcpServers = protectedMcpServers)))
             }
+        }
+
+        /** Run within the same DataStore transaction as the write. Inspect previous servers
+         * before deletion as well as incoming servers; backups and clear attempts cannot
+         * revive a legacy alias once its namespace has represented different UUIDs.
+         */
+        private fun rememberMcpCollisionNamespaces(preferences: Preferences, settings: Settings): Settings {
+            val previousServers = preferences[MCP_SERVERS]?.let {
+                JsonInstant.decodeFromString<List<McpServerConfig>>(it)
+            }.orEmpty()
+            // Full identity history survives an empty server list and a restart. Re-adding
+            // the same UUID is harmless; any different UUID sharing its prefix retires it.
+            val seenServerIds = preferences[MCP_TOOL_NAME_SEEN_SERVER_IDS].orEmpty() + settings.mcpToolNameSeenServerIds +
+                previousServers.map { it.id.toString() } + settings.mcpServers.map { it.id.toString() }
+            return settings.copy(
+                mcpToolNameSeenServerIds = seenServerIds,
+                mcpToolNameCollisionPrefixes = preferences[MCP_TOOL_NAME_COLLISION_PREFIXES].orEmpty() +
+                    settings.mcpToolNameCollisionPrefixes + mcpToolNameCollisionPrefixes(seenServerIds.map(Uuid::parse)),
+            )
         }
 
         private fun writeSettings(preferences: MutablePreferences, settings: Settings) {
@@ -252,6 +276,8 @@ class SettingsStore(
             preferences[SEARCH_SELECTED] = settings.searchServiceSelected.coerceIn(0, (settings.searchServices.size - 1).coerceAtLeast(0))
 
             preferences[MCP_SERVERS] = JsonInstant.encodeToString(settings.mcpServers)
+            preferences[MCP_TOOL_NAME_COLLISION_PREFIXES] = settings.mcpToolNameCollisionPrefixes
+            preferences[MCP_TOOL_NAME_SEEN_SERVER_IDS] = settings.mcpToolNameSeenServerIds
             preferences[DELETED_BUNDLED_SKILLS] = JsonInstant.encodeToString(settings.deletedBundledSkills)
             preferences[WEBDAV_CONFIG] = JsonInstant.encodeToString(settings.webDavConfig)
             preferences[S3_CONFIG] = JsonInstant.encodeToString(settings.s3Config)
@@ -335,6 +361,8 @@ class SettingsStore(
             mcpServers = preferences[MCP_SERVERS]?.let {
                 JsonInstant.decodeFromString(it)
             } ?: emptyList(),
+            mcpToolNameCollisionPrefixes = preferences[MCP_TOOL_NAME_COLLISION_PREFIXES].orEmpty(),
+            mcpToolNameSeenServerIds = preferences[MCP_TOOL_NAME_SEEN_SERVER_IDS].orEmpty(),
             deletedBundledSkills = preferences[DELETED_BUNDLED_SKILLS]?.let {
                 JsonInstant.decodeFromString(it)
             } ?: emptySet(),
@@ -500,9 +528,9 @@ class SettingsStore(
         dataStore.edit { preferences ->
             val requested = transform(decodeSettings(preferences))
             require(!requested.init) { "Cannot update dummy settings" }
-            val protected = requested.copy(
+            val protected = rememberMcpCollisionNamespaces(preferences, requested.copy(
                 mcpServers = protectLegacyMcpConfigs(requested.mcpServers, mcpSecretStore)
-            )
+            ))
             writeSettings(preferences, protected)
             committed = protected
         }
@@ -641,6 +669,8 @@ data class Settings(
     val searchCommonOptions: SearchCommonOptions = SearchCommonOptions(),
     val searchServiceSelected: Int = 0,
     val mcpServers: List<McpServerConfig> = emptyList(),
+    val mcpToolNameCollisionPrefixes: Set<String> = emptySet(),
+    val mcpToolNameSeenServerIds: Set<String> = emptySet(),
     val webDavConfig: WebDavConfig = WebDavConfig(),
     val s3Config: S3Config = S3Config(),
     // RemoteFileStore 上传临时素材用的桶，和备份的 s3Config 互不影响；items 字段在这里不使用

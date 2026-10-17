@@ -112,6 +112,7 @@ import me.rerere.rikkahub.data.ai.mcp.control.McpControlSecretStore
 import me.rerere.rikkahub.data.ai.mcp.control.McpHeaderRedactor
 import me.rerere.rikkahub.data.ai.mcp.control.mcpCredentialOrigin
 import me.rerere.rikkahub.data.ai.mcp.control.redactedMcpUrl
+import me.rerere.rikkahub.data.ai.mcp.control.isMcpKnownCredentialValue
 import me.rerere.rikkahub.data.ai.mcp.serverUrl
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.ItemAction
@@ -146,7 +147,7 @@ internal fun protectMcpSettingsSecrets(
             val draft = headerDrafts[index]
             val previousValue = beforeConfig?.commonOptions?.headers?.any { it.second == value } == true
             if (originChanged && draft == null && previousValue &&
-                (McpControlSecretStore.isReference(value) || McpHeaderRedactor.isSensitive(name))) null
+                (McpControlSecretStore.isReference(value) || McpHeaderRedactor.isSensitive(name) || isMcpKnownCredentialValue(value))) null
             else name to (draft?.trim() ?: value)
         },
         oauth = if (originChanged) null else config.commonOptions.oauth,

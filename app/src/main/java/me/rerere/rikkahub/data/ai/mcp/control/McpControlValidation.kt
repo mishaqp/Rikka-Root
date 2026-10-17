@@ -107,7 +107,11 @@ object McpControlValidation {
             if (value.startsWith(McpControlSecretStore.REFERENCE_PREFIX) && !McpControlSecretStore.isReference(value)) {
                 return Result.Reject("invalid_secret_reference", "Некорректная ссылка AndroidKeyStore на заголовок MCP.")
             }
-            if (McpHeaderRedactor.isSensitive(name) && value.isNotEmpty() && !McpControlSecretStore.isReference(value)) {
+            if (isMcpRedactionPlaceholder(value)) {
+                return Result.Reject("redacted_header_value", "Скрытое значение нельзя сохранить как заголовок. Введите секрет в защищённых настройках MCP и используйте ссылку AndroidKeyStore.")
+            }
+            if ((McpHeaderRedactor.isSensitive(name) || isMcpKnownCredentialValue(value)) &&
+                value.isNotEmpty() && !McpControlSecretStore.isReference(value)) {
                 return Result.Reject("plaintext_secret_forbidden", "Не передавайте секретные заголовки в чат. Введите значение в защищённом поле настроек MCP и используйте ссылку AndroidKeyStore.")
             }
         }

@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.ai.tools
 
 import android.util.Log
 import me.rerere.rikkahub.data.ai.mcp.control.McpControlCaller
+import me.rerere.rikkahub.data.ai.mcp.control.redactedMcpText
 import me.rerere.rikkahub.data.ai.mcp.buildMcpToolName
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -158,12 +159,14 @@ class ChatToolFactory(
             )
         }
 
-        val mcpTools = mcpManager.getAllAvailableTools(assistant)
+        val configuredMcpServerIds = settings.mcpServers.map { it.id }
+        val mcpTools = mcpManager.getAllAvailableTools(assistant, settings)
         mcpTools.forEach { (serverId, serverName, tool) ->
             add(
                 Tool(
-                    name = buildMcpToolName(serverId, serverName, tool.name),
-                    description = tool.description ?: "",
+                    name = buildMcpToolName(serverId, serverName, tool.name, configuredMcpServerIds,
+                        settings.mcpToolNameCollisionPrefixes),
+                    description = redactedMcpText(tool.description ?: ""),
                     parameters = { tool.inputSchema },
                     needsApproval = { tool.needsApproval },
                     execute = { mcpManager.callTool(serverId, tool.name, it.jsonObject) },

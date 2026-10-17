@@ -18,6 +18,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.ai.mcp.control.McpControlSecretStore
 import me.rerere.rikkahub.data.ai.mcp.control.McpUrlGuard
 import me.rerere.rikkahub.data.ai.mcp.control.mcpCredentialOrigin
+import me.rerere.rikkahub.data.ai.mcp.control.isMcpRedactionPlaceholder
 import me.rerere.rikkahub.reliability.SecretRedactor
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration.Companion.minutes
@@ -64,6 +65,9 @@ internal fun secureMcpConfigForPersistence(
     secretStore: McpControlSecretStore,
 ): McpServerConfig = config.clone(commonOptions = config.commonOptions.copy(
     headers = config.commonOptions.headers.map { (name, value) ->
+        require(!isMcpRedactionPlaceholder(value)) {
+            "Скрытое значение нельзя сохранить как секрет MCP. Введите настоящий секрет в защищённых настройках MCP."
+        }
         name to if (value.isBlank()) value else {
             val reference = if (McpControlSecretStore.isReference(value)) value else secretStore.put(value)
             secretStore.bind(reference, config.id, config.serverUrl)
