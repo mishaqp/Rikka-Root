@@ -79,6 +79,9 @@ internal fun httpRequestTool(
     execute = { input ->
         val result = try {
             val prepared = prepareHttpRequest(input)
+            // A private IP literal would otherwise hang until connect timeout before the interceptor runs.
+            val host = prepared.request.url.host
+            if (HTTP_IP_LITERAL.matches(host) && !isAllowedAddress(InetAddress.getByName(host))) throw PrivateHttpAddressException()
             // Keep the app's proxy/TLS/network settings, without logging credentials or caching responses.
             val boundedClient = client.newBuilder().apply {
                 interceptors().removeAll { it is RequestLoggingInterceptor || it is AIRequestInterceptor }
@@ -102,6 +105,8 @@ internal fun httpRequestTool(
             executeHttpRequest(boundedClient, prepared)
         } catch (cancelled: CancellationException) {
             throw cancelled
+        } catch (_: PrivateHttpAddressException) {
+            httpError(PRIVATE_ADDRESS_ERROR)
         } catch (invalid: HttpRequestInputException) {
             httpError(invalid.message.orEmpty())
         } catch (_: Exception) {
@@ -114,6 +119,7 @@ internal fun httpRequestTool(
 
 private const val PRIVATE_ADDRESS_ERROR =
     "Адреса в локальной сети и на самом телефоне недоступны для http_request. Используйте публичный адрес."
+private val HTTP_IP_LITERAL = Regex("(?:[0-9]{1,3}\\.){3}[0-9]{1,3}|.*:.*")
 private class PrivateHttpAddressException : UnknownHostException(PRIVATE_ADDRESS_ERROR)
 
 private fun publicOnlyHttpDns(delegate: Dns, isAllowedAddress: (InetAddress) -> Boolean) = Dns { host ->

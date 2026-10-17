@@ -271,7 +271,7 @@ class HttpRequestToolTest {
         server.createContext("/") { exchange -> calls.incrementAndGet(); exchange.sendResponseHeaders(200, -1); exchange.close() }
         server.start()
         try {
-            for (host in listOf("127.0.0.1", "localhost")) {
+            for (host in listOf("127.0.0.1", "localhost", "192.168.1.1", "10.255.255.1", "[::1]")) {
                 val output = runBlocking {
                     httpRequestTool(OkHttpClient()).execute(buildJsonObject { put("url", "http://$host:${server.address.port}/") })
                         .filterIsInstance<UIMessagePart.Text>().single().text

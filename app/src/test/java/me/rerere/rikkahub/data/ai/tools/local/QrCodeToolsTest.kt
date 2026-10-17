@@ -266,4 +266,23 @@ class QrCodeToolsTest {
         val matrix = MultiFormatWriter().encode(text, format, width, height, mapOf(EncodeHintType.CHARACTER_SET to "UTF-8"))
         for (y in 0 until matrix.height) for (x in 0 until matrix.width) image.setRGB(left + x, top + y, if (matrix[x, y]) 0xff000000.toInt() else 0xffffffff.toInt())
     }
+
+    /** On phones cacheDir is /data/user/0/<pkg>/cache, and /data/user/0 is a system link to /data/data. */
+    @Test fun scanOfGeneratedScratchFileWorksWhenAppCacheSitsBehindSystemLink() {
+        val realData = temporary.newFolder("data-data")
+        val userLink = File(temporary.root, "user-0").toPath()
+        Files.createSymbolicLink(userLink, realData.toPath())
+        val linkedCache = File(userLink.toFile(), "cache").apply { mkdirs() }
+        val phoneLike = object : android.content.ContextWrapper(context) {
+            override fun getCacheDir(): File = linkedCache
+            override fun getApplicationContext(): Context = this
+        }
+        val generate = qrCodeTools(phoneLike, access(), false).single { it.name == "qr_generate" }
+        val created = metadata(invoke(generate, buildJsonObject { put("text", "Проверка Rikka 123"); put("size", 256) }))
+        assertSuccess(created)
+        val scanTool = qrCodeTools(phoneLike, access(), false).single { it.name == "qr_scan" }
+        val result = metadata(invoke(scanTool, buildJsonObject { put("path", created.getValue("path").jsonPrimitive.content) }))
+        assertSuccess(result)
+        assertTrue(result.toString(), result.toString().contains("Проверка Rikka 123"))
+    }
 }

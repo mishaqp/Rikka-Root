@@ -338,13 +338,10 @@ class LocalFileAccess internal constructor(
         }
         val canonical = file.canonicalFile
         // No directories, arbitrary cache files, links or writes enter this opt-in capability.
-        // The ancestor symlink walk above applies equally to screenshot reads.
+        // The requested-path symlink walk above applies equally to screenshot reads.
         if (!write && qrScreenshotCacheRoot != null && canonical.isFile) {
-            var cacheAncestor = qrScreenshotCacheRoot.absoluteFile.toPath().normalize()
-            while (cacheAncestor.parent != null) {
-                require(!Files.isSymbolicLink(cacheAncestor)) { "Символические ссылки недоступны файловым инструментам." }
-                cacheAncestor = cacheAncestor.parent
-            }
+            // The app's own cacheDir sits under the system /data/user/0 -> /data/data link, so its
+            // ancestors are not walked; canonical parent equality rejects a linked screenshots folder.
             val cache = qrScreenshotCacheRoot.canonicalFile
             val parent = canonical.parentFile
             val screenshot = parent == File(cache, "screenshots") && canonical.name.matches(Regex("screen-[0-9]+\\.png"))
