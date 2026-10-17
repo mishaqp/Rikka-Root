@@ -61,6 +61,8 @@ internal object PermissionsAccessCatalog {
             kind = PermissionAccessKind.Root),
         PermissionAccessEntry("network", "Интернет и состояние сетей", "Модели, поиск, браузер, MCP, SSH и сетевые инструменты. Android выдаёт этот доступ при установке.",
             android("INTERNET", "ACCESS_NETWORK_STATE", "ACCESS_WIFI_STATE", "CHANGE_WIFI_MULTICAST_STATE"), PermissionAccessKind.Automatic),
+        PermissionAccessEntry("alarm_clock", "Будильники и таймеры", "Создание будильников и таймеров в приложении часов. Android выдаёт этот доступ при установке.",
+            listOf("com.android.alarm.permission.SET_ALARM"), PermissionAccessKind.Automatic),
         PermissionAccessEntry("vibration", "Вибрация", "Отклик интерфейса и инструмент вибрации. Выдаётся при установке.",
             android("VIBRATE"), PermissionAccessKind.Automatic),
         PermissionAccessEntry("wallpaper", "Обои", "Инструмент установки обоев. Выдаётся при установке.", android("SET_WALLPAPER"), PermissionAccessKind.Automatic),
