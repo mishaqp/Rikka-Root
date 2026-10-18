@@ -236,6 +236,102 @@ class ScreenAuditRegressionTest {
             "input text 'replacement'"), calls.filter { it.startsWith("input ") })
     }
 
+    @Test fun `review 10 relative age preserves promoted click and edit handles`() = runBlocking {
+        assertVolatileAncestorUsable("Заказ 123 · 5 мин назад", "Заказ 123 · 6 мин назад")
+    }
+
+    @Test fun `review 10 progress percentage preserves promoted click and edit handles`() = runBlocking {
+        assertVolatileAncestorUsable("45%", "46%")
+    }
+
+    @Test fun `review 10 clock countdown preserves promoted click and edit handles`() = runBlocking {
+        assertVolatileAncestorUsable("0:59", "0:58")
+    }
+
+    @Test fun `review 10 notification counter preserves promoted click and edit handles`() = runBlocking {
+        assertVolatileAncestorUsable("Сообщения (5)", "Сообщения (6)")
+    }
+
+    private suspend fun assertVolatileAncestorUsable(before: String, after: String) {
+        for (editable in listOf(false, true)) {
+            // Editable values themselves are excluded already: test their accessible label instead.
+            xml = ancestorXml(editable).replace("text=\"Parent\"", if (editable)
+                "text=\"Parent\" content-desc=\"$before\"" else "text=\"$before\"")
+            val svc = service()
+            val id = nodeId(svc)
+            xml = xml.replace(before, after)
+            calls.clear()
+            val result = if (editable) execute(setTextTool(svc), buildJsonObject {
+                put("node_id", id); put("text", "replacement")
+            }.toString()) else execute(clickNodeTool(svc), buildJsonObject { put("node_id", id) }.toString())
+            assertEquals("Volatile '$before' → '$after' must not replace the actual ancestor: $result",
+                "true", result["success"]?.jsonPrimitive?.content)
+            assertTrue("The real ancestor action must still execute", calls.contains("input tap 150 300"))
+            if (editable) assertTrue(calls.toString(), calls.contains("input text 'replacement'"))
+        }
+    }
+
+    @Test fun `review 10 changing semantic order or amount still blocks promoted actions`() = runBlocking {
+        val labels = listOf(
+            "Заказ 123 · 5 мин назад" to "Заказ 456 · 6 мин назад",
+            "Оплатить 100 рублей" to "Оплатить 900 рублей",
+            "Заказ (123)" to "Заказ (456)",
+            "Ставка 45%" to "Ставка 46%",
+        )
+        for (editable in listOf(false, true)) for ((before, after) in labels) {
+            xml = ancestorXml(editable).replace("text=\"Parent\"", "text=\"Parent\" content-desc=\"$before\"")
+            val svc = service()
+            val id = nodeId(svc)
+            xml = xml.replace(before, after)
+            calls.clear()
+            val result = if (editable) execute(setTextTool(svc), buildJsonObject {
+                put("node_id", id); put("text", "replacement")
+            }.toString()) else execute(clickNodeTool(svc), buildJsonObject { put("node_id", id) }.toString())
+            assertEquals("Semantic digits must continue identifying the actual target: $result",
+                "stale_node_id", result["error"]?.jsonPrimitive?.content)
+            assertTrue("Changed semantic targets must not receive any input", calls.none { it.startsWith("input ") })
+        }
+    }
+
+    @Test fun `review 10 expanded volatile formats do not erase the observed node identity`() = runBlocking {
+        for ((before, after) in listOf("5 мин назад" to "6 мин назад", "45%" to "46%",
+            "0:59" to "0:58", "Сообщения (5)" to "Сообщения (6)")) {
+            xml = ancestorXml(editable = false).replace("text=\"Search\"", "text=\"$before\"")
+            val svc = service()
+            val id = execute(findNodeTool(svc), buildJsonObject {
+                put("by", "text"); put("value", before)
+            }.toString()).getValue("matches").jsonArray.single().jsonObject.getValue("node_id").jsonPrimitive.content
+            xml = xml.replace(before, after)
+            calls.clear()
+            val result = execute(clickNodeTool(svc), buildJsonObject { put("node_id", id) }.toString())
+            assertEquals("New volatility rules are ancestor-only: $result", "stale_node_id", result["error"]?.jsonPrimitive?.content)
+            assertTrue(calls.toString(), calls.none { it.startsWith("input ") })
+        }
+    }
+
+    @Test fun `review 10 relative age suffix must not match longer words or identifiers`() = runBlocking {
+        val labels = listOf(
+            "5 мин назадание" to "6 мин назадание",
+            "5 минутами назад" to "6 минутами назад",
+            "5 часовой пояс назад" to "6 часовой пояс назад",
+            "5 мин назад_метка" to "6 мин назад_метка",
+            "5 мин назад2" to "6 мин назад2",
+        )
+        for (editable in listOf(false, true)) for ((before, after) in labels) {
+            xml = ancestorXml(editable).replace("text=\"Parent\"", "text=\"Parent\" content-desc=\"$before\"")
+            val svc = service()
+            val id = nodeId(svc)
+            xml = xml.replace(before, after)
+            calls.clear()
+            val result = if (editable) execute(setTextTool(svc), buildJsonObject {
+                put("node_id", id); put("text", "replacement")
+            }.toString()) else execute(clickNodeTool(svc), buildJsonObject { put("node_id", id) }.toString())
+            assertEquals("Only an actual relative-age phrase can be volatile: $result",
+                "stale_node_id", result["error"]?.jsonPrimitive?.content)
+            assertTrue(calls.toString(), calls.none { it.startsWith("input ") })
+        }
+    }
+
     private fun ancestorXml(editable: Boolean): String = """<hierarchy rotation="0">
         <node package="org.test" class="android.widget.FrameLayout" bounds="[0,0][1080,2400]" enabled="true">
           <node package="org.test" class="${if (editable) "org.test.ParentEditText" else "org.test.ClickableParent"}" text="Parent" clickable="true" editable="$editable" focused="$editable" bounds="[0,0][300,600]" enabled="true">

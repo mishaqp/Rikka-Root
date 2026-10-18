@@ -19,11 +19,30 @@ import me.rerere.ai.ui.UIMessagePart
 private const val DEFAULT_MAX_NODES = 500
 private const val MAX_NODES_HARD_CEILING = 2000
 
-// Preserve order numbers, amounts and other semantic digits. Only the explicit
-// seconds countdown suffix is volatile, e.g. «Отправить код (59с)».
+// The observed node preserves semantic digits; only its existing explicit seconds
+// countdown suffix is volatile, e.g. «Отправить код (59с)».
 private val NODE_COUNTDOWN = Regex("(\\()\\d+(\\s*[сs]\\))")
-private fun stableNodeLabel(text: String): String = text.replace(NODE_COUNTDOWN) {
-    "${it.groupValues[1]}#${it.groupValues[2]}"
+// Expanded formats belong only to a promoted action ancestor, never the observed node itself.
+private val ANCESTOR_AGE = Regex(
+    """(?<![\p{L}\p{N}])\d+\s+(?:сек(?:унд[уы]?)?|мин(?:ут[уы]?)?|час(?:а|ов)?|д(?:ень|ня|ней))\.?\s+назад(?![\p{L}\p{N}_])""",
+    RegexOption.IGNORE_CASE,
+)
+private val ANCESTOR_PROGRESS = Regex("""^\s*\d{1,3}(?:[.,]\d+)?\s*%\s*$""")
+private val ANCESTOR_CLOCK = Regex("""^\s*(?:\d{1,2}:)?\d{1,2}:[0-5]\d\s*$""")
+private val ANCESTOR_COUNTER = Regex(
+    """^(\s*(?:сообщения|уведомления|messages|notifications)\s*\()\d+(\)\s*)$""",
+    RegexOption.IGNORE_CASE,
+)
+private fun stableNodeLabel(text: String, ancestor: Boolean = false): String {
+    val stable = text.replace(NODE_COUNTDOWN) { "${it.groupValues[1]}#${it.groupValues[2]}" }
+    if (!ancestor) return stable
+    return when {
+        ANCESTOR_PROGRESS.matches(stable) -> "#%"
+        ANCESTOR_CLOCK.matches(stable) -> "#:#"
+        else -> stable.replace(ANCESTOR_AGE, "# назад").replace(ANCESTOR_COUNTER) {
+            "${it.groupValues[1]}#${it.groupValues[2]}"
+        }
+    }
 }
 
 /**
@@ -31,10 +50,10 @@ private fun stableNodeLabel(text: String): String = text.replace(NODE_COUNTDOWN)
  * opens, an edited field's own text changes, and timers ("Отправить код (59с)") tick, so
  * none of those may invalidate the handle; a different element at the same index still does.
  */
-private fun nodeIdentity(node: RootScreenNode, withText: Boolean): List<String> = listOf(
+private fun nodeIdentity(node: RootScreenNode, withText: Boolean, ancestor: Boolean = false): List<String> = listOf(
     node.packageName.orEmpty(), node.className.orEmpty(),
-    if (withText && !node.isEditable) stableNodeLabel(node.text.orEmpty()) else "",
-    stableNodeLabel(node.contentDescription.orEmpty()), node.viewIdResourceName.orEmpty(),
+    if (withText && !node.isEditable) stableNodeLabel(node.text.orEmpty(), ancestor) else "",
+    stableNodeLabel(node.contentDescription.orEmpty(), ancestor), node.viewIdResourceName.orEmpty(),
     node.isClickable.toString(), node.isEditable.toString(), node.isScrollable.toString(),
 )
 
@@ -56,7 +75,7 @@ internal fun nodeFingerprint(node: RootScreenNode): String = fnv1a64(buildList {
             add(depth.toString())
             // A child handle can trigger this ancestor's action. Its non-editable
             // label is part of that action's identity, including semantic numbers.
-            addAll(nodeIdentity(target, withText = true))
+            addAll(nodeIdentity(target, withText = true, ancestor = depth > 0))
         }
     }
     addActionTarget("click") { it.isClickable }

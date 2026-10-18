@@ -76,7 +76,7 @@ object ReadabilityRunner {
         val limit = maxChars.coerceIn(100, 64 * 1024)
         val context = this.context.applicationContext ?: return null
         val library = loadLibrary(context) ?: return null
-        val identity = extractionDocumentIdentity() ?: throw ExtractionTimedOut()
+        val identity = extractionDocumentIdentity() ?: return null
         synchronized(timedOutDocuments) {
             if (timedOutDocuments[this] == identity) return null
             timedOutDocuments.remove(this)

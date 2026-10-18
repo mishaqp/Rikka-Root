@@ -20,6 +20,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.browser.ReadabilityRunner.runReadabilityResult
 import me.rerere.rikkahub.data.ai.tools.local.createBrowserTool
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -313,6 +314,50 @@ class BrowserReadReliabilityTest {
 
     @Test fun `links identify their document even when native URL has already changed`() = runTest {
         assertReadDocumentUrl(BrowserToolDefaults.GET_LINKS)
+    }
+
+    @Test fun `review 11 missing readability document identity returns null before starting parser`() = runTest {
+        view.lostIdentityCallbacks = 1
+        val result = runCatching { view.runReadabilityResult() }
+        assertTrue("Missing document identity is not a running-parser timeout: ${result.exceptionOrNull()}", result.isSuccess)
+        assertEquals(null, result.getOrNull())
+        assertEquals(0, view.readabilityInvocations)
+    }
+
+    @Test fun `review 11 repeated missing identities use raw fallback without timeout loop`() = runTest {
+        view.lostIdentityCallbacks = Int.MAX_VALUE
+        view.pageText = "Текст доступен без извлечения статьи"
+        repeat(3) {
+            val result = execute(BrowserToolDefaults.GET_TEXT)
+            assertFalse("An unavailable identity must permit same-call raw fallback: $result", result.containsKey("error"))
+            assertEquals("raw_fallback", result["extract_mode"]?.jsonPrimitive?.content)
+            assertEquals(view.pageText, result["text"]?.jsonPrimitive?.content)
+        }
+        assertEquals(0, view.readabilityInvocations)
+        assertEquals(3, view.rawReadRequests)
+        assertEquals(0, view.navigationCount)
+    }
+
+    @Test fun `review 11 recovered identity can extract article after a raw fallback`() = runTest {
+        view.lostIdentityCallbacks = 1
+        view.pageText = "Обычный текст"
+        view.articleText = "Настоящая статья ".repeat(40)
+        val first = execute(BrowserToolDefaults.GET_TEXT)
+        assertFalse(first.toString(), first.containsKey("error"))
+        assertEquals("raw_fallback", first["extract_mode"]?.jsonPrimitive?.content)
+        val second = execute(BrowserToolDefaults.GET_TEXT)
+        assertFalse(second.toString(), second.containsKey("error"))
+        assertEquals("readability", second["extract_mode"]?.jsonPrimitive?.content)
+        assertEquals(1, view.readabilityInvocations)
+        assertEquals(0, view.navigationCount)
+    }
+
+    @Test fun `review 11 forced readability with no identity reports unavailable article not timeout`() = runTest {
+        view.lostIdentityCallbacks = 1
+        val result = execute(BrowserToolDefaults.GET_TEXT, """{"extract_mode":"readability"}""")
+        assertEquals("readability_failed", result["error"]?.jsonPrimitive?.content)
+        assertEquals(0, view.readabilityInvocations)
+        assertEquals(0, view.rawReadRequests)
     }
 
     @Test fun `timed out readability does not queue raw extraction behind an unresponsive parser`() = runTest {

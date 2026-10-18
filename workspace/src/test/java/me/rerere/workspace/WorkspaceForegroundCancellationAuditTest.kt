@@ -14,7 +14,7 @@ class WorkspaceForegroundCancellationAuditTest {
 
     @Test(timeout = 10_000) fun `timeout gives the tracer QUIT before forcing termination`() {
         fixture { process, childPid, quit ->
-            val result = process.readResult(150)
+            val result = process.readResult(150, sendQuit = ::sendHostQuit)
             assertTrue(result.timedOut)
             assertTrue("A tracer needs QUIT to reap its tracees before it is killed", quit.exists())
             await { !alive(childPid.readText().trim().toLong()) }
@@ -27,7 +27,7 @@ class WorkspaceForegroundCancellationAuditTest {
         fixture { process, childPid, quit ->
             val error = AtomicReference<Throwable?>()
             val worker = Thread {
-                try { process.readResult(30_000) }
+                try { process.readResult(30_000, sendQuit = ::sendHostQuit) }
                 catch (actual: Throwable) { error.set(actual) }
             }
             worker.start()
@@ -55,7 +55,7 @@ class WorkspaceForegroundCancellationAuditTest {
         try {
             await { started.exists() }
             val start = System.nanoTime()
-            val result = process.readResult(100)
+            val result = process.readResult(100, sendQuit = ::sendHostQuit)
             assertTrue(result.timedOut)
             assertTrue("Forced fallback must finish in less than four seconds", (System.nanoTime() - start) / 1_000_000 < 4_000)
             assertTrue(process.waitFor(1, TimeUnit.SECONDS))
@@ -86,6 +86,13 @@ class WorkspaceForegroundCancellationAuditTest {
             process.destroyForcibly()
             process.waitFor(1, TimeUnit.SECONDS)
         }
+    }
+
+    // Android's sendSignal is a stub in these plain JVM tests; preserve the real QUIT/reap contract.
+    private fun sendHostQuit(pid: Int) {
+        val sender = ProcessBuilder("/bin/kill", "-QUIT", pid.toString()).start()
+        assertTrue("The host signal transport must complete", sender.waitFor(1, TimeUnit.SECONDS))
+        assertEquals("The actual QUIT must be delivered", 0, sender.exitValue())
     }
 
     private fun alive(pid: Long): Boolean = ProcessHandle.of(pid).map { process ->

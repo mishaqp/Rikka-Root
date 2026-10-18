@@ -45,7 +45,11 @@ class HostShellRunner : WorkspaceShellRunner {
 // 单个流保留的最大字符数, 防止命令疯狂输出导致 OOM 或撑爆 LLM 上下文
 const val MAX_OUTPUT_CHARS = 128 * 1024
 
-fun Process.readResult(timeoutMillis: Long, stdin: ByteArray? = null): WorkspaceCommandResult {
+fun Process.readResult(
+    timeoutMillis: Long,
+    stdin: ByteArray? = null,
+    sendQuit: (Int) -> Unit = { pid -> android.os.Process.sendSignal(pid, android.os.Process.SIGNAL_QUIT) },
+): WorkspaceCommandResult {
     val identity = ownedIdentity()
     val stdout = StreamCollector(inputStream)
     val stderr = StreamCollector(errorStream)
@@ -62,7 +66,7 @@ fun Process.readResult(timeoutMillis: Long, stdin: ByteArray? = null): Workspace
     try {
         val finished = waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
         if (!finished) {
-            stopForeground(identity)
+            stopForeground(identity, sendQuit)
         }
         stdinWriter?.join(1_000)
         stdout.join(1_000)
@@ -76,7 +80,7 @@ fun Process.readResult(timeoutMillis: Long, stdin: ByteArray? = null): Workspace
         )
     } catch (e: InterruptedException) {
         // PRoot must receive QUIT while alive so it can reap tracees before forced cleanup.
-        stopForeground(identity)
+        stopForeground(identity, sendQuit)
         runCatching { stdinWriter?.join(1_000) }
         runCatching { stdout.join(1_000) }
         runCatching { stderr.join(1_000) }
@@ -94,7 +98,7 @@ private data class ForegroundProcessIdentity(val pid: Long, val parent: Long, va
 private fun Process.ownedIdentity(): ForegroundProcessIdentity? = runCatching {
     val pid = (runCatching { Process::class.java.getMethod("pid").invoke(this) as Long }.getOrNull()
         ?: Regex("\\bpid=(\\d+)").find(toString())?.groupValues?.get(1)?.toLongOrNull()) ?: return null
-    if (pid <= 1 || !isAlive) return null
+    if (pid <= 1 || pid > Int.MAX_VALUE || !isAlive) return null
     val self = File("/proc/self/stat").readText().substringBefore(' ').toLong()
     val fields = File("/proc/$pid/stat").readText().substringAfterLast(") ").trim().split(Regex("\\s+"))
     val parent = fields.getOrNull(1)?.toLongOrNull() ?: return null
@@ -103,29 +107,18 @@ private fun Process.ownedIdentity(): ForegroundProcessIdentity? = runCatching {
     ForegroundProcessIdentity(pid, parent, started)
 }.getOrNull()
 
-private fun Process.stopForeground(identity: ForegroundProcessIdentity?) {
+private fun Process.stopForeground(identity: ForegroundProcessIdentity?, sendQuit: (Int) -> Unit) {
     if (!isAlive) return
     if (identity != null) {
-        // Check ownership again in the signal sender. PID and start time come only from
-        // the owned Process and procfs, never from a command or model-visible output.
-        val script = """
-            IFS= read -r stat < /proc/${identity.pid}/stat || exit 1
-            rest=${'$'}{stat##*) }
-            set -- ${'$'}rest
-            [ "${'$'}2" = "${identity.parent}" ] || exit 1
-            shift 19
-            [ "${'$'}1" = "${identity.started}" ] || exit 1
-            kill -QUIT ${identity.pid}
-        """.trimIndent()
+        // Revalidate procfs immediately before signalling; a recycled PID is not our child.
+        // The signal is sent in-process so starting/killing a helper shell cannot lose QUIT.
         runCatching {
-            val shell = if (File("/system/bin/sh").isFile) "/system/bin/sh" else "/bin/sh"
-            val signal = ProcessBuilder(shell, "-c", script).redirectErrorStream(true).start()
-            try {
-                signal.outputStream.close()
-                if (!signal.waitFor(200, TimeUnit.MILLISECONDS)) signal.destroyForcibly()
-            } finally {
-                if (signal.isAlive) signal.destroyForcibly()
-                signal.inputStream.close()
+            val fields = File("/proc/${identity.pid}/stat").readText()
+                .substringAfterLast(") ").trim().split(Regex("\\s+"))
+            val parent = fields.getOrNull(1)?.toLongOrNull()
+            val started = fields.getOrNull(19)?.toLongOrNull()
+            if (isAlive && parent == identity.parent && started == identity.started) {
+                sendQuit(identity.pid.toInt())
             }
         }
     } else {
