@@ -74,7 +74,7 @@ class IncompleteHistoryUiTest {
         compose.onNodeWithText("Часть истории не загрузилась, чат открыт только для чтения").assertIsDisplayed()
         compose.onNodeWithText("Экспорт").assertIsDisplayed().assertHasClickAction().performClick()
         compose.onNodeWithText("Полная резервная копия").assertIsDisplayed()
-        compose.onNodeWithText("Резервная копия включает всю базу данных, файлы и настройки приложения, в том числе незагруженные сообщения.").assertIsDisplayed()
+        compose.onNodeWithText("Резервная копия включает всю базу данных, вложения чатов, навыки, шрифты и настройки приложения, в том числе незагруженные сообщения. Файлы рабочих пространств (workspace) в неё не входят — сохраните их отдельно.").assertIsDisplayed()
     }
     @Test fun favoriteMutationIsBlockedBeforeActualFavoriteDaoWrite() {
         vm.toggleMessageFavorite(vm.conversation.value.messageNodes.first())
