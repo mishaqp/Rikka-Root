@@ -64,7 +64,7 @@ REQUIRED_FAILURES = {
          ("AssistantDataIsolationAuditTest", r"^deleteCannotRemoveAnotherAssistantsMemory")],
     11: [("AssistantDataIsolationAuditTest", r"^conversationSearchCannotReturnAnotherAssistantsChats")],
     12: [("WorkflowApprovalRendererAuditTest", r"^audit 12 ")],
-    13: [("ClipboardSensitiveContentTest", r"^sensitiveClipboardReadPreservesText"),
+    13: [("ClipboardSensitiveContentTest", r"^sensitiveClipboardReadMasksSecretsAndWarnsWithoutRepeatingThem$"),
          ("ApprovalAuditPolicyTest", r"^audit 13 calendar")],
     14: [("ScreenshotStoragePrivacyTest", r"^missingOrFalseGalleryOption")],
     15: [("ChatServiceMetadataTest", r"^audit 15 answer cannot turn ordinary"),
@@ -87,6 +87,101 @@ REQUIRED_FAILURES = {
 }
 
 
+NOT_RED_EVIDENCE = "BASELINE_COMPAT_API_ABSENT_NOT_RED_EVIDENCE"
+
+# These are the proven, fixture-only bridges for the exact original 9b74 snapshot.
+# No @Test body/assertion is changed. The output-bound identity fallback represents the
+# original no-workspace behavior; missing keepWithChat is explicitly NOT behavioral RED.
+GENERATION_BOUND_BRIDGE = '''    // Without workspace_shell, the original generation path kept tool output unchanged.
+    private fun boundToolOutputsForModel(messages: List<UIMessage>): List<UIMessage> {
+        val generationLoopClass = try {
+            Class.forName("me.rerere.rikkahub.data.ai.GenerationLoopKt")
+        } catch (_: ClassNotFoundException) {
+            return messages
+        }
+        val bound = try {
+            generationLoopClass.getDeclaredMethod("boundToolOutputsForModel", List::class.java)
+        } catch (_: NoSuchMethodException) {
+            return messages
+        }
+        val result = bound.invoke(null, messages)
+        check(result is List<*>) { "Invalid boundToolOutputsForModel result" }
+        return result.map { it as UIMessage }
+    }
+
+'''
+
+SCREENSHOT_BRIDGE = '''
+    // Local baseline-harness compatibility only. Missing new API is not behavioral RED evidence.
+    private suspend fun keepWithChat(
+        cacheFile: File,
+        displayName: String,
+        files: me.rerere.rikkahub.data.files.FilesManager,
+    ): File = kotlin.coroutines.intrinsics.suspendCoroutineUninterceptedOrReturn { continuation ->
+        val signature = arrayOf(
+            File::class.java, String::class.java,
+            me.rerere.rikkahub.data.files.FilesManager::class.java,
+            kotlin.coroutines.Continuation::class.java,
+        )
+        val method = Class.forName("me.rerere.rikkahub.data.ai.tools.local.ScreenshotToolKt")
+            .declaredMethods.singleOrNull { it.name == "keepWithChat" && it.parameterTypes.contentEquals(signature) }
+            ?: throw AssertionError("BASELINE_COMPAT_API_ABSENT_NOT_RED_EVIDENCE: keepWithChat is absent on 9b74; this helper-only test cannot establish behavioral RED")
+        method.invoke(null, cacheFile, displayName, files, continuation)
+    }
+'''
+
+
+def adapt_baseline_test(relative, source, checkout):
+    """Adapt only detached fixture copies; current supported APIs leave bytes unchanged.
+
+    The checkout is the fixed BASELINE, not a second production implementation. Unexpected
+    fixture/API shapes fail closed, rather than deleting tests or manufacturing RED evidence.
+    """
+    relative = Path(relative).as_posix()
+    generation = "app/src/test/java/me/rerere/rikkahub/data/ai/GenerationLoopAuditRegressionTest.kt"
+    screenshot = "app/src/test/java/me/rerere/rikkahub/data/ai/tools/local/ScreenshotStoragePrivacyTest.kt"
+    metadata = "app/src/test/java/me/rerere/rikkahub/service/ChatServiceMetadataTest.kt"
+    if relative not in {generation, screenshot, metadata}:
+        return source
+    api = "app/src/main/java/me/rerere/rikkahub/data/ai/" + (
+        "tools/local/ScreenshotTool.kt" if relative == screenshot else "GenerationLoop.kt")
+    production = (Path(checkout) / api).read_text()
+    if relative == generation:
+        if re.search(r"\bfun\s+boundToolOutputsForModel\s*\(", production):
+            return source
+    elif relative == screenshot:
+        if re.search(r"\bfun\s+keepWithChat\s*\(", production):
+            return source
+    else:
+        signature = re.search(r"\bfun\s+generateText\s*\((.*?)\n\s*\):\s*Flow<GenerationChunk>", production, re.DOTALL)
+        if signature is None:
+            raise ValueError("Неизвестная сигнатура baseline generateText: " + relative)
+        if re.search(r"^\s*approveEverything\s*:", signature.group(1), re.MULTILINE):
+            return source
+        if not all(re.search(r"^\s*" + name + r"\s*:", signature.group(1), re.MULTILINE)
+                   for name in ("prepareToolApproval", "beforeModelRequest")):
+            raise ValueError("Неизвестные параметры baseline generateText: " + relative)
+    if BASELINE != "9b74e54124b30e8086f893d2518238482ba06767":
+        raise ValueError("Адаптация разрешена только для проверенного baseline 9b74e541")
+    if relative == generation:
+        anchors = ('val hasShellAccess = tools.any { it.name == "workspace_shell" }',
+                   'if (totalChars <= MAX_TOOL_OUTPUT_CHARS || !hasShellAccess) return output')
+        anchor = "    private class Fixture("
+        if not all(text in production for text in anchors) or source.count(anchor) != 1 or re.search(r"\bfun\s+boundToolOutputsForModel\s*\(", source):
+            raise ValueError("Неизвестный baseline output path или fixture anchor: " + relative)
+        return source.replace(anchor, GENERATION_BOUND_BRIDGE + anchor, 1)
+    if relative == screenshot:
+        if 'fun takeScreenshotTool(context: Context, service: RootScreenService): Tool = Tool(' not in production or \
+                source.count("class ScreenshotStoragePrivacyTest {") != 1 or not source.endswith("\n}\n") or \
+                re.search(r"\bfun\s+keepWithChat\s*\(", source):
+            raise ValueError("Неизвестный baseline screenshot API или fixture anchor: " + relative)
+        return source[:-2] + SCREENSHOT_BRIDGE + source[-2:]
+    context = "prepareToolApproval = any(), beforeModelRequest = any(), approveEverything = any())"
+    if source.count(", approveEverything = any()") != 5 or source.count(context) != 5:
+        raise ValueError("Ожидались ровно пять известных baseline mock anchors: " + relative)
+    return source.replace(context, "prepareToolApproval = any(), beforeModelRequest = any())")
+
+
 def check_evidence(report_files, requirements=REQUIRED_FAILURES):
     cases = []
     for report in report_files:
@@ -103,6 +198,8 @@ def check_evidence(report_files, requirements=REQUIRED_FAILURES):
                 if not re.search(method, case.get("name", ""), re.IGNORECASE):
                     continue
                 failure = case.find("failure")
+                if failure is not None and NOT_RED_EVIDENCE in failure.get("message", "") + "\n" + "".join(failure.itertext()):
+                    continue
                 if failure is not None and failure.get("type", "").rsplit(".", 1)[-1] in {
                     "AssertionError", "ComparisonFailure", "AssertionFailedError",
                 }:
@@ -132,6 +229,10 @@ def run_baseline(root, output):
                     target = checkout / relative
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(root / relative, target)
+                    original = (root / relative).read_bytes().decode("utf-8")
+                    adapted = adapt_baseline_test(relative, original, checkout)
+                    if adapted != original:
+                        target.write_bytes(adapted.encode("utf-8"))
             # Use the exact checked-out submodule and already-installed frontend dependencies.
             submodule = checkout / "material3/material-color-utilities"
             recorded = subprocess.check_output(["git", "ls-tree", BASELINE, "material3/material-color-utilities"], cwd=root, text=True).split()[2]
