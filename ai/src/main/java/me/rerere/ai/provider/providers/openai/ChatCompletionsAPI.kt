@@ -8,7 +8,6 @@ import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonArrayBuilder
 import kotlinx.serialization.json.JsonElement
@@ -54,7 +53,8 @@ import me.rerere.ai.util.encodeBase64
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.mergeCustomHeaders
-import me.rerere.ai.util.parseErrorDetail
+import me.rerere.ai.util.joinUrl
+import me.rerere.ai.util.streamFailure
 import me.rerere.ai.util.stringSafe
 import me.rerere.common.http.await
 import me.rerere.common.http.jsonArrayOrNull
@@ -89,7 +89,7 @@ class ChatCompletionsAPI(
             )
 
         val request = Request.Builder()
-            .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
+            .url(joinUrl(providerSetting.baseUrl, providerSetting.chatCompletionsPath))
             .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
@@ -151,7 +151,7 @@ class ChatCompletionsAPI(
             )
 
             val request = Request.Builder()
-                .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
+                .url(joinUrl(providerSetting.baseUrl, providerSetting.chatCompletionsPath))
                 .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
                 .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
                 .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
@@ -190,22 +190,11 @@ class ChatCompletionsAPI(
                 }
 
                 override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                    var exception = t
-
                     response?.let { metadata.response(it.code) }
 
                     val bodyRaw = response?.body?.stringSafe()
                     metadata.bodySize(bodyRaw?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0)
-                    try {
-                        if (!bodyRaw.isNullOrBlank()) {
-                            val bodyElement = Json.parseToJsonElement(bodyRaw)
-                            exception = bodyElement.parseErrorDetail()
-                        }
-                    } catch (e: Throwable) {
-                        exception = e
-                    } finally {
-                        close(exception)
-                    }
+                    close(streamFailure(t, response?.code, bodyRaw))
                 }
 
                 override fun onClosed(eventSource: EventSource) {

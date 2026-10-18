@@ -1,6 +1,7 @@
 package me.rerere.ai.provider.providers.openai
 
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -31,6 +32,9 @@ import kotlin.uuid.Uuid
 internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
     private val streamState = ChatCompletionsStreamState()
     private val toolIdsByIndex = mutableMapOf<Int, String>()
+    private val rawToolIdsByIndex = mutableMapOf<Int, String>()
+    // Для вызовов без `index`: позиция в массиве tool_calls -> выделенный индекс вызова.
+    private val indexlessSlots = mutableMapOf<Int, Int>()
     private val usedToolIds = mutableSetOf<String>()
     private val reasoningDetailsByIndex = linkedMapOf<Int, JsonObject>()
     private var responseId: String = Uuid.random().toString()
@@ -43,9 +47,9 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
         if (event.data == "[DONE]") return DecodeResult(finish(), completed = true)
 
         val chunks = buildList {
-            event.data.trim().split("\n").filter(String::isNotBlank).forEach { line ->
+            payloads(event.data).forEach { element ->
                 // 部分中转会在流中夹杂 `data: null` 之类的非对象行，直接跳过
-                val payload = json.parseToJsonElement(line).jsonObjectOrNull ?: return@forEach
+                val payload = element.jsonObjectOrNull ?: return@forEach
                 payload["error"]?.let { throw it.parseErrorDetail() }
                 responseId = payload["id"]?.jsonPrimitive?.contentOrNull
                     ?.takeIf(String::isNotBlank) ?: responseId
@@ -58,11 +62,14 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
 
                         message["tool_calls"]?.jsonArrayOrNull?.forEachIndexed { fallbackIndex, element ->
                             val toolCall = element.jsonObjectOrNull ?: return@forEachIndexed
-                            val index = toolCall["index"]?.jsonPrimitive?.intOrNull ?: fallbackIndex
+                            val rawId = toolCall["id"]?.jsonPrimitive?.contentOrNull?.takeIf(String::isNotBlank)
+                            val index = toolCall["index"]?.jsonPrimitive?.intOrNull
+                                ?: indexlessToolIndex(fallbackIndex, rawId)
                             // Index owns identity for the whole stream. Later blank/changed IDs
                             // cannot erase an emitted identity or merge another parallel index.
                             val toolId = toolIdsByIndex.getOrPut(index) {
-                                uniqueToolCallId(toolCall["id"]?.jsonPrimitive?.contentOrNull, usedToolIds)
+                                rawId?.let { rawToolIdsByIndex[index] = it }
+                                uniqueToolCallId(rawId, usedToolIds)
                             }
                             val function = toolCall["function"]?.jsonObjectOrNull
                             addAll(streamState.append(
@@ -90,6 +97,28 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
     }
 
     override fun onClosed(): List<StreamChunk> = finish()
+
+    /** Событие целиком — один JSON (в том числе многострочный); иначе каждая строка — отдельный JSON. */
+    private fun payloads(data: String): List<JsonElement> =
+        runCatching { listOf(json.parseToJsonElement(data)) }.getOrElse {
+            data.trim().split("\n").filter(String::isNotBlank).map(json::parseToJsonElement)
+        }
+
+    /**
+     * Вызов без `index` занимает позицию в массиве, пока не придёт другой непустой id:
+     * тогда это новый вызов, и ему выделяется свободный индекс, а не слияние с прежним.
+     */
+    private fun indexlessToolIndex(position: Int, rawId: String?): Int {
+        val current = indexlessSlots[position] ?: position
+        val currentRawId = rawToolIdsByIndex[current]
+        val index = if (rawId != null && currentRawId != null && rawId != currentRawId) {
+            (toolIdsByIndex.keys.maxOrNull() ?: -1) + 1
+        } else {
+            current
+        }
+        indexlessSlots[position] = index
+        return index
+    }
 
     private fun finish(): List<StreamChunk> {
         if (finished) return emptyList()
@@ -130,7 +159,7 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
                     val url = imageObject["image_url"]?.jsonObjectOrNull
                         ?.get("url")?.jsonPrimitive?.contentOrNull ?: return@forEach
                     require(url.startsWith("data:image")) { "Only data uri is supported" }
-                    add(UIMessagePart.Image(url.substringAfter("data:image/png;base64,")))
+                    add(UIMessagePart.Image(url))
                 }
             },
             annotations = parseAnnotations(payload["annotations"]?.jsonArrayOrNull ?: JsonArray(emptyList())),
@@ -229,10 +258,12 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
                         }
                     }
                     is UIMessagePart.Image -> {
-                        addAll(closeText()); addAll(closeReasoning()); addAll(closeTools())
-                        val id = imageId ?: nextId(sourceId, "image").also {
-                            imageId = it; add(StreamChunk.ImageStart(it, metadata = part.metadata))
-                        }
+                        // Каждый элемент images — целая картинка, поэтому предыдущая закрывается.
+                        addAll(closeText()); addAll(closeReasoning()); addAll(closeImage()); addAll(closeTools())
+                        val id = nextId(sourceId, "image").also { imageId = it }
+                        val mimeType = part.url.substringAfter("data:", "").substringBefore(";base64,", "")
+                            .ifBlank { "image/png" }
+                        add(StreamChunk.ImageStart(id, mimeType = mimeType, metadata = part.metadata))
                         add(StreamChunk.ImageDelta(id, part.url.substringAfter(";base64,", part.url), part.metadata))
                     }
                     else -> Unit

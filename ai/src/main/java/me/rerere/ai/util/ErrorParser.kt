@@ -49,3 +49,23 @@ fun JsonElement.parseErrorDetail(): HttpException {
         }
     }
 }
+
+/**
+ * Ошибка SSE-потока: описание из JSON-тела ответа, иначе исходное исключение,
+ * иначе HTTP-код с началом тела. Неуспешный ответ никогда не закрывает поток как успешный.
+ */
+fun streamFailure(cause: Throwable?, code: Int?, body: String?): Throwable {
+    val detail = body?.takeIf { it.isNotBlank() }?.let {
+        runCatching { Json.parseToJsonElement(it).parseErrorDetail() }.getOrNull()
+    }
+    if (detail != null) return detail
+    if (cause != null) return cause
+    val snippet = body?.trim()?.take(500).orEmpty()
+    return HttpException(
+        when {
+            code == null -> "Stream failed"
+            snippet.isEmpty() -> "HTTP $code"
+            else -> "HTTP $code: $snippet"
+        }
+    )
+}

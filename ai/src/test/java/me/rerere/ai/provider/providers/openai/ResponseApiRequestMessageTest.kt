@@ -368,8 +368,37 @@ class ResponseApiRequestMessageTest {
     }
 
     @Test
+    fun `reasoning without id or encrypted content is skipped when store is false`() {
+        val items = invokeBuildMessages(listOf(
+            UIMessage(
+                role = MessageRole.ASSISTANT,
+                parts = listOf(
+                    UIMessagePart.Reasoning(
+                        reasoning = "id only",
+                        metadata = OpenAIReasoningMetadata(reasoningId = "rs_1").toMetadata(),
+                        reasoningType = ReasoningType.REASONING_TEXT,
+                    ),
+                    UIMessagePart.Reasoning(
+                        reasoning = "no metadata",
+                        reasoningType = ReasoningType.SUMMARY_TEXT,
+                    ),
+                    UIMessagePart.Text("answer"),
+                ),
+            ),
+        ))
+        assertEquals(1, items.size)
+        assertEquals("assistant", items.single().jsonObject["role"]?.jsonPrimitive?.content)
+        assertTrue(items.none { it.jsonObject["type"]?.jsonPrimitive?.content == "reasoning" })
+        assertFalse(invokeBuildRequestBody(
+            ProviderSetting.OpenAI(baseUrl = "https://api.openai.com/v1"),
+            createReasoningParams(),
+        )["store"]!!.jsonPrimitive.content.toBoolean())
+    }
+
+    @Test
     fun `unencrypted reasoning should replay plaintext content`() {
-        val reasoningItem = invokeBuildMessages(listOf(
+        // Только для провайдеров без encrypted_content (Volcengine), см. supportEncryptedContent.
+        val reasoningItem = api.buildMessages(listOf(
             UIMessage(
                 role = MessageRole.ASSISTANT,
                 parts = listOf(UIMessagePart.Reasoning(
@@ -378,7 +407,7 @@ class ResponseApiRequestMessageTest {
                     reasoningType = ReasoningType.REASONING_TEXT,
                 )),
             ),
-        )).single().jsonObject
+        ), replayUnencryptedReasoning = true).single().jsonObject
 
         val content = reasoningItem["content"]?.jsonArray
         assertEquals(1, content?.size)

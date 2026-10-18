@@ -10,7 +10,6 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonArrayBuilder
 import kotlinx.serialization.json.JsonElement
@@ -64,7 +63,8 @@ import me.rerere.ai.util.encodeBase64
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.mergeCustomHeaders
-import me.rerere.ai.util.parseErrorDetail
+import me.rerere.ai.util.joinUrl
+import me.rerere.ai.util.streamFailure
 import me.rerere.ai.util.stringSafe
 import me.rerere.common.http.await
 import me.rerere.common.http.jsonPrimitiveOrNull
@@ -246,7 +246,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
     override suspend fun listModels(providerSetting: ProviderSetting.Claude): List<Model> =
         withContext(Dispatchers.IO) {
             val request = Request.Builder()
-                .url("${providerSetting.baseUrl}/models")
+                .url(joinUrl(providerSetting.baseUrl, "/models"))
                 .headers(providerSetting.mergeCustomHeaders())
                 .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
                 .addHeader("anthropic-version", ANTHROPIC_VERSION)
@@ -298,7 +298,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
     ): TextGenerationResult {
         val requestBody = buildMessageRequest(providerSetting, messages, params)
         val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/messages")
+            .url(joinUrl(providerSetting.baseUrl, "/messages"))
             .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
@@ -357,7 +357,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         try {
             val requestBody = buildMessageRequest(providerSetting, messages, params, stream = true)
             val request = Request.Builder()
-                .url("${providerSetting.baseUrl}/messages")
+                .url(joinUrl(providerSetting.baseUrl, "/messages"))
                 .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
                 .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
                 .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
@@ -397,21 +397,11 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 }
 
                 override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                    var exception = t
-
                     response?.let { metadata.response(it.code) }
 
                     val bodyRaw = response?.body?.stringSafe()
                     metadata.bodySize(bodyRaw?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0)
-                    try {
-                        if (!bodyRaw.isNullOrBlank()) {
-                            val bodyElement = Json.parseToJsonElement(bodyRaw)
-                            exception = bodyElement.parseErrorDetail()
-                        }
-                    } catch (e: Throwable) {
-                    } finally {
-                        close(exception)
-                    }
+                    close(streamFailure(t, response?.code, bodyRaw))
                 }
 
                 override fun onClosed(eventSource: EventSource) {
@@ -751,10 +741,24 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             }
         }
 
-        is UIMessagePart.Reasoning -> buildJsonObject {
-            put("type", "thinking")
-            put("thinking", reasoning)
-            metadataAs<ClaudeReasoningMetadata>()?.signature?.let { put("signature", it) }
+        // Claude принимает thinking только с подписью; рассуждения без неё (например, от другого
+        // провайдера) не отправляются, а redacted_thinking возвращается в исходном виде.
+        is UIMessagePart.Reasoning -> {
+            val metadata = metadataAs<ClaudeReasoningMetadata>()
+            val redactedData = metadata?.redactedData
+            val signature = metadata?.signature
+            when {
+                redactedData != null -> buildJsonObject {
+                    put("type", "redacted_thinking")
+                    put("data", redactedData)
+                }
+                signature != null -> buildJsonObject {
+                    put("type", "thinking")
+                    put("thinking", reasoning)
+                    put("signature", signature)
+                }
+                else -> null
+            }
         }
 
         else -> null

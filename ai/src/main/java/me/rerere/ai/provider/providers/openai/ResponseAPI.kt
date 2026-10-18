@@ -8,7 +8,6 @@ import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArrayBuilder
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -55,7 +54,8 @@ import me.rerere.ai.util.encodeBase64
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.mergeCustomHeaders
-import me.rerere.ai.util.parseErrorDetail
+import me.rerere.ai.util.joinUrl
+import me.rerere.ai.util.streamFailure
 import me.rerere.ai.util.stringSafe
 import me.rerere.common.http.await
 import me.rerere.common.http.jsonObjectOrNull
@@ -87,7 +87,7 @@ class ResponseAPI(
             stream = false,
         )
         val request = Request.Builder()
-            .url("${providerSetting.baseUrl}${providerSetting.responsesPath}")
+            .url(joinUrl(providerSetting.baseUrl, providerSetting.responsesPath))
             .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addHeader(
@@ -134,7 +134,7 @@ class ResponseAPI(
                 stream = true,
             )
             val request = Request.Builder()
-                .url("${providerSetting.baseUrl}${providerSetting.responsesPath}")
+                .url(joinUrl(providerSetting.baseUrl, providerSetting.responsesPath))
                 .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
                 .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
                 .addHeader(
@@ -175,21 +175,11 @@ class ResponseAPI(
                 }
 
                 override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                    var exception = t
-
                     response?.let { metadata.response(it.code) }
 
                     val bodyRaw = response?.body?.stringSafe()
                     metadata.bodySize(bodyRaw?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0)
-                    try {
-                        if (!bodyRaw.isNullOrBlank()) {
-                            val bodyElement = Json.parseToJsonElement(bodyRaw)
-                            exception = bodyElement.parseErrorDetail()
-                        }
-                    } catch (e: Throwable) {
-                    } finally {
-                        close(exception)
-                    }
+                    close(streamFailure(t, response?.code, bodyRaw))
                 }
 
                 override fun onClosed(eventSource: EventSource) {
@@ -239,7 +229,7 @@ class ResponseAPI(
             }
 
             // messages
-            put("input", buildMessages(messages))
+            put("input", buildMessages(messages, replayUnencryptedReasoning = !capabilities.supportEncryptedContent))
 
             // reasoning
             if (params.model.abilities.contains(ModelAbility.REASONING)) {
@@ -315,7 +305,14 @@ class ResponseAPI(
         } else sanitized
     }
 
-    internal fun buildMessages(messages: List<UIMessage>) = buildJsonArray {
+    /**
+     * @param replayUnencryptedReasoning отправлять reasoning без encrypted_content (провайдеры,
+     * которые его не выдают). Иначе при store=false такой элемент сервер отклоняет: по id он не сохранён.
+     */
+    internal fun buildMessages(
+        messages: List<UIMessage>,
+        replayUnencryptedReasoning: Boolean = false,
+    ) = buildJsonArray {
         messages
             .filter { message ->
                 message.role != MessageRole.SYSTEM && (
@@ -327,14 +324,14 @@ class ResponseAPI(
             }
             .forEach { message ->
                 if (message.role == MessageRole.ASSISTANT) {
-                    addAssistantItems(message)
+                    addAssistantItems(message, replayUnencryptedReasoning)
                 } else {
                     addUserItems(message)
                 }
             }
     }
 
-    private fun JsonArrayBuilder.addAssistantItems(message: UIMessage) {
+    private fun JsonArrayBuilder.addAssistantItems(message: UIMessage, replayUnencryptedReasoning: Boolean) {
         val groups = groupPartsByToolBoundary(message.parts)
         val contentBuffer = mutableListOf<UIMessagePart>()
 
@@ -345,9 +342,22 @@ class ResponseAPI(
                     group.parts.forEach { part ->
                         when (part) {
                             is UIMessagePart.Reasoning -> {
-                                val reasoningMetadata = part.metadataAs<OpenAIReasoningMetadata>()
-                                val reasoningId = reasoningMetadata?.reasoningId
+                                val reasoningId = part.metadataAs<OpenAIReasoningMetadata>()?.reasoningId
                                 if (reasoningId != null && !emittedReasoningIds.add(reasoningId)) {
+                                    return@forEach
+                                }
+                                val reasoningParts = if (reasoningId == null) {
+                                    listOf(part)
+                                } else {
+                                    group.parts.filterIsInstance<UIMessagePart.Reasoning>().filter {
+                                        it.metadataAs<OpenAIReasoningMetadata>()?.reasoningId == reasoningId
+                                    }
+                                }
+                                val encryptedContent = reasoningParts.firstNotNullOfOrNull {
+                                    it.metadataAs<OpenAIReasoningMetadata>()?.encryptedContent
+                                }
+                                // store=false: без id и encrypted_content элемент reasoning не воспроизвести
+                                if (!replayUnencryptedReasoning && (reasoningId == null || encryptedContent == null)) {
                                     return@forEach
                                 }
                                 // 先输出累积的文本/图片内容
@@ -356,13 +366,6 @@ class ResponseAPI(
                                     contentBuffer.clear()
                                 }
                                 // 输出 reasoning item
-                                val reasoningParts = if (reasoningId == null) {
-                                    listOf(part)
-                                } else {
-                                    group.parts.filterIsInstance<UIMessagePart.Reasoning>().filter {
-                                        it.metadataAs<OpenAIReasoningMetadata>()?.reasoningId == reasoningId
-                                    }
-                                }
                                 add(buildJsonObject {
                                     put("type", "reasoning")
                                     reasoningId?.let { put("id", it) }
@@ -377,7 +380,6 @@ class ResponseAPI(
                                                 })
                                             }
                                     })
-                                    val encryptedContent = reasoningMetadata?.encryptedContent
                                     val content = reasoningParts
                                         .filter { it.reasoningType == ReasoningType.REASONING_TEXT }
                                         .filter { it.reasoning.isNotEmpty() }

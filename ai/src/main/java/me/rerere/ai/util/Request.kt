@@ -58,6 +58,10 @@ fun Request.Builder.configureSessionHeaders(url: String, sessionId: String?): Re
     }
 }
 
+/** Склеивает базовый URL провайдера и путь ровно одним `/`, даже если baseUrl оканчивается на `/`. */
+fun joinUrl(baseUrl: String, path: String): String =
+    if (path.isEmpty()) baseUrl.trimEnd('/') else baseUrl.trimEnd('/') + "/" + path.trimStart('/')
+
 fun ResponseBody.stringSafe(): String? {
     return when (this) {
         is RealResponseBody -> string()

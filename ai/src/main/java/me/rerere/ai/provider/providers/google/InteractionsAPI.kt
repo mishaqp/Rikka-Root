@@ -53,7 +53,8 @@ import me.rerere.ai.util.encodeBase64
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.mergeCustomHeaders
-import me.rerere.ai.util.parseErrorDetail
+import me.rerere.ai.util.joinUrl
+import me.rerere.ai.util.streamFailure
 import me.rerere.ai.util.stringSafe
 import me.rerere.common.http.await
 import me.rerere.common.http.jsonArrayOrNull
@@ -146,21 +147,11 @@ internal class InteractionsAPI(
                 }
 
                 override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                    var exception = t
                     response?.let { metadata.response(it.code) }
 
                     val bodyRaw = response?.body?.stringSafe()
                     metadata.bodySize(bodyRaw?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0)
-                    try {
-                        if (!bodyRaw.isNullOrBlank()) {
-                            exception = json.parseToJsonElement(bodyRaw).parseErrorDetail()
-                        } else if (t == null && response != null) {
-                            exception = Exception("Unknown error: ${response.code}")
-                        }
-                    } catch (e: Throwable) {
-                    } finally {
-                        close(exception ?: Exception("Stream failed"))
-                    }
+                    close(streamFailure(t, response?.code, bodyRaw))
                 }
 
                 override fun onClosed(eventSource: EventSource) {
@@ -187,7 +178,7 @@ internal class InteractionsAPI(
         params: TextGenerationParams,
         requestBody: JsonObject,
     ): Request {
-        val url = "${providerSetting.baseUrl}/interactions"
+        val url = joinUrl(providerSetting.baseUrl, "/interactions")
         return Request.Builder()
             .url(url)
             .headers(providerSetting.mergeCustomHeaders(params.customHeaders))

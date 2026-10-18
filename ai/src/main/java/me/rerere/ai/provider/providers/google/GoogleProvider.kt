@@ -63,6 +63,8 @@ import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.mergeCustomHeaders
 import me.rerere.ai.util.removeElements
+import me.rerere.ai.util.joinUrl
+import me.rerere.ai.util.streamFailure
 import me.rerere.ai.util.stringSafe
 import me.rerere.common.http.await
 import me.rerere.common.http.jsonPrimitiveOrNull
@@ -92,7 +94,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
     private fun buildUrl(providerSetting: ProviderSetting.Google, path: String): HttpUrl {
         return if (!providerSetting.vertexAI) {
-            "${providerSetting.baseUrl}/$path".toHttpUrl()
+            joinUrl(providerSetting.baseUrl, path).toHttpUrl()
         } else if (providerSetting.useServiceAccount) {
             "https://aiplatform.googleapis.com/v1/projects/${providerSetting.projectId}/locations/${providerSetting.location}/$path".toHttpUrl()
         } else {
@@ -310,31 +312,11 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                     t: Throwable?,
                     response: Response?
                 ) {
-                    var exception = t
-
                     response?.let { metadata.response(it.code) }
 
-                    try {
-                        if (t == null && response != null) {
-                            val bodyStr = response.body.stringSafe()
-                            metadata.bodySize(bodyStr?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0)
-                            if (!bodyStr.isNullOrEmpty()) {
-                                val bodyElement = json.parseToJsonElement(bodyStr)
-                                if (bodyElement is JsonObject) {
-                                    exception = Exception(
-                                        bodyElement["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content
-                                            ?: "unknown"
-                                    )
-                                }
-                            } else {
-                                exception = Exception("Unknown error: ${response.code}")
-                            }
-                        }
-                    } catch (e: Throwable) {
-                        exception = e
-                    } finally {
-                        close(exception ?: Exception("Stream failed"))
-                    }
+                    val bodyStr = if (t == null) response?.body?.stringSafe() else null
+                    metadata.bodySize(bodyStr?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0)
+                    close(streamFailure(t, response?.code, bodyStr))
                 }
 
                 override fun onClosed(eventSource: EventSource) {

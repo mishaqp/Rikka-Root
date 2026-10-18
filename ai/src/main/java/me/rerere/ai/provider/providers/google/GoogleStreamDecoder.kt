@@ -181,8 +181,6 @@ internal class GoogleStreamDecoder(
         private val openToolIds = linkedSetOf<String>()
 
         fun append(message: UIMessage, responseId: String): List<StreamChunk> = buildList {
-            val imageCount = message.parts.count { it is UIMessagePart.Image }
-            var emittedImages = 0
             message.parts.forEach { part ->
                 when (part) {
                     is UIMessagePart.Text -> if (part.text.isNotEmpty()) {
@@ -233,18 +231,16 @@ internal class GoogleStreamDecoder(
                         }
                     }
                     is UIMessagePart.Image -> {
-                        addAll(closeText()); addAll(closeReasoning()); addAll(closeTools())
-                        if (imageCount > 1 && emittedImages > 0) addAll(closeImage())
-                        val id = imageId ?: nextId(responseId, "image").also {
-                            imageId = it
-                            add(StreamChunk.ImageStart(
-                                id = it,
-                                mimeType = part.url.substringAfter("data:").substringBefore(";base64,"),
-                                metadata = part.metadata,
-                            ))
-                        }
+                        // inlineData всегда несёт целую картинку, в том числе в следующих событиях потока,
+                        // поэтому открытая ранее картинка закрывается, а не дописывается.
+                        addAll(closeText()); addAll(closeReasoning()); addAll(closeImage()); addAll(closeTools())
+                        val id = nextId(responseId, "image").also { imageId = it }
+                        add(StreamChunk.ImageStart(
+                            id = id,
+                            mimeType = part.url.substringAfter("data:").substringBefore(";base64,"),
+                            metadata = part.metadata,
+                        ))
                         add(StreamChunk.ImageDelta(id, part.url.substringAfter(";base64,", part.url), part.metadata))
-                        emittedImages++
                     }
                     else -> Unit
                 }

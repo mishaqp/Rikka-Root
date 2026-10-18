@@ -30,6 +30,7 @@ import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.util.KeyRoulette
 import me.rerere.ai.util.configureReferHeaders
+import me.rerere.ai.util.joinUrl
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.mergeCustomHeaders
@@ -59,7 +60,7 @@ class OpenAIProvider(
         withContext(Dispatchers.IO) {
             val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
             val request = Request.Builder()
-                .url("${providerSetting.baseUrl}/models")
+                .url(joinUrl(providerSetting.baseUrl, "/models"))
                 .headers(providerSetting.mergeCustomHeaders())
                 .addHeader("Authorization", "Bearer $key")
                 .get()
@@ -99,7 +100,7 @@ class OpenAIProvider(
         val url = if (providerSetting.balanceOption.apiPath.startsWith("http")) {
             providerSetting.balanceOption.apiPath
         } else {
-            "${providerSetting.baseUrl}${providerSetting.balanceOption.apiPath}"
+            joinUrl(providerSetting.baseUrl, providerSetting.balanceOption.apiPath)
         }
         val request = Request.Builder()
             .url(url)
@@ -181,7 +182,7 @@ class OpenAIProvider(
         )
 
         val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/embeddings")
+            .url(joinUrl(providerSetting.baseUrl, "/embeddings"))
             .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
             .addHeader("Authorization", "Bearer $key")
             .addHeader("Content-Type", "application/json")
@@ -239,7 +240,7 @@ class OpenAIProvider(
         )
 
         val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/images/generations")
+            .url(joinUrl(providerSetting.baseUrl, "/images/generations"))
             .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
             .addHeader("Authorization", "Bearer $key")
             .addHeader("Content-Type", "application/json")
@@ -321,7 +322,7 @@ class OpenAIProvider(
         }
 
         val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/images/edits")
+            .url(joinUrl(providerSetting.baseUrl, "/images/edits"))
             .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
             .addHeader("Authorization", "Bearer $key")
             .post(bodyBuilder.build())
@@ -375,7 +376,7 @@ class OpenAIProvider(
         )
 
         val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/images/generations")
+            .url(joinUrl(providerSetting.baseUrl, "/images/generations"))
             .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
             .addHeader("Authorization", "Bearer $key")
             .addHeader("Content-Type", "application/json")

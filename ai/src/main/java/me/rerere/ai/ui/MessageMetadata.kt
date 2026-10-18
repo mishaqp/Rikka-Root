@@ -27,6 +27,9 @@ sealed interface PartMetadata
 @Serializable
 data class ClaudeReasoningMetadata(
     val signature: String? = null,
+    /** Зашифрованное содержимое блока redacted_thinking, возвращается Claude без изменений. */
+    @SerialName("redacted_data")
+    val redactedData: String? = null,
 ) : PartMetadata
 
 /**

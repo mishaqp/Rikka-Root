@@ -9,13 +9,16 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.ClaudePromptCacheTtl
+import me.rerere.ai.provider.stream.SseEvent
 import me.rerere.ai.ui.ClaudeReasoningMetadata
 import me.rerere.ai.ui.ServerToolMetadata
+import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.ServerToolProtocol
 import me.rerere.ai.ui.ServerToolStatus
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.toMetadata
+import me.rerere.ai.util.json
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -168,11 +171,63 @@ class ClaudeRequestMessageTest {
     }
 
     @Test
+    fun `thinking without signature is not sent to Claude`() {
+        val result = invokeBuildMessages(listOf(
+            UIMessage.user("Question"),
+            UIMessage(
+                role = MessageRole.ASSISTANT,
+                parts = listOf(
+                    UIMessagePart.Reasoning(reasoning = "reasoning from another provider"),
+                    UIMessagePart.Text("Answer"),
+                ),
+            ),
+        ))
+        val content = result.last().jsonObject["content"]!!.jsonArray
+        assertEquals(listOf("text"), content.map { it.jsonObject["type"]?.jsonPrimitive?.content })
+    }
+
+    @Test
+    fun `redacted thinking is sent back with its data`() {
+        val result = invokeBuildMessages(listOf(
+            UIMessage.user("Question"),
+            UIMessage(
+                role = MessageRole.ASSISTANT,
+                parts = listOf(
+                    UIMessagePart.Reasoning(
+                        reasoning = "",
+                        metadata = ClaudeReasoningMetadata(redactedData = "opaque-data").toMetadata(),
+                    ),
+                    UIMessagePart.Text("Answer"),
+                ),
+            ),
+        ))
+        val block = result.last().jsonObject["content"]!!.jsonArray.first().jsonObject
+        assertEquals("redacted_thinking", block["type"]?.jsonPrimitive?.content)
+        assertEquals("opaque-data", block["data"]?.jsonPrimitive?.content)
+        assertEquals(setOf("type", "data"), block.keys)
+    }
+
+    @Test
+    fun `streamed redacted thinking keeps its data for the next request`() {
+        val decoder = ClaudeStreamDecoder()
+        val start = decoder.accept(SseEvent(
+            event = "content_block_start",
+            data = """{"type":"content_block_start","index":0,"content_block":{"type":"redacted_thinking","data":"opaque-data"}}""",
+        )).chunks.filterIsInstance<StreamChunk.ReasoningStart>().single()
+        assertEquals("opaque-data", start.metadata?.let {
+            json.decodeFromJsonElement(ClaudeReasoningMetadata.serializer(), it).redactedData
+        })
+    }
+
+    @Test
     fun `thinking blocks should be included in assistant content`() {
         val assistantMessage = UIMessage(
             role = MessageRole.ASSISTANT,
             parts = listOf(
-                UIMessagePart.Reasoning(reasoning = "Let me think about this..."),
+                UIMessagePart.Reasoning(
+                    reasoning = "Let me think about this...",
+                    metadata = ClaudeReasoningMetadata(signature = "signature").toMetadata(),
+                ),
                 UIMessagePart.Text("Here is my response")
             )
         )
