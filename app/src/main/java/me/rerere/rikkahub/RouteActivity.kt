@@ -7,6 +7,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -67,6 +68,8 @@ import coil3.request.crossfade
 import coil3.svg.SvgDecoder
 import com.dokar.sonner.Toaster
 import com.dokar.sonner.rememberToasterState
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import me.rerere.rikkahub.data.datastore.DEFAULT_CODEX_PROVIDER_ID
@@ -77,6 +80,7 @@ import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.repository.MediaCreationRepository
 import me.rerere.rikkahub.service.MediaCreationForegroundService
+import me.rerere.rikkahub.service.WebServerAutoStart
 import me.rerere.rikkahub.ui.activity.SafeModeActivity
 import me.rerere.rikkahub.ui.components.ui.TTSController
 import me.rerere.rikkahub.ui.context.LocalASRState
@@ -149,9 +153,11 @@ import me.rerere.rikkahub.ui.pages.translator.TranslatorPage
 import me.rerere.rikkahub.ui.pages.webview.WebViewPage
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
+import me.rerere.rikkahub.web.WebServerManager
 import me.rerere.rikkahub.utils.CrashHandler
 import me.rerere.rikkahub.utils.openUsageAccessSettings
 import okhttp3.OkHttpClient
+import org.koin.android.ext.android.get
 import org.koin.android.ext.android.inject
 import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
@@ -232,6 +238,26 @@ class RouteActivity : ComponentActivity() {
     private fun disableNavigationBarContrast() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             window.isNavigationBarContrastEnforced = false
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        startWebServerIfEnabled()
+    }
+
+    /** Retries the start Application.onCreate could not make while the process was in the background. */
+    private fun startWebServerIfEnabled() {
+        lifecycleScope.launch {
+            try {
+                val settings = settingsStore.settingsFlowRaw.first()
+                if (!settings.webServerEnabled) return@launch
+                WebServerAutoStart.startIfEnabled(this@RouteActivity, settings, get<WebServerManager>().state.value)
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (e: Exception) {
+                Log.w(TAG, "startWebServerIfEnabled failed", e)
+            }
         }
     }
 

@@ -55,6 +55,7 @@ object NotificationUtil {
      * @param channelId 通知渠道 ID
      * @param notificationId 通知 ID
      * @param config 通知配置 lambda
+     * @param tag 通知标签；同一 ID 不同标签的通知互不覆盖
      * @return 是否成功发送
      */
     @SuppressLint("MissingPermission")
@@ -62,6 +63,7 @@ object NotificationUtil {
         context: Context,
         channelId: String,
         notificationId: Int,
+        tag: String? = null,
         config: NotificationConfig.() -> Unit
     ): Boolean {
         if (!hasNotificationPermission(context)) {
@@ -71,7 +73,7 @@ object NotificationUtil {
         val notificationConfig = NotificationConfig().apply(config)
         val notification = buildNotification(context, channelId, notificationConfig)
 
-        NotificationManagerCompat.from(context).notify(notificationId, notification.build())
+        NotificationManagerCompat.from(context).notify(tag, notificationId, notification.build())
         return true
     }
 
@@ -137,8 +139,9 @@ object NotificationUtil {
 fun Context.sendNotification(
     channelId: String,
     notificationId: Int,
+    tag: String? = null,
     config: NotificationConfig.() -> Unit
-): Boolean = NotificationUtil.notify(this, channelId, notificationId, config)
+): Boolean = NotificationUtil.notify(this, channelId, notificationId, tag, config)
 
 /**
  * Context 扩展函数，取消通知

@@ -20,9 +20,13 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.WEB_SERVER_NOTIFICATION_CHANNEL_ID
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.web.WebServerManager
+import me.rerere.rikkahub.web.WebServerState
 import org.koin.android.ext.android.inject
 
 private const val TAG = "WebServerService"
+
+/** The observer is only started after start()/stop() set a loading state, so an idle state is final. */
+internal fun shouldStopWebServerService(state: WebServerState): Boolean = !state.isRunning && !state.isLoading
 
 class WebServerService : Service() {
 
@@ -39,10 +43,12 @@ class WebServerService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var stateObserverJob: Job? = null
+    private var latestStartId = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        latestStartId = startId
         when (intent?.action) {
             ACTION_START -> {
                 val port = intent.getIntExtra(EXTRA_PORT, 8080)
@@ -51,8 +57,10 @@ class WebServerService : Service() {
                     stopSelf()
                     return START_NOT_STICKY
                 }
-                startObservingState()
+                // start() marks the state as loading synchronously, so the observer only sees
+                // an idle state once the start attempt has finished (failed or stopped).
                 webServerManager.start(port = port, localhostOnly = localhostOnly)
+                startObservingState()
             }
 
             ACTION_STOP -> {
@@ -60,7 +68,8 @@ class WebServerService : Service() {
                 serviceScope.launch {
                     settingsStore.update { it.copy(webServerEnabled = false) }
                 }
-                // 不立即 stopSelf，等状态流检测到停止后再结束
+                // 不立即 stopSelf，等状态流检测到停止后再结束；服务未运行时也由观察者结束服务
+                startObservingState()
             }
 
             null -> {
@@ -72,13 +81,14 @@ class WebServerService : Service() {
                 serviceScope.launch {
                     val settings = settingsStore.settingsFlowRaw.first()
                     if (settings.webServerEnabled) {
-                        startObservingState()
                         webServerManager.start(
                             port = settings.webServerPort,
                             localhostOnly = settings.webServerLocalhostOnly
                         )
+                        startObservingState()
                     } else {
-                        stopSelf()
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelf(latestStartId)
                     }
                 }
             }
@@ -97,11 +107,11 @@ class WebServerService : Service() {
                 ServiceCompat.startForeground(
                     this,
                     NOTIFICATION_ID,
-                    buildStartingNotification(),
+                    buildCurrentNotification(),
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
                 )
             } else {
-                startForeground(NOTIFICATION_ID, buildStartingNotification())
+                startForeground(NOTIFICATION_ID, buildCurrentNotification())
             }
             true
         } catch (e: Exception) {
@@ -116,23 +126,29 @@ class WebServerService : Service() {
     private fun startObservingState() {
         if (stateObserverJob != null) return
         stateObserverJob = serviceScope.launch {
-            var wasRunning = false
             webServerManager.state.collect { state ->
                 when {
-                    state.isRunning -> {
-                        wasRunning = true
-                        val host = if (state.localhostOnly) "localhost" else (state.address ?: "localhost")
-                        val url = "http://$host:${state.port}"
-                        updateNotification(buildRunningNotification(url))
-                    }
+                    state.isRunning -> updateNotification(buildRunningNotification(state.url()))
 
-                    wasRunning && !state.isRunning && !state.isLoading -> {
+                    // 启动失败、停止完成或本就未运行：都不应保留前台服务
+                    shouldStopWebServerService(state) -> {
                         stopForeground(STOP_FOREGROUND_REMOVE)
-                        stopSelf()
+                        // A newer queued start request keeps the service alive.
+                        stopSelf(latestStartId)
                     }
                 }
             }
         }
+    }
+
+    private fun buildCurrentNotification(): android.app.Notification {
+        val state = webServerManager.state.value
+        return if (state.isRunning) buildRunningNotification(state.url()) else buildStartingNotification()
+    }
+
+    private fun WebServerState.url(): String {
+        val host = if (localhostOnly) "localhost" else (address ?: "localhost")
+        return "http://$host:$port"
     }
 
     private fun updateNotification(notification: android.app.Notification) {

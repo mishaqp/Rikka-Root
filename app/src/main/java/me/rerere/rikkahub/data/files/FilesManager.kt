@@ -195,17 +195,14 @@ class FilesManager(
                     when (part) {
                         is UIMessagePart.Image -> {
                             if (part.url.startsWith("data:image")) {
-                                val sourceByteArray = Base64.decode(part.url.substringAfter("base64,").toByteArray())
-                                val bitmap = BitmapFactory.decodeByteArray(sourceByteArray, 0, sourceByteArray.size)
-                                val byteArray = FileUtils.compressBitmapToPng(bitmap)
-                                val urls = createChatFilesByByteArrays(listOf(byteArray))
-                                Log.i(
-                                    TAG,
-                                    "convertBase64ImagePartToLocalFile: convert base64 img to ${urls.joinToString(", ")}"
-                                )
-                                part.copy(
-                                    url = urls.first().toString(),
-                                )
+                                val url = saveBase64Image(part.url)
+                                if (url == null) {
+                                    Log.w(TAG, "convertBase64ImagePartToLocalFile: undecodable base64 image kept inline")
+                                    part
+                                } else {
+                                    Log.i(TAG, "convertBase64ImagePartToLocalFile: convert base64 img to $url")
+                                    part.copy(url = url.toString())
+                                }
                             } else {
                                 part
                             }
@@ -216,6 +213,27 @@ class FilesManager(
                 }
             )
         }
+
+    /**
+     * Writes a known image format as is, with its real type; only unknown formats are re-encoded
+     * as PNG. Returns null when the data cannot be decoded as an image.
+     */
+    private fun saveBase64Image(dataUrl: String): Uri? {
+        val bytes = runCatching { Base64.Mime.decode(dataUrl.substringAfter("base64,")) }.getOrNull()
+            ?.takeIf { it.isNotEmpty() } ?: return null
+        val sniffed = FileUtils.sniffImageMimeType(bytes)
+        if (sniffed != null) {
+            val extension = sniffed.substringAfter('/')
+            return createChatFilesByByteArrays(listOf(bytes), displayName = "image.$extension", mimeType = sniffed).first()
+        }
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+        val png = try {
+            FileUtils.compressBitmapToPng(bitmap)
+        } finally {
+            bitmap.recycle()
+        }
+        return createChatFilesByByteArrays(listOf(png)).first()
+    }
 
     fun deleteChatFiles(uris: List<Uri>) {
         val retained = settingsFileReferences() ?: return

@@ -60,10 +60,12 @@ class WebServerManager(
         serviceName: String = DEFAULT_SERVICE_NAME,
         localhostOnly: Boolean = false
     ) {
-        if (server != null) {
-            Log.w(TAG, "Server already running")
+        if (server != null || _state.value.isLoading) {
+            Log.w(TAG, "Server already running or busy")
             return
         }
+        // Set synchronously so observers never mistake the idle state before launch for a failed start.
+        _state.value = _state.value.copy(isLoading = true, error = null)
 
         appScope.launch {
             // 仅本机模式绑定回环地址
@@ -74,7 +76,6 @@ class WebServerManager(
                 localhostOnly = localhostOnly
             )
             try {
-                _state.value = _state.value.copy(isLoading = true)
                 Log.i(TAG, "Starting web server on $host:$port")
                 if (!isPortAvailable(port)) {
                     Log.w(TAG, "Port $port is already in use")

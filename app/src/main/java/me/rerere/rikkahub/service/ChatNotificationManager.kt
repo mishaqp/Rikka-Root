@@ -31,6 +31,30 @@ import kotlin.uuid.Uuid
 // notify() 是 binder IPC 且系统本身会对高频更新限流，必须在应用侧节流
 private const val LIVE_UPDATE_NOTIFICATION_THROTTLE_MS = 1000L
 
+// 完成通知使用独立的标签，按会话区分 ID，不会与前台服务等固定 ID 的通知冲突
+internal const val CHAT_COMPLETED_NOTIFICATION_TAG = "chat_completed"
+
+internal fun chatCompletedNotificationId(conversationId: Uuid): Int = conversationId.hashCode()
+
+/** 每个会话一条“回复已完成”通知：新的回复替换同一会话的旧通知，不覆盖其他会话。 */
+internal fun Context.sendChatCompletedNotification(
+    conversationId: Uuid,
+    senderName: String,
+    contentPreview: String,
+    contentIntent: PendingIntent,
+): Boolean = sendNotification(
+    channelId = CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID,
+    notificationId = chatCompletedNotificationId(conversationId),
+    tag = CHAT_COMPLETED_NOTIFICATION_TAG,
+) {
+    title = senderName
+    content = contentPreview
+    autoCancel = true
+    useDefaults = true
+    category = NotificationCompat.CATEGORY_MESSAGE
+    this.contentIntent = contentIntent
+}
+
 /**
  * 订阅 [AppEventBus] 上的聊天生成事件，负责后台生成相关的系统通知
  * （Live Update 进度通知和生成完成通知）。
@@ -96,17 +120,12 @@ class ChatNotificationManager(
         senderName: String,
         contentPreview: String
     ) {
-        context.sendNotification(
-            channelId = CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID,
-            notificationId = 1
-        ) {
-            title = senderName
-            content = contentPreview
-            autoCancel = true
-            useDefaults = true
-            category = NotificationCompat.CATEGORY_MESSAGE
-            contentIntent = getPendingIntent(context, conversationId)
-        }
+        context.sendChatCompletedNotification(
+            conversationId = conversationId,
+            senderName = senderName,
+            contentPreview = contentPreview,
+            contentIntent = getPendingIntent(context, conversationId),
+        )
     }
 
     private fun sendLiveUpdateNotification(

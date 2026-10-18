@@ -119,6 +119,8 @@ class ToolMediaPlaybackService : Service() {
         private const val CHANNEL = "tool_media_playback"
         private const val NOTIFICATION_ID = 7001
         private const val REQUEST_ID = "request_id"
+        /** A paused or finished session leaves the foreground and ends after this long unless resumed. */
+        internal const val PAUSED_STOP_DELAY_MS = 5 * 60_000L
         private val requests = ConcurrentHashMap<String, CompletableDeferred<ToolMediaStatus>>()
         private var instance: ToolMediaPlaybackService? = null
         private var stopped: ToolMediaStatus? = null
@@ -192,6 +194,7 @@ class ToolMediaPlaybackService : Service() {
     private var lastError: String? = null
     private var preparationTimeout: Runnable? = null
     private var seekTimeout: Runnable? = null
+    private val pausedStop = Runnable { if (player != null && !state.playWhenReady) stopPlayback() }
 
     private val noisyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) { pausePlayback(abandon = true) }
@@ -305,7 +308,7 @@ class ToolMediaPlaybackService : Service() {
             }
         }
         created.setOnCompletionListener {
-            if (player === created) { state.complete(); abandonFocus(); publishState() }
+            if (player === created) { state.complete(); abandonFocus(); publishState(); leaveForegroundWhilePaused() }
         }
         created.setOnErrorListener { _, _, _ -> if (player === created) failPlayback(); true }
         created.setDataSource(this, Uri.parse(uri))
@@ -340,6 +343,21 @@ class ToolMediaPlaybackService : Service() {
         state.pause()
         if (abandon) { resumeOnFocusGain = false; abandonFocus() }
         publishState()
+        // A transient focus loss resumes by itself; any other pause must not hold the foreground forever.
+        if (!resumeOnFocusGain) leaveForegroundWhilePaused()
+    }
+
+    private fun leaveForegroundWhilePaused() {
+        if (player == null || state.playWhenReady) return
+        stopForeground(STOP_FOREGROUND_DETACH)
+        handler.removeCallbacks(pausedStop)
+        handler.postDelayed(pausedStop, PAUSED_STOP_DELAY_MS)
+    }
+
+    private fun returnToForeground() {
+        handler.removeCallbacks(pausedStop)
+        // Android may refuse a foreground start from the background; playback still continues.
+        runCatching { startAsForeground() }
     }
 
     private fun resumePlayback() {
@@ -350,6 +368,7 @@ class ToolMediaPlaybackService : Service() {
             state.resume(); seekPlayback(0, null); startReadyPlayer()
         } else startReadyPlayer()
         publishState()
+        if (state.playWhenReady) returnToForeground()
     }
 
     private fun seekPlayback(position: Long, id: String?) {
@@ -387,6 +406,7 @@ class ToolMediaPlaybackService : Service() {
         sessionRequest = null
         preparationTimeout?.let(handler::removeCallbacks); preparationTimeout = null
         seekTimeout?.let(handler::removeCallbacks); seekTimeout = null
+        handler.removeCallbacks(pausedStop)
         seekInProgress = false
         initialSeek = false
         player?.let { runCatching { it.reset() }; it.release() }; player = null
@@ -400,6 +420,8 @@ class ToolMediaPlaybackService : Service() {
         releasePlayer("Медиасеанс остановлен. Для продолжения вызовите resume_media.")
         session.isActive = false
         stopForeground(STOP_FOREGROUND_REMOVE)
+        // A paused session detached its notification from the service, so remove it explicitly.
+        getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
         if (instance === this) instance = null
         stopSelf()
     }

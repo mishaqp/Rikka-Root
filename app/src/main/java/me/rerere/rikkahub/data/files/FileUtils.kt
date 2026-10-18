@@ -104,29 +104,11 @@ object FileUtils {
 
         if (read <= 0) return "application/octet-stream"
 
-        if (header.startsWithBytes(0x89, 0x50, 0x4E, 0x47)) return "image/png"
-        if (header.startsWithBytes(0xFF, 0xD8, 0xFF)) return "image/jpeg"
-        if (header.startsWithBytes(0x47, 0x49, 0x46, 0x38)) return "image/gif"
+        sniffImageMimeType(header.copyOf(read))?.let { return it }
         if (header.startsWithBytes(0x25, 0x50, 0x44, 0x46)) return "application/pdf"
         if (header.startsWithBytes(0x50, 0x4B, 0x03, 0x04)) return "application/zip"
         if (header.startsWithBytes(0x50, 0x4B, 0x05, 0x06)) return "application/zip"
         if (header.startsWithBytes(0x50, 0x4B, 0x07, 0x08)) return "application/zip"
-        if (header.startsWithBytes(0x52, 0x49, 0x46, 0x46) && header.sliceArray(8..11)
-                .contentEquals(byteArrayOf(0x57, 0x45, 0x42, 0x50))
-        ) {
-            return "image/webp"
-        }
-        // HEIF/HEIC/AVIF: ISO-BMFF 容器，"ftyp" box 位于字节 4..8，主品牌码位于 8..12
-        if (read >= 12 && header.sliceArray(4..7).toString(Charsets.US_ASCII) == "ftyp") {
-            when (header.sliceArray(8..11).toString(Charsets.US_ASCII)) {
-                "heic", "heix", "heim", "heis",
-                "hevc", "hevx", "hevm", "hevs",
-                "mif1", "msf1", "heif",
-                    -> return "image/heic"
-
-                "avif", "avis" -> return "image/avif"
-            }
-        }
 
         val textSample = runCatching {
             val sample = ByteArray(512)
@@ -141,6 +123,30 @@ object FileUtils {
         }
 
         return "application/octet-stream"
+    }
+
+    /** Image type from the file signature, or null when the bytes are not a known image format. */
+    fun sniffImageMimeType(header: ByteArray): String? {
+        if (header.startsWithBytes(0x89, 0x50, 0x4E, 0x47)) return "image/png"
+        if (header.startsWithBytes(0xFF, 0xD8, 0xFF)) return "image/jpeg"
+        if (header.startsWithBytes(0x47, 0x49, 0x46, 0x38)) return "image/gif"
+        if (header.size >= 12 && header.startsWithBytes(0x52, 0x49, 0x46, 0x46) && header.sliceArray(8..11)
+                .contentEquals(byteArrayOf(0x57, 0x45, 0x42, 0x50))
+        ) {
+            return "image/webp"
+        }
+        // HEIF/HEIC/AVIF: ISO-BMFF 容器，"ftyp" box 位于字节 4..8，主品牌码位于 8..12
+        if (header.size >= 12 && header.sliceArray(4..7).toString(Charsets.US_ASCII) == "ftyp") {
+            when (header.sliceArray(8..11).toString(Charsets.US_ASCII)) {
+                "heic", "heix", "heim", "heis",
+                "hevc", "hevx", "hevm", "hevs",
+                "mif1", "msf1", "heif",
+                    -> return "image/heic"
+
+                "avif", "avis" -> return "image/avif"
+            }
+        }
+        return null
     }
 
     private fun isLikelyText(bytes: ByteArray): Boolean {

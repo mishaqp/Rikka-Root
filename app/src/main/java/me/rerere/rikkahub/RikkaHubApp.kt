@@ -2,8 +2,6 @@ package me.rerere.rikkahub
 
 import android.app.Application
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.ComposeFoundationFlags
@@ -11,7 +9,6 @@ import androidx.compose.runtime.Composer
 import androidx.compose.runtime.tooling.ComposeStackTraceMode
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -40,7 +37,9 @@ import me.rerere.rikkahub.data.sync.RestoreFailedException
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.service.CronJobScheduler
 import me.rerere.rikkahub.service.MediaCreationService
+import me.rerere.rikkahub.service.WebServerAutoStart
 import me.rerere.rikkahub.service.WebServerService
+import me.rerere.rikkahub.web.WebServerManager
 import me.rerere.rikkahub.utils.CrashHandler
 import me.rerere.rikkahub.utils.DatabaseUtil
 import me.rerere.rikkahub.utils.UpdateChecker
@@ -298,33 +297,7 @@ class RikkaHubApp : Application() {
             runCatching {
                 delay(500)
                 val settings = get<SettingsStore>().settingsFlowRaw.first()
-                if (settings.webServerEnabled) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                        ContextCompat.checkSelfPermission(
-                            this@RikkaHubApp,
-                            android.Manifest.permission.POST_NOTIFICATIONS
-                        ) != PackageManager.PERMISSION_GRANTED
-                    ) {
-                        Log.w(TAG, "startWebServerIfEnabled: notification permission not granted, skipping")
-                        return@launch
-                    }
-                    if (Build.VERSION.SDK_INT >= 37 &&
-                        !settings.webServerLocalhostOnly &&
-                        ContextCompat.checkSelfPermission(
-                            this@RikkaHubApp,
-                            android.Manifest.permission.ACCESS_LOCAL_NETWORK
-                        ) != PackageManager.PERMISSION_GRANTED
-                    ) {
-                        Log.w(TAG, "startWebServerIfEnabled: local network permission not granted, skipping")
-                        return@launch
-                    }
-                    val intent = Intent(this@RikkaHubApp, WebServerService::class.java).apply {
-                        action = WebServerService.ACTION_START
-                        putExtra(WebServerService.EXTRA_PORT, settings.webServerPort)
-                        putExtra(WebServerService.EXTRA_LOCALHOST_ONLY, settings.webServerLocalhostOnly)
-                    }
-                    startForegroundService(intent)
-                }
+                WebServerAutoStart.startIfEnabled(this@RikkaHubApp, settings, get<WebServerManager>().state.value)
             }.onFailure {
                 Log.e(TAG, "startWebServerIfEnabled failed", it)
             }
