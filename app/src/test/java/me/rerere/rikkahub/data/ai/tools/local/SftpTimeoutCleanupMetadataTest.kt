@@ -37,22 +37,25 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class SftpTimeoutCleanupMetadataTest {
     @get:Rule val temporary = TemporaryFolder()
+    private lateinit var cache: File
 
-    @Test(timeout = 15_000) fun `own timeout retains cleanup warning after ancestor swap without touching foreign files`() = runBlocking {
+    @Test(timeout = 15_000) fun `own timeout retains cleanup warning after cache ancestor swap without touching foreign files`() = runBlocking {
         fixture(shared = false) { tool, destination, sftp, _ ->
-            val parent = destination.parentFile!!
             val outside = temporary.newFolder()
-            val parked = File(parent.parentFile, "parked-${parent.name}")
             val foreignTarget = File(outside, destination.name).apply { writeText("FOREIGN TARGET") }
+            var cacheParent: File? = null
+            var parked: File? = null
             var partialPath: String? = null
             var partialName: String? = null
             every { sftp.get(any<String>(), any<OutputStream>()) } answers {
                 secondArg<OutputStream>().write("PARTIAL".toByteArray())
-                val partial = parent.listFiles()!!.single { it.name.endsWith(".part") }
+                val partial = cache.walkTopDown().single { it.isFile && it.name.endsWith(".part") }
                 partialPath = partial.absolutePath
                 partialName = partial.name
-                Files.move(parent.toPath(), parked.toPath())
-                Files.createSymbolicLink(parent.toPath(), outside.toPath())
+                cacheParent = partial.parentFile!!
+                parked = File(cacheParent!!.parentFile, "parked-${cacheParent!!.name}")
+                Files.move(cacheParent!!.toPath(), parked!!.toPath())
+                Files.createSymbolicLink(cacheParent!!.toPath(), outside.toPath())
                 File(outside, partial.name).writeText("FOREIGN PARTIAL")
                 waitUntilInterrupted()
             }
@@ -60,28 +63,41 @@ class SftpTimeoutCleanupMetadataTest {
                 val result = execute(tool, destination, timeoutSeconds = 1)
                 assertEquals("FOREIGN TARGET", foreignTarget.readText())
                 assertEquals("FOREIGN PARTIAL", File(outside, partialName!!).readText())
-                assertEquals("ORIGINAL", File(parked, destination.name).readText())
-                assertEquals("PARTIAL", File(parked, partialName!!).readText())
+                assertEquals("ORIGINAL", destination.readText())
+                assertEquals("PARTIAL", File(parked!!, partialName!!).readText())
                 assertTimeoutCleanup(result, destination, partialPath!!)
+                Files.delete(cacheParent!!.toPath())
+                Files.move(parked!!.toPath(), cacheParent!!.toPath())
+                every { sftp.get(any<String>(), any<OutputStream>()) } answers {
+                    secondArg<OutputStream>().write("COMPLETE".toByteArray()); Unit
+                }
+                val next = execute(tool, destination, timeoutSeconds = 5)
+                assertEquals("true", next["success"]?.jsonPrimitive?.content)
+                assertEquals("COMPLETE", destination.readText())
+                for (key in listOf("cleanup_failed", "partial_path", "partial_path_unverified", "cleanup_recovery")) {
+                    assertNull("Prior cleanup failure cannot leak to a later invocation: $key", next[key])
+                }
             } finally {
-                if (Files.isSymbolicLink(parent.toPath())) Files.delete(parent.toPath())
+                cacheParent?.let { if (Files.isSymbolicLink(it.toPath())) Files.delete(it.toPath()) }
             }
         }
     }
 
-    @Test(timeout = 15_000) fun `own timeout retains cleanup warning after shared storage grant revocation`() = runBlocking {
+    @Test(timeout = 15_000) fun `own timeout cleans independent cache after shared storage grant revocation`() = runBlocking {
         fixture(shared = true) { tool, destination, sftp, granted ->
             var partial: File? = null
             every { sftp.get(any<String>(), any<OutputStream>()) } answers {
                 secondArg<OutputStream>().write("PARTIAL".toByteArray())
-                partial = destination.parentFile!!.listFiles()!!.single { it.name.endsWith(".part") }
+                partial = cache.walkTopDown().single { it.isFile && it.name.endsWith(".part") }
                 granted.set(false)
                 waitUntilInterrupted()
             }
             val result = execute(tool, destination, timeoutSeconds = 1)
             assertEquals("ORIGINAL", destination.readText())
-            assertEquals("Cleanup cannot remove bytes after the live capability is revoked", "PARTIAL", partial!!.readText())
-            assertTimeoutCleanup(result, destination, partial!!.absolutePath)
+            assertFalse("Target grant revocation does not revoke our independent cache inode", partial!!.exists())
+            assertEquals("timeout", result["error"]?.jsonPrimitive?.content)
+            assertEquals(destination.absolutePath, result["local_path"]?.jsonPrimitive?.content)
+            for (key in listOf("cleanup_failed", "partial_path", "partial_path_unverified", "cleanup_recovery")) assertNull(key, result[key])
 
             // Reuse the same tool after restoring the grant: diagnostics belong to the
             // completed invocation, not to a tool instance or a later download.
@@ -99,14 +115,14 @@ class SftpTimeoutCleanupMetadataTest {
         }
     }
 
-    @Test(timeout = 15_000) fun `parent cancellation remains cancellation when revoked access prevents partial cleanup`() = runBlocking {
+    @Test(timeout = 15_000) fun `parent cancellation remains cancellation while owned cache is cleaned after revoked access`() = runBlocking {
         fixture(shared = true) { tool, destination, sftp, granted ->
             val started = CompletableDeferred<Unit>()
             var partial: File? = null
             var returned = false
             every { sftp.get(any<String>(), any<OutputStream>()) } answers {
                 secondArg<OutputStream>().write("PARTIAL".toByteArray())
-                partial = destination.parentFile!!.listFiles()!!.single { it.name.endsWith(".part") }
+                partial = cache.walkTopDown().single { it.isFile && it.name.endsWith(".part") }
                 granted.set(false)
                 started.complete(Unit)
                 waitUntilInterrupted()
@@ -121,7 +137,7 @@ class SftpTimeoutCleanupMetadataTest {
                 assertTrue("Caller cancellation must propagate", job.isCancelled)
                 assertFalse("A cancellation must not become a timeout or normal tool result", returned)
                 assertEquals("ORIGINAL", destination.readText())
-                assertEquals("PARTIAL", partial!!.readText())
+                assertFalse("Cancelled transfer cache must be cleaned without using the revoked target grant", partial!!.exists())
             } finally { job.cancelAndJoin() }
         }
     }
@@ -165,7 +181,11 @@ class SftpTimeoutCleanupMetadataTest {
         val access = LocalFileAccess(scratch, temporary.newFolder(), sharedStorageAccess = policy)
         val directory = if (shared) File(primary, "Download").apply { mkdirs() } else scratch
         val destination = File(directory, "artifact").apply { writeText("ORIGINAL") }
-        val context = mockk<Context>()
+        cache = temporary.newFolder()
+        val context = mockk<Context> {
+            every { cacheDir } returns cache
+            every { externalCacheDirs } returns emptyArray()
+        }
         val repository = mockk<SshHostRepository>()
         coEvery { repository.getByName("build") } returns SshHostEntity(
             name = "build", host = "build.example", user = "builder", createdAtMs = 0,

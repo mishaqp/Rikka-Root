@@ -37,7 +37,6 @@ import java.net.URI
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
-import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.coroutineContext
 import kotlin.coroutines.resume
@@ -123,7 +122,7 @@ private val downloadHttpClient by lazy {
 }
 
 /** Cancellation closes the network socket; the callback owns and closes its file/body streams. */
-private suspend fun downloadToFile(url: String, staging: File, maxBytes: Long): Pair<Long, String?> =
+private suspend fun downloadToFile(url: String, staging: TransferStaging, maxBytes: Long): Pair<Long, String?> =
     suspendCancellableCoroutine { continuation ->
         val call = downloadHttpClient.newCall(Request.Builder().url(url).build())
         continuation.invokeOnCancellation { call.cancel() }
@@ -159,7 +158,7 @@ private suspend fun downloadToFile(url: String, staging: File, maxBytes: Long): 
                         val expected = body.contentLength()
                         if (expected > maxBytes) throw IOException("Загрузка превышает ограничение размера.")
                         val count = body.byteStream().use { input ->
-                            staging.outputStream().use { output ->
+                            staging.openOutput().use { output ->
                                 copyDownloadBounded(input, output, maxBytes) {
                                     if (!continuation.isActive) throw CancellationException()
                                 }
@@ -175,7 +174,7 @@ private suspend fun downloadToFile(url: String, staging: File, maxBytes: Long): 
                     if (continuation.isActive) continuation.resumeWithException(error)
                 } finally {
                     // The network callback may open a stream concurrently with cancellation.
-                    if (!handedOff) staging.delete()
+                    if (!handedOff) staging.cleanup()
                 }
             }
         })
@@ -222,9 +221,10 @@ fun downloadTool(context: Context, access: LocalFileAccess = LocalFileAccess(con
                 ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
                 return@withContext deviceToolError("На Android 8–9 для общей папки «Загрузки» нужно разрешение записи либо выбранная SAF-папка.", Manifest.permission.WRITE_EXTERNAL_STORAGE)
             }
-            val staging = File.createTempFile("tool-download-", ".partial", context.cacheDir)
+            val transfer = TransferStaging.create(context)
             try {
-                val (bytes, mime) = downloadToFile(url, staging, maxBytes)
+                val (bytes, mime) = downloadToFile(url, transfer, maxBytes)
+                val staging = transfer.checkedFile()
                 coroutineContext.ensureActive()
                 val wantedName = if (explicitName != null) baseName else validatedDownloadFilename(downloadNameWithExtension(baseName, mime))
                 var name = wantedName
@@ -240,7 +240,7 @@ fun downloadTool(context: Context, access: LocalFileAccess = LocalFileAccess(con
                     }
                     if (overwrite) {
                         try {
-                            replacePrivateDownload(access, directory as LocalFileSource.Local, name, staging, maxBytes)
+                            replacePrivateDownload(access, directory as LocalFileSource.Local, name, transfer)
                         } catch (partial: FileCreationCleanupFailedException) {
                             return@withContext buildJsonObject {
                                 put("error", "creation_cleanup_failed")
@@ -290,47 +290,33 @@ fun downloadTool(context: Context, access: LocalFileAccess = LocalFileAccess(con
                     if (name != wantedName) put("message", "Файл $wantedName уже был, сохранено как $name.")
                 }
             } finally {
-                staging.delete()
+                transfer.cleanup()
             }
         }
     } }
 )
 
-/** Keep the previous private file intact until the complete replacement is ready beside it. */
+/** Publish the completed app-cache inode directly; never leave a second stage beside user files. */
 private suspend fun replacePrivateDownload(
     access: LocalFileAccess,
     directory: LocalFileSource.Local,
     name: String,
-    staging: File,
-    maxBytes: Long,
+    staging: TransferStaging,
 ): String {
     val target = access.child(directory, name) as LocalFileSource.Local
-    val temporary = withContext(NonCancellable) {
-        access.createFile(directory, ".download-${UUID.randomUUID()}.partial")
-    } as LocalFileSource.Local
+    coroutineContext.ensureActive()
+    val sourceFile = staging.checkedFile()
+    val targetFile = access.checkFile(target.file, true)
+    coroutineContext.ensureActive()
     try {
-        val jobContext = coroutineContext
-        access.openOutput(temporary).use { output ->
-            staging.inputStream().use { input ->
-                copyDownloadBounded(input, output, maxBytes) { jobContext.ensureActive() }
-            }
-        }
-        coroutineContext.ensureActive()
-        val sourceFile = access.checkFile(temporary.file, true)
-        val targetFile = access.checkFile(target.file, true)
-        try {
-            Files.move(sourceFile.toPath(), targetFile.toPath(),
-                StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
-        } catch (unsupported: AtomicMoveNotSupportedException) {
-            throw IOException("Хранилище не поддерживает атомарную замену. Старый файл сохранён.", unsupported)
-        } catch (unsupported: UnsupportedOperationException) {
-            throw IOException("Хранилище не поддерживает атомарную замену. Старый файл сохранён.", unsupported)
-        }
-        return target.reference
-    } catch (failure: Exception) {
-        access.cleanupOwnedTarget(temporary, failure)
-        throw failure
+        Files.move(sourceFile.toPath(), targetFile.toPath(),
+            StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+    } catch (unsupported: AtomicMoveNotSupportedException) {
+        throw IOException("Хранилище не поддерживает атомарную замену. Старый файл сохранён.", unsupported)
+    } catch (unsupported: UnsupportedOperationException) {
+        throw IOException("Хранилище не поддерживает атомарную замену. Старый файл сохранён.", unsupported)
     }
+    return target.reference
 }
 
 /** Returns the destination and the actual name: MediaStore renames a taken name itself. */

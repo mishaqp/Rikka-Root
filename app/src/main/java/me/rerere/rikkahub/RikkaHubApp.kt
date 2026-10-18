@@ -62,6 +62,10 @@ const val MEDIA_CREATION_NOTIFICATION_CHANNEL_ID = "media_creation"
 class RikkaHubApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        // Interrupted transfer bytes exist only in dedicated app-owned cache directories.
+        runBlocking(Dispatchers.IO) {
+            me.rerere.rikkahub.data.ai.tools.local.cleanupInterruptedTransferStaging(this@RikkaHubApp)
+        }
         // Restore files and settings before eager Koin singletons or workers can access them.
         try {
             val restored = runBlocking(Dispatchers.IO) {

@@ -20,11 +20,8 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.repository.SshHostRepository
-import java.io.File
 import java.nio.file.Files
-import java.nio.file.LinkOption
 import java.nio.file.StandardCopyOption
-import java.nio.file.attribute.BasicFileAttributes
 import java.util.concurrent.atomic.AtomicReference
 
 private const val TAG_SFTP = "SshSftpTool"
@@ -178,15 +175,9 @@ fun sshDownloadTool(context: Context, repo: SshHostRepository, access: LocalFile
             val downloadContext = currentCoroutineContext()
             withSavedHostSession(context, repo, name, timeoutSec * 1000, sessionRef) { session ->
                 val sftp = openSftp(session)
-                var partialFile: File? = null
-                var partialKey: Any? = null
+                var staging: TransferStaging? = null
                 var published = false
                 var cleanupFailed = false
-                fun checkedPartial(file: File): File = access.checkFile(file, write = true).also { guarded ->
-                    val key = Files.readAttributes(guarded.toPath(), BasicFileAttributes::class.java,
-                        LinkOption.NOFOLLOW_LINKS).fileKey()
-                    require(partialKey != null && key == partialKey) { "Временный файл SFTP изменился. Проверьте исходную папку." }
-                }
                 val result = try {
                     downloadContext.ensureActive()
                     val parent = access.checkFile(requireNotNull(localFile.absoluteFile.parentFile))
@@ -194,16 +185,14 @@ fun sshDownloadTool(context: Context, repo: SshHostRepository, access: LocalFile
                     require(parent.mkdirs() || parent.isDirectory) { "Не удалось создать папку назначения SFTP." }
                     access.checkFile(parent)
                     access.checkFile(localFile, write = true)
-                    val partial = File.createTempFile(".rikka-sftp-", ".part", parent)
-                    partialFile = partial
-                    partialKey = Files.readAttributes(access.checkFile(partial, write = true).toPath(),
-                        BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS).fileKey()
-                    checkedPartial(partial).outputStream().use { output -> sftp.get(remotePath, output) }
+                    val transfer = TransferStaging.create(context, targetParent = parent)
+                    staging = transfer
+                    transfer.openOutput().use { output -> sftp.get(remotePath, output) }
                     downloadContext.ensureActive()
                     // The final path changes only after a complete transfer. Never fall back to
                     // truncating/copying the destination when the filesystem cannot move atomically.
                     access.checkFile(parent)
-                    checkedPartial(partial)
+                    val partial = transfer.checkedFile()
                     access.checkFile(localFile, write = true)
                     downloadContext.ensureActive()
                     Files.move(partial.toPath(), localFile.toPath(),
@@ -218,18 +207,13 @@ fun sshDownloadTool(context: Context, repo: SshHostRepository, access: LocalFile
                     sshFailureEnvelope(e, "Ошибка скачивания SFTP.",
                         "Проверьте remote_path, право чтения на сервере и доступ к local_path, затем повторите ssh_download.")
                 } finally {
-                    // A stale pathname can now resolve to somebody else's file.
-                    // Never follow a swapped ancestor or delete a replacement inode.
-                    if (!published) partialFile?.let { partial ->
-                        try {
-                            val guarded = access.checkFile(partial, write = true)
-                            if (guarded.exists()) check(checkedPartial(guarded).delete())
-                        } catch (_: Throwable) { cleanupFailed = true }
-                    }
+                    // Cache ownership is independent of the target grant. Never delete a
+                    // replaced cache inode or follow a changed cache ancestor.
+                    if (!published && staging?.cleanup() == false) cleanupFailed = true
                     try { sftp.disconnect() } catch (_: Throwable) {}
                     if (cleanupFailed) completedCleanupDetails.set(buildJsonObject {
                         put("cleanup_failed", true)
-                        put("partial_path", partialFile!!.absolutePath)
+                        put("partial_path", staging!!.file.absolutePath)
                         put("partial_path_unverified", true)
                         put("cleanup_recovery", "Временный файл не удалён: путь или доступ изменились. Указан прежний путь; его текущее содержимое не подтверждено. Проверьте исходную папку перед повтором.")
                     })

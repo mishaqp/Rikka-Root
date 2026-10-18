@@ -316,7 +316,16 @@ class LocalFileAccess internal constructor(
     internal suspend fun movePath(from: LocalFileSource, reference: String, overwrite: Boolean = false): Pair<LocalFileSource, Long> {
         validateMoveSource(from)
         val target = planWritePath(reference).existing
-        if (target != null) tryLocalMove(from, target, overwrite)?.let { return target to it }
+        if (target != null) {
+            // Canonicalization on casefold storage can erase the requested final spelling.
+            // Preserve only that checked leaf; parents and permissions still come from the plan.
+            val requestedTarget = if (target is LocalFileSource.Local) {
+                val leaf = if (reference.startsWith("file:")) File(URI(reference)).name else File(reference).name
+                if (leaf != target.file.name && leaf.equals(target.file.name, ignoreCase = true))
+                    LocalFileSource.Local(File(target.file.parentFile, leaf)) else target
+            } else target
+            tryLocalMove(from, requestedTarget, overwrite)?.let { return requestedTarget to it }
+        }
         val copied = copyPath(from, reference, overwrite)
         // Finish ownership rollback before deletion: a committed copy survives a
         // source-delete failure, including cancellation after partial deletion.
@@ -823,14 +832,26 @@ class LocalFileAccess internal constructor(
         currentCoroutineContext().ensureActive()
         val source = checkFile(from.file, true)
         val target = checkFile(to.file, true)
+        val caseOnly = to.file.name != source.name && to.file.name.equals(source.name, ignoreCase = true) &&
+            source.parentFile == target.parentFile && source.isFile && target.isFile &&
+            Files.readAttributes(source.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java,
+                LinkOption.NOFOLLOW_LINKS).fileKey()?.let { sourceKey ->
+                sourceKey == Files.readAttributes(target.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java,
+                    LinkOption.NOFOLLOW_LINKS).fileKey()
+            } == true
+        if (caseOnly) {
+            // Same inode is a spelling change, not permission to overwrite another file.
+            // Repeat the same-key constraint inside the final guarded operation as well.
+            val requestedTarget = File(target.parentFile, to.file.name)
+            return@withContext replaceLocalMove(source, requestedTarget, source.length(), sameFileOnly = true)
+        }
         require(source != target) { "Источник совпадает с назначением." }
         require(source.exists()) { "Источник не найден." }
         val directory = source.isDirectory
         if (!directory && !source.isFile) return@withContext null
         require(!directory || !target.toPath().startsWith(source.toPath())) { "Нельзя перемещать папку внутрь себя." }
         // Directory merges retain their existing copy/delete semantics. Regular-file
-        // replacements can keep the old inode beside the destination instead of
-        // allocating an unbounded byte copy through scratch.
+        // replacement uses one guarded atomic rename, without a hidden backup window.
         require(!target.exists() || overwrite) { "Назначение уже существует. Укажите overwrite=true." }
         if (target.exists() && (directory || !target.isFile)) return@withContext null
         val parent = target.parentFile ?: return@withContext null
@@ -900,76 +921,27 @@ class LocalFileAccess internal constructor(
         }
     }
 
-    /** Once the old target moves, every failure must restore it or retain its recovery path. */
-    private suspend fun replaceLocalMove(source: File, target: File, bytes: Long): Long {
-        val parent = requireNotNull(target.parentFile)
-        val backup = File(parent, ".rk-move-${java.util.UUID.randomUUID()}.bak")
+    /** One atomic commit: before it both files exist; after it the source inode owns the destination. */
+    private suspend fun replaceLocalMove(source: File, target: File, bytes: Long, sameFileOnly: Boolean = false): Long {
         val sourceKey = Files.readAttributes(checkFile(source).toPath(), java.nio.file.attribute.BasicFileAttributes::class.java,
             LinkOption.NOFOLLOW_LINKS).fileKey()
         val targetKey = Files.readAttributes(checkFile(target).toPath(), java.nio.file.attribute.BasicFileAttributes::class.java,
             LinkOption.NOFOLLOW_LINKS).fileKey()
-        // A shared pathname may be replaced by another application between steps.
-        // A provider without stable inode identity cannot use this transaction.
         require(sourceKey != null && targetKey != null) { "Хранилище не поддерживает безопасное перемещение с заменой." }
-        fun sameInode(file: File, expected: Any): Boolean = Files.readAttributes(checkFile(file).toPath(),
-            java.nio.file.attribute.BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS).fileKey() == expected
-        var backedUp = false
-        var installed = false
-        try {
-            currentCoroutineContext().ensureActive()
-            checkFile(source, true)
-            checkFile(target, true)
-            checkFile(backup, true)
-            require(sameInode(source, sourceKey) && sameInode(target, targetKey)) { "Источник или назначение изменились во время перемещения." }
-            currentCoroutineContext().ensureActive()
-            // Neither move may replace an existing pathname. In particular an
-            // unrelated file created at target after backup must survive failure.
-            Files.move(target.toPath(), backup.toPath())
-            backedUp = true
-            currentCoroutineContext().ensureActive()
-            checkFile(source, true)
-            checkFile(target, true)
-            checkFile(backup, true)
-            require(sameInode(source, sourceKey) && sameInode(backup, targetKey)) { "Источник или резервная копия изменились во время перемещения." }
-            require(!target.exists()) { "Назначение изменилось во время перемещения." }
-            currentCoroutineContext().ensureActive()
-            Files.move(source.toPath(), target.toPath())
-            installed = true
-            // Rename is the commit point. Cancellation after it keeps the accepted
-            // result; do not move a new source back over a possibly raced pathname.
-            withContext(NonCancellable) {
-                checkFile(target, true)
-                checkFile(backup, true)
-                require(sameInode(target, sourceKey) && sameInode(backup, targetKey)) { "Назначение или резервная копия изменились; проверьте оба файла." }
-                Files.delete(backup.toPath())
-            }
-            return bytes
-        } catch (failure: Exception) {
-            if (!backedUp) throw failure
-            if (!installed) {
-                try {
-                    withContext(NonCancellable) {
-                        checkFile(target, true)
-                        checkFile(backup, true)
-                        require(sameInode(backup, targetKey)) { "Резервная копия изменена другим приложением; файл сохранён для проверки." }
-                        require(!target.exists()) { "Назначение занято другим файлом; резервная копия сохранена." }
-                        Files.move(backup.toPath(), target.toPath())
-                    }
-                } catch (restoration: Exception) {
-                    val recovery = FileMoveRecoveryException(backup.absolutePath, restoration, installed = false)
-                    if (failure is CancellationException) { failure.addSuppressed(recovery); throw failure }
-                    recovery.addSuppressed(failure)
-                    throw recovery
-                }
-                throw failure
-            }
-            // Source installation succeeded but cleanup failed (including revoked
-            // storage access). Never delete the completed destination in response.
-            if (!Files.exists(backup.toPath(), LinkOption.NOFOLLOW_LINKS)) throw failure
-            val recovery = FileMoveRecoveryException(backup.absolutePath, failure, installed = true)
-            if (failure is CancellationException) { failure.addSuppressed(recovery); throw failure }
-            throw recovery
+        if (sameFileOnly) require(sourceKey == targetKey) { "Назначение изменилось: это уже другой файл." }
+        currentCoroutineContext().ensureActive()
+        checkFile(source, true)
+        checkFile(target, true)
+        require(Files.readAttributes(checkFile(source, true).toPath(), java.nio.file.attribute.BasicFileAttributes::class.java,
+            LinkOption.NOFOLLOW_LINKS).fileKey() == sourceKey &&
+            Files.readAttributes(checkFile(target, true).toPath(), java.nio.file.attribute.BasicFileAttributes::class.java,
+                LinkOption.NOFOLLOW_LINKS).fileKey() == targetKey) {
+            "Источник или назначение изменились во время перемещения."
         }
+        currentCoroutineContext().ensureActive()
+        Files.move(source.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        // This is the commit point: do not turn a completed rename into failure after cancellation.
+        return bytes
     }
 
     suspend fun move(from: LocalFileSource, to: LocalFileSource, overwrite: Boolean = false, ownedDestination: Boolean = false): Long {

@@ -53,7 +53,7 @@ class DownloadPolicyTest {
                 assertTrue(error, error.contains(nextStep, ignoreCase = true))
                 assertFalse(error, error.contains("private"))
                 assertFalse(error, error.contains("secret"))
-                assertTrue(cache.listFiles().orEmpty().isEmpty())
+                assertTrue(cache.walkTopDown().none { it.isFile })
             }
         } finally { server.stop(0) }
     }
@@ -106,7 +106,7 @@ class DownloadPolicyTest {
             assertTrue(error, error.contains("Проверьте"))
             assertTrue(error, error.contains("интернет"))
             assertFalse(error, error.contains("Exception"))
-            assertTrue(cache.listFiles().orEmpty().isEmpty())
+            assertTrue(cache.walkTopDown().none { it.isFile })
         } finally { server.stop(0) }
     }
     @Test fun missingOrInvalidDownloadParametersExplainRecovery() = runBlocking {

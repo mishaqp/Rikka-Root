@@ -3,8 +3,7 @@ package me.rerere.rikkahub.data.ai.tools.local
 import android.content.Context
 import com.sun.net.httpserver.HttpServer
 import io.mockk.every
-import io.mockk.coEvery
-import io.mockk.coVerify
+import io.mockk.verify
 import io.mockk.mockk
 import io.mockk.spyk
 import kotlinx.coroutines.runBlocking
@@ -71,7 +70,7 @@ class DownloadNamingTest {
         } finally { server.stop(0) }
     }
 
-    @Test fun `failed overwrite preserves the original file when destination write fails`() = runBlocking {
+    @Test fun `failed overwrite preserves the original file when destination publication access fails`() = runBlocking {
         val hits = AtomicInteger()
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/module-update.json") { exchange ->
@@ -88,7 +87,7 @@ class DownloadNamingTest {
             val scratch = temp.newFolder("failure-scratch")
             val original = File(scratch, "module-update.json").apply { writeText("""{"version":1}""") }
             val access = spyk(LocalFileAccess(scratch, temp.newFolder("failure-upload")))
-            coEvery { access.openOutput(any(), any()) } throws IOException("injected destination write failure")
+            every { access.checkFile(match { it.absolutePath == original.absolutePath }, true) } throws IOException("injected destination publication failure")
             val tool = downloadTool(context, access)
             val parts = tool.execute(buildJsonObject {
                 put("url", "http://127.0.0.1:${server.address.port}/module-update.json")
@@ -97,12 +96,12 @@ class DownloadNamingTest {
             })
             val result = Json.parseToJsonElement((parts.single() as UIMessagePart.Text).text).jsonObject
             assertEquals(1, hits.get())
-            coVerify(exactly = 1) { access.openOutput(any(), any()) }
+            verify(atLeast = 1) { access.checkFile(match { it.absolutePath == original.absolutePath }, true) }
             assertTrue("The injected write failure must reach the tool result: $result", result.containsKey("error"))
             assertTrue("An unsuccessful replacement must retain the old file", original.exists())
             assertEquals("""{"version":1}""", original.readText())
             assertEquals(listOf("module-update.json"), scratch.listFiles()!!.map { it.name })
-            assertTrue("Download staging must be cleaned", cache.listFiles()!!.isEmpty())
+            assertTrue("Download staging must be cleaned", cache.walkTopDown().none { it.isFile })
         } finally { server.stop(0) }
     }
 }

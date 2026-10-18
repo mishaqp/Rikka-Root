@@ -28,6 +28,7 @@ import java.nio.file.attribute.BasicFileAttributes
 
 class SftpAtomicDownloadAuditTest {
     @get:Rule val temporary = TemporaryFolder()
+    private lateinit var cache: File
 
     @Test fun `failed remote get preserves existing destination even after partial bytes`() = runBlocking {
         for (partial in listOf(false, true)) fixture { tool, destination, sftp ->
@@ -136,7 +137,7 @@ class SftpAtomicDownloadAuditTest {
             var ownedPartial: File? = null
             every { sftp.get(any<String>(), any<OutputStream>()) } answers {
                 secondArg<OutputStream>().write("COMPLETE".toByteArray())
-                val original = destination.parentFile!!.listFiles()!!.single { it.name.endsWith(".part") }
+                val original = cache.walkTopDown().single { it.isFile && it.name.endsWith(".part") }
                 val originalKey = Files.readAttributes(original.toPath(), BasicFileAttributes::class.java).fileKey()
                 ownedPartial = File(original.parentFile, "owned-${original.name}.kept")
                 Files.move(original.toPath(), ownedPartial!!.toPath())
@@ -163,28 +164,25 @@ class SftpAtomicDownloadAuditTest {
             val outside = temporary.newFolder()
             val parked = File(parent.parentFile, "parked-${parent.name}")
             var foreignPartial: File? = null
-            var originalPartialPath: String? = null
+            var ownedPartial: File? = null
             val foreignTarget = File(outside, destination.name).apply { writeText("FOREIGN TARGET") }
             every { sftp.get(any<String>(), any<OutputStream>()) } answers {
                 secondArg<OutputStream>().write("COMPLETE".toByteArray())
-                val ownedPartial = parent.listFiles()!!.single { it.name.endsWith(".part") }
-                originalPartialPath = ownedPartial.absolutePath
+                ownedPartial = cache.walkTopDown().single { it.isFile && it.name.endsWith(".part") }
                 Files.move(parent.toPath(), parked.toPath())
                 Files.createSymbolicLink(parent.toPath(), outside.toPath())
-                foreignPartial = File(outside, ownedPartial.name).apply { writeText("FOREIGN PARTIAL") }
+                // A same-named user file is deliberately outside the cache capability.
+                foreignPartial = File(outside, ownedPartial!!.name).apply { writeText("FOREIGN PARTIAL") }
                 if (failTransfer) throw IOException("remote stream disconnected after ancestor swap")
                 Unit
             }
             val result = Json.parseToJsonElement((tool.execute(arguments(destination.absolutePath)).single() as UIMessagePart.Text).text).jsonObject
             assertNotNull("A changed symlink ancestor must reject publication: $result", result["error"])
             assertEquals("Atomic commit must never replace a file outside the granted roots", "FOREIGN TARGET", foreignTarget.readText())
-            assertEquals("Cleanup must never delete another file reached through the swapped ancestor", "FOREIGN PARTIAL", foreignPartial!!.readText())
+            assertEquals("Cleanup must never delete another file reached through the swapped target ancestor", "FOREIGN PARTIAL", foreignPartial!!.readText())
             assertEquals("ORIGINAL", File(parked, destination.name).readText())
-            assertEquals("Owned temporary bytes must survive when their path can no longer be trusted", "COMPLETE",
-                File(parked, foreignPartial!!.name).readText())
-            assertEquals("true", result["cleanup_failed"]?.jsonPrimitive?.content)
-            assertEquals("true", result["partial_path_unverified"]?.jsonPrimitive?.content)
-            assertEquals(originalPartialPath, result["partial_path"]?.jsonPrimitive?.content)
+            assertFalse("The independent owned cache inode can still be safely cleaned", ownedPartial!!.exists())
+            for (key in listOf("cleanup_failed", "partial_path", "partial_path_unverified", "cleanup_recovery")) assertNull(key, result[key])
         }
     }
 
@@ -197,7 +195,11 @@ class SftpAtomicDownloadAuditTest {
         block: suspend (me.rerere.ai.core.Tool, java.io.File, ChannelSftp) -> Unit) {
         val directory = temporary.newFolder()
         val destination = java.io.File(directory, "artifact").apply { writeText("ORIGINAL") }
-        val context = mockk<Context>()
+        cache = temporary.newFolder()
+        val context = mockk<Context> {
+            every { cacheDir } returns cache
+            every { externalCacheDirs } returns emptyArray()
+        }
         val repository = mockk<SshHostRepository>()
         coEvery { repository.getByName("build") } returns SshHostEntity(
             name = "build", host = "build.example", user = "builder", createdAtMs = 0,
