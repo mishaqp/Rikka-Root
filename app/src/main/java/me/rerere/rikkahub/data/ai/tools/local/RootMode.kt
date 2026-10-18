@@ -65,19 +65,20 @@ object RootMode {
 - Батарея: dumpsys battery. Память: df -h /data /sdcard. Модель и Android: getprop ro.product.model; getprop ro.build.version.release
 - Wi-Fi: cmd wifi status; svc wifi enable|disable. Мобильные данные: svc data enable|disable. Bluetooth: cmd bluetooth_manager enable|disable
 - Громкость (поток 3 — музыка, 2 — звонок, 4 — будильник, 5 — уведомления): cmd media_session volume --stream 3 --get; --set 8. На старых Android: media volume --stream 3 --set 8
-- Не беспокоить: cmd notification set_dnd on | priority | alarms | off
+- Не беспокоить: cmd notification set_dnd on | priority | alarms | off (settings put global zen_mode не работает — система откатывает). Узнать: settings get global zen_mode (0 — выкл, 1 — только важные, 2 — полная тишина, 3 — только будильники)
 - Режим полёта: cmd connectivity airplane-mode enable|disable (узнать: settings get global airplane_mode_on)
 - Поворот экрана: автоповорот settings put system accelerometer_rotation 1|0; при выключенном — settings put system user_rotation 0|1|2|3
 - Вибрация (мс): cmd vibrator_manager synced oneshot 500; на старых Android: cmd vibrator vibrate 500
-- Музыка в любом плеере: cmd media_session dispatch play-pause | next | previous | pause; что играет: dumpsys media_session | grep -m5 -i 'description\|state='. Открыть файл в плеере: am start -a android.intent.action.VIEW -d 'file:///sdcard/Music/файл.mp3' -t audio/*
-- Календарь (только чтение; создавать событие — инструментом календаря, если он есть): content query --uri content://com.android.calendar/events --projection title:dtstart:dtend --where "dtstart>$(date +%s)000" --sort 'dtstart ASC' | head -n 20
-- Где телефон (последние координаты): dumpsys location | grep -m3 -i 'last location'
-- Экран включён или нет: dumpsys power | grep -m1 mWakefulness. Открыть настройки приложения: am start -a android.settings.APPLICATION_DETAILS_SETTINGS -d package:ПАКЕТ
+- Музыка в любом плеере: cmd media_session dispatch play-pause | next | previous | pause; что играет: dumpsys media_session | grep -m4 -E 'package=|metadata: size=[1-9]|state=PlaybackState' (трек — в metadata: description=Название, Исполнитель). Открыть файл в плеере: am start -a android.intent.action.VIEW -d 'file:///sdcard/Music/файл.mp3' -t audio/*
+- Календарь (только чтение; создавать событие — инструментом календаря, если он есть): content query --uri content://com.android.calendar/instances/when/$(date +%s)000/$(( $(date +%s) + 2592000 ))000 --projection title:begin:end --sort 'begin ASC' | head -n 20 (окно 30 дней; instances показывает и повторяющиеся события, например дни рождения; begin/end — миллисекунды)
+- Где телефон (последние координаты): dumpsys location | grep -m3 -i 'last location'. Если везде null — геолокация выключена (settings get secure location_mode = 0), координат нет; так и скажи.
+- Перевести время из секунд в дату: date -D %s -d 1804982400 '+%Y-%m-%d %H:%M' (toybox; date -d @… здесь даёт неверный результат). Миллисекунды сначала раздели на 1000: $(( MS / 1000 ))
+- Экран включён или нет: dumpsys power | grep -m1 mWakefulness. Открыть настройки приложения: am start -a android.settings.APPLICATION_DETAILS_SETTINGS -d 'package:ПАКЕТ' (URI обязательно в кавычках). Что сейчас на экране: dumpsys window | grep -m1 mCurrentFocus
 - Яркость: settings put system screen_brightness_mode 0; settings put system screen_brightness 128 (0–255)
 - Экран: input tap X Y; input swipe X1 Y1 X2 Y2 300; input text 'abc' (пробел — %s); input keyevent KEYCODE_HOME | KEYCODE_BACK | KEYCODE_ENTER | KEYCODE_WAKEUP. Разметка с координатами: uiautomator dump /sdcard/window.xml >/dev/null && cat /sdcard/window.xml. Скриншот: screencap -p /sdcard/Pictures/screen.png
 - Контакты: content query --uri content://com.android.contacts/data/phones --projection display_name:data1 (последние добавленные: --sort '_id DESC')
 - SMS: content query --uri content://sms/inbox --projection address:date:body --sort 'date DESC' | head -n 40
 - Журнал звонков: content query --uri content://call_log/calls --projection number:name:date:type --sort 'date DESC' | head -n 40
-Правила: команда не должна ждать ввода (никаких vi, less, top без -n 1). Значения с пробелами бери в одинарные кавычки. Если команда не сработала, прочитай stderr и попробуй другой способ, а не ту же команду. Перед изменением системных настроек и удалением убедись, что пользователь этого хочет.
+Правила: независимые проверки объединяй в одну команду через ; или && (одна команда вместо пяти — ответ в разы быстрее). Команда не должна ждать ввода (никаких vi, less, top без -n 1). Значения с пробелами бери в одинарные кавычки. Если команда не сработала, прочитай stderr и попробуй другой способ, а не ту же команду. Перед изменением системных настроек и удалением убедись, что пользователь этого хочет.
 """.trim()
 }
