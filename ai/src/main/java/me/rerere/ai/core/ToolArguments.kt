@@ -86,6 +86,8 @@ private fun normalizeArgument(value: JsonElement, schema: JsonObject, path: Stri
             }
             if (!number.toDouble().isFinite()) invalidArgument(path, "ожидается конечное число")
             if ((type as JsonPrimitive).content == "integer") {
+                // Reject fractions before setScale inside toBigIntegerExact can expand a huge negative exponent.
+                if (number.stripTrailingZeros().scale() > 0) invalidArgument(path, "ожидается целое число")
                 val integer = try { number.toBigIntegerExact() } catch (_: ArithmeticException) {
                     invalidArgument(path, "ожидается целое число")
                 }

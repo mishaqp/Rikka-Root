@@ -1,6 +1,12 @@
 package me.rerere.rikkahub.data.ai
 
 import android.content.ContextWrapper
+import io.mockk.every
+import io.mockk.mockkConstructor
+import io.mockk.unmockkConstructor
+import java.math.BigDecimal
+import me.rerere.ai.core.prepareArguments
+import me.rerere.ai.core.ToolArgumentException
 import java.io.Closeable
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
@@ -356,8 +362,21 @@ class GenerationLoopArgumentContractTest {
                 .map { it.jsonObject.getValue("content").jsonPrimitive.content }
             assertEquals(2, results.size)
             assertTrue(results.all { it.length <= cap })
-            assertFalse(results.first().contains("повтор", ignoreCase = true))
-            assertTrue(results.last().takeLast(400), results.last().contains("повтор", ignoreCase = true))
+            val envelopes = results.map { parsed(it).jsonObject }
+            assertTrue(envelopes.all { it["truncated"] == JsonPrimitive(true) })
+            val previews = envelopes.map { it.getValue("preview").jsonPrimitive.content }
+            val repeatWarning = "Предупреждение: повторный вызов этого инструмента с теми же параметрами в текущем ходе. Проверьте предыдущий результат; при необходимости измените параметры или выберите другой способ."
+            assertEquals(JsonPrimitive(raw.length), envelopes.first()["total_chars"])
+            assertEquals(JsonPrimitive(repeatWarning.length + 1 + raw.length), envelopes.last()["total_chars"])
+            assertTrue(previews.all { it.isNotEmpty() })
+            assertEquals(raw.take(previews.first().length), previews.first())
+            assertTrue(previews.last(), previews.last().startsWith(repeatWarning + "\n"))
+            val repeatedSource = repeatWarning + "\n" + raw
+            assertEquals(repeatedSource.take(previews.last().length), previews.last())
+            // Generic anti-replay advice is not the loop's actual repeated-call notice.
+            assertFalse(previews.first().contains("повтор", ignoreCase = true))
+            assertTrue(previews.last().takeLast(400), previews.last().contains("повтор", ignoreCase = true))
+            assertEquals(listOf("first", "second"), f.tools().map { it.toolCallId })
         }
     }
 
@@ -433,6 +452,95 @@ class GenerationLoopArgumentContractTest {
         val ids = calls.map { it.getValue("id").jsonPrimitive.content }
         assertEquals(ids.size, ids.toSet().size)
         assertEquals(ids, results.map { it.getValue("tool_call_id").jsonPrimitive.content })
+    }
+
+
+    @Test fun `fractional integer rejects before scale expansion with a verified safe probe`() {
+        // The original JDK operation is never reached after this verified interception.
+        // If constructor instrumentation is unavailable, the small witness fails first;
+        // the extreme exact-integer conversion never reaches the uninstrumented implementation.
+        // Derive faithful public results before instrumenting java.math: MockK cannot
+        // reflectively delegate BigDecimal's private helpers on the closed JDK module.
+        val probes = listOf("1e-10000", "1e-100000000").associateWith { raw ->
+            val decimal = BigDecimal(raw)
+            decimal.toDouble() to decimal.stripTrailingZeros()
+        }
+        mockkConstructor(BigDecimal::class)
+        try {
+            var currentProbe = probes.getValue("1e-10000")
+            every { anyConstructed<BigDecimal>().toDouble() } answers { currentProbe.first }
+            every { anyConstructed<BigDecimal>().stripTrailingZeros() } answers { currentProbe.second }
+            var exactConversions = 0
+            every { anyConstructed<BigDecimal>().toBigIntegerExact() } answers {
+                exactConversions++
+                throw AssertionError("bounded exact conversion probe")
+            }
+            val witness = runCatching { BigDecimal("1e-10000").toBigIntegerExact() }.exceptionOrNull()
+            assertTrue("Constructor interception must work before testing large exponents: $witness",
+                witness is AssertionError && witness.message == "bounded exact conversion probe")
+            assertEquals(1, exactConversions)
+            val tool = Tool("integer_probe", "test", parameters = {
+                InputSchema.Obj(parsed("""{"value":{"type":"integer"}}""").jsonObject, listOf("value"))
+            }, execute = { fail("Validation probe must never execute a tool"); emptyList() })
+            for (numeric in probes.keys) {
+                currentProbe = probes.getValue(numeric)
+                for (value in listOf(JsonPrimitive(numeric), parsed(numeric))) {
+                    exactConversions = 0
+                    val error = runCatching { tool.prepareArguments(buildJsonObject { put("value", value) }) }.exceptionOrNull()
+                    assertEquals("Nonzero fractional integer must reject before a scale-expanding conversion: $numeric", 0, exactConversions)
+                    assertTrue("Expected recoverable argument rejection, got $error", error is ToolArgumentException)
+                    assertTrue(error!!.message.orEmpty(), Regex("[А-Яа-яЁё]").containsMatchIn(error.message.orEmpty()))
+                }
+            }
+        } finally {
+            unmockkConstructor(BigDecimal::class)
+        }
+    }
+
+    @Test fun `safe fractional and overflowing integer arguments fail before approval or effects`() = runBlocking {
+        for (numeric in listOf("1e-10000", "1e10000", "1e9999999999999999999", "1.25")) {
+            val raw = """{"count":"$numeric","label":"ok"}"""
+            Fixture(folder.newFolder(), listOf(response(Call("numeric", "contract_tool", raw)))).use { f ->
+                var callbacks = 0
+                var effects = 0
+                f.collect(listOf(contractTool(needsApproval = { callbacks++; true }) { effects++; emptyList() }),
+                    autoApproved = { _, _ -> callbacks++; true })
+                assertEquals(0, callbacks)
+                assertEquals(0, effects)
+                assertInvalid(f.tools().single())
+                assertTranscript(f, listOf("contract_tool"))
+            }
+        }
+    }
+
+    @Test fun `exact numeric normalization preserves zero ordinary values and native freeform strings`() {
+        val tool = Tool("numeric_controls", "test", parameters = {
+            InputSchema.Obj(parsed("""{"integer":{"type":"integer"},"number":{"type":"number"},"flag":{"type":"boolean"},"union":{"type":["string","integer"]},"free":{"type":"object","additionalProperties":true}}""").jsonObject)
+        }, execute = { emptyList() })
+        for ((input, expected) in listOf("0e-100000000" to "0", "5.0" to "5", "1e2" to "100", "-3.000" to "-3")) {
+            val args = buildJsonObject {
+                put("integer", input); put("number", "1e-10000"); put("flag", "true"); put("union", "5")
+                put("free", buildJsonObject { put("numeric", "5"); put("flag", "true") })
+            }
+            val actual = tool.prepareArguments(args)
+            assertEquals(parsed(expected), actual["integer"])
+            assertEquals("1e-10000", actual["number"]!!.jsonPrimitive.content)
+            assertFalse(actual["number"]!!.jsonPrimitive.isString)
+            assertEquals(JsonPrimitive(true), actual["flag"])
+            assertEquals(JsonPrimitive("5"), actual["union"])
+            assertEquals(args["free"], actual["free"])
+        }
+    }
+
+    @Test fun `repeat canonicalization keeps large exponents scientific without expanding digits`() {
+        val first = UIMessagePart.Tool("first", "freeform_tool", """{"value":1e-100000000}""", listOf(UIMessagePart.Text("ok")))
+        val second = first.copy(toolCallId = "second", input = """{"value":10e-100000001}""")
+        val saved = listOf(UIMessage.user("read"), UIMessage.assistant("").copy(parts = listOf(first, second)))
+        val projected = modelVisibleMessages(saved).flatMap { it.parts }.filterIsInstance<UIMessagePart.Tool>()
+        assertEquals(first, projected.first())
+        assertEquals(second.input, projected.last().input)
+        assertTrue(projected.last().output.filterIsInstance<UIMessagePart.Text>().first().text.contains("повтор", ignoreCase = true))
+        assertEquals(listOf(first, second), saved.last().getTools())
     }
 
     private fun contractTool(needsApproval: (JsonElement) -> Boolean = { false }, execute: suspend (JsonElement) -> List<UIMessagePart>) =

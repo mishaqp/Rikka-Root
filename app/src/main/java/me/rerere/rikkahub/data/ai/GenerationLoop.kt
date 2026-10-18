@@ -888,10 +888,11 @@ class GenerationLoop(
         tool: UIMessagePart.Tool,
         output: List<UIMessagePart>,
         hasShellAccess: Boolean,
+        openDirectory: ((java.nio.file.Path) -> java.nio.file.DirectoryStream<java.nio.file.Path>)? = null,
+        openWriter: ((java.nio.file.Path) -> java.io.Writer)? = null,
     ): List<UIMessagePart> {
         if (hasShellAccess && tool.toolName in TOOLS_WITHOUT_OUTPUT_TRUNCATION) return output
 
-        val toolCallId = tool.toolCallId
         val textParts = output.filterIsInstance<UIMessagePart.Text>()
         val nonTextParts = output.filter { it !is UIMessagePart.Text }
         val totalChars = textParts.sumOf { it.text.length }
@@ -900,26 +901,70 @@ class GenerationLoop(
         // for the UI, and boundToolOutputsForModel shortens only the copy sent to the provider.
         if (totalChars <= MAX_TOOL_OUTPUT_CHARS || !hasShellAccess) return output
 
-        Log.i(TAG, "maybeTruncateToolOutput: truncating tool $toolCallId output ($totalChars chars)")
-
         val fullText = textParts.joinToString("\n") { it.text }
-        val preview = fullText.take(TOOL_OUTPUT_PREVIEW_CHARS)
+        var previewEnd = minOf(fullText.length, TOOL_OUTPUT_PREVIEW_CHARS)
+        if (previewEnd < fullText.length && previewEnd > 0 &&
+            fullText[previewEnd - 1].isHighSurrogate() && fullText[previewEnd].isLowSurrogate()
+        ) previewEnd--
+        val preview = fullText.substring(0, previewEnd)
 
-        val fileName = "${toolCallId}.txt"
-        val outputDir = File(context.filesDir, FileFolders.TOOL_OUTPUTS).apply { mkdirs() }
-        File(outputDir, fileName).writeText(fullText)
+        // This directory is mounted into the workspace. Pin writes to its opened inode;
+        // a pathname check alone cannot prevent a concurrent parent-directory replacement.
+        val fileName = "${Uuid.random()}.txt"
+        try {
+            val outputDir = File(context.filesDir, FileFolders.TOOL_OUTPUTS).apply { mkdirs() }
+            val directoryPath = outputDir.toPath()
+            fun liveDirectoryKey(): Any {
+                val attributes = java.nio.file.Files.readAttributes(
+                    directoryPath, java.nio.file.attribute.BasicFileAttributes::class.java,
+                    java.nio.file.LinkOption.NOFOLLOW_LINKS,
+                )
+                if (!attributes.isDirectory || attributes.isSymbolicLink ||
+                    outputDir.canonicalFile.parentFile != context.filesDir.canonicalFile
+                ) throw IOException("Каталог архива вывода недоступен.")
+                return attributes.fileKey() ?: throw IOException("Не удалось проверить каталог архива вывода.")
+            }
+            val expectedKey = liveDirectoryKey()
+            (openDirectory?.invoke(directoryPath) ?: java.nio.file.Files.newDirectoryStream(directoryPath)).use { directory ->
+                if (directory !is java.nio.file.SecureDirectoryStream<java.nio.file.Path>) {
+                    throw IOException("Безопасная запись архива вывода недоступна.")
+                }
+                val openedKey = directory.getFileAttributeView(
+                    java.nio.file.attribute.BasicFileAttributeView::class.java,
+                )?.readAttributes()?.fileKey()
+                    ?: throw IOException("Не удалось проверить открытый каталог архива вывода.")
+                if (openedKey != expectedKey || liveDirectoryKey() != openedKey) {
+                    throw IOException("Каталог архива вывода изменён.")
+                }
+                val options = setOf<java.nio.file.OpenOption>(
+                    java.nio.file.StandardOpenOption.CREATE_NEW,
+                    java.nio.file.StandardOpenOption.WRITE,
+                    java.nio.file.LinkOption.NOFOLLOW_LINKS,
+                )
+                directory.newByteChannel(File(fileName).toPath(), options).use { channel ->
+                    java.nio.channels.Channels.newWriter(channel, Charsets.UTF_8.newEncoder(), -1).use { writer ->
+                        writer.write(fullText)
+                    }
+                }
+                if (liveDirectoryKey() != openedKey) throw IOException("Каталог архива вывода изменён.")
+            }
+        } catch (_: IOException) {
+            Log.w(TAG, "Не удалось записать архив вывода инструмента; полный результат сохранён в сообщении.")
+            return output
+        } catch (_: UnsupportedOperationException) {
+            Log.w(TAG, "Безопасная запись архива вывода недоступна; полный результат сохранён в сообщении.")
+            return output
+        }
 
         return listOf(
-            UIMessagePart.Text(
-                buildString {
-                    appendLine("[Tool output truncated: $totalChars characters total]")
-                    appendLine("Full output saved to: /tool_outputs/$fileName")
-                    appendLine("Use shell to read: `cat /tool_outputs/$fileName`")
-                    appendLine("Use shell to search: `grep \"pattern\" /tool_outputs/$fileName`")
-                    appendLine()
-                    append(preview)
-                }
-            )
+            UIMessagePart.Text(buildJsonObject {
+                put("path", "/tool_outputs/$fileName")
+                put("preview", preview)
+                put("preview_chars", preview.length)
+                put("truncated", true)
+                put("total_chars", fullText.length)
+                put("message", "Показан фрагмент результата. Полный исходный вывод сохранён по пути path; используйте доступный инструмент shell для чтения или поиска в файле.")
+            }.toString())
         ) + nonTextParts
     }
 
@@ -990,6 +1035,31 @@ private fun boundedToolOutput(toolName: String, output: List<UIMessagePart>): Li
     if (toolName == "search_web") {
         boundedSearchOutput(text, MAX_TOOL_OUTPUT_CHARS)?.let { return listOf(UIMessagePart.Text(it)) + nonTextParts }
     }
-    val marker = "\n[Вывод инструмента сокращён: всего ${text.length} символов.]"
-    return listOf(UIMessagePart.Text(text.take(MAX_TOOL_OUTPUT_CHARS - marker.length) + marker)) + nonTextParts
+    return listOf(UIMessagePart.Text(boundedToolOutputEnvelope(text))) + nonTextParts
+}
+
+/** The serialized envelope, including escaping and guidance, fits the existing provider budget. */
+private fun boundedToolOutputEnvelope(text: String): String {
+    fun render(prefixLength: Int): String {
+        val end = if (prefixLength > 0 && prefixLength < text.length &&
+            text[prefixLength - 1].isHighSurrogate() && text[prefixLength].isLowSurrogate()) prefixLength - 1 else prefixLength
+        return buildJsonObject {
+            put("truncated", true)
+            put("total_chars", text.length)
+            put("preview", text.substring(0, end))
+            put("message", "Вывод инструмента сокращён; preview содержит только начало. Полный исходный результат сохранён в истории чата. Для дальнейшего чтения уточните поддерживаемые фильтры или диапазон. Не повторяйте изменяющие данные действия автоматически ради полного вывода.")
+        }.toString()
+    }
+    var low = 0
+    var high = minOf(text.length, MAX_TOOL_OUTPUT_CHARS)
+    var result = render(0)
+    while (low <= high) {
+        val middle = low + (high - low) / 2
+        val candidate = render(middle)
+        if (candidate.length <= MAX_TOOL_OUTPUT_CHARS) {
+            result = candidate
+            low = middle + 1
+        } else high = middle - 1
+    }
+    return result
 }
