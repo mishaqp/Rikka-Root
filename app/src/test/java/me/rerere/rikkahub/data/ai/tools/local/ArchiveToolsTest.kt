@@ -32,7 +32,7 @@ class ArchiveToolsTest {
                 assertTrue("${tool.name}: workspace paths missing", tool.description.contains("/workspace/"))
                 assertTrue("${tool.name}: relative paths missing", tool.description.contains("относительные пути"))
                 assertTrue("${tool.name}: package installation guidance missing", tool.description.contains("apt"))
-                assertTrue("${tool.name}: shell alternative missing", tool.description.contains("workspace_exec"))
+                assertTrue("${tool.name}: shell alternative missing", tool.description.contains("workspace_shell"))
             }
         } finally { temp.deleteRecursively() }
     }

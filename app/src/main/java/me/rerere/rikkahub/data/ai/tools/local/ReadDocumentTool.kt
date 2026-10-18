@@ -39,16 +39,16 @@ internal fun readDocumentTool(
     backend: ReadDocumentBackend? = null,
 ): Tool = Tool(
     name = "read_document",
-    description = "Извлекает текст PDF, DOCX, PPTX или EPUB через разрешённый файловый доступ. " +
+    description = "Извлечь текст PDF, DOCX, PPTX или EPUB через разрешённый файловый доступ. Для обычного текста или двоичных байтов используйте read_file, для папок — list_files. " +
         "max_chars: по умолчанию 20000, максимум 65536 символов. page_from и page_to: " +
         "страницы PDF с 1 включительно. pages — общее число страниц PDF, для остальных форматов null. " +
         "total_chars — размер текста выбранного диапазона до обрезки; если total_chars_is_lower_bound=true, " +
-        "текст PDF длиннее и читать его нужно меньшими диапазонами страниц. Документ до 32 МиБ.",
+        "текст PDF длиннее и читать его нужно меньшими диапазонами страниц. truncated сообщает об обрезке text. Документ до 32 МиБ; для архивных форматов — до 10000 записей и 64 МиБ распакованных данных. Диапазон страниц поддерживается только для PDF.",
     parameters = { InputSchema.Obj(buildJsonObject {
-        put("path", buildJsonObject { put("type", "string"); put("description", "Путь к документу или URI выбранной папки SAF.") })
-        put("max_chars", buildJsonObject { put("type", "integer"); put("default", 20000); put("minimum", 1); put("maximum", 65536) })
+        put("path", buildJsonObject { put("type", "string"); put("minLength", 1); put("maxLength", 8192); put("description", "Путь к файлу PDF/DOCX/PPTX/EPUB: относительный от cwd workspace (без workspace — /scratch), /scratch, /upload, file:// или content:// документа в выданной SAF-папке.") })
+        put("max_chars", buildJsonObject { put("type", "integer"); put("description", "Максимум символов text: 1–65536, по умолчанию 20000; total_chars сохраняет размер до обрезки."); put("default", 20000); put("minimum", 1); put("maximum", 65536) })
         for (parameter in listOf("page_from", "page_to")) put(parameter, buildJsonObject {
-            put("type", "integer"); put("minimum", 1); put("description", "Номер страницы PDF с 1 включительно.")
+            put("type", "integer"); put("minimum", 1); put("maximum", Int.MAX_VALUE); put("description", if (parameter == "page_from") "Первая страница PDF с 1 включительно; без параметра — с начала. Для других форматов не передавать." else "Последняя страница PDF включительно, не меньше page_from; без параметра — до конца. Для других форматов не передавать.")
         })
     }, listOf("path")) },
     needsApproval = { false },

@@ -27,13 +27,47 @@ import java.security.MessageDigest
 import java.util.Base64
 import java.util.UUID
 
-internal fun fileSchema(required: List<String> = emptyList(), vararg properties: Pair<String, String>): InputSchema.Obj = InputSchema.Obj(
-    buildJsonObject { properties.forEach { (name, type) -> put(name, buildJsonObject {
+internal fun fileSchema(
+    required: List<String> = emptyList(),
+    vararg properties: Pair<String, String>,
+    recursiveDefault: Boolean = false,
+): InputSchema.Obj = InputSchema.Obj(buildJsonObject {
+    properties.forEach { (name, type) -> put(name, buildJsonObject {
         put("type", type)
-        if (type == "array") put("items", buildJsonObject { put("type", "string") })
-        if (name == "limit") { put("minimum", 1); put("maximum", 500) }
-        if (name == "max_bytes") { put("minimum", 1); put("maximum", 1048576) }
-    }) } }, required.takeIf { it.isNotEmpty() })
+        put("description", when (name) {
+            "path" -> "Путь к файлу или папке: относительно текущей папки workspace (без workspace — /scratch), /scratch, /upload для чтения, file:// или доступный content://."
+            "src" -> "Путь или доступный URI существующего файла или папки источника."
+            "dst" -> "Полный путь или доступный URI назначения, включая имя файла или папки."
+            "root" -> "Существующая папка для поиска или выбора прямых дочерних файлов по pattern."
+            "dst_dir" -> "Существующая папка назначения для всех выбранных файлов; исходные имена сохраняются."
+            "paths" -> "От 1 до 500 явных путей или доступных URI; вместо этого массива можно указать root и pattern."
+            "pattern" -> "Шаблон имени: * означает любые символы, ? — один символ; регистр не учитывается, максимум 512 символов."
+            "query" -> "Подстрока имени без учёта регистра либо шаблон с * и ?; для шаблона максимум 512 символов."
+            "recursive" -> "Обрабатывать вложенные папки; по умолчанию $recursiveDefault. Удаление непустой папки требует true."
+            "limit" -> "Число записей в ответе: 1–500, по умолчанию 50; truncated сообщает об усечении."
+            "max_bytes" -> "Предел читаемых байтов: 1–1048576, по умолчанию 65536; truncated сообщает о продолжении файла."
+            "encoding" -> "Кодировка текста, например UTF-8 или windows-1251; без параметра определяется BOM, иначе UTF-8."
+            "base64_content" -> "Двоичные данные base64/base64url либо data: URI с base64; пробелы и переносы допустимы, после декодирования максимум 16 МиБ."
+            "content" -> "Текст UTF-8 для записи; размер закодированных данных не более 16 МиБ."
+            "overwrite" -> "Разрешить замену существующего назначения; по умолчанию false."
+            "append" -> "Добавить текст к локальному файлу; по умолчанию false. Для SAF добавление не поддерживается."
+            "include_hash" -> "Вычислить SHA-256 обычного файла до 512 МиБ; по умолчанию false."
+            "name" -> "Прямое имя создаваемой папки внутри path: 1–255 символов, без разделителей, управляющих символов, «.» и «..»."
+            "mime_type" -> "Тип содержимого для Android-просмотрщика, например application/pdf; без параметра определяется по URI и расширению."
+            else -> "Значение параметра $name."
+        })
+        if (type == "array") {
+            put("items", buildJsonObject { put("type", "string"); put("description", "Путь к файлу или папке либо доступный URI."); put("minLength", 1); put("maxLength", 8192) })
+            if (name == "paths") { put("minItems", 1); put("maxItems", 500) }
+        }
+        if (type == "boolean") put("default", if (name == "recursive") recursiveDefault else false)
+        if (name in setOf("path", "src", "dst", "root", "dst_dir")) { put("minLength", 1); put("maxLength", 8192) }
+        if (name == "pattern") put("maxLength", 512)
+        if (name == "name") { put("minLength", 1); put("maxLength", 255) }
+        if (name == "limit") { put("minimum", 1); put("maximum", 500); put("default", 50) }
+        if (name == "max_bytes") { put("minimum", 1); put("maximum", 1048576); put("default", 65536) }
+    }) }
+}, required.takeIf { it.isNotEmpty() })
 
 internal fun fileArgument(obj: JsonObject, name: String, default: String? = null): String =
     (obj[name] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: default ?: error("Укажите $name строкой.")
@@ -89,7 +123,7 @@ internal fun fileJsonTool(name: String, description: String, schema: InputSchema
 
 /** Every tool uses this immutable conversation-scoped resolver; no operation invokes a shell. */
 fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCanReadImages: Boolean = false): List<Tool> {
-    val scope = " Paths: ${access.defaultPath}, /scratch, /upload, attachment:N for reads, and content:// under a persisted SAF tree. Absolute shared-storage paths inside that granted tree also use SAF. With the explicit all-files setting and Android grant, mounted shared storage can be used directly. System paths and app settings are blocked." + ASSISTANT_FILE_DIRECTORY_HINT
+    val scope = " Пути: относительно текущей папки workspace, без workspace — /scratch (текущая область ${access.defaultPath}); доступны /scratch, /upload и attachment:N для чтения, file:// и content:// в выданной SAF-папке. Абсолютные пути внутри выданной папки также используют SAF. Прямой доступ к общей памяти требует настройки всех файлов и системного разрешения Android. Системные пути и настройки приложения запрещены." + ASSISTANT_FILE_DIRECTORY_HINT
     suspend fun source(obj: JsonObject, key: String = "path", write: Boolean = false) = access.resolve(fileArgument(obj, key), write)
     suspend fun entry(source: LocalFileSource): JsonObject {
         val name = access.name(source)
@@ -202,11 +236,11 @@ fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCan
         return buildJsonObject { put("success", succeeded); put("failed", JsonArray(failures)) }
     }
     val tools = mutableListOf<Tool>()
-    tools += fileJsonTool("list_files", "List files by optional filename glob; recursive=false, limit=50 (maximum500). At most5000 guarded entries." + scope,
+    tools += fileJsonTool("list_files", "Показать содержимое папки и метаданные файлов; для поиска по подстроке имени используйте find_files. pattern — необязательный шаблон имени. recursive=false, limit=50 (1–500); обход до 5000 записей и глубины 64. truncated отмечает усечение ответа, scan_incomplete — неполный обход; сузьте path при слишком большой папке." + scope,
         fileSchema(listOf("path"), "path" to "string", "pattern" to "string", "recursive" to "boolean", "limit" to "integer")) { listing(it, false) }
-    tools += fileJsonTool("find_files", "Find filenames by query substring or glob; recursive=true, limit=50 (maximum500)." + scope,
-        fileSchema(listOf("root", "query"), "root" to "string", "query" to "string", "recursive" to "boolean", "limit" to "integer")) { listing(it, true) }
-    tools += fileJsonTool("read_file", "Read at most max_bytes (default65536, maximum1048576). Text includes BOM detection; binary data returns base64." + scope,
+    tools += fileJsonTool("find_files", "Найти файлы по подстроке имени или шаблону query с * и ? без учёта регистра; для обычного просмотра папки используйте list_files. recursive=true, limit=50 (1–500); обход до 5000 записей и глубины 64. truncated отмечает усечение, scan_incomplete — неполный обход; сузьте root, чтобы проверить остальные файлы." + scope,
+        fileSchema(listOf("root", "query"), "root" to "string", "query" to "string", "recursive" to "boolean", "limit" to "integer", recursiveDefault = true)) { listing(it, true) }
+    tools += fileJsonTool("read_file", "Прочитать текст или двоичные байты файла; для извлечения текста PDF/DOCX/PPTX/EPUB используйте read_document, для списка папки — list_files. max_bytes: 1–1048576, по умолчанию 65536. Кодировка определяется по BOM, иначе UTF-8; encoding задаёт её явно. Двоичные данные возвращаются как content_base64. truncated и bytes_read показывают усечение и фактически прочитанные байты." + scope,
         fileSchema(listOf("path"), "path" to "string", "max_bytes" to "integer", "encoding" to "string")) { obj ->
         val source = source(obj)
         require(!access.isDirectory(source)) { "Это папка, используйте list_files" }
@@ -241,13 +275,13 @@ fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCan
             put("bytes_read", bytesRead)
         }
     }
-    tools += fileJsonTool("write_binary_file", "Write base64_content, up to16MiB decoded. overwrite=false refuses an existing file. Local writes are staged before replacement." + scope,
+    tools += fileJsonTool("write_binary_file", "Записать двоичный файл из base64_content, не более 16 МиБ после декодирования; для обычного текста используйте write_text_file. overwrite=false отказывает при существующем файле, true разрешает замену. Локальная запись готовится во временном файле до публикации; при ошибке общей памяти проверьте created_path. Возвращает фактический path и bytes_written." + scope,
         fileSchema(listOf("path", "base64_content"), "path" to "string", "base64_content" to "string", "overwrite" to "boolean")) { obj ->
         val encoded = decodeFileBase64(fileArgument(obj, "base64_content"))
         val (destination, bytes) = access.writePath(fileArgument(obj, "path"), encoded, fileBoolean(obj, "overwrite"))
         buildJsonObject { put("success", true); put("path", destination.reference); put("bytes_written", bytes) }
     }
-    tools += fileJsonTool("delete_file", "Delete a file or directory; recursive=true required for nonempty folders. Roots cannot be deleted." + scope,
+    tools += fileJsonTool("delete_file", "Удалить один файл или папку; для нескольких путей используйте batch_delete. recursive=false, для непустой папки требуется true. Корни хранилищ удалять нельзя; обход ограничен 5000 записей и глубиной 64. Проверьте success и deleted_count: инструмент не обещает восстановление удалённых данных." + scope,
         fileSchema(listOf("path"), "path" to "string", "recursive" to "boolean")) { obj ->
         val from = source(obj, write = true)
         val count = if (access.isDirectory(from)) access.walk(from).size + 1 else 1
@@ -257,14 +291,16 @@ fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCan
             if (!deleted) put("message", "Файл или папка не удалены. Проверьте, существует ли путь, и доступ к папке.")
         }
     }
-    for (operation in listOf("copy", "move")) tools += fileJsonTool("${operation}_file", "${operation.replaceFirstChar(Char::uppercase)} a file or directory from src to dst. overwrite=false. Copies are limited to512MiB." + scope,
+    for (operation in listOf("copy", "move")) tools += fileJsonTool("${operation}_file", (if (operation == "copy")
+        "Скопировать файл или папку из src в полный dst; для нескольких файлов используйте batch_copy, для переноса — move_file. overwrite=false, замена только при true. Копирование до 512 МиБ; папки до 5000 записей и глубины 64. Источник сохраняется; ответ содержит from, to и bytes_copied."
+        else "Переместить файл или папку из src в полный dst; для копии с сохранением источника используйте copy_file, для нескольких — batch_move. overwrite=false. Обычный файл на одном томе переименовывается без копирования и лимита 512 МиБ; перенос с копированием ограничен 512 МиБ, папки — 5000 записями и глубиной 64. Если удаление источника не удалось, проверьте сохранённое назначение перед повтором.") + scope,
         fileSchema(listOf("src", "dst"), "src" to "string", "dst" to "string", "overwrite" to "boolean")) { obj ->
         val from = source(obj, "src", operation == "move")
         val (destination, bytes) = if (operation == "copy") access.copyPath(from, fileArgument(obj, "dst"), fileBoolean(obj, "overwrite"))
         else access.movePath(from, fileArgument(obj, "dst"), fileBoolean(obj, "overwrite"))
         buildJsonObject { put("success", true); put("from", from.reference); put("to", destination.reference); put("bytes_copied", bytes) }
     }
-    tools += fileJsonTool("create_directory", "Create a directory by path, including an absolute path inside a granted SAF tree. Alternatively supply an existing parent path and a direct child name." + scope,
+    tools += fileJsonTool("create_directory", "Создать папку по path, включая абсолютный путь в выданной SAF-папке; для записи файла используйте write_text_file или write_binary_file. Вместо полного пути можно передать существующий родительский path и прямое name длиной 1–255 без разделителей. Возвращает path, success и created; уже существующая папка не считается новой." + scope,
         fileSchema(listOf("path"), "path" to "string", "name" to "string")) { obj ->
         val path = fileArgument(obj, "path")
         val name = if ("name" in obj) fileArgument(obj, "name") else null
@@ -297,7 +333,7 @@ fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCan
             if (!created) put("message", "Не удалось создать папку. Проверьте, не занят ли путь файлом; укажите другое имя или проверьте доступ к родительской папке.")
         }
     }
-    tools += fileJsonTool("file_info", "Get file metadata. include_hash=true computes SHA256 up to512MiB." + scope,
+    tools += fileJsonTool("file_info", "Получить метаданные файла или папки без чтения содержимого; для текста используйте read_file, для детей папки — list_files. Несуществующий путь возвращает exists=false. include_hash=false; true вычисляет SHA-256 только обычного файла до 512 МиБ." + scope,
         fileSchema(listOf("path"), "path" to "string", "include_hash" to "boolean")) { obj ->
         val from = source(obj)
         if (!access.exists(from)) buildJsonObject { put("path", from.reference); put("exists", false) }
@@ -314,8 +350,14 @@ fun fileManagerTools(access: LocalFileAccess, context: Context? = null, modelCan
         }
     }
     val batchProperties = arrayOf("paths" to "array", "root" to "string", "pattern" to "string")
-    for (operation in listOf("copy", "move", "delete")) tools += fileJsonTool("batch_$operation", "${operation.replaceFirstChar(Char::uppercase)} up to500 explicit paths or direct children matching root+pattern; report each failed item and keep independent successes." + scope,
-        fileSchema(emptyList(), *batchProperties, *(if (operation == "delete") arrayOf("recursive" to "boolean") else arrayOf("dst_dir" to "string", "overwrite" to "boolean")))) { batch(it, operation) }
+    for (operation in listOf("copy", "move", "delete")) tools += fileJsonTool("batch_$operation", (when (operation) {
+        "copy" -> "Скопировать до 500 выбранных файлов или папок в существующую dst_dir; для одного используйте copy_file."
+        "move" -> "Переместить до 500 выбранных файлов или папок в существующую dst_dir; для одного используйте move_file."
+        else -> "Удалить до 500 выбранных файлов или папок; для одного используйте delete_file. recursive=false, для непустых папок требуется true."
+    }) + " Выберите paths (1–500 путей) либо root и pattern для прямых детей без рекурсивного поиска. Папки ограничены 5000 записями и глубиной 64." +
+        (if (operation == "delete") "" else " overwrite=false; копирование ограничено 512 МиБ на элемент, rename на одном томе не копирует данные.") +
+        " Успешные элементы не откатываются из-за других ошибок; success — число успехов, failed содержит ошибки отдельных путей." + scope,
+        fileSchema(if (operation == "delete") emptyList() else listOf("dst_dir"), *batchProperties, *(if (operation == "delete") arrayOf("recursive" to "boolean") else arrayOf("dst_dir" to "string", "overwrite" to "boolean")))) { batch(it, operation) }
     tools += showImageFileTool(access, modelCanReadImages)
     tools += openFileTool(access, context)
     return tools
@@ -373,7 +415,7 @@ internal fun fileGlobRegex(pattern: String): Regex {
 }
 
 private fun showImageFileTool(access: LocalFileAccess, modelCanReadImages: Boolean): Tool = Tool(
-    "show_image", "Show an image with bounded16MiB input. A text-only model receives metadata with visible_to_you=false; use open_file for the Android viewer.",
+    "show_image", "Показать изображение модели с поддержкой изображений, вход до 16 МиБ. Текстовая модель получает только размеры и visible_to_you=false; для просмотра человеком в Android используйте open_file. Не используйте read_file для передачи изображения как base64-текста.",
     parameters = { fileSchema(listOf("path"), "path" to "string") }, needsApproval = { true }, execute = { input -> deviceToolParts(FileToolOperation.SHOW_IMAGE) { withContext(Dispatchers.IO) {
         val obj = requireNotNull(input as? JsonObject)
         val from = access.resolve(fileArgument(obj, "path"))
@@ -407,7 +449,7 @@ private fun showImageFileTool(access: LocalFileAccess, modelCanReadImages: Boole
     } } })
 
 private fun openFileTool(access: LocalFileAccess, suppliedContext: Context?): Tool = fileJsonTool(
-    "open_file", "Open a guarded local file or granted SAF document in the Android viewer. Rikka-Root must be in the foreground.",
+    "open_file", "Открыть разрешённый файл или SAF-документ в Android-просмотрщике для пользователя. Rikka-Root должен быть на переднем плане. Для чтения моделью используйте read_file/read_document, для показа изображения модели — show_image. mime_type необязателен, определяется по URI и расширению; папки не открываются.",
     fileSchema(listOf("path"), "path" to "string", "mime_type" to "string")) { obj ->
     val context = suppliedContext ?: access.androidContext
     val source = access.resolve(fileArgument(obj, "path"))

@@ -95,8 +95,8 @@ class LocalImageSources(
         reference.startsWith("attachment:") || reference in chatImages
 
     internal fun attachmentPrompt(): String = if (chatImages.isEmpty()) "" else
-        "set_wallpaper can use the images in the latest user message containing images: " +
-            chatImages.indices.joinToString { "attachment:${it + 1}" } + ". Attachment numbers are 1-based in message order."
+        "set_wallpaper может использовать изображения из последнего сообщения пользователя с изображениями: " +
+            chatImages.indices.joinToString { "attachment:${it + 1}" } + ". Нумерация начинается с 1 в порядке изображений в этом сообщении; эти ссылки не относятся к более старым сообщениям."
 }
 
 private fun localImageUri(source: String, requested: String): URI = try { URI(source) } catch (_: URISyntaxException) {

@@ -383,30 +383,33 @@ private fun archiveRollbackWarning(
 
 fun zipFilesTool(context: Context, access: LocalFileAccess = LocalFileAccess(context)): Tool = Tool(
     name = "zip_files",
-    description = "Создать ZIP из файлов и папок рабочего пространства, временной области или явно выданных SAF-папок. Предпочитайте этот встроенный инструмент вместо workspace_exec для создания ZIP: он не требует установки zip/unzip через apt или другой менеджер пакетов. sources и destination поддерживают /workspace/..., относительные пути от текущей папки рабочего пространства (без рабочего пространства — от /scratch), /scratch/..., file:// и content://. base_dir задаёт локальную базовую папку для имён записей. overwrite по умолчанию false; для замены существующего ZIP укажите overwrite=true. compression_level: 0–9, по умолчанию 6. Максимум 10 000 записей, 2 ГиБ данных и 512 МиБ ZIP." + ASSISTANT_FILE_DIRECTORY_HINT,
+    description = "Создать ZIP из файлов и папок рабочего пространства, временной области или явно выданных SAF-папок. Предпочитайте этот встроенный инструмент вместо workspace_shell для создания ZIP: он не требует установки zip/unzip через apt или другой менеджер пакетов. sources и destination поддерживают /workspace/..., относительные пути от текущей папки рабочего пространства (без рабочего пространства — от /scratch), /scratch/..., file:// и content://. base_dir задаёт локальную базовую папку для имён записей. overwrite по умолчанию false; для замены существующего ZIP укажите overwrite=true. compression_level: 0–9, по умолчанию 6. Максимум 10 000 записей, 512 МиБ на файл, 2 ГиБ данных и 512 МиБ ZIP; до 180 секунд. Для просмотра готового ZIP используйте list_zip_contents, а не создание нового архива." + ASSISTANT_FILE_DIRECTORY_HINT,
     parameters = { InputSchema.Obj(buildJsonObject {
-        put("sources", buildJsonObject { put("type", "array"); put("items", buildJsonObject { put("type", "string") }) })
-        put("destination", buildJsonObject { put("type", "string") })
-        put("overwrite", buildJsonObject { put("type", "boolean"); put("default", false) })
-        put("base_dir", buildJsonObject { put("type", "string") })
-        put("compression_level", buildJsonObject { put("type", "integer"); put("minimum", 0); put("maximum", 9) })
+        put("sources", buildJsonObject { put("type", "array"); put("description", "От 1 до 10000 путей к существующим файлам или папкам: относительные от cwd workspace (без workspace — /scratch), /scratch, file:// либо выданный SAF URI."); put("minItems", 1); put("maxItems", 10000); put("items", buildJsonObject { put("type", "string"); put("description", "Путь к файлу или папке источника."); put("minLength", 1); put("maxLength", 8192) }) })
+        put("destination", buildJsonObject { put("type", "string"); put("minLength", 1); put("maxLength", 4096); put("description", "Полный путь или доступный URI создаваемого ZIP-файла, включая имя; максимум 4096 символов.") })
+        put("overwrite", buildJsonObject { put("type", "boolean"); put("default", false); put("description", "Разрешить замену существующего ZIP; по умолчанию false.") })
+        put("base_dir", buildJsonObject { put("type", "string"); put("minLength", 1); put("maxLength", 8192); put("description", "Необязательная локальная базовая папка для относительных имён ZIP; все локальные sources должны находиться внутри неё. Для SAF не передавать.") })
+        put("compression_level", buildJsonObject { put("type", "integer"); put("minimum", 0); put("maximum", 9); put("default", 6); put("description", "Уровень сжатия ZIP: 0–9, по умолчанию 6; 0 отключает сжатие данных.") })
     }, listOf("sources", "destination")) },
     needsApproval = { true },
     execute = { input -> archiveOperation(FileToolOperation.ZIP) {
         val obj = input.jsonObject
+        val overwrite = fileBoolean(obj, "overwrite")
+        val level = if ("compression_level" in obj)
+            (obj["compression_level"] as? JsonPrimitive)?.intOrNull
+                ?: throw ArchiveSafetyException("compression_level должен быть целым числом от 0 до 9.")
+        else 6
+        if (level !in 0..9) throw ArchiveSafetyException("compression_level должен быть от 0 до 9.")
         val references = obj["sources"]?.jsonArray?.map { it.jsonPrimitive.contentOrNull ?: throw ArchiveSafetyException("sources должен содержать пути к файлам.") }
             ?: throw ArchiveSafetyException("Укажите sources.")
         if (references.isEmpty() || references.size > 10_000) throw ArchiveSafetyException("Укажите от 1 до 10 000 источников.")
         val destinationPlan = access.planWritePath(obj.archivePath("destination"))
         if (destinationPlan.existing?.let { access.isDirectory(it) } == true) throw ArchiveSafetyException("destination должен указывать файл ZIP, а не папку.")
-        val overwrite = fileBoolean(obj, "overwrite")
         if (!overwrite && destinationPlan.existing?.let { access.exists(it) } == true) {
             throw ArchiveSafetyException("Файл назначения уже существует. Для замены ZIP укажите overwrite=true.")
         }
         val roots = references.map { access.resolve(it) }
         val base = obj["base_dir"]?.jsonPrimitive?.contentOrNull?.let { access.resolve(it) }
-        val level = obj["compression_level"]?.jsonPrimitive?.intOrNull ?: 6
-        if (level !in 0..9) throw ArchiveSafetyException("compression_level должен быть от 0 до 9.")
         val sources = collectArchiveSources(access, roots, base)
         val scratch = createArchiveScratch(access)
         var retainBackups = false
@@ -475,22 +478,25 @@ private fun checkExtractionRoot(access: LocalFileAccess, root: LocalFileSource, 
 
 fun unzipFileTool(context: Context, access: LocalFileAccess = LocalFileAccess(context)): Tool = Tool(
     name = "unzip_file",
-    description = "Распаковать ZIP в разрешённую папку. Предпочитайте этот встроенный инструмент вместо workspace_exec для распаковки ZIP: он не требует установки zip/unzip через apt или другой менеджер пакетов. source и destination_dir поддерживают /workspace/..., относительные пути от текущей папки рабочего пространства (без рабочего пространства — от /scratch), /scratch/..., file:// и content:// явно выданных SAF-папок. overwrite по умолчанию false. Небезопасные пути, символические ссылки и слишком большие архивы отклоняются. При отмене частичные новые файлы в workspace и SAF удаляются по возможности. При прямом доступе к памяти проверьте папку назначения: могли остаться частичные файлы." + ASSISTANT_FILE_DIRECTORY_HINT,
+    description = "Распаковать ZIP в разрешённую папку. Предпочитайте этот встроенный инструмент вместо workspace_shell для распаковки ZIP: он не требует установки zip/unzip через apt или другой менеджер пакетов. source и destination_dir поддерживают /workspace/..., относительные пути от текущей папки рабочего пространства (без рабочего пространства — от /scratch), /scratch/..., file:// и content:// явно выданных SAF-папок. overwrite по умолчанию false. Для просмотра без распаковки используйте list_zip_contents. Максимум 10 000 записей, 512 МиБ на запись, 2 ГиБ распакованных данных и 512 МиБ ZIP; до 180 секунд. Небезопасные пути, символические ссылки и слишком большие архивы отклоняются. При отмене частичные новые файлы в workspace и SAF удаляются по возможности. При прямом доступе к памяти проверьте папку назначения: могли остаться частичные файлы." + ASSISTANT_FILE_DIRECTORY_HINT,
     parameters = { InputSchema.Obj(buildJsonObject {
-        put("source", buildJsonObject { put("type", "string") })
-        put("destination_dir", buildJsonObject { put("type", "string") })
-        put("overwrite", buildJsonObject { put("type", "boolean") })
+        put("source", buildJsonObject { put("type", "string"); put("minLength", 1); put("maxLength", 4096); put("description", "Путь ZIP-файла или доступный SAF URI; относительный путь от cwd workspace (без workspace — /scratch), максимум 4096 символов.") })
+        put("destination_dir", buildJsonObject { put("type", "string"); put("minLength", 1); put("maxLength", 4096); put("description", "Папка распаковки: локальная разрешённая папка либо существующая выданная SAF-папка, максимум 4096 символов.") })
+        put("overwrite", buildJsonObject { put("type", "boolean"); put("default", false); put("description", "Разрешить замену существующих файлов при распаковке; по умолчанию false.") })
     }, listOf("source", "destination_dir")) },
     needsApproval = { true },
     execute = { input -> archiveOperation(FileToolOperation.UNZIP) {
         val obj = input.jsonObject
+        val overwrite = if ("overwrite" in obj)
+            (obj["overwrite"] as? JsonPrimitive)?.booleanOrNull
+                ?: throw ArchiveSafetyException("overwrite должен быть логическим значением.")
+        else false
         val source = access.resolve(obj.archivePath("source"))
         val destinationReference = obj.archivePath("destination_dir")
         val root = access.resolve(destinationReference).also {
             if (it is LocalFileSource.Content) access.resolve(destinationReference, write = true)
         }
         if (access.exists(root) && !access.isDirectory(root)) throw ArchiveSafetyException("destination_dir должен указывать папку.")
-        val overwrite = obj["overwrite"]?.jsonPrimitive?.booleanOrNull ?: false
         val scratch = createArchiveScratch(access)
         val items = ArrayList<ExtractionItem>()
         val changes = ArrayList<ArchiveChange>()
@@ -588,10 +594,10 @@ fun unzipFileTool(context: Context, access: LocalFileAccess = LocalFileAccess(co
 
 fun listZipContentsTool(context: Context, access: LocalFileAccess = LocalFileAccess(context)): Tool = Tool(
     name = "list_zip_contents",
-    description = "Показать записи ZIP без распаковки в пользовательскую папку. Предпочитайте этот встроенный инструмент вместо workspace_exec для просмотра ZIP: он не требует установки zip/unzip через apt или другой менеджер пакетов. source поддерживает /workspace/..., относительные пути от текущей папки рабочего пространства (без рабочего пространства — от /scratch), /scratch/..., file:// и content:// явно выданных SAF-папок. limit ограничивает число записей в ответе: 1–10 000, по умолчанию 1000; truncated сообщает об усечении ответа. Весь ZIP проверяется независимо от limit: максимум 10 000 записей, 2 ГиБ распакованных данных и 512 МиБ ZIP." + ASSISTANT_FILE_DIRECTORY_HINT,
+    description = "Показать записи ZIP без распаковки в пользовательскую папку. Предпочитайте этот встроенный инструмент вместо workspace_shell для просмотра ZIP: он не требует установки zip/unzip через apt или другой менеджер пакетов. source поддерживает /workspace/..., относительные пути от текущей папки рабочего пространства (без рабочего пространства — от /scratch), /scratch/..., file:// и content:// явно выданных SAF-папок. limit ограничивает число записей в ответе: 1–10 000, по умолчанию 1000; truncated сообщает об усечении ответа. Весь ZIP проверяется независимо от limit: максимум 10 000 записей, 512 МиБ на запись, 2 ГиБ распакованных данных и 512 МиБ ZIP; до 180 секунд. Для извлечения файлов используйте unzip_file, а не чтение записей как обычного текста." + ASSISTANT_FILE_DIRECTORY_HINT,
     parameters = { InputSchema.Obj(buildJsonObject {
-        put("source", buildJsonObject { put("type", "string") })
-        put("limit", buildJsonObject { put("type", "integer"); put("minimum", 1); put("maximum", 10_000); put("default", 1000) })
+        put("source", buildJsonObject { put("type", "string"); put("minLength", 1); put("maxLength", 4096); put("description", "Путь ZIP-файла или доступный SAF URI; относительный путь от cwd workspace (без workspace — /scratch), максимум 4096 символов.") })
+        put("limit", buildJsonObject { put("type", "integer"); put("minimum", 1); put("maximum", 10_000); put("default", 1000); put("description", "Число записей в ответе: 1–10000, по умолчанию 1000. truncated=true означает, что записи ZIP не все показаны; проверка безопасности выполняется для всего архива.") })
     }, listOf("source")) },
     needsApproval = { true },
     execute = { input -> archiveOperation(FileToolOperation.LIST_ZIP) {

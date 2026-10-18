@@ -16,6 +16,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
@@ -182,33 +183,35 @@ private suspend fun downloadToFile(url: String, staging: TransferStaging, maxByt
 
 fun downloadTool(context: Context, access: LocalFileAccess = LocalFileAccess(context)): Tool = Tool(
     name = "download_file",
-    description = "Download an HTTP(S) file and wait for completion (90-second timeout; at most 128 MiB). " +
-        "By default save to public Downloads/Rikka. Optional directory must be an allowed workspace/scratch directory " +
-        "or a user-granted SAF directory or explicitly enabled shared storage. Existing files are never overwritten: a taken name gets a number, " +
-        "e.g. `file (2).json`, and the result's filename/destination give the actual name. overwrite: true replaces a file only in /scratch or the workspace. " +
-        "Returns destination and bytes; cancelled/failed downloads are removed where safe. Interrupted direct shared-storage writes may leave a partial file, reported in created_path." + ASSISTANT_FILE_DIRECTORY_HINT +
+    description = "Скачать HTTP(S)-файл и дождаться завершения: до 90 секунд и 128 МиБ. Для чтения веб-страницы используйте scrape_web, для чтения уже скачанного файла — read_file/read_document. " +
+        "Без directory сохраняет в общие «Загрузки»/Rikka. directory — разрешённая workspace/scratch, выданная SAF-папка либо явно включённая общая память. " +
+        "overwrite=false: занятое имя получает номер, например file (2).json; filename и destination в ответе содержат фактическое имя. overwrite=true разрешён только в /scratch или workspace. " +
+        "Возвращает success, filename, destination и bytes. Временная загрузка находится в кэше приложения; прежний файл заменяется после завершения. При прерванной прямой записи общей памяти возможен частичный файл: проверьте created_path." + ASSISTANT_FILE_DIRECTORY_HINT +
         " Для проверки обновлений root-модулей используйте URL из updateJson в module.prop; " +
         "при необходимости — https://api.github.com/repos/<владелец>/<репо>/releases/latest вместо HTML GitHub. " +
         "Сохраните JSON в /scratch (directory: /scratch, overwrite: true для повторной проверки) и прочитайте через read_file по имени из ответа; загрузка не устанавливает обновление.",
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {
-            put("url", buildJsonObject { put("type", "string"); put("description", "HTTP(S) file URL") })
-            put("filename", buildJsonObject { put("type", "string"); put("description", "Optional plain filename") })
-            put("directory", buildJsonObject { put("type", "string"); put("description", "Optional allowed directory; omitted means public Downloads") })
-            put("max_bytes", buildJsonObject { put("type", "integer"); put("description", "Optional byte limit, at most 134217728") })
-            put("overwrite", buildJsonObject { put("type", "boolean"); put("description", "Replace an existing file with the same name; only in /scratch or the workspace (default false)") })
+            put("url", buildJsonObject { put("type", "string"); put("minLength", 1); put("maxLength", 8192); put("description", "Адрес HTTP(S)-файла без встроенного логина и пароля; максимум 8192 символа.") })
+            put("filename", buildJsonObject { put("type", "string"); put("minLength", 1); put("maxLength", 127); put("description", "Необязательное прямое имя файла до 127 символов, без начальной точки, разделителей и управляющих символов. Без параметра имя берётся из URL и типа содержимого.") })
+            put("directory", buildJsonObject { put("type", "string"); put("minLength", 1); put("maxLength", 8192); put("description", "Необязательная существующая разрешённая папка или SAF URI; без параметра — общие «Загрузки»/Rikka.") })
+            put("max_bytes", buildJsonObject { put("type", "integer"); put("minimum", 1); put("maximum", MAX_DOWNLOAD_BYTES); put("default", MAX_DOWNLOAD_BYTES); put("description", "Предел размера загрузки: 1–134217728 байт, по умолчанию 134217728 (128 МиБ).") })
+            put("overwrite", buildJsonObject { put("type", "boolean"); put("default", false); put("description", "Заменить существующий файл с тем же именем; только в /scratch или workspace, по умолчанию false. В общей памяти/SAF используется свободное нумерованное имя.") })
         }, required = listOf("url"))
     },
     needsApproval = { true },
     execute = { arguments -> deviceToolResult {
         withContext(Dispatchers.IO) {
             val params = arguments.jsonObject
+            // Reject malformed flags before checking storage access or starting HTTP.
+            val overwrite = if ("overwrite" in params)
+                (params["overwrite"] as? JsonPrimitive)?.booleanOrNull ?: error("overwrite должен быть логическим значением.")
+            else false
             val url = validatedDownloadUrl(params.textArgument("url") ?: error("Укажите адрес файла в url."))
             val explicitName = params.textArgument("filename")?.let(::validatedDownloadFilename)
             val baseName = explicitName ?: validatedDownloadFilename(downloadNameFromUrl(url) ?: "download_${System.currentTimeMillis()}")
             val maxBytes = validatedDownloadLimit(if (params.containsKey("max_bytes"))
                 params["max_bytes"]?.jsonPrimitive?.longOrNull ?: error("Укажите max_bytes целым числом.") else MAX_DOWNLOAD_BYTES)
-            val overwrite = params["overwrite"]?.jsonPrimitive?.booleanOrNull == true
             val directory = params.textArgument("directory")?.let { access.resolve(it) }
             if (directory != null) {
                 require(access.isDirectory(directory)) { "Назначение должно быть папкой." }
