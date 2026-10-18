@@ -94,11 +94,13 @@ private fun createSettingsDataStore(context: Context): DataStore<Preferences> {
         corruptionHandler = ReplaceFileCorruptionHandler { exception ->
             // 文件已损坏无法解析, 先留一份原文件用于排查/抢救, 再重建为空
             Log.e(TAG, "Settings datastore corrupted, resetting", exception)
+            val copy = File(file.parentFile, "${file.name}.corrupt-${System.currentTimeMillis()}")
             runCatching {
-                file.copyTo(File(file.parentFile, "${file.name}.corrupt-${System.currentTimeMillis()}"))
+                file.copyTo(copy)
             }.onFailure {
                 Log.e(TAG, "Failed to backup corrupted settings file", it)
             }
+            SettingsResetNotice.mark(context, copy.name)
             emptyPreferences()
         },
         migrations = listOf(

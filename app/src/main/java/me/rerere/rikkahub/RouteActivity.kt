@@ -1,5 +1,6 @@
 package me.rerere.rikkahub
 
+import me.rerere.rikkahub.data.datastore.SettingsResetNotice
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.Context
@@ -26,6 +27,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -345,6 +351,25 @@ class RouteActivity : ComponentActivity() {
         )
 
         val backStack = rememberNavBackStack(startScreen)
+        var settingsResetNotice by remember { mutableStateOf(SettingsResetNotice.pending(this@RouteActivity)) }
+        if (settingsResetNotice) {
+            fun dismissNotice() {
+                SettingsResetNotice.dismiss(this@RouteActivity)
+                settingsResetNotice = false
+            }
+            AlertDialog(
+                onDismissRequest = {},
+                title = { Text("Настройки были сброшены") },
+                text = {
+                    Text("Файл настроек оказался повреждён, поэтому приложение запустилось с настройками по умолчанию. " +
+                        "Провайдеры, ключи и ассистенты можно вернуть из резервной копии. Чаты не затронуты.")
+                },
+                confirmButton = {
+                    TextButton(onClick = { dismissNotice(); backStack.add(Screen.Backup) }) { Text("Восстановить из копии") }
+                },
+                dismissButton = { TextButton(onClick = { dismissNotice() }) { Text("Понятно") } },
+            )
+        }
         SideEffect {
             navStack = backStack
             while (pendingIntents.isNotEmpty()) {
