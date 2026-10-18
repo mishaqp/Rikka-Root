@@ -17,7 +17,7 @@ internal fun Settings.remapRestoredFileUrls(filesDir: File, restoredPaths: Set<S
         if (!relative.startsWith("${FileFolders.UPLOAD}/") ||
             '/' in relative.substringAfter('/') || relative !in restoredPaths
         ) return url
-        return PendingRestore.resolveInside(filesDir, relative).toUri().toString()
+        return restoredFileUrl(filesDir, relative)
     }
     fun remapAvatar(avatar: Avatar): Avatar = if (avatar is Avatar.Image) avatar.copy(url = remap(avatar.url)) else avatar
 
@@ -44,6 +44,16 @@ internal fun remapRestoredMessageFileUrls(messagesJson: String, filesDir: File, 
     return CHAT_UPLOAD_URL.replace(messagesJson) { match ->
         val relative = match.groupValues[2]
         if (relative !in restoredPaths) match.value
-        else PendingRestore.resolveInside(filesDir, relative).toUri().toString()
+        else restoredFileUrl(filesDir, relative)
     }
+}
+
+/**
+ * resolveInside validates containment but returns a canonical path, and on Android
+ * /data/user/0 is a link to /data/data. Keep the app's own filesDir spelling so the URL
+ * matches what FilesManager and the attachment-reference checks build.
+ */
+private fun restoredFileUrl(filesDir: File, relative: String): String {
+    PendingRestore.resolveInside(filesDir, relative)
+    return File(filesDir, relative).toUri().toString()
 }

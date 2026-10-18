@@ -151,4 +151,15 @@ class SettingsBackupFilePathsTest {
         assertTrue(remapped.contains("file:///sdcard/Download/x.png"))
         assertEquals(json, remapRestoredMessageFileUrls(json, filesDir, emptySet()))
     }
+
+    @Test fun `restored chat urls keep the app's own files path behind the system link`() {
+        val real = temporary.newFolder("data-data")
+        val link = File(temporary.root, "user-0").toPath()
+        java.nio.file.Files.createSymbolicLink(link, real.toPath())
+        val filesDir = File(link.toFile(), "files").apply { mkdirs() }
+        val json = """[{"url":"file:///data/user/0/other.app/files/upload/a.png"}]"""
+        val remapped = remapRestoredMessageFileUrls(json, filesDir, setOf("upload/a.png"))
+        assertTrue(remapped, remapped.contains(File(filesDir, "upload/a.png").toUri().toString()))
+        assertFalse("Canonical /data/data spelling would not match reference checks", remapped.contains(real.path))
+    }
 }

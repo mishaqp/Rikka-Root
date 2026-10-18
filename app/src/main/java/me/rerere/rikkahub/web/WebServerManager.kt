@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.web
 
+import kotlinx.coroutines.flow.first
 import android.content.Context
 import android.util.Log
 import io.ktor.server.cio.CIOApplicationEngine
@@ -145,7 +146,11 @@ class WebServerManager(
         localhostOnly: Boolean = _state.value.localhostOnly
     ) {
         stop()
-        start(port, serviceName, localhostOnly)
+        // stop() finishes asynchronously and start() ignores calls while busy.
+        appScope.launch {
+            _state.first { !it.isLoading && !it.isRunning }
+            start(port, serviceName, localhostOnly)
+        }
     }
 
     private fun isPortAvailable(port: Int): Boolean {
