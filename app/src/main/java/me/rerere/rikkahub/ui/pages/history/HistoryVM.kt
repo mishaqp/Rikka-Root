@@ -5,6 +5,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flatMapLatest
@@ -13,6 +16,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
+import me.rerere.rikkahub.data.datastore.getAssistantById
+import me.rerere.rikkahub.data.model.Assistant
+import java.util.concurrent.ConcurrentHashMap
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.service.ChatService
@@ -25,6 +31,17 @@ class HistoryVM(
     private val settingsStore: SettingsStore,
     private val chatService: ChatService,
 ) : ViewModel() {
+    private data class UndoDeletion(val snapshot: Conversation, val target: Assistant)
+    private val undoDeletions = ConcurrentHashMap<Uuid, UndoDeletion>()
+    private val undoMutex = Mutex()
+
+    /** Display this destination before the user accepts an orphan-chat restoration. */
+    fun undoDestinationName(conversationId: Uuid): String? = undoDeletions[conversationId]?.let {
+        if (it.snapshot.assistantId == it.target.id) null else it.target.name.ifBlank { it.target.id.toString() }
+    }
+
+    fun discardUndo(conversationId: Uuid) { undoDeletions.remove(conversationId) }
+
     val assistant = settingsStore.settingsFlow
         .map { it.getCurrentAssistant() }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -36,7 +53,16 @@ class HistoryVM(
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     suspend fun deleteConversation(conversation: Conversation): Boolean = try {
-        conversationRepo.deleteConversation(conversation)
+        undoMutex.withLock {
+            val snapshot = checkNotNull(conversationRepo.getConversationById(conversation.id)) {
+                "Чат уже удалён. Обновите историю."
+            }
+            val settings = settingsStore.settingsFlowRaw.first()
+            check(!settings.init) { "Настройки ещё загружаются. Повторите удаление после загрузки." }
+            val target = settings.getAssistantById(snapshot.assistantId) ?: settings.getCurrentAssistant()
+            conversationRepo.deleteConversation(snapshot)
+            undoDeletions[conversation.id] = UndoDeletion(snapshot, target)
+        }
         true
     } catch (error: Exception) {
         if (error is CancellationException) throw error
@@ -70,7 +96,17 @@ class HistoryVM(
 
     fun restoreConversation(conversation: Conversation) {
         viewModelScope.launch {
-            try { conversationRepo.insertConversation(conversation) }
+            try {
+                undoMutex.withLock {
+                    val deleted = checkNotNull(undoDeletions[conversation.id]) {
+                        "Отменить можно только недавнее удаление чата на этом экране."
+                    }
+                    // The destination shown in the undo action is fixed. Do not silently adopt
+                    // a different selected assistant, trust a caller snapshot, or bypass the live guard.
+                    conversationRepo.insertConversation(deleted.snapshot.copy(assistantId = deleted.target.id))
+                    undoDeletions.remove(conversation.id, deleted)
+                }
+            }
             catch (error: Exception) {
                 if (error is CancellationException) throw error
                 chatService.addError(error, conversation.id)

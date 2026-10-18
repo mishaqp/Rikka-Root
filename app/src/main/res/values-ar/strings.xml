@@ -1568,4 +1568,5 @@
   <string name="chat_page_history_backup_save">حفظ النسخة الاحتياطية</string>
   <string name="chat_page_history_partial_export">يتضمن هذا التصدير الرسائل التي تم تحميلها فقط. لحفظ السجل بالكامل، استخدم نسخة احتياطية كاملة.</string>
   <string name="chat_page_history_backup_error">تعذّر حفظ النسخة الاحتياطية</string>
+  <string name="history_page_undo_into_assistant">Восстановить в «%1$s»</string>
 </resources>

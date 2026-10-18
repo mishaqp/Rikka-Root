@@ -1568,4 +1568,5 @@
   <string name="chat_page_history_backup_save">儲存備份</string>
   <string name="chat_page_history_partial_export">此匯出僅包含已載入的訊息。請使用完整備份儲存全部歷史記錄。</string>
   <string name="chat_page_history_backup_error">無法儲存備份</string>
+  <string name="history_page_undo_into_assistant">Восстановить в «%1$s»</string>
 </resources>

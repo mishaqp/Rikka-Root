@@ -105,6 +105,7 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
         val snackMessageDeleted = stringResource(R.string.history_page_conversation_deleted)
         val historyReadOnly = stringResource(R.string.chat_page_history_read_only)
         val snackMessageUndo = stringResource(R.string.history_page_undo)
+        val snackMessageUndoInto = stringResource(R.string.history_page_undo_into_assistant)
         LazyColumn(
             contentPadding = contentPadding + PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -126,12 +127,12 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
                             if (!vm.deleteConversation(fullConversation)) return@launch
                             val result = snackbarHostState.showSnackbar(
                                 message = snackMessageDeleted,
-                                actionLabel = snackMessageUndo,
+                                actionLabel = vm.undoDestinationName(fullConversation.id)?.let { snackMessageUndoInto.format(it) } ?: snackMessageUndo,
                                 withDismissAction = true,
                             )
                             if (result == SnackbarResult.ActionPerformed) {
                                 vm.restoreConversation(fullConversation)
-                            }
+                            } else vm.discardUndo(fullConversation.id)
                         }
                     },
                     onTogglePin = { vm.togglePinStatus(conversation.id) },

@@ -46,7 +46,9 @@ internal fun manageAppSettingsTool(engine: AppSettingsEngine): Tool = Tool(
             action == "get" && args.keys.all { it in setOf("action", "section", "key") } -> engine.get(section, key)
             action == "set" && key != null && "value" in args && args.keys.all { it in setOf("action", "key", "value", "_expected_before", "_approval_preview") } -> {
                 val preview = args["_approval_preview"] as? JsonObject
-                if (preview == null) error("Изменение настроек требует нового одобрения пользователя.", "approval_required")
+                // Failed preview preparation still needs its actual validation error. A valid
+                // request with no trusted snapshot stops at approval_required before any write.
+                if (preview == null) engine.set(key, args.getValue("value"), expectedBefore = null)
                 else engine.set(key, args.getValue("value"), args["_expected_before"], preview)
             }
             else -> error("Укажите list_sections без дополнительных полей; get с section или key; set с key и value.")

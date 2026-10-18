@@ -100,7 +100,7 @@ internal fun prepareAssistantManagementApproval(input: JsonElement, settings: Se
     return JsonObject(clean + mapOf(
         "_expected_before" to before,
         "_approval_preview" to buildJsonObject {
-            put("assistant_name", redact(JsonPrimitive(assistant?.name ?: "Новый ассистент")))
+            put("assistant_name", redactText(JsonPrimitive(assistant?.name ?: "Новый ассистент")))
             put("before", before)
             put("after", after)
         },
@@ -122,11 +122,12 @@ fun manageAssistantsTool(
     caller: AssistantManagerCaller,
     dependencies: (suspend (Uuid) -> AssistantManagerDependencies)? = null,
     ownershipGuard: AssistantOwnershipGuard? = null,
+    beforeDelete: (suspend (Uuid) -> Unit)? = null,
 ): Tool {
-    val engine = AssistantManagerEngine({ settingsStore.settingsFlow.value }, { settingsStore.update(it) }, catalog, caller, dependencies, ownershipGuard)
+    val engine = AssistantManagerEngine({ settingsStore.settingsFlow.value }, { settingsStore.update(it) }, catalog, caller, dependencies, ownershipGuard, beforeDelete)
     return Tool(
         name = "manage_assistants",
-        description = "Управляет ассистентами приложения: list — краткий список, get — все настройки, list_options — реальные идентификаторы и схемы полей, create/update/duplicate/switch/delete — изменения с обязательным одобрением пользователя. Перед настройкой вызовите list_options и get. Изменения ассистента применяются к следующим сообщениям с учётом закреплённой ConversationConfig текущего чата. switch выбирает ассистента для следующих чатов и сохраняет текущий чат. Нельзя удалять владельца текущего чата и последнего ассистента. Секреты и правила безопасности доступны только вручную в настройках.",
+        description = "Управляет ассистентами приложения: list — краткий список, get — все настройки, list_options — реальные идентификаторы и схемы полей, create/update/duplicate/switch/delete — изменения с обязательным одобрением пользователя. Перед настройкой вызовите list_options и get. Изменения ассистента применяются к следующим сообщениям с учётом закреплённой ConversationConfig текущего чата. switch выбирает ассистента для следующих чатов и сохраняет текущий чат. Нельзя удалять владельца текущего чата, последнего ассистента или ассистента с чатами, памятью, неудалёнными заданиями либо ссылками из сценариев. Сначала перенесите или удалите связанные данные; история уже удалённых заданий очищается вместе с ассистентом. Секреты и правила безопасности доступны только вручную в настройках.",
         parameters = { InputSchema.Obj(properties = buildJsonObject {
             put("action", buildJsonObject { put("type", "string"); put("enum", buildJsonArray { assistantManagerActions.forEach { add(it) } }) })
             put("assistant_id", buildJsonObject { put("type", "string"); put("description", "UUID из list; обязателен для get/update/duplicate/switch/delete.") })
@@ -149,6 +150,7 @@ internal class AssistantManagerEngine(
     private val caller: AssistantManagerCaller,
     private val dependencies: (suspend (Uuid) -> AssistantManagerDependencies)? = null,
     private val ownershipGuard: AssistantOwnershipGuard? = null,
+    private val beforeDelete: (suspend (Uuid) -> Unit)? = null,
 ) {
     suspend fun execute(input: JsonElement): JsonObject = try {
         val args = input as? JsonObject ?: fail("Аргументы должны быть объектом JSON.")
@@ -227,6 +229,7 @@ internal class AssistantManagerEngine(
             val values = listOf(counts.conversations, counts.memories, counts.cronJobs, counts.workflows)
             if (values.any { it < 0 }) fail("Не удалось проверить связанные данные ассистента. Удаление отменено.", "DEPENDENCIES_UNAVAILABLE")
             if (values.any { it > 0 }) fail("Нельзя удалить ассистента со связанными данными: чаты — ${counts.conversations}, память — ${counts.memories}, задания — ${counts.cronJobs}, сценарии — ${counts.workflows}. Сначала перенесите или удалите их вручную.", "ASSISTANT_HAS_DEPENDENCIES")
+            beforeDelete?.invoke(base.id)
         }
         var affected: Assistant? = null
         val committed = updateSettings { settings ->
@@ -258,7 +261,7 @@ internal class AssistantManagerEngine(
         return success {
             if (action == "delete") put("deleted_id", assistant.id.toString())
             else { put("assistant", assistantSettingsJson(committed.assistants.single { it.id == assistant.id })); put("fields", assistantFieldDescriptions()) }
-            put("message", when (action) { "create" -> "Ассистент создан."; "update" -> "Настройки ассистента сохранены."; "duplicate" -> "Копия ассистента создана."; else -> "Ассистент удалён. История чатов сохранена." })
+            put("message", when (action) { "create" -> "Ассистент создан."; "update" -> "Настройки ассистента сохранены."; "duplicate" -> "Копия ассистента создана."; else -> "Ассистент удалён. История удалённых заданий очищена." })
         }
     }
 
@@ -275,19 +278,19 @@ internal class AssistantManagerEngine(
 private fun target(args: JsonObject, settings: Settings): Assistant {
     val id = args.string("assistant_id")
     return settings.assistants.singleOrNull { it.id.toString() == id }
-        ?: fail("Ассистент не найден. Допустимые идентификаторы: ${settings.assistants.joinToString { "${it.id} (${redact(JsonPrimitive(it.name)).jsonPrimitive.content})" }.ifEmpty { "нет" }}.", "NOT_FOUND")
+        ?: fail("Ассистент не найден. Допустимые идентификаторы: ${settings.assistants.joinToString { "${it.id} (${redactText(JsonPrimitive(it.name)).jsonPrimitive.content})" }.ifEmpty { "нет" }}.", "NOT_FOUND")
 }
 private fun JsonObject.string(key: String): String? = (get(key) as? JsonPrimitive)?.takeIf { it.isString }?.content
 private fun success(block: JsonObjectBuilder.() -> Unit): JsonObject = buildJsonObject { put("success", true); block() }
 private fun shortAssistant(assistant: Assistant): JsonObject = buildJsonObject {
-    put("id", assistant.id.toString()); put("name", redact(JsonPrimitive(assistant.name))); put("chatModelId", assistant.chatModelId?.let { JsonPrimitive(it.toString()) } ?: JsonNull)
+    put("id", assistant.id.toString()); put("name", redactText(JsonPrimitive(assistant.name))); put("chatModelId", assistant.chatModelId?.let { JsonPrimitive(it.toString()) } ?: JsonNull)
 }
 
 /** Model-facing transport only. Never use this redacted object as an update baseline. */
 internal fun assistantSettingsJson(assistant: Assistant): JsonObject =
     JsonObject(assistantPatchBaseline(assistant).mapValues { (key, value) ->
         // Specialized wrappers have structural keys such as customBodies[].key; keep their restorers.
-        if (key in specializedAssistantSecretFields) value else redact(value)
+        if (key in specializedAssistantSecretFields) value else redactText(value)
     })
 
 /** Private assembly preserves generic text; specialized credentials stay masked until restoration. */
@@ -318,10 +321,10 @@ private val specializedAssistantSecretFields = setOf("customHeaders", "customBod
 
 private fun protectedAssistantTextFields(assistant: Assistant, baseline: JsonObject): Set<String> = buildSet {
     baseline.forEach { (key, value) ->
-        if (key !in specializedAssistantSecretFields && containsSecrets(value)) add(key)
+        if (key !in specializedAssistantSecretFields && containsTextSecrets(value)) add(key)
     }
     // The tool's canonical text view omits native non-text parts. They must not be copied or lost.
-    if (containsSecrets(assistantJson.encodeToJsonElement(assistant.presetMessages))) add("presetMessages")
+    if (containsTextSecrets(assistantJson.encodeToJsonElement(assistant.presetMessages))) add("presetMessages")
 }
 
 private fun applyAssistantPatch(base: Assistant, inputPatch: JsonObject, settings: Settings, external: AssistantManagerCatalog): Assistant {
@@ -331,7 +334,7 @@ private fun applyAssistantPatch(base: Assistant, inputPatch: JsonObject, setting
     for ((key, value) in inputPatch) {
         val schema = schemas[key] as? JsonObject ?: if (securitySetting(key)) fail(MANUAL_ONLY, "MANUAL_ONLY") else fail("Неизвестное поле $key. Допустимые поля: ${schemas.keys.joinToString()}.")
         // Existing native values need not fit the tool's narrower creation schema (e.g. SYSTEM presets).
-        if (key in protectedTextFields && value == redact(baseline.getValue(key))) continue
+        if (key in protectedTextFields && value == redactText(baseline.getValue(key))) continue
         validateValue(value, schema, key)
     }
     val patch = JsonObject(inputPatch.mapValues { (key, value) ->
@@ -339,10 +342,10 @@ private fun applyAssistantPatch(base: Assistant, inputPatch: JsonObject, setting
             key in specializedAssistantSecretFields -> value // Existing per-field restorers below.
             key in protectedTextFields -> {
                 val original = baseline.getValue(key)
-                if (value != redact(original)) fail(MANUAL_ONLY, "MANUAL_ONLY")
+                if (value != redactText(original)) fail(MANUAL_ONLY, "MANUAL_ONLY")
                 original
             }
-            containsSecrets(value) -> fail(MANUAL_ONLY, "MANUAL_ONLY")
+            containsTextSecrets(value) -> fail(MANUAL_ONLY, "MANUAL_ONLY")
             else -> value
         }
     })
@@ -465,16 +468,33 @@ private fun secretName(name: String): Boolean {
 private fun secretHeaderName(name: String): Boolean = secretName(name) ||
     name.lowercase().filter(Char::isLetterOrDigit).let { "token" in it || "auth" in it || it.endsWith("key") }
 
-private fun credentialValue(value: String): Boolean {
+private fun credentialValue(value: String): Boolean = credentialValue(value, ordinaryText = false)
+private fun textCredentialValue(value: String): Boolean = credentialValue(value, ordinaryText = true)
+
+private fun credentialValue(value: String, ordinaryText: Boolean): Boolean {
     val normalized = value.trim()
     if (SensitiveContentDetector.scan(normalized).any {
         it == SensitiveContentDetector.Category.API_KEY || it == SensitiveContentDetector.Category.JWT
     }) return true
-    if (Regex("""^(Bearer|Basic)\s+\S+""", RegexOption.IGNORE_CASE).containsMatchIn(normalized)) return true
+    // Ordinary assistant prose is not an HTTP header: "Basic helper" is an editable name.
+    // Keep the stricter scheme rule for credential-capable headers/bodies and image URLs.
+    if (!ordinaryText && Regex("""^(Bearer|Basic)\s+\S+""", RegexOption.IGNORE_CASE).containsMatchIn(normalized)) return true
+    if (ordinaryText) {
+        val bearer = Regex("""(?<![A-Za-z0-9_])Bearer\s+([A-Za-z0-9._~+/-]{12,}=*)""", RegexOption.IGNORE_CASE)
+        if (bearer.findAll(normalized).any { match ->
+                val token = match.groupValues[1]
+                token.length >= 20 || token.any { !it.isLetter() }
+            }) return true
+    }
+    // Ordinary text needs a parsed absolute hierarchical URI; file:/// has no host.
+    val uri = runCatching { URI(normalized) }.getOrNull()
+    if (ordinaryText) {
+        if (uri == null || !uri.isAbsolute || uri.isOpaque) return false
+    } else if (uri?.isAbsolute != true &&
+        !Regex("""^[a-zA-Z][a-zA-Z0-9+.-]*://""").containsMatchIn(normalized)) return false
     // Android/HTTP clients may accept spaces or repair malformed escapes rejected by URI.
     // Detect the credential-bearing components before relying on that strict parser.
     if (Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://[^/?#]*@").containsMatchIn(normalized)) return true
-    val uri = runCatching { URI(normalized) }.getOrNull()
     if (uri?.rawUserInfo != null) return true
     val components = listOfNotNull(uri?.rawQuery,
         normalized.substringAfter('?', "").substringBefore('#').takeIf { it.isNotEmpty() },
@@ -498,7 +518,11 @@ private fun safeAssistantPatchPreview(patch: JsonObject): JsonObject = JsonObjec
             val property = obj.string(if (key == "customHeaders") "name" else "key")
             if (property != null && (if (key == "customHeaders") secretHeaderName(property) else secretName(property))) JsonObject(obj + ("value" to JsonPrimitive(MASK))) else redact(obj)
         }) } ?: redact(value)
-        else -> if (securitySetting(key) && key !in assistantSettingsSchema()) JsonPrimitive(MASK) else redact(value)
+        else -> when {
+            securitySetting(key) && key !in assistantSettingsSchema() -> JsonPrimitive(MASK)
+            key in specializedAssistantSecretFields -> redact(value)
+            else -> redactText(value)
+        }
     }
 })
 
@@ -510,30 +534,34 @@ private fun containsProtectedAssistantInputs(patch: JsonObject): Boolean = patch
             (name != null && if (key == "customHeaders") secretHeaderName(name) else secretName(name)) ||
                 obj?.get("value")?.let(::containsSecrets) == true
         } == true
-        else -> containsSecrets(value)
+        else -> if (key in specializedAssistantSecretFields) containsSecrets(value) else containsTextSecrets(value)
     }
 }
 private fun securitySetting(name: String): Boolean {
     val key = name.lowercase().filter(Char::isLetterOrDigit)
     return secretName(name) || listOf("approval", "permission", "security", "hardline", "trusted", "allowlist", "denylist", "safemode", "rootaccess", "toolaccess").any { it in key }
 }
-private fun redact(value: JsonElement): JsonElement = when (value) {
-    is JsonObject -> JsonObject(value.mapValues { (key, item) -> if (secretName(key)) JsonPrimitive(MASK) else redact(item) })
-    is JsonArray -> JsonArray(value.map(::redact))
-    is JsonPrimitive -> if (value.isString && credentialValue(value.content)) JsonPrimitive(MASK) else value
+private fun redact(value: JsonElement): JsonElement = redact(value, ordinaryText = false)
+private fun redactText(value: JsonElement): JsonElement = redact(value, ordinaryText = true)
+private fun redact(value: JsonElement, ordinaryText: Boolean): JsonElement = when (value) {
+    is JsonObject -> JsonObject(value.mapValues { (key, item) -> if (secretName(key)) JsonPrimitive(MASK) else redact(item, ordinaryText) })
+    is JsonArray -> JsonArray(value.map { redact(it, ordinaryText) })
+    is JsonPrimitive -> if (value.isString && credentialValue(value.content, ordinaryText)) JsonPrimitive(MASK) else value
     else -> value
 }
 /** Metadata is transport-only: structural keys and the private patch baseline stay intact. */
 private fun redactCatalogValues(value: JsonElement): JsonElement = when (value) {
     is JsonObject -> JsonObject(value.mapValues { (_, item) -> redactCatalogValues(item) })
     is JsonArray -> JsonArray(value.map(::redactCatalogValues))
-    is JsonPrimitive -> if (value.isString && credentialValue(value.content)) JsonPrimitive(MASK) else value
+    is JsonPrimitive -> if (value.isString && textCredentialValue(value.content)) JsonPrimitive(MASK) else value
     else -> value
 }
-private fun containsSecrets(value: JsonElement): Boolean = when (value) {
-    is JsonObject -> value.any { (key, item) -> secretName(key) || containsSecrets(item) }
-    is JsonArray -> value.any(::containsSecrets)
-    is JsonPrimitive -> value.isString && credentialValue(value.content)
+private fun containsSecrets(value: JsonElement): Boolean = containsSecrets(value, ordinaryText = false)
+private fun containsTextSecrets(value: JsonElement): Boolean = containsSecrets(value, ordinaryText = true)
+private fun containsSecrets(value: JsonElement, ordinaryText: Boolean): Boolean = when (value) {
+    is JsonObject -> value.any { (key, item) -> secretName(key) || containsSecrets(item, ordinaryText) }
+    is JsonArray -> value.any { containsSecrets(it, ordinaryText) }
+    is JsonPrimitive -> value.isString && credentialValue(value.content, ordinaryText)
     else -> false
 }
 private fun restoreHeaders(values: JsonArray, original: List<CustomHeader>): List<CustomHeader> {

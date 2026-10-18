@@ -135,7 +135,10 @@ class LocalTools(
                         cronJobs = get().get<me.rerere.rikkahub.data.repository.ScheduledJobRepository>().countOfAssistant(owner),
                         workflows = get().get<me.rerere.rikkahub.workflow.repository.WorkflowRepository>().countReferencingAssistant(owner),
                     )
-                }, ownershipGuard = get().get<me.rerere.rikkahub.data.repository.AssistantOwnershipGuard>()))
+                }, ownershipGuard = get().get<me.rerere.rikkahub.data.repository.AssistantOwnershipGuard>(),
+                beforeDelete = { id ->
+                    get().get<me.rerere.rikkahub.data.repository.ScheduledJobRepository>().purgeDeletedOfAssistant(id.toString())
+                }))
         }
         if (LocalToolOption.ManageAppSettings in options) {
             add(LocalToolOption.ManageAppSettings, buildManageAppSettingsTool(settingsStore, context))

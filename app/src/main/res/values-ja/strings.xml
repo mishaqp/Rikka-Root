@@ -1570,4 +1570,5 @@ mDNSアドレス: .localホスト名を使用し、IPを知らなくても同じ
   <string name="chat_page_history_backup_save">バックアップを保存</string>
   <string name="chat_page_history_partial_export">このエクスポートには読み込まれたメッセージのみが含まれます。履歴全体を保存するには、完全なバックアップを使用してください。</string>
   <string name="chat_page_history_backup_error">バックアップを保存できませんでした</string>
+  <string name="history_page_undo_into_assistant">Восстановить в «%1$s»</string>
 </resources>

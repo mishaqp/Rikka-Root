@@ -83,6 +83,12 @@ class ScheduledJobRepository(
 ) {
     private val dao get() = db.scheduledJobDao()
     suspend fun countOfAssistant(assistantId: String): Int = dao.countOfAssistant(assistantId)
+
+    /** Called under the shared ownership guard, after live-dependency checks and before owner removal. */
+    suspend fun purgeDeletedOfAssistant(assistantId: String) = db.withTransaction {
+        db.scheduledJobRunDao().deleteForDeletedJobsOfAssistant(assistantId)
+        dao.deleteDeletedOfAssistant(assistantId)
+    }
     suspend fun getById(id: String): ScheduledJobEntity? = dao.getById(id)
     suspend fun getOwned(id: String, owner: String): ScheduledJobEntity? = dao.getById(id)?.takeIf { it.ownerAssistantId == owner && !it.deleted }
     suspend fun listOwned(owner: String): List<ScheduledJobEntity> = dao.listOwned(owner)

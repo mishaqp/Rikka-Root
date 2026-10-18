@@ -89,18 +89,18 @@ class AssistantDependencyDaoAuditTest {
         assertEquals("Память сохранить", database.memoryDao().getMemoryById(memory)?.content)
     }
 
-    @Test fun `cron counts include tombstones and exceed the visible list limit`() = runBlocking {
+    @Test fun `cron counts exclude tombstones and exceed the visible list limit`() = runBlocking {
         val owner = Uuid.random().toString()
         repeat(101) { database.scheduledJobDao().insert(job(owner)) }
         val tombstone = job(owner, deleted = true)
         database.scheduledJobDao().insert(tombstone)
         database.scheduledJobDao().insert(job(Uuid.random().toString()))
-        assertEquals(102, database.scheduledJobDao().countOfAssistant(owner))
+        assertEquals(101, database.scheduledJobDao().countOfAssistant(owner))
         assertEquals(100, database.scheduledJobDao().listOwned(owner).size)
         assertEquals(tombstone, database.scheduledJobDao().getById(tombstone.id))
     }
 
-    @Test fun `workflow reference count retains malformed definitions and conservative prose references`() = runBlocking {
+    @Test fun `workflow reference count retains owner and action references but ignores prose`() = runBlocking {
         val owner = Uuid.random().toString()
         val malformed = workflow(owner, malformed = true)
         val prose = workflow(owner, proseOnly = true)
@@ -108,8 +108,11 @@ class AssistantDependencyDaoAuditTest {
         workflows.workflowDao().upsert(malformed)
         workflows.workflowDao().upsert(prose)
         workflows.workflowDao().upsert(workflow(Uuid.random().toString()))
-        // Prose can cause a false positive: preserve the assistant and let the user resolve it.
+        val action = workflow(Uuid.random().toString()).copy(definitionJson =
+            """{"actions":[{"tool":"manage_assistants","args":{"action":"get","assistant_id":"$owner"}}]}""")
+        workflows.workflowDao().upsert(action)
         assertEquals(3, workflows.workflowDao().countReferencingAssistant(owner))
+        assertEquals(action, workflows.workflowDao().getById(action.id))
         assertEquals(0, workflows.workflowDao().countReferencingAssistant(Uuid.random().toString()))
         assertEquals(malformed, workflows.workflowDao().getById(malformed.id))
         assertEquals(prose, workflows.workflowDao().getById(prose.id))
@@ -122,7 +125,7 @@ class AssistantDependencyDaoAuditTest {
             val id = target.id.toString()
             val chat = conversation(id)
             val memory = MemoryEntity(assistantId = id, content = "Не удалять")
-            val cron = job(id, deleted = true)
+            val cron = job(id).copy(enabled = false)
             val definition = workflow(id, malformed = true)
             var memoryId = 0
             when (kind) {

@@ -80,6 +80,7 @@ class AssistantVM(
                         )
                         return null
                     }
+                    scheduledJobRepository?.purgeDeletedOfAssistant(owner)
                     return settingsStore.update { current -> current.copy(
                         assistants = current.assistants.filter { row ->
                             if (row.id == assistant.id) { removed = row; false } else true

@@ -23,6 +23,7 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.entity.ScheduledJobEntity
+import me.rerere.rikkahub.data.db.entity.ScheduledJobRunEntity
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.repository.AssistantOwnershipGuard
@@ -176,13 +177,18 @@ class AssistantManualDeletionTest {
 
     @Test(timeout = 30_000) fun `workflow writer first preserves owner and existing data on manual deletion`() = writerFirst("workflow")
 
-    @Test(timeout = 30_000) fun `manual removal retains owner of a cron tombstone`() = runBlocking {
+    @Test(timeout = 30_000) fun `manual removal cleans cron tombstone and its run history`() = runBlocking {
         Fixture().use { f ->
             val tombstone = f.job.copy(deleted = true, enabled = false)
             database.scheduledJobDao().insert(tombstone)
+            val run = ScheduledJobRunEntity("run-${tombstone.id}", tombstone.id, tombstone.revision,
+                "scheduled", 1, status = "succeeded", finishedAtMs = 2)
+            database.scheduledJobRunDao().insert(run)
             awaitRemoval(f.remove())
-            assertTrue("A tombstone must retain its owner", f.hasOwner())
-            assertEquals(tombstone, database.scheduledJobDao().getById(tombstone.id))
+            assertFalse("Only deleted jobs must not prevent assistant removal", f.hasOwner())
+            assertNull(f.vm.removalError.value)
+            assertNull(database.scheduledJobDao().getById(tombstone.id))
+            assertNull(database.scheduledJobRunDao().getById(run.occurrenceId))
         }
     }
 

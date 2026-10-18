@@ -1570,4 +1570,5 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="chat_page_history_backup_save">保存备份</string>
   <string name="chat_page_history_partial_export">此导出仅包含已加载的消息。请使用完整备份保存全部历史记录。</string>
   <string name="chat_page_history_backup_error">无法保存备份</string>
+  <string name="history_page_undo_into_assistant">Восстановить в «%1$s»</string>
 </resources>

@@ -1570,4 +1570,5 @@ mDNS 주소: .local 호스트네임을 사용하며, IP를 몰라도 같은 네�
   <string name="chat_page_history_backup_save">백업 저장</string>
   <string name="chat_page_history_partial_export">이 내보내기에는 불러온 메시지만 포함됩니다. 전체 기록을 저장하려면 전체 백업을 사용하세요.</string>
   <string name="chat_page_history_backup_error">백업을 저장하지 못했습니다</string>
+  <string name="history_page_undo_into_assistant">Восстановить в «%1$s»</string>
 </resources>

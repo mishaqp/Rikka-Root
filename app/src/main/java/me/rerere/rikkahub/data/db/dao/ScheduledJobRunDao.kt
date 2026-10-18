@@ -8,6 +8,9 @@ import me.rerere.rikkahub.data.db.entity.ScheduledJobRunEntity
 
 @Dao
 interface ScheduledJobRunDao {
+    @Query("DELETE FROM scheduled_job_runs WHERE job_id IN (SELECT id FROM scheduled_jobs WHERE owner_assistant_id = :assistantId AND deleted = 1)")
+    suspend fun deleteForDeletedJobsOfAssistant(assistantId: String)
+
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insert(run: ScheduledJobRunEntity): Long
     @Query("SELECT * FROM scheduled_job_runs WHERE occurrence_id = :id") suspend fun getById(id: String): ScheduledJobRunEntity?
     @Query("SELECT * FROM scheduled_job_runs WHERE job_id = :jobId ORDER BY scheduled_at_ms DESC, occurrence_id DESC LIMIT :limit") suspend fun recent(jobId: String, limit: Int): List<ScheduledJobRunEntity>
