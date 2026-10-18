@@ -156,7 +156,7 @@ class McpAuditRegressionTest {
     }
 
     @Test fun `audit 9 server views redact provider tokens embedded in URL paths`() = runBlocking {
-        val old = server().copy(url = "https://8.8.8.8/mcp/sk-private-path-secret-canary")
+        val old = server().copy(url = "https://8.8.8.8/mcp/sk-proj-FAKE_private_path_secret_canary_1234567890")
         val fixture = Fixture(old)
         val caller = McpControlCaller({ setOf(old.id) }, {}, {})
         for (parts in listOf(
@@ -164,7 +164,7 @@ class McpAuditRegressionTest {
             mcpListTool(fixture.store, fixture.manager, caller).execute(JsonObject(emptyMap())),
         )) {
             val result = (parts.single() as UIMessagePart.Text).text
-            assertFalse(result, result.contains("sk-private-path-secret-canary"))
+            assertFalse(result, result.contains("sk-proj-FAKE_private_path_secret_canary_1234567890"))
         }
     }
 

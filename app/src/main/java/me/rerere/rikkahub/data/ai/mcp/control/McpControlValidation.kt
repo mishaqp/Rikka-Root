@@ -42,10 +42,9 @@ object McpControlValidation {
                 "name длиннее $MAX_NAME_LENGTH символов (${trimmed.length})"
             )
         }
-        // Upstream 2.5.6 Root's existing registration and MCP settings accept only this
-        // alphabet. Keep it here too, otherwise an accepted add breaks the next generation.
-        if (!trimmed.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' }) {
-            return Result.Reject("invalid_name", "Название MCP должно содержать только латинские буквы и цифры, как в настройках MCP.")
+        // This is a display label; callable aliases are normalized by buildMcpToolName.
+        if (candidate.any { it.isISOControl() } || trimmed.replace('\\', '/').split('/').any { it == "." || it == ".." }) {
+            return Result.Reject("invalid_name", "Название MCP не должно содержать управляющие символы или части пути . и ..")
         }
         val lowered = trimmed.lowercase()
         val collision = existingServers.firstOrNull { srv ->
@@ -110,7 +109,7 @@ object McpControlValidation {
             if (isMcpRedactionPlaceholder(value)) {
                 return Result.Reject("redacted_header_value", "Скрытое значение нельзя сохранить как заголовок. Введите секрет в защищённых настройках MCP и используйте ссылку AndroidKeyStore.")
             }
-            if ((McpHeaderRedactor.isSensitive(name) || isMcpKnownCredentialValue(value)) &&
+            if ((McpHeaderRedactor.isSensitive(name) || isMcpKnownHeaderCredentialValue(value)) &&
                 value.isNotEmpty() && !McpControlSecretStore.isReference(value)) {
                 return Result.Reject("plaintext_secret_forbidden", "Не передавайте секретные заголовки в чат. Введите значение в защищённом поле настроек MCP и используйте ссылку AndroidKeyStore.")
             }

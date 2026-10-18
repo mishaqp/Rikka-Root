@@ -409,7 +409,7 @@
   <string name="editing">جارٍ التعديل</string>
   <string name="emoji_picker_search_placeholder">ابحث عن الرموز التعبيرية...</string>
   <string name="emoji_picker_select_skin_tone">اختر لون البشرة</string>
-  <string name="error_mcp_invalid_server_name">اسم خادم MCP غير صالح (يُسمح فقط بالأحرف والأرقام): %1$s</string>
+  <string name="error_mcp_invalid_server_name">Недопустимое имя сервера MCP: %1$s</string>
   <string name="error_title_compress_conversation">فشل ضغط المحادثة</string>
   <string name="error_title_generate_title">فشل توليد العنوان التلقائي</string>
   <string name="error_title_generation">فشل توليد الرسالة</string>
@@ -873,7 +873,7 @@
   <string name="setting_mcp_page_import_title">استيراد خادم MCP</string>
   <string name="setting_mcp_page_name">الاسم</string>
   <string name="setting_mcp_page_name_desc">اسم العرض لخادم MCP</string>
-  <string name="setting_mcp_page_name_invalid">يمكن أن يحتوي الاسم على أحرف إنجليزية وأرقام فقط</string>
+  <string name="setting_mcp_page_name_invalid">Имя: от 1 до 60 символов, без управляющих символов и частей пути . или ..</string>
   <string name="setting_mcp_page_name_placeholder">مثال: خادم MCP الخاص بي</string>
   <string name="setting_mcp_page_needs_approval">يتطلب موافقة</string>
   <string name="setting_mcp_page_no_mcp_servers_found">لم يتم العثور على خوادم MCP</string>

@@ -112,7 +112,8 @@ import me.rerere.rikkahub.data.ai.mcp.control.McpControlSecretStore
 import me.rerere.rikkahub.data.ai.mcp.control.McpHeaderRedactor
 import me.rerere.rikkahub.data.ai.mcp.control.mcpCredentialOrigin
 import me.rerere.rikkahub.data.ai.mcp.control.redactedMcpUrl
-import me.rerere.rikkahub.data.ai.mcp.control.isMcpKnownCredentialValue
+import me.rerere.rikkahub.data.ai.mcp.control.isMcpKnownHeaderCredentialValue
+import me.rerere.rikkahub.data.ai.mcp.control.McpControlValidation
 import me.rerere.rikkahub.data.ai.mcp.serverUrl
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.ItemAction
@@ -147,7 +148,7 @@ internal fun protectMcpSettingsSecrets(
             val draft = headerDrafts[index]
             val previousValue = beforeConfig?.commonOptions?.headers?.any { it.second == value } == true
             if (originChanged && draft == null && previousValue &&
-                (McpControlSecretStore.isReference(value) || McpHeaderRedactor.isSensitive(name) || isMcpKnownCredentialValue(value))) null
+                (McpControlSecretStore.isReference(value) || McpHeaderRedactor.isSensitive(name) || isMcpKnownHeaderCredentialValue(value))) null
             else name to (draft?.trim() ?: value)
         },
         oauth = if (originChanged) null else config.commonOptions.oauth,
@@ -1107,7 +1108,7 @@ private fun McpToolCard(
 }
 
 private fun isValidMcpName(name: String): Boolean {
-    return name.isEmpty() || name.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' }
+    return name.isEmpty() || McpControlValidation.validateName(name, emptyList()) is McpControlValidation.Result.Ok
 }
 
 private fun parseMcpServersFromJson(json: String): List<McpServerConfig> {

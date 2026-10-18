@@ -62,7 +62,7 @@ private class ManualProtectedFieldUpdateRequired : IllegalStateException()
 private fun hasLegacySecretHeaders(config: McpServerConfig): Boolean =
     config.commonOptions.headers.any { (name, value) ->
         value.isNotBlank() && !McpControlSecretStore.isReference(value) &&
-            (McpHeaderRedactor.isSensitive(name) || isMcpKnownCredentialValue(value))
+            (McpHeaderRedactor.isSensitive(name) || isMcpKnownHeaderCredentialValue(value))
     }
 
 private fun hasProtectedMcpInput(value: String): Boolean =
@@ -77,7 +77,7 @@ private fun hasProtectedMcpUrlInput(value: String): Boolean =
 private fun withoutCrossOriginCredentials(headers: List<Pair<String, String>>): List<Pair<String, String>> =
     headers.filterNot { (name, value) ->
         McpHeaderRedactor.isSensitive(name) || value.contains(McpControlSecretStore.REFERENCE_PREFIX) ||
-            isMcpKnownCredentialValue(value)
+            isMcpKnownHeaderCredentialValue(value)
     }
 
 /** ---------- Shared helpers ---------- */
@@ -422,7 +422,7 @@ fun mcpAddTool(settingsStore: SettingsStore, manager: McpManager, caller: McpCon
                 })
                 put("name", buildJsonObject {
                     put("type", "string")
-                    put("description", "Название для пользователя: только латинские буквы и цифры, уникальное без учёта регистра, до 60 символов.")
+                    put("description", "Отображаемое название: непустое, уникальное без учёта регистра, до 60 символов, без управляющих символов и частей пути «.» и «..».")
                 })
                 put("url", buildJsonObject {
                     put("type", "string")

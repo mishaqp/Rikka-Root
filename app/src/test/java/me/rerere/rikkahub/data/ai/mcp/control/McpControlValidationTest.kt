@@ -56,8 +56,12 @@ class McpControlValidationTest {
         assertEquals("hello", (r as McpControlValidation.Result.Ok).value)
     }
 
-    @Test fun `Root name alphabet matches existing tool registration`() {
-        for (name in listOf("my-server", "two words", "сервер", "../local")) {
+    @Test fun `Root display names accept readable labels while rejecting traversal and controls`() {
+        for (name in listOf("my-server", "two words", "сервер", "Basic Memory")) {
+            val result = McpControlValidation.validateName(name, emptyList())
+            assertEquals(name, (result as McpControlValidation.Result.Ok).value)
+        }
+        for (name in listOf("../local", "safe/../local", "x\ny", "x\u0000y", "x\ty")) {
             assertEquals("invalid_name", (McpControlValidation.validateName(name, emptyList()) as McpControlValidation.Result.Reject).error)
         }
         assertTrue(McpControlValidation.validateName("Remote123", emptyList()) is McpControlValidation.Result.Ok)

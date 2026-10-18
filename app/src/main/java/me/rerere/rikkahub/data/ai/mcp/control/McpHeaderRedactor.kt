@@ -52,7 +52,7 @@ object McpHeaderRedactor {
      */
     fun redactHeaderValue(name: String, value: String): String {
         if (value.contains(McpControlSecretStore.REFERENCE_PREFIX)) return "…"
-        if (!isSensitive(name)) return maskMcpCredentialShapes(value)
+        if (!isSensitive(name)) return maskMcpHeaderCredentialShapes(value)
         return if (value.length >= 4) "…${value.takeLast(4)}" else "…"
     }
 
