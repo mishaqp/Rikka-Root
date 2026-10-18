@@ -159,4 +159,61 @@ class TermuxSessionFailureMessageTest {
 
     private fun sessionInput() = buildJsonObject { put("session_id", "rk_build") }
     private fun envelope(parts: List<UIMessagePart>) = Json.parseToJsonElement((parts.single() as UIMessagePart.Text).text).jsonObject
+
+    @Test fun `capture command reports actual stdout truncation with safe continuation`() = runBlocking {
+        val raw = "Ж".repeat(me.rerere.rikkahub.data.preferences.TermuxRuntime.maxStdoutBytes)
+        val context = callbackContext { _, marker -> resultBundle(stdout = "$raw\n$marker\n", stderr = "remote stderr") }
+        val result = envelope(termuxRunCommandTool(context).execute(buildJsonObject { put("command", "printf test") }))
+        assertEquals("true", result["truncated"]?.jsonPrimitive?.content)
+        assertEquals("true", result["stdout_truncated"]?.jsonPrimitive?.content)
+        assertEquals("false", result["stderr_truncated"]?.jsonPrimitive?.content)
+        assertEquals("remote stderr", result["stderr"]?.jsonPrimitive?.content)
+        val recovery = result["recovery"]?.jsonPrimitive?.content.orEmpty()
+        assertTrue(recovery, recovery.contains("не повтор", ignoreCase = true))
+        assertTrue(result["stdout"]!!.jsonPrimitive.content.startsWith(takeFirstUtf8Bytes(raw,
+            me.rerere.rikkahub.data.preferences.TermuxRuntime.maxStdoutBytes)))
+    }
+
+    @Test fun `session read reports actual tail truncation and keeps the latest content`() = runBlocking {
+        val raw = "Ж".repeat(me.rerere.rikkahub.data.preferences.TermuxRuntime.maxStdoutBytes) + "LATEST"
+        val context = callbackContext { _, marker -> resultBundle(stdout = "$raw\n$marker\n") }
+        val result = envelope(termuxSessionReadTool(context).execute(sessionInput()))
+        assertEquals("true", result["truncated"]?.jsonPrimitive?.content)
+        assertTrue(result["screen"]!!.jsonPrimitive.content.contains("LATEST"))
+        val recovery = result["recovery"]?.jsonPrimitive?.content.orEmpty()
+        assertTrue(recovery, Regex("[А-Яа-яЁё]").containsMatchIn(recovery))
+        assertTrue(recovery, recovery.contains("не повтор", ignoreCase = true))
+    }
+
+    @Test fun `failure diagnostics flag clipped streams without rewriting remote output`() {
+        val raw = "X".repeat(me.rerere.rikkahub.data.preferences.TermuxRuntime.maxStderrBytes + 1)
+        val result = CaptureFailureDetails(stdout = "untouched", stderr = raw).json()
+        assertEquals("true", result["truncated"]?.jsonPrimitive?.content)
+        assertEquals("false", result["stdout_truncated"]?.jsonPrimitive?.content)
+        assertEquals("true", result["stderr_truncated"]?.jsonPrimitive?.content)
+        assertEquals("untouched", result["partial_stdout"]?.jsonPrimitive?.content)
+        assertTrue(result["partial_stderr"]!!.jsonPrimitive.content.startsWith(raw.dropLast(1)))
+    }
+
+    @Test fun `Termux clipped multibyte marker counts bytes actually omitted`() = runBlocking {
+        val old = me.rerere.rikkahub.data.preferences.TermuxRuntime.maxStdoutBytes
+        me.rerere.rikkahub.data.preferences.TermuxRuntime.maxStdoutBytes = 5
+        try {
+            val context = callbackContext { _, marker -> resultBundle(stdout = "😀😀\n$marker\n") }
+            val result = envelope(termuxRunCommandTool(context).execute(buildJsonObject { put("command", "printf test") }))
+            val output = result["stdout"]!!.jsonPrimitive.content
+            assertTrue(output, output.startsWith("😀\n"))
+            assertTrue(output, output.contains("ещё 4 байт"))
+            assertFalse(output, output.contains('\uFFFD'))
+        } finally { me.rerere.rikkahub.data.preferences.TermuxRuntime.maxStdoutBytes = old }
+    }
+
+    @Test fun `printed truncation words in short Termux output remain ordinary external content`() = runBlocking {
+        val raw = "remote [truncated] вывод сокращён"
+        val context = callbackContext { _, marker -> resultBundle(stdout = "$raw\n$marker\n") }
+        val result = envelope(termuxRunCommandTool(context).execute(buildJsonObject { put("command", "printf test") }))
+        assertEquals(raw, result["stdout"]?.jsonPrimitive?.content)
+        assertFalse(result["truncated"]?.jsonPrimitive?.content == "true")
+        assertFalse(result.containsKey("recovery"))
+    }
 }

@@ -464,6 +464,53 @@ class BrowserReadReliabilityTest {
         assertEquals("An individual 1500ms probe must not overrun the whole 1000ms wait", 1000L, testScheduler.currentTime)
     }
 
+    @Test fun `clipped text and DOM explain how to read the omitted region without replaying actions`() = runTest {
+        view.pageText = "Страница".repeat(1000)
+        for ((name, field) in listOf(BrowserToolDefaults.GET_TEXT to "text", BrowserToolDefaults.GET_DOM to "html")) {
+            val result = execute(name, """{"extract_mode":"raw","max_chars":100}""")
+            assertEquals(true, result["truncated"]?.jsonPrimitive?.booleanOrNull)
+            assertEquals(100, result[field]?.jsonPrimitive?.content?.length)
+            val recovery = result["recovery"]?.jsonPrimitive?.content.orEmpty()
+            assertTrue("Missing scoped continuation: $result", recovery.contains("selector"))
+            assertTrue("Missing Russian continuation: $result", Regex("[А-Яа-яЁё]").containsMatchIn(recovery))
+            assertEquals(0, view.clickCount)
+        }
+    }
+
+    @Test fun `clipped eval result keeps raw prefix and reports size with nonreplaying continuation`() = runTest {
+        val raw = JsonPrimitive("Ж".repeat(70000)).toString()
+        val result = execute(BrowserToolDefaults.EVAL_JS, """{"code":"'Ж'.repeat(70000)"}""")
+        assertEquals(raw.take(65536), result["result"]?.jsonPrimitive?.content)
+        assertEquals(true, result["truncated"]?.jsonPrimitive?.booleanOrNull)
+        assertEquals(65536, result["shown_chars"]?.jsonPrimitive?.intOrNull)
+        assertEquals(raw.length, result["total_chars"]?.jsonPrimitive?.intOrNull)
+        val recovery = result["recovery"]?.jsonPrimitive?.content.orEmpty()
+        assertTrue(recovery, recovery.contains("browser_get_text"))
+        assertTrue("Do not suggest blindly replaying arbitrary JS: $recovery", recovery.contains("не повтор", ignoreCase = true))
+    }
+
+    @Test fun `clipped links explain narrower selector while preserving the hundred link payload`() = runTest {
+        view.anchorCount = 101
+        val result = execute(BrowserToolDefaults.GET_LINKS)
+        assertEquals(101, result["total"]?.jsonPrimitive?.intOrNull)
+        assertEquals(true, result["truncated"]?.jsonPrimitive?.booleanOrNull)
+        assertEquals(100, (result["links"] as kotlinx.serialization.json.JsonArray).size)
+        val recovery = result["recovery"]?.jsonPrimitive?.content.orEmpty()
+        assertTrue("Missing links continuation: $result", recovery.contains("selector"))
+        assertTrue(recovery, Regex("[А-Яа-яЁё]").containsMatchIn(recovery))
+    }
+
+    @Test fun `short browser results keep external content verbatim without truncation advice`() = runTest {
+        view.pageText = "External output: password, Basic helper, tp-link"
+        val result = execute(BrowserToolDefaults.GET_TEXT, """{"extract_mode":"raw"}""")
+        assertEquals(view.pageText, result["text"]?.jsonPrimitive?.content)
+        assertFalse(result["truncated"]?.jsonPrimitive?.booleanOrNull == true)
+        assertFalse(result.containsKey("recovery"))
+        val evaluated = execute(BrowserToolDefaults.EVAL_JS, """{"code":"'External raw result'"}""")
+        assertEquals(JsonPrimitive("External raw result").toString(), evaluated["result"]?.jsonPrimitive?.content)
+        assertFalse(evaluated.containsKey("recovery"))
+    }
+
     private class ScriptedWebView(context: Context) : WebView(context), AutoCloseable {
         private val js = QuickJs.create(Dispatchers.Unconfined)
         private val bundledParser by lazy { context.assets.open("browser/readability.js").bufferedReader().use { it.readText() } }

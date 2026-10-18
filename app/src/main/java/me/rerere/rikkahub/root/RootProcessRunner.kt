@@ -10,6 +10,8 @@ internal data class RootProcessResult(
     val stderr: String = "",
     val error: String? = null,
     val reason: String? = null,
+    val stdoutTruncated: Boolean = false,
+    val stderrTruncated: Boolean = false,
 )
 
 /** One launch only; cancellation/timeout never retries a command that may have side effects. */
@@ -50,6 +52,8 @@ internal object RootProcessRunner {
                 exitCode = if (finished) process.exitValue() else null,
                 stdout = stdout.snapshot(),
                 stderr = stderr.snapshot(),
+                stdoutTruncated = stdout.isTruncated(),
+                stderrTruncated = stderr.isTruncated(),
                 error = if (finished) null else "command_timeout",
                 reason = if (finished) null else "Время root-команды истекло. Проверьте, что успело выполниться, перед новым вызовом; команда автоматически не повторяется.",
             )

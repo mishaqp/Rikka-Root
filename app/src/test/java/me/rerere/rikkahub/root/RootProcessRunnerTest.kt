@@ -31,16 +31,16 @@ class RootProcessRunnerTest {
     @Test fun `bounds each stream and marks discarded bytes`() {
         val result = RootProcessRunner.run(listOf("sh", "-c", "printf abcdef; printf 123456 >&2"), 2_000, 3, 2)
         assertTrue(result.stdout.startsWith("abc"))
-        assertTrue(result.stdout.contains("3 bytes more"))
+        assertTrue(result.stdout.contains("ещё 3 байт"))
         assertTrue(result.stderr.startsWith("12"))
-        assertTrue(result.stderr.contains("4 bytes more"))
+        assertTrue(result.stderr.contains("ещё 4 байт"))
     }
 
     @Test fun `multibyte output is truncated on a UTF8 boundary`() {
         val result = RootProcessRunner.run(listOf("sh", "-c", "printf '😀😀'"), 2_000, 5, 2)
         assertTrue(result.stdout.startsWith("😀\n"))
         assertFalse(result.stdout.contains("\uFFFD"))
-        assertTrue(result.stdout.contains("4 bytes more"))
+        assertTrue(result.stdout.contains("ещё 4 байт"))
     }
 
     @Test fun `timeout kills the process and retains partial output`() {
@@ -75,7 +75,16 @@ class RootProcessRunnerTest {
     @Test fun `drains output beyond pipe capacity without deadlock`() {
         val result = RootProcessRunner.run(listOf("sh", "-c", "head -c 131072 /dev/zero; head -c 131072 /dev/zero >&2"), 3_000, 64, 32)
         assertEquals(0, result.exitCode)
-        assertTrue(result.stdout.contains("131008 bytes more"))
-        assertTrue(result.stderr.contains("131040 bytes more"))
+        assertTrue(result.stdout.contains("ещё 131008 байт"))
+        assertTrue(result.stderr.contains("ещё 131040 байт"))
+    }
+
+    @Test fun `owned process truncation marker is Russian while preserving exact omitted bytes`() {
+        val result = RootProcessRunner.run(listOf("sh", "-c", "printf abcdef; printf 123456 >&2"), 2_000, 3, 2)
+        assertTrue(result.stdout.startsWith("abc\n"))
+        assertTrue(result.stdout, result.stdout.contains("ещё 3 байт"))
+        assertTrue(result.stderr.startsWith("12\n"))
+        assertTrue(result.stderr, result.stderr.contains("ещё 4 байт"))
+        assertFalse(result.stdout.contains("bytes more"))
     }
 }

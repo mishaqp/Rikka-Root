@@ -139,8 +139,10 @@ internal class BoundedOutputStream(private val cap: Int) : java.io.OutputStream(
         var keep = minOf(cap, bytes.size)
         while (keep in 1 until bytes.size && (bytes[keep].toInt() and 0xC0) == 0x80) keep--
         val kept = String(bytes, 0, keep, Charsets.UTF_8)
-        return kept + "\n…[truncated; ${total - keep.toLong()} bytes more]"
+        return kept + "\n…[вывод сокращён; ещё ${total - keep.toLong()} байт]"
     }
+
+    @Synchronized fun isTruncated(): Boolean = total > cap.toLong()
 
     private companion object {
         /** Headroom past [cap] so a final multi-byte UTF-8 sequence isn't split. */
@@ -156,6 +158,18 @@ internal class SshCommandOutput {
     fun partial(): JsonObject = buildJsonObject {
         put("partial_stdout", stdout.snapshot())
         put("partial_stderr", stderr.snapshot())
+        truncationMetadata().forEach { (key, value) -> put(key, value) }
+    }
+
+    fun truncationMetadata(recoveryKey: String = "output_recovery"): JsonObject = buildJsonObject {
+        val out = stdout.isTruncated()
+        val err = stderr.isTruncated()
+        if (out || err) {
+            put("truncated", true)
+            put("stdout_truncated", out)
+            put("stderr_truncated", err)
+            put(recoveryKey, "Вывод сокращён. Прочитайте нужный диапазон из сохранённого файла или запросите ограниченный фрагмент отдельной командой чтения. Не повторяйте исходную команду вслепую: она могла изменить данные.")
+        }
     }
 }
 
@@ -512,8 +526,7 @@ internal fun runOnSession(
                 put("recovery", "Команда не завершилась за ${timeoutMs / 1000} с. Увеличьте " +
                     "timeout_seconds или передайте background=true для отсоединённого запуска " +
                     "с немедленным возвратом PID. Частичные stdout/stderr включены в результат.")
-                put("partial_stdout", stdout.snapshot())
-                put("partial_stderr", stderr.snapshot())
+                output.partial().forEach { (key, value) -> put(key, value) }
             }
         }
         val exitCode = channel.exitStatus
@@ -522,6 +535,7 @@ internal fun runOnSession(
             put("exit_code", exitCode)
             put("stdout", stdout.snapshot())
             put("stderr", stderr.snapshot())
+            output.truncationMetadata(recoveryKey = "recovery").forEach { (key, value) -> put(key, value) }
             commandExitFailureReason(exitCode, stderr.snapshot(), CommandEnvironment.SSH)?.let { put("message", it) }
         }
     } catch (error: CancellationException) {
@@ -543,26 +557,20 @@ fun sshExecTool(context: Context, toolSecrets: SshToolSecretSanitizer = SshToolS
     SshCredentialStore(context, JsonInstant),
 )): Tool = Tool(
     name = "ssh_exec",
-    description = """
-        Connect to a remote host via SSH and run a single shell command. Returns stdout, stderr,
-        and exit code. For destructive or system-level commands you should explicitly confirm
-        with the user before invoking. Pass either password OR private_key for authentication.
-        For hosts you'll use repeatedly, prefer save_ssh_host + ssh_exec_saved instead so
-        credentials don't appear in chat history every time.
-    """.trimIndent().replace("\n", " "),
+    description = "Выполнить одну команду на удалённой машине через SSH; возвращает stdout, stderr и exit_code. Для повторных подключений сохраните хост в настройках SSH или save_ssh_host и используйте ssh_exec_saved; для интерактивного ввода — termux_session_start. Нужен password или private_key, без них подключение невозможно. Разрушительные и системные команды требуют явного согласования с пользователем. Общий таймаут подключения и исполнения 1–300 секунд, по умолчанию 30; stdout ограничен 8000 байт, stderr 2000 байт. background=true отсоединяет команду и возвращает PID, но несовместим со stdin.",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                put("host", buildJsonObject { put("type", "string"); put("description", "Hostname or IP address") })
-                put("port", buildJsonObject { put("type", "integer"); put("description", "SSH port, default 22") })
-                put("user", buildJsonObject { put("type", "string"); put("description", "SSH username") })
-                put("password", buildJsonObject { put("type", "string"); put("description", "Password (use only if no private_key)") })
-                put("private_key", buildJsonObject { put("type", "string"); put("description", "Full PEM/OpenSSH private key contents") })
-                put("passphrase", buildJsonObject { put("type", "string"); put("description", "Optional passphrase for the private key") })
-                put("command", buildJsonObject { put("type", "string"); put("description", "Shell command to run on the remote host") })
-                put("stdin", buildJsonObject { put("type", "string"); put("description", "Optional data piped to the command's stdin (then EOF). Quote-free way to write a file (command=\"cat > /path\") or feed input; omit to send an immediate EOF.") })
-                put("background", buildJsonObject { put("type", "boolean"); put("description", "If true, launch the command fully detached (nohup, streams redirected) and return immediately with its PID instead of waiting. Use for servers/long jobs that would otherwise block until timeout. Default false.") })
-                put("timeout_seconds", buildJsonObject { put("type", "integer"); put("description", "Total timeout including connect+exec, default 30, max 300") })
+                put("host", buildJsonObject { put("type", "string"); put("description", "Имя DNS или IP-адрес SSH-сервера.") })
+                put("port", buildJsonObject { put("type", "integer"); put("description", "Порт SSH: 1–65535, по умолчанию 22."); put("minimum", 1); put("maximum", 65535); put("default", 22) })
+                put("user", buildJsonObject { put("type", "string"); put("description", "Имя пользователя на SSH-сервере.") })
+                put("password", buildJsonObject { put("type", "string"); put("description", "Пароль для входа, если не используется private_key. Безопаснее ввести в настройках SSH.") })
+                put("private_key", buildJsonObject { put("type", "string"); put("description", "Полный приватный ключ PEM/OpenSSH вместо пароля. Безопаснее сохранить в настройках SSH.") })
+                put("passphrase", buildJsonObject { put("type", "string"); put("description", "Необязательная парольная фраза для зашифрованного private_key.") })
+                put("command", buildJsonObject { put("type", "string"); put("description", "Команда оболочки на удалённом сервере.") })
+                put("stdin", buildJsonObject { put("type", "string"); put("description", "Данные для стандартного ввода команды, затем EOF; при отсутствии сразу EOF. Несовместимо с background=true.") })
+                put("background", buildJsonObject { put("type", "boolean"); put("description", "Отсоединить команду через nohup с перенаправлением потоков и вернуть PID. По умолчанию false; stdin недоступен."); put("default", false) })
+                put("timeout_seconds", buildJsonObject { put("type", "integer"); put("description", "Общий таймаут операции в секундах: 1–300, по умолчанию 30."); put("minimum", 1); put("maximum", 300); put("default", 30) })
             },
             required = listOf("host", "user", "command")
         )

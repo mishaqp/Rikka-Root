@@ -165,11 +165,31 @@ internal data class CaptureFailureDetails(
     val exitCode: Int? = null,
 ) {
     fun json(): JsonObject = buildJsonObject {
+        val maxOut = TermuxRuntime.maxStdoutBytes
+        val maxErr = TermuxRuntime.maxStderrBytes
         rawError?.let { put("raw", SecretRedactor.redact(it)) }
         errorCode?.let { put("err", it) }
         exitCode?.let { put("exit_code", it) }
-        if (stdout.isNotEmpty()) put("partial_stdout", boundedFailureOutput(stdout, TermuxRuntime.maxStdoutBytes))
-        if (stderr.isNotEmpty()) put("partial_stderr", boundedFailureOutput(stderr, TermuxRuntime.maxStderrBytes))
+        if (stdout.isNotEmpty()) put("partial_stdout", boundedFailureOutput(stdout, maxOut))
+        if (stderr.isNotEmpty()) put("partial_stderr", boundedFailureOutput(stderr, maxErr))
+        termuxOutputTruncation(stdout, stderr, maxOut, maxErr).forEach { (key, value) -> put(key, value) }
+    }
+}
+
+private fun termuxOutputTruncation(
+    stdout: String,
+    stderr: String,
+    maxOut: Int,
+    maxErr: Int,
+    recoveryKey: String = "output_recovery",
+): JsonObject = buildJsonObject {
+    val out = stdout.toByteArray(Charsets.UTF_8).size > maxOut
+    val err = stderr.toByteArray(Charsets.UTF_8).size > maxErr
+    if (out || err) {
+        put("truncated", true)
+        put("stdout_truncated", out)
+        put("stderr_truncated", err)
+        put(recoveryKey, "Вывод сокращён. Прочитайте нужный диапазон из сохранённого файла или запросите ограниченный фрагмент отдельной командой чтения. Не повторяйте исходную команду вслепую: она могла изменить данные.")
     }
 }
 
@@ -430,48 +450,43 @@ internal suspend fun runCommandCapture(
 fun termuxRunCommandTool(context: Context): Tool = Tool(
     name = "termux_run_command",
     needsApproval = { true },
-    description = """
-        Execute a shell command in Termux. By default the command runs in the background and
-        its stdout / stderr / exit_code are returned to you so you can reason on the output
-        (e.g. check if a package is installed, read a file, run a script). Pass
-        interactive=true to instead open a visible Termux session - useful when the user
-        explicitly wants to watch output live or when the command needs an interactive prompt;
-        in that mode no output is returned. Termux must have allow-external-apps=true set in
-        ~/.termux/termux.properties (one-time setup). In command mode, apt/apt-get are
-        automatically wrapped with DEBIAN_FRONTEND=noninteractive and safe dpkg defaults;
-        do not add extra -y flags unless the user specifically asked for unattended upgrades.
-    """.trimIndent().replace("\n", " "),
+    description = "Выполнить команду в Termux и получить stdout, stderr и exit_code. Используйте для неинтерактивной локальной оболочки; для постоянного терминала, запросов пароля и REPL используйте termux_session_start. interactive=true открывает видимую сессию без захвата вывода; background=true отсоединяет процесс и возвращает PID. Укажите либо command, либо executable с arguments. Нужны установленный Termux, разрешение RUN_COMMAND и allow-external-apps=true в ~/.termux/termux.properties. Таймаут захвата: 0 или отсутствие означает настройку пользователя, иначе 1–600 секунд. Вывод ограничен настройками Termux. apt/apt-get в командном режиме получают DEBIAN_FRONTEND=noninteractive и безопасные параметры dpkg; не добавляйте -y без запроса пользователя на автоматическое обновление.",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("command", buildJsonObject {
                     put("type", "string")
-                    put("description", "Shell command line, e.g. 'pkg update && pkg upgrade -y'. Mutually exclusive with executable+arguments.")
+                    put("description", "Команда оболочки Termux. В termux_run_command несовместима с executable и arguments; в session_start запускается при создании сессии.")
                 })
                 put("executable", buildJsonObject {
                     put("type", "string")
-                    put("description", "Absolute path to executable, e.g. /data/data/com.termux/files/usr/bin/bash. Pairs with arguments[].")
+                    put("description", "Абсолютный путь к исполняемому файлу Termux; arguments передаёт отдельные аргументы. Не задавайте вместе с command.")
                 })
                 put("arguments", buildJsonObject {
                     put("type", "array")
-                    put("description", "Argument list when using executable mode")
+                    put("description", "Массив строковых аргументов для executable, без дополнительного shell-экранирования.")
                     put("items", buildJsonObject { put("type", "string") })
                 })
                 put("working_dir", buildJsonObject {
                     put("type", "string")
-                    put("description", "Working directory. Defaults to Termux home (/data/data/com.termux/files/home).")
+                    put("description", "Рабочая папка; по умолчанию домашняя папка Termux /data/data/com.termux/files/home.")
                 })
                 put("interactive", buildJsonObject {
                     put("type", "boolean")
-                    put("description", "If true, opens a visible Termux session and does NOT capture output. Default false (background + capture).")
+                    put("description", "Открыть видимую сессию без захвата вывода. По умолчанию false: выполнить с захватом результата.")
+                    put("default", false)
                 })
                 put("background", buildJsonObject {
                     put("type", "boolean")
-                    put("description", "Command mode only. If true, launch the command fully detached (nohup, streams redirected) and return immediately with its PID. Use for servers / long-running processes that would otherwise keep the capture pipe open and block until timeout. Default false.")
+                    put("description", "Отсоединить команду и сразу вернуть PID вместо ожидания. Только командный режим; по умолчанию false.")
+                    put("default", false)
                 })
                 put("timeout_seconds", buildJsonObject {
                     put("type", "integer")
-                    put("description", "Capture-mode timeout in seconds. Omit or pass 0 to use the user-configured default (Settings -> Termux). Max ${TermuxDefaults.MAX_COMMAND_TIMEOUT_SECONDS} s.")
+                    put("description", "Таймаут в секундах, максимум 600. Отсутствие или 0 использует настройку пользователя Termux.")
+                    put("minimum", 0)
+                    put("maximum", 600)
+                    put("default", 0)
                 })
             }
         )
@@ -633,21 +648,10 @@ fun termuxRunCommandTool(context: Context): Tool = Tool(
                 // maxStdoutBytes/maxStderrBytes are UTF-8 byte budgets. Measure and cut on bytes
                 // (boundary-aligned via takeFirstUtf8Bytes) so multibyte output isn't mis-sized
                 // and the "bytes more" count is honest rather than a char-count delta.
-                put(
-                    "stdout",
-                    res.stdout.let {
-                        val outBytes = it.toByteArray(Charsets.UTF_8).size
-                        if (outBytes > maxOut) takeFirstUtf8Bytes(it, maxOut) + "\n…[вывод сокращён; ещё ${outBytes - maxOut} байт]" else it
-                    }
-                )
-                if (res.stderr.isNotBlank()) {
-                    put(
-                        "stderr",
-                        res.stderr.let {
-                            if (it.toByteArray(Charsets.UTF_8).size > maxErr) takeFirstUtf8Bytes(it, maxErr) + "\n…[вывод сокращён]" else it
-                        }
-                    )
-                }
+                put("stdout", boundedFailureOutput(res.stdout, maxOut))
+                if (res.stderr.isNotBlank()) put("stderr", boundedFailureOutput(res.stderr, maxErr))
+                termuxOutputTruncation(res.stdout, res.stderr, maxOut, maxErr, recoveryKey = "recovery")
+                    .forEach { (key, value) -> put(key, value) }
                 commandExitFailureReason(res.exitCode, res.stderr, CommandEnvironment.TERMUX)?.let { put("note", it) }
             }
             is CaptureResult.Timeout -> buildJsonObject {

@@ -229,11 +229,11 @@ private class HeadlessRootSession private constructor(
             }
             val outcome = acknowledgement(result, nonce) ?: return quarantine()
             return when (outcome) {
-                "timeout", "cancelled" -> RootProcessResult(error = "command_timeout", stdout = output(request, "stdout", 8_000), stderr = output(request, "stderr", 2_000),
+                "timeout", "cancelled" -> capturedResult(request, error = "command_timeout",
                     reason = "Время root-команды истекло. Проверьте, что успело выполниться, перед новым вызовом; команда автоматически не повторяется.")
                 "not_root", "failed" -> { close(); interactionRequired() }
                 else -> outcome.toIntOrNull()?.takeIf { it in 0..255 }?.let { code ->
-                    RootProcessResult(exitCode = code, stdout = output(request, "stdout", 8_000), stderr = output(request, "stderr", 2_000))
+                    capturedResult(request, exitCode = code)
                 } ?: quarantine()
             }
         } catch (error: InterruptedException) {
@@ -280,14 +280,23 @@ private class HeadlessRootSession private constructor(
         }
     }
 
-    private fun output(request: File, name: String, limit: Int): String {
+    private data class CapturedOutput(val text: String, val truncated: Boolean = false)
+
+    private fun capturedResult(request: File, exitCode: Int? = null, error: String? = null, reason: String? = null): RootProcessResult {
+        val stdout = output(request, "stdout", 8_000)
+        val stderr = output(request, "stderr", 2_000)
+        return RootProcessResult(exitCode = exitCode, stdout = stdout.text, stderr = stderr.text,
+            error = error, reason = reason, stdoutTruncated = stdout.truncated, stderrTruncated = stderr.truncated)
+    }
+
+    private fun output(request: File, name: String, limit: Int): CapturedOutput {
         val file = File(request, name)
-        if (!Files.isRegularFile(file.toPath(), LinkOption.NOFOLLOW_LINKS)) return ""
+        if (!Files.isRegularFile(file.toPath(), LinkOption.NOFOLLOW_LINKS)) return CapturedOutput("")
         val bytes = readPrefix(file, limit + 4)
-        if (bytes.size <= limit) return bytes.toString(Charsets.UTF_8)
+        if (bytes.size <= limit) return CapturedOutput(bytes.toString(Charsets.UTF_8))
         var keep = limit
         while (keep > 0 && bytes[keep].toInt() and 0xc0 == 0x80) keep--
-        return String(bytes, 0, keep, Charsets.UTF_8) + "\n…[truncated]"
+        return CapturedOutput(String(bytes, 0, keep, Charsets.UTF_8) + "\n…[вывод сокращён]", truncated = true)
     }
 
     private fun readPrefix(file: File, limit: Int): ByteArray = file.inputStream().use { input ->

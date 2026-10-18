@@ -167,13 +167,13 @@ private suspend fun trackJsonAction(
 
 fun browserOpenTool(context: Context, invocationContext: ToolInvocationContext? = null): Tool = Tool(
     name = BrowserToolDefaults.OPEN,
-    description = "Navigate the in-app browser to a URL. Launches the browser if it isn't open. Returns {success, current_url, title}. Resets the per-task 5-minute timer.$TELEGRAM_HEADLESS_CUE",
+    description = "Открыть URL во встроенном браузере, при необходимости запустить его. Используйте для перехода на страницу; для проверки уже открытой страницы — browser_current_url, для её текста — browser_get_text. Поддерживаются http, https и about; имя хоста без схемы дополняется https. Возвращает success, current_url и title; сбрасывает таймер задачи на 5 минут.$TELEGRAM_HEADLESS_CUE",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("url", buildJsonObject {
                     put("type", "string")
-                    put("description", "The full URL to navigate to (https://...)")
+                    put("description", "URL для перехода: http, https или about. Имя хоста без схемы дополняется https.")
                 })
             },
             required = listOf("url"),
@@ -196,11 +196,11 @@ fun browserOpenTool(context: Context, invocationContext: ToolInvocationContext? 
         // Scheme-less host input (`github.com/x`, `host:8080/p`) is normalised to https first.
         val scheme = url?.let { android.net.Uri.parse(it.trim()).scheme?.lowercase() }
         val rawOut = if (url == null) {
-            missingArgEnvelope("url", "url is required and must be a non-empty string")
+            missingArgEnvelope("url", "Укажите url непустой строкой.")
         } else if (scheme != null && scheme !in setOf("http", "https", "about")) {
             buildJsonObject {
                 put("error", "scheme_not_allowed")
-                put("detail", "browser_open only accepts http(s) and about: URLs; got scheme '$scheme'")
+                put("detail", "browser_open принимает только http, https и about; получена схема '$scheme'. Укажите поддерживаемый URL.")
                 put("message", "Схема адреса не поддерживается. Укажите url с http, https или about.")
             }
         } else {
@@ -334,7 +334,7 @@ fun browserOpenTool(context: Context, invocationContext: ToolInvocationContext? 
 
 fun browserCurrentUrlTool(): Tool = Tool(
     name = BrowserToolDefaults.CURRENT_URL,
-    description = "Return the browser's current URL and page title. {url, title}. browser_not_open if the browser isn't open.$TELEGRAM_HEADLESS_CUE",
+    description = "Получить URL и заголовок текущей страницы: url, title. Используйте для проверки результата перехода; для навигации — browser_open, для содержания — browser_get_text. Если браузер не открыт, возвращает browser_not_open.$TELEGRAM_HEADLESS_CUE",
     parameters = { InputSchema.Obj(properties = buildJsonObject { }) },
     execute = {
         val out = withTimeoutOrNull(toolTimeoutMs) {
@@ -351,13 +351,14 @@ fun browserCurrentUrlTool(): Tool = Tool(
 
 fun browserScreenshotTool(context: Context): Tool = Tool(
     name = BrowserToolDefaults.SCREENSHOT,
-    description = "Capture the visible viewport of the browser as a PNG vision attachment. Use browser_get_text first if you only need the page's text — screenshots cost vision tokens. full_page=true is best-effort and currently captures the viewport only (viewport_only:true in the response).$TELEGRAM_HEADLESS_CUE",
+    description = "Получить снимок видимой области браузера как вложение PNG. Используйте для визуальных элементов и расположения; для обычного текста сначала browser_get_text, чтобы не тратить токены изображения. full_page=true сейчас также снимает только видимую область, что отмечено viewport_only в ответе.$TELEGRAM_HEADLESS_CUE",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("full_page", buildJsonObject {
                     put("type", "boolean")
-                    put("description", "If true, attempt to capture the entire scroll height (currently no-op; viewport-only)")
+                    put("description", "Запрос полного снимка страницы; сейчас всё равно снимается только видимая область. По умолчанию false.")
+                    put("default", false)
                 })
             },
         )
@@ -406,14 +407,14 @@ fun browserScreenshotTool(context: Context): Tool = Tool(
 
 fun browserGetTextTool(): Tool = Tool(
     name = BrowserToolDefaults.GET_TEXT,
-    description = "Returns the main article content via Readability.js by default, falling back to selector-based extraction if Readability fails. Pass extract_mode:'raw' for the unfiltered text. Pass selector (e.g. 'article', 'main', '.content') for explicit scoping — selectors override Readability. max_chars (default 8000) caps the result. Use this BEFORE screenshot if you only need text content. {text, truncated, extract_mode}.$TELEGRAM_HEADLESS_CUE",
+    description = "Прочитать основной текст страницы через Readability с резервным чтением DOM. Используйте перед screenshot, если нужен текст. selector ограничивает область и имеет приоритет над Readability; extract_mode=raw возвращает текст DOM без выделения статьи. Для HTML используйте browser_get_dom, для ссылок — browser_get_links. max_chars: 100–65536, по умолчанию 8000. Ответ содержит text, truncated, extract_mode и URL фактически прочитанного документа.$TELEGRAM_HEADLESS_CUE",
     parameters = { getTextSchema(defaultMax = 8000) },
     execute = { input -> textPart(runGetText(input)) },
 )
 
 fun browserGetDomTool(): Tool = Tool(
     name = BrowserToolDefaults.GET_DOM,
-    description = "Extract a simplified outerHTML of a CSS selector (default 'body'). Strips <script>/<style>. Truncates at max_chars (default 4000). Use scoped selectors like 'article' / 'main' rather than 'body' for relevance — body usually includes nav and footer chrome that costs tokens without value. {html, truncated}.$TELEGRAM_HEADLESS_CUE",
+    description = "Прочитать упрощённый outerHTML области страницы без script/style. Используйте для структуры и селекторов; для чтения статьи экономнее browser_get_text. selector по умолчанию body, но article/main или более узкая область уменьшают лишний текст. max_chars: 100–65536, по умолчанию 4000; ответ html, truncated.$TELEGRAM_HEADLESS_CUE",
     parameters = { selectorAndMaxCharsSchema(defaultMax = 4000, required = false) },
     execute = { input -> textPart(runReadHelper(input, BrowserToolDefaults.GET_DOM, defaultMax = 4000) { selector, maxChars ->
         """(function(){
@@ -435,12 +436,13 @@ fun browserGetDomTool(): Tool = Tool(
 
 fun browserGetLinksTool(): Tool = Tool(
     name = BrowserToolDefaults.GET_LINKS,
-    description = "List up to 100 anchor links inside a CSS selector (default 'body') as {links:[{href, text}], count, total, truncated}; use a narrower selector when truncated. {error:'selector_not_found'} if the root selector doesn't match.$TELEGRAM_HEADLESS_CUE",
+    description = "Получить до 100 ссылок внутри selector, по умолчанию body: links с href/text, count, total, truncated. Используйте для выбора перехода; для самого перехода — browser_open или browser_click. При truncated сузьте selector; при отсутствии области возвращает selector_not_found.$TELEGRAM_HEADLESS_CUE",
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {
             put("selector", buildJsonObject {
                 put("type", "string")
-                put("description", "Root selector to search inside (default 'body')")
+                put("description", "CSS-селектор области страницы; по умолчанию body.")
+                put("default", "body")
             })
         })
     },
@@ -468,7 +470,11 @@ fun browserGetLinksTool(): Tool = Tool(
                     } catch(e) { return JSON.stringify({error:'js_failed', detail:String(e)}); }
                 })()"""
                 webView.awaitReadyState(8_000L)
-                evaluateReadResult(js)
+                val result = evaluateReadResult(js)
+                if (result["truncated"]?.jsonPrimitive?.booleanOrNull == true) buildJsonObject {
+                    result.forEach { (key, value) -> put(key, value) }
+                    put("recovery", "Список ссылок сокращён до 100. Укажите более узкий selector в browser_get_links, чтобы прочитать ссылки нужного блока.")
+                } else result
             }
         } ?: timeoutEnvelope(BrowserToolDefaults.GET_LINKS)
         textPart(out)
@@ -477,14 +483,14 @@ fun browserGetLinksTool(): Tool = Tool(
 
 fun browserBackTool(): Tool = Tool(
     name = BrowserToolDefaults.BACK,
-    description = "Navigate the browser one step back in history. {success, current_url}.$TELEGRAM_HEADLESS_CUE",
+    description = "Перейти на одну страницу назад в истории браузера; ответ success, current_url. Используйте для возврата после перехода; для известного адреса — browser_open. Нужен открытый браузер и доступная история.$TELEGRAM_HEADLESS_CUE",
     parameters = { InputSchema.Obj(properties = buildJsonObject { }) },
     execute = { textPart(runHistoryNav(BrowserToolDefaults.BACK, forward = false)) },
 )
 
 fun browserForwardTool(): Tool = Tool(
     name = BrowserToolDefaults.FORWARD,
-    description = "Navigate the browser one step forward in history. {success, current_url}.$TELEGRAM_HEADLESS_CUE",
+    description = "Перейти на одну страницу вперёд в истории браузера; ответ success, current_url. Используйте после browser_back; для нового адреса — browser_open. Нужен открытый браузер и доступная история.$TELEGRAM_HEADLESS_CUE",
     parameters = { InputSchema.Obj(properties = buildJsonObject { }) },
     execute = { textPart(runHistoryNav(BrowserToolDefaults.FORWARD, forward = true)) },
 )
@@ -545,25 +551,29 @@ internal fun buildWaitForPredicate(selector: String, state: String, containsText
 
 fun browserWaitForTool(): Tool = Tool(
     name = BrowserToolDefaults.WAIT_FOR,
-    description = "Pause until a CSS selector reaches a target state. Polls every 200 ms up to timeout_ms (default 10_000). state is one of attached (default — element present in DOM), detached (element gone), visible (present AND rendered), hidden (none rendered). Optional contains_text waits until a matching element contains that text. {found, elapsed_ms}.$TELEGRAM_HEADLESS_CUE",
+    description = "Дождаться состояния элемента по CSS selector, проверяя каждые 200 мс. Используйте после загрузки или действия вместо повторных кликов; для чтения результата — browser_get_text. state: attached, detached, visible или hidden; по умолчанию attached. contains_text задаёт подстроку. Ожидание по умолчанию 10000 мс, ограничено текущим таймаутом инструмента с резервом 2000 мс; минимум 200 мс. Ответ found, elapsed_ms.$TELEGRAM_HEADLESS_CUE",
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {
             put("selector", buildJsonObject {
                 put("type", "string")
-                put("description", "CSS selector to wait for")
+                put("description", "CSS-селектор целевого элемента или области страницы.")
             })
             put("timeout_ms", buildJsonObject {
                 put("type", "integer")
-                put("description", "Max wait in ms (default 10000, capped at the configured per-tool timeout)")
+                put("description", "Ожидание в миллисекундах, по умолчанию 10000. Не менее 200; максимум — текущий таймаут инструмента минус 2000, но не менее 200.")
+                put("minimum", 200)
+                put("maximum", (toolTimeoutMs - 2_000L).coerceAtLeast(200L))
+                put("default", 10_000L.coerceIn(200L, (toolTimeoutMs - 2_000L).coerceAtLeast(200L)))
             })
             put("contains_text", buildJsonObject {
                 put("type", "string")
-                put("description", "Optional — wait until an element matching the selector contains this text (case-sensitive substring). Ignored for state=detached/hidden.")
+                put("description", "Необязательная подстрока с учётом регистра в ожидаемом элементе; игнорируется при state=detached/hidden.")
             })
             put("state", buildJsonObject {
                 put("type", "string")
                 put("enum", buildJsonArray { add("attached"); add("detached"); add("visible"); add("hidden") })
-                put("description", "Target state to wait for (default 'attached', the original presence-in-DOM behavior)")
+                put("description", "Состояние элемента: attached, detached, visible или hidden. По умолчанию attached.")
+                put("default", "attached")
             })
         }, required = listOf("selector"))
     },
@@ -572,9 +582,9 @@ fun browserWaitForTool(): Tool = Tool(
         val rawState = input.jsonObject["state"]?.jsonPrimitive?.contentOrNull?.lowercase()
         val out = when {
             selector == null ->
-                missingArgEnvelope("selector", "selector is required and must be a non-empty CSS selector")
+                missingArgEnvelope("selector", "Укажите selector непустой строкой с CSS-селектором.")
             rawState != null && rawState !in WAIT_FOR_STATES ->
-                missingArgEnvelope("state", "state must be one of [attached, detached, visible, hidden]")
+                missingArgEnvelope("state", "Укажите state: attached, detached, visible или hidden.")
             else -> {
                 val state = rawState ?: "attached"
                 val containsText = input.jsonObject["contains_text"]?.jsonPrimitive?.contentOrNull
@@ -616,13 +626,13 @@ fun browserWaitForTool(): Tool = Tool(
 
 fun browserClickTool(): Tool = Tool(
     name = BrowserToolDefaults.CLICK,
-    description = "Click an element matching a CSS selector. Returns the diff between the page before and after the action by default ({added, removed, added_chars, removed_chars, truncated} truncated to 4000 chars total). Pass full:true to skip the diff and get post_click_url only — use when the click navigates to an entirely new page. Waits up to 8 s for readyState=complete.$TELEGRAM_HEADLESS_CUE",
-    parameters = { selectorWithFullSchema("CSS selector to click") },
+    description = "Нажать элемент по CSS selector и дождаться readyState=complete до 8 секунд. Используйте для кнопок и ссылок; если сразу нужен текст после перехода — browser_click_and_read. По умолчанию возвращает изменения текста до/после, ограниченные 4000 символами. full=true пропускает сравнение и возвращает post_click_url; подходит для перехода на другую страницу.$TELEGRAM_HEADLESS_CUE",
+    parameters = { selectorWithFullSchema("CSS-селектор элемента для нажатия.") },
     execute = { input ->
         val selector = input.jsonObject["selector"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
         val full = parseFullArg(input)
         val out = if (selector == null) {
-            missingArgEnvelope("selector", "selector is required and must be a non-empty CSS selector")
+            missingArgEnvelope("selector", "Укажите selector непустой строкой с CSS-селектором.")
         } else {
             withTimeoutOrNull(toolTimeoutMs) {
                 BrowserControllerHandle.withController {
@@ -714,13 +724,13 @@ internal fun buildTypeScript(selector: String, text: String, clear: Boolean): St
 
 fun browserTypeTool(): Tool = Tool(
     name = BrowserToolDefaults.TYPE,
-    description = "Type text into an input/textarea/contenteditable matching a CSS selector. Focuses, optionally clears, sets the value + dispatches an 'input' event so SPA frameworks observe the change. Returns the diff between the page before and after by default; pass full:true to skip the diff. {success, [diff]}.$TELEGRAM_HEADLESS_CUE",
+    description = "Ввести текст в input, textarea или contenteditable по CSS selector, сфокусировать поле и отправить событие input. Используйте для заполнения поля; для выбора option — browser_select, для Enter или другой клавиши — browser_press_key. clear=true очищает поле перед вводом. По умолчанию возвращает success и изменения текста; full=true пропускает сравнение.$TELEGRAM_HEADLESS_CUE",
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {
-            put("selector", buildJsonObject { put("type","string"); put("description","CSS selector of the input") })
-            put("text", buildJsonObject { put("type","string"); put("description","Text to type") })
-            put("clear", buildJsonObject { put("type","boolean"); put("description","Clear the field first (default true)") })
-            put("full", buildJsonObject { put("type","boolean"); put("description","If true, return the action envelope without the page-text diff (default false)") })
+            put("selector", buildJsonObject { put("type","string"); put("description", "CSS-селектор целевого элемента или области страницы.") })
+            put("text", buildJsonObject { put("type","string"); put("description", "Текст для ввода в выбранное поле; пустая строка допустима.") })
+            put("clear", buildJsonObject { put("type","boolean"); put("description", "Очистить поле перед вводом; по умолчанию true."); put("default", true) })
+            put("full", buildJsonObject { put("type","boolean"); put("description", "Вернуть результат действия без сравнения текста страницы; по умолчанию false."); put("default", false) })
         }, required = listOf("selector","text"))
     },
     execute = { input ->
@@ -729,8 +739,8 @@ fun browserTypeTool(): Tool = Tool(
         val clear = input.jsonObject["clear"]?.jsonPrimitive?.booleanOrNull ?: true
         val full = parseFullArg(input)
         val out = when {
-            selector == null -> missingArgEnvelope("selector", "selector is required")
-            text == null -> missingArgEnvelope("text", "text is required (use empty string to clear)")
+            selector == null -> missingArgEnvelope("selector", "Укажите обязательный CSS-селектор в selector.")
+            text == null -> missingArgEnvelope("text", "Укажите text; для очистки передайте пустую строку.")
             else -> withTimeoutOrNull(toolTimeoutMs) {
                 BrowserControllerHandle.withController {
                     trackJsonAction(BrowserAiActionKind.TYPE, selector) {
@@ -753,21 +763,22 @@ fun browserTypeTool(): Tool = Tool(
 
 fun browserScrollTool(): Tool = Tool(
     name = BrowserToolDefaults.SCROLL,
-    description = "Scroll the page in a direction (up/down/top/bottom). amount is in pixels (default 600, ignored for top/bottom). {success, scroll_y}.$TELEGRAM_HEADLESS_CUE",
+    description = "Прокрутить страницу: up, down, top или bottom. Используйте для просмотра следующей области; для текста страницы обычно достаточно browser_get_text. amount задаёт пиксели, по умолчанию 600, и игнорируется для top/bottom. Ответ success, scroll_y.$TELEGRAM_HEADLESS_CUE",
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {
             put("direction", buildJsonObject {
                 put("type","string")
                 put("enum", buildJsonArray { add("up"); add("down"); add("top"); add("bottom") })
+                put("description", "Направление прокрутки: up, down, top или bottom.")
             })
-            put("amount", buildJsonObject { put("type","integer"); put("description","Scroll distance in px (default 600)") })
+            put("amount", buildJsonObject { put("type","integer"); put("description", "Расстояние прокрутки в пикселях, по умолчанию 600; для top/bottom игнорируется."); put("default", 600) })
         }, required = listOf("direction"))
     },
     execute = { input ->
         val direction = input.jsonObject["direction"]?.jsonPrimitive?.contentOrNull
         val amount = input.jsonObject["amount"]?.jsonPrimitive?.intOrNull ?: 600
         val out = if (direction == null || direction !in setOf("up", "down", "top", "bottom")) {
-            missingArgEnvelope("direction", "direction must be one of [up, down, top, bottom]")
+            missingArgEnvelope("direction", "Укажите direction: up, down, top или bottom.")
         } else {
             withTimeoutOrNull(toolTimeoutMs) {
                 BrowserControllerHandle.withController {
@@ -809,13 +820,13 @@ fun browserScrollTool(): Tool = Tool(
 
 fun browserSubmitTool(): Tool = Tool(
     name = BrowserToolDefaults.SUBMIT,
-    description = "Submit a form. If the selector is a <button type=submit> click it; otherwise locates the enclosing <form> and calls .submit(). Awaits the post-navigation readyState. Returns the diff between the page before and after by default; pass full:true to skip the diff (recommended when submission navigates to a brand-new page). {success, post_submit_url, [diff]}.$TELEGRAM_HEADLESS_CUE",
-    parameters = { selectorWithFullSchema("CSS selector of a submit button or any element inside the target form") },
+    description = "Отправить форму по CSS selector: нажать кнопку submit либо найти окружающую форму и вызвать submit. Используйте после заполнения; для обычной кнопки — browser_click. Ожидает завершения перехода; ответ success, post_submit_url и изменения текста. full=true пропускает сравнение, что подходит при переходе на новую страницу.$TELEGRAM_HEADLESS_CUE",
+    parameters = { selectorWithFullSchema("CSS-селектор кнопки submit или элемента внутри нужной формы.") },
     execute = { input ->
         val selector = input.jsonObject["selector"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
         val full = parseFullArg(input)
         val out = if (selector == null) {
-            missingArgEnvelope("selector", "selector is required")
+            missingArgEnvelope("selector", "Укажите обязательный CSS-селектор в selector.")
         } else {
             withTimeoutOrNull(toolTimeoutMs) {
                 BrowserControllerHandle.withController {
@@ -857,12 +868,12 @@ fun browserSubmitTool(): Tool = Tool(
 
 fun browserSelectTool(): Tool = Tool(
     name = BrowserToolDefaults.SELECT,
-    description = "Set a <select> element's value. Dispatches 'change' so framework listeners fire. Returns the diff between the page before and after by default; pass full:true to skip the diff. {success, [diff]}.$TELEGRAM_HEADLESS_CUE",
+    description = "Выбрать value в элементе select и отправить событие change. Используйте для HTML-списка; для текстового поля — browser_type. Если значение отсутствует, ответ содержит доступные options. По умолчанию возвращает success и изменения текста; full=true пропускает сравнение.$TELEGRAM_HEADLESS_CUE",
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {
-            put("selector", buildJsonObject { put("type","string"); put("description","CSS selector of the <select>") })
-            put("value", buildJsonObject { put("type","string"); put("description","The option value to set") })
-            put("full", buildJsonObject { put("type","boolean"); put("description","If true, return the action envelope without the page-text diff (default false)") })
+            put("selector", buildJsonObject { put("type","string"); put("description", "CSS-селектор целевого элемента или области страницы.") })
+            put("value", buildJsonObject { put("type","string"); put("description", "Точное значение option в элементе select.") })
+            put("full", buildJsonObject { put("type","boolean"); put("description", "Вернуть результат действия без сравнения текста страницы; по умолчанию false."); put("default", false) })
         }, required = listOf("selector","value"))
     },
     execute = { input ->
@@ -870,8 +881,8 @@ fun browserSelectTool(): Tool = Tool(
         val value = input.jsonObject["value"]?.jsonPrimitive?.contentOrNull
         val full = parseFullArg(input)
         val out = when {
-            selector == null -> missingArgEnvelope("selector", "selector is required")
-            value == null -> missingArgEnvelope("value", "value is required")
+            selector == null -> missingArgEnvelope("selector", "Укажите обязательный CSS-селектор в selector.")
+            value == null -> missingArgEnvelope("value", "Укажите обязательное значение value.")
             else -> withTimeoutOrNull(toolTimeoutMs) {
                 BrowserControllerHandle.withController {
                     trackJsonAction(BrowserAiActionKind.SELECT, selector) {
@@ -907,14 +918,14 @@ fun browserSelectTool(): Tool = Tool(
 
 fun browserPressKeyTool(): Tool = Tool(
     name = BrowserToolDefaults.PRESS_KEY,
-    description = "Synthesize keydown + keyup events on the active element. Use KeyboardEvent.key values like 'Enter', 'Escape', 'ArrowDown', 'Tab'. Returns the diff between the page before and after by default; pass full:true to skip the diff (recommended when Enter triggers a navigation). Enter in a form field submits that form. {success, [submitted, current_url], [diff]}.$TELEGRAM_HEADLESS_CUE",
+    description = "Отправить keydown и keyup активному элементу страницы, например Enter, Escape, ArrowDown или Tab. Используйте для клавиатурного действия; для ввода строки — browser_type. Enter в поле формы отправляет её. Имя клавиши ограничивается 32 символами. По умолчанию возвращает изменения текста; full=true пропускает сравнение, например при навигации.$TELEGRAM_HEADLESS_CUE",
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {
             put("key", buildJsonObject {
                 put("type","string")
-                put("description","KeyboardEvent.key value (e.g. 'Enter', 'Escape', 'ArrowDown')")
+                put("description", "Значение KeyboardEvent.key, например Enter, Escape, ArrowDown или Tab; используются первые 32 символа.")
             })
-            put("full", buildJsonObject { put("type","boolean"); put("description","If true, return the action envelope without the page-text diff (default false)") })
+            put("full", buildJsonObject { put("type","boolean"); put("description", "Вернуть результат действия без сравнения текста страницы; по умолчанию false."); put("default", false) })
         }, required = listOf("key"))
     },
     execute = { input ->
@@ -923,7 +934,7 @@ fun browserPressKeyTool(): Tool = Tool(
         val key = input.jsonObject["key"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }?.take(32)
         val full = parseFullArg(input)
         val out = if (key == null) {
-            missingArgEnvelope("key", "key is required (e.g. 'Enter', 'Escape')")
+            missingArgEnvelope("key", "Укажите key, например Enter или Escape.")
         } else {
             withTimeoutOrNull(toolTimeoutMs) {
                 BrowserControllerHandle.withController {
@@ -967,12 +978,12 @@ fun browserPressKeyTool(): Tool = Tool(
 
 fun browserEvalJsTool(): Tool = Tool(
     name = BrowserToolDefaults.EVAL_JS,
-    description = "Run arbitrary JavaScript in the page and return its last expression. HARDLINE-checked: shell-shaped strings, document.cookie writes, eval/Function constructors, and string-form setTimeout are all blocked at the tool dispatcher BEFORE the JS executes. Always asks for approval; never eligible for 'Always Allow'.$TELEGRAM_HEADLESS_CUE",
+    description = "Выполнить JavaScript на странице и вернуть JSON-представление значения последнего выражения. Используйте, когда обычных browser_get_text/get_dom/click/type недостаточно. Проверка HARDLINE выполняется диспетчером до запуска; shell-подобные строки, запись document.cookie, eval/Function и строковый setTimeout блокируются. Требуется подтверждение, Always Allow недоступен.$TELEGRAM_HEADLESS_CUE",
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {
             put("code", buildJsonObject {
                 put("type","string")
-                put("description","JavaScript to evaluate. The string returned by the WebView is the value of the last expression, JSON-encoded.")
+                put("description", "JavaScript для страницы. Возвращается JSON-представление значения последнего выражения.")
             })
         }, required = listOf("code"))
     },
@@ -982,7 +993,7 @@ fun browserEvalJsTool(): Tool = Tool(
         // pattern HARDLINE missed is a bug to fix in HardlineCommandGuard, not here.
         val code = input.jsonObject["code"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
         val out = if (code == null) {
-            missingArgEnvelope("code", "code is required")
+            missingArgEnvelope("code", "Укажите непустой JavaScript в code.")
         } else {
             withTimeoutOrNull(toolTimeoutMs) {
                 BrowserControllerHandle.withController {
@@ -1004,7 +1015,12 @@ fun browserEvalJsTool(): Tool = Tool(
                             val (clipped, truncated) = clipText(raw ?: "null", EVAL_JS_MAX_RESULT_CHARS)
                             buildJsonObject {
                                 put("result", clipped)
-                                if (truncated) put("truncated", true)
+                                if (truncated) {
+                                    put("truncated", true)
+                                    put("shown_chars", clipped.length)
+                                    put("total_chars", raw?.length ?: 4)
+                                    put("recovery", "Результат JavaScript сокращён. Для текста используйте browser_get_text с узким selector; для другого значения верните только нужный фрагмент отдельным выражением чтения. Не повторяйте исходный JavaScript вслепую: он мог выполнить действие.")
+                                }
                             }
                         }.getOrElse {
                             // Don't swallow cancellation: a withTimeoutOrNull timeout (or scope
@@ -1051,21 +1067,25 @@ fun browserEvalJsTool(): Tool = Tool(
  */
 fun browserClickAndReadTool(): Tool = Tool(
     name = BrowserToolDefaults.CLICK_AND_READ,
-    description = "One-shot click + read in a single round trip. Click an element, await readyState, then return either the diff (default extract_mode:'diff') or the extracted text (auto/readability/raw — same semantics as browser_get_text). Use this instead of browser_click + browser_get_text when you want to minimise tokens. {success, post_click_url, page_title, [diff], [text]}.$TELEGRAM_HEADLESS_CUE",
+    description = "Нажать элемент и прочитать результат за один вызов вместо browser_click и browser_get_text. Используйте, когда после действия нужен текст страницы; для одного клика — browser_click. После readyState возвращает изменения текста (extract_mode=diff по умолчанию) либо текст auto/readability/raw. max_chars: 100–65536, по умолчанию 4000. Ответ success, post_click_url, page_title и diff либо text.$TELEGRAM_HEADLESS_CUE",
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {
             put("selector", buildJsonObject {
                 put("type","string")
-                put("description","CSS selector to click")
+                put("description", "CSS-селектор целевого элемента или области страницы.")
             })
             put("extract_mode", buildJsonObject {
                 put("type","string")
                 put("enum", buildJsonArray { add("diff"); add("auto"); add("readability"); add("raw") })
-                put("description","diff (default) returns a before/after diff; auto/readability/raw return the extracted page text")
+                put("description", "diff возвращает изменения текста; auto/readability/raw читают текст страницы. По умолчанию diff.")
+                put("default", "diff")
             })
             put("max_chars", buildJsonObject {
                 put("type","integer")
-                put("description","Caps the returned text length (default 4000)")
+                put("description", "Максимум возвращаемых символов: 100–65536, по умолчанию 4000.")
+                put("minimum", 100)
+                put("maximum", 65536)
+                put("default", 4000)
             })
         }, required = listOf("selector"))
     },
@@ -1076,7 +1096,7 @@ fun browserClickAndReadTool(): Tool = Tool(
         val maxChars = (input.jsonObject["max_chars"]?.jsonPrimitive?.intOrNull ?: 4000)
             .coerceIn(100, 64 * 1024)
         val out = if (selector == null) {
-            missingArgEnvelope("selector", "selector is required")
+            missingArgEnvelope("selector", "Укажите обязательный CSS-селектор в selector.")
         } else {
             withTimeoutOrNull(toolTimeoutMs) {
                 BrowserControllerHandle.withController {
@@ -1138,23 +1158,23 @@ fun browserClickAndReadTool(): Tool = Tool(
 
 fun browserDoneTool(invocationContext: ToolInvocationContext? = null): Tool = Tool(
     name = BrowserToolDefaults.DONE,
-    description = "Signal that the AI has finished its current browser task. Clears the per-task 5-minute timer so the next browser_open starts fresh. The browser session ITSELF stays alive — subsequent turns can navigate, click, scroll without re-opening. result_url is optional; pass the page URL the user should look at if any. {success}.$TELEGRAM_HEADLESS_CUE",
+    description = "Сообщить о завершении текущей задачи браузера: summary и при необходимости result_url. Используйте после получения результата; для продолжения работы вызывайте обычные browser-инструменты. Сбрасывает таймер задачи, но сохраняет сессию браузера для следующих сообщений. Ответ success.$TELEGRAM_HEADLESS_CUE",
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {
             put("summary", buildJsonObject {
                 put("type","string")
-                put("description","One-sentence summary of what was accomplished")
+                put("description", "Краткое непустое описание выполненной задачи одним предложением.")
             })
             put("result_url", buildJsonObject {
                 put("type","string")
-                put("description","Optional URL the user should look at")
+                put("description", "Необязательный URL результата, который следует открыть пользователю.")
             })
         }, required = listOf("summary"))
     },
     execute = { input ->
         val summary = input.jsonObject["summary"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
         val out = if (summary == null) {
-            missingArgEnvelope("summary", "summary is required")
+            missingArgEnvelope("summary", "Укажите непустой итог задачи в summary.")
         } else {
             BrowserController.recordAction(BrowserAiActionKind.DONE, summary)
             BrowserController.clearTaskWindow()
@@ -1197,7 +1217,8 @@ private fun selectorWithFullSchema(description: String): InputSchema = InputSche
         })
         put("full", buildJsonObject {
             put("type", "boolean")
-            put("description", "If true, return the action envelope without the page-text diff (default false)")
+            put("description", "Вернуть результат действия без сравнения текста страницы; по умолчанию false.")
+            put("default", false)
         })
     },
     required = listOf("selector"),
@@ -1207,11 +1228,15 @@ private fun selectorAndMaxCharsSchema(defaultMax: Int, required: Boolean): Input
     properties = buildJsonObject {
         put("selector", buildJsonObject {
             put("type", "string")
-            put("description", "CSS selector (default 'body')")
+            put("description", "CSS-селектор области страницы; по умолчанию body.")
+            put("default", "body")
         })
         put("max_chars", buildJsonObject {
             put("type", "integer")
-            put("description", "Truncation cap (default $defaultMax)")
+            put("description", "Максимум возвращаемых символов: 100–65536, по умолчанию $defaultMax.")
+            put("minimum", 100)
+            put("maximum", 65536)
+            put("default", defaultMax)
         })
     },
     required = if (required) listOf("selector") else null,
@@ -1226,16 +1251,20 @@ private fun getTextSchema(defaultMax: Int): InputSchema = InputSchema.Obj(
     properties = buildJsonObject {
         put("selector", buildJsonObject {
             put("type", "string")
-            put("description", "Optional CSS selector — when set, overrides Readability and reads the selector's innerText directly")
+            put("description", "Необязательный CSS-селектор области; при наличии имеет приоритет над Readability и читает innerText этой области.")
         })
         put("max_chars", buildJsonObject {
             put("type", "integer")
-            put("description", "Truncation cap (default $defaultMax)")
+            put("description", "Максимум возвращаемых символов: 100–65536, по умолчанию $defaultMax.")
+            put("minimum", 100)
+            put("maximum", 65536)
+            put("default", defaultMax)
         })
         put("extract_mode", buildJsonObject {
             put("type", "string")
             put("enum", buildJsonArray { add("auto"); add("readability"); add("raw") })
-            put("description", "auto (default) tries Readability then falls back; readability forces it; raw uses selector-based innerText")
+            put("description", "auto сначала использует Readability с резервным чтением DOM; readability запрашивает выделение статьи; raw читает innerText. По умолчанию auto.")
+            put("default", "auto")
         })
     },
 )
@@ -1511,7 +1540,10 @@ private fun withContentSize(result: JsonObject, field: String): JsonObject {
         result.forEach { (key, value) -> put(key, value) }
         put("shown_chars", shown)
         put("total_chars", total)
-        if (total > shown) put("message", "Показано $shown из $total символов.")
+        if (total > shown) {
+            put("message", "Показано $shown из $total символов.")
+            put("recovery", "Укажите более узкий selector в ${if (field == "html") "browser_get_dom" else "browser_get_text"} для нужного блока или увеличьте max_chars до 65536. Не повторяйте действие на странице ради чтения оставшегося текста.")
+        }
     }
 }
 

@@ -23,10 +23,7 @@ import me.rerere.rikkahub.data.ai.tools.RunExecutionContext
 /** Ordinary mode retains its consent gate; automatic permission is global on this device. */
 fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = null, assistantId: String? = null): Tool = Tool(
     name = "root_exec",
-    description = "Run a non-interactive shell command on the Android device using su, after verified UID 0. Requires a rooted device and a root-manager grant. User approval is required unless global auto-approval or Always Allow is enabled on this device; visible protected operations still require approval. Returns bounded stdout/stderr, exit_code, and errors. No Shizuku or Termux fallback. Commands are never retried after execution starts. timeout_ms defaults to 30000 and is limited to 1000–300000. " +
-        "Для проверки обновлений root-модулей сначала прочитайте updateJson из /data/adb/modules/*/module.prop без изменений. " +
-        "Затем загрузите JSON по этому адресу через download_file в /scratch и прочитайте через read_file. " +
-        "При необходимости используйте https://api.github.com/repos/<владелец>/<репо>/releases/latest вместо разбора HTML GitHub. Проверка обновлений не означает разрешение на установку.",
+    description = "Выполнить неинтерактивную команду Android через su после проверки UID 0. Используйте для диагностики и операций, требующих root; для обычной оболочки Termux используйте termux_run_command, для удалённой машины — ssh_exec_saved. Нужны root на устройстве и разрешение root-менеджера; автоматического перехода на Termux или Shizuku нет. Подтверждение требуется, если на этом устройстве не включено глобальное автоодобрение или Always Allow; видимые защищённые операции сохраняют отдельное подтверждение. Возвращает ограниченные stdout/stderr, exit_code и ошибки. Начатые команды автоматически не повторяются. timeout_ms: 1000–300000, по умолчанию 30000. Для проверки обновлений root-модулей сначала прочитайте updateJson из /data/adb/modules/*/module.prop без изменений, затем скачайте JSON через download_file в /scratch и прочитайте read_file. При необходимости используйте https://api.github.com/repos/<владелец>/<репо>/releases/latest вместо HTML GitHub. Проверка обновлений не разрешает установку.",
     needsApproval = { input ->
         val command = ((input as? JsonObject)?.get("command") as? JsonPrimitive)
             ?.takeIf { it.isString }?.contentOrNull
@@ -36,8 +33,8 @@ fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = nul
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                put("command", buildJsonObject { put("type", "string"); put("description", "Android root shell command, for example id -u or dumpsys battery.") })
-                put("timeout_ms", buildJsonObject { put("type", "integer"); put("description", "Command timeout in milliseconds, default 30000, range 1000–300000.") })
+                put("command", buildJsonObject { put("type", "string"); put("description", "Непустая команда оболочки Android с root, например id -u или dumpsys battery.") })
+                put("timeout_ms", buildJsonObject { put("type", "integer"); put("description", "Таймаут команды в миллисекундах: 1000–300000, по умолчанию 30000."); put("minimum", 1000); put("maximum", 300000); put("default", 30000) })
             },
             required = listOf("command"),
         )
@@ -100,6 +97,12 @@ fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = nul
                     put("success", executed.error == null && executed.exitCode == 0)
                     put("stdout", executed.stdout)
                     put("stderr", executed.stderr)
+                    if (executed.stdoutTruncated || executed.stderrTruncated) {
+                        put("truncated", true)
+                        put("stdout_truncated", executed.stdoutTruncated)
+                        put("stderr_truncated", executed.stderrTruncated)
+                        put("recovery", "Вывод сокращён. Прочитайте нужный диапазон из сохранённого файла или запросите ограниченный фрагмент отдельной командой чтения. Не повторяйте исходную root-команду вслепую: она могла изменить данные.")
+                    }
                     executed.exitCode?.let { put("exit_code", it) }
                     executed.error?.let { put("error", it) }
                     val reason = executed.reason ?:

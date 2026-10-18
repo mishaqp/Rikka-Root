@@ -255,7 +255,7 @@ internal fun takeFirstUtf8Bytes(s: String, maxBytes: Int): String {
     return s.substring(0, i)
 }
 
-private fun truncateOut(s: String): String {
+private fun screenReceipt(s: String): JsonObject {
     // capture-pane emits the full terminal height, so the screen arrives padded with a wall
     // of blank lines below the cursor. Drop trailing blank lines so each read does not burn
     // tokens on empty padding.
@@ -263,10 +263,17 @@ private fun truncateOut(s: String): String {
     val max = TermuxRuntime.maxStdoutBytes
     // Bound on UTF-8 bytes, not chars: maxStdoutBytes is a byte budget, and a char-count cut
     // would over- or under-shoot for multibyte text and could split a code point.
-    return if (trimmed.toByteArray(Charsets.UTF_8).size > max) {
-        takeLastUtf8Bytes(trimmed, max) + "\n…[предыдущий вывод сокращён]"
-    } else {
-        trimmed
+    val total = trimmed.toByteArray(Charsets.UTF_8).size
+    val clipped = total > max
+    val kept = if (clipped) takeLastUtf8Bytes(trimmed, max) else trimmed
+    return buildJsonObject {
+        put("screen", if (clipped) kept + "\n…[предыдущий вывод сокращён]" else kept)
+        if (clipped) {
+            put("truncated", true)
+            put("shown_bytes", kept.toByteArray(Charsets.UTF_8).size)
+            put("total_bytes", total)
+            put("recovery", "Показан конец экрана. Для другого фрагмента прочитайте нужный диапазон истории tmux или сохранённого файла отдельной командой чтения. Не повторяйте исходный ввод или команду вслепую.")
+        }
     }
 }
 
@@ -364,13 +371,13 @@ private suspend fun sessionNotFoundEnvelope(context: Context, session: String, r
 fun termuxSessionStartTool(context: Context): Tool = Tool(
     name = "termux_session_start",
     needsApproval = { true },
-    description = "Open a persistent, interactive Termux terminal session (tmux-backed, real pty). Use for ssh into a saved host, anything that prompts for a password/sudo, REPLs, or stateful shells. Returns a session_id; drive it with termux_session_send / termux_session_read. Auto-installs tmux on first use.",
+    description = "Открыть постоянную интерактивную сессию Termux с tmux и настоящим терминалом. Используйте для SSH с запросом пароля, sudo, REPL и сохранения состояния оболочки; для одной команды с готовым выводом — termux_run_command или ssh_exec_saved. Возвращает session_id; далее используйте termux_session_send/read. При первом запуске устанавливает tmux. Максимум 8 сессий; при создании убирает неактивные более 6 часов. Начальная команда автоматически не повторяется при частичной отправке.",
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {
-            put("name", buildJsonObject { put("type", "string"); put("description", "Optional friendly label for the session.") })
-            put("command", buildJsonObject { put("type", "string"); put("description", "Optional initial command line to run, e.g. 'ssh myhost'.") })
-            put("cols", buildJsonObject { put("type", "integer"); put("description", "Terminal width (default $DEFAULT_COLS).") })
-            put("rows", buildJsonObject { put("type", "integer"); put("description", "Terminal height (default $DEFAULT_ROWS).") })
+            put("name", buildJsonObject { put("type", "string"); put("description", "Необязательное понятное имя сессии; возвращаемый session_id используйте в дальнейших вызовах.") })
+            put("command", buildJsonObject { put("type", "string"); put("description", "Команда оболочки Termux. В termux_run_command несовместима с executable и arguments; в session_start запускается при создании сессии.") })
+            put("cols", buildJsonObject { put("type", "integer"); put("description", "Ширина терминала в столбцах, по умолчанию 200."); put("default", 200) })
+            put("rows", buildJsonObject { put("type", "integer"); put("description", "Высота терминала в строках, по умолчанию 50."); put("default", 50) })
         })
     },
     execute = { input ->
@@ -440,7 +447,8 @@ fun termuxSessionStartTool(context: Context): Tool = Tool(
         val read = readResult as? CaptureResult.Success
         listOf(UIMessagePart.Text(buildJsonObject {
             put("success", true); put("session_id", name)
-            put("screen", read?.let { truncateOut(it.stdout) } ?: "")
+            if (read != null) screenReceipt(read.stdout).forEach { (key, value) -> put(key, value) }
+            else put("screen", "")
             if (read == null) {
                 put("note", "Сессия создана, но начальный экран не прочитан. Используйте termux_session_read.")
                 readResult.failureDiagnostics().forEach { (key, value) -> put(key, value) }
@@ -452,15 +460,15 @@ fun termuxSessionStartTool(context: Context): Tool = Tool(
 fun termuxSessionSendTool(context: Context): Tool = Tool(
     name = "termux_session_send",
     needsApproval = { true },
-    description = "Type input into a session and read what comes back. Set enter=false to type without a newline (e.g. answering a prompt). Use keys for control keys (tmux names: 'C-c', 'Enter', 'Up', 'Tab'). Pass wait_for (substring/regex) to return as soon as expected text appears (e.g. 'password:'). Returns the screen, matched_wait_for, timed_out.",
+    description = "Отправить текст или клавиши в сессию из termux_session_start и прочитать экран. Используйте для ввода и управления интерактивным процессом; для чтения без ввода — termux_session_read. enter=false не добавляет Enter. keys принимает имена tmux, например C-c, Enter, Up, Tab. wait_for ждёт подстроку или регулярное выражение. Возвращает screen, matched_wait_for, timed_out; ожидание по умолчанию 20 секунд, максимум 600. При частичной отправке сначала прочитайте экран; не повторяйте ввод вслепую.",
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {
-            put("session_id", buildJsonObject { put("type", "string"); put("description", "Session id from termux_session_start.") })
-            put("input", buildJsonObject { put("type", "string"); put("description", "Text to type. Optional if keys is given.") })
-            put("enter", buildJsonObject { put("type", "boolean"); put("description", "Press Enter after input. Default true.") })
-            put("keys", buildJsonObject { put("type", "array"); put("description", "tmux key names to send (e.g. ['C-c']).") ; put("items", buildJsonObject { put("type", "string") }) })
-            put("wait_for", buildJsonObject { put("type", "string"); put("description", "Return as soon as this substring/regex appears on screen.") })
-            put("timeout_seconds", buildJsonObject { put("type", "integer"); put("description", "Default $DEFAULT_TIMEOUT_S, max $MAX_TIMEOUT_S.") })
+            put("session_id", buildJsonObject { put("type", "string"); put("description", "Точный идентификатор из termux_session_start или termux_session_list.") })
+            put("input", buildJsonObject { put("type", "string"); put("description", "Текст для ввода; можно не передавать, если заданы keys. Не повторяйте автоматически после частичного сбоя.") })
+            put("enter", buildJsonObject { put("type", "boolean"); put("description", "Нажать Enter после текста; по умолчанию true. false вводит текст без перевода строки."); put("default", true) })
+            put("keys", buildJsonObject { put("type", "array"); put("description", "Массив имён клавиш tmux, например C-c, Enter, Up, Tab.") ; put("items", buildJsonObject { put("type", "string") }) })
+            put("wait_for", buildJsonObject { put("type", "string"); put("description", "Необязательная подстрока или регулярное выражение, появления которого нужно дождаться на экране.") })
+            put("timeout_seconds", buildJsonObject { put("type", "integer"); put("description", "Таймаут в секундах, максимум 600. Отсутствие или 0 использует 20 секунд; положительные значения ограничиваются диапазоном 1–600."); put("minimum", 0); put("maximum", 600); put("default", 20) })
         })
     },
     execute = { input ->
@@ -525,7 +533,7 @@ fun termuxSessionSendTool(context: Context): Tool = Tool(
             ?: return@Tool sessionErrorEnvelope("read_failed", "Ввод отправлен, но экран не прочитан. Используйте termux_session_read для проверки результата.", read, session)
         listOf(UIMessagePart.Text(buildJsonObject {
             put("success", true)
-            put("screen", truncateOut(r.stdout))
+            screenReceipt(r.stdout).forEach { (key, value) -> put(key, value) }
             put("matched_wait_for", r.stderr == "MATCHED")
             put("timed_out", r.stderr == "TIMEOUT")
         }.toString()))
@@ -535,13 +543,13 @@ fun termuxSessionSendTool(context: Context): Tool = Tool(
 fun termuxSessionReadTool(context: Context): Tool = Tool(
     name = "termux_session_read",
     needsApproval = { true },
-    description = "Re-read a session's screen without sending input (e.g. check on a long-running command). Optional wait_for + timeout_seconds to wait for expected text; otherwise returns the current screen immediately. lines sets scrollback depth (default $DEFAULT_READ_LINES).",
+    description = "Прочитать экран существующей сессии без ввода, например проверить длительную команду. Для ввода используйте termux_session_send, для новой сессии — termux_session_start. Без wait_for возвращает текущий экран; с ним ждёт подстроку или регулярное выражение до timeout_seconds. По умолчанию 200 строк истории и 20 секунд ожидания, максимум 600 секунд; возвращаемый текст ограничен.",
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {
-            put("session_id", buildJsonObject { put("type", "string"); put("description", "Session id.") })
-            put("wait_for", buildJsonObject { put("type", "string"); put("description", "Optional substring/regex to wait for.") })
-            put("timeout_seconds", buildJsonObject { put("type", "integer"); put("description", "Used only with wait_for. Default $DEFAULT_TIMEOUT_S.") })
-            put("lines", buildJsonObject { put("type", "integer"); put("description", "Scrollback lines (default $DEFAULT_READ_LINES).") })
+            put("session_id", buildJsonObject { put("type", "string"); put("description", "Точный идентификатор из termux_session_start или termux_session_list.") })
+            put("wait_for", buildJsonObject { put("type", "string"); put("description", "Необязательная подстрока или регулярное выражение, появления которого нужно дождаться на экране.") })
+            put("timeout_seconds", buildJsonObject { put("type", "integer"); put("description", "Таймаут в секундах, максимум 600. Отсутствие или 0 использует 20 секунд; положительные значения ограничиваются диапазоном 1–600."); put("minimum", 0); put("maximum", 600); put("default", 20) })
+            put("lines", buildJsonObject { put("type", "integer"); put("description", "Число строк истории для чтения, по умолчанию 200; отрицательное значение приводится к 0."); put("default", 200) })
         })
     },
     execute = { input ->
@@ -561,7 +569,8 @@ fun termuxSessionReadTool(context: Context): Tool = Tool(
         val r = read as? CaptureResult.Success
             ?: return@Tool sessionErrorEnvelope("read_failed", "Не удалось прочитать экран сессии. Проверьте Termux и повторите termux_session_read.", read, session)
         listOf(UIMessagePart.Text(buildJsonObject {
-            put("success", true); put("screen", truncateOut(r.stdout))
+            put("success", true)
+            screenReceipt(r.stdout).forEach { (key, value) -> put(key, value) }
         }.toString()))
     }
 )
@@ -569,10 +578,10 @@ fun termuxSessionReadTool(context: Context): Tool = Tool(
 fun termuxSessionKillTool(context: Context): Tool = Tool(
     name = "termux_session_kill",
     needsApproval = { true },
-    description = "End a Termux session opened by termux_session_start.",
+    description = "Завершить сессию, созданную termux_session_start. Используйте после завершения задачи или для освобождения одного из 8 слотов; для остановки команды с сохранением терминала отправьте C-c через termux_session_send. Идентификатор уточните через termux_session_list. Завершение сессии прекращает её интерактивную работу.",
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {
-            put("session_id", buildJsonObject { put("type", "string"); put("description", "Session id to kill.") })
+            put("session_id", buildJsonObject { put("type", "string"); put("description", "Точный идентификатор из termux_session_start или termux_session_list.") })
         })
     },
     execute = { input ->
@@ -590,7 +599,7 @@ fun termuxSessionKillTool(context: Context): Tool = Tool(
 fun termuxSessionListTool(context: Context): Tool = Tool(
     name = "termux_session_list",
     needsApproval = { true },
-    description = "List live Termux sessions opened by the agent (id, name, last activity).",
+    description = "Получить список живых сессий Termux, созданных инструментами: session_id, время создания и последней активности. Используйте перед read/send/kill, если идентификатор неизвестен. Не создаёт сессию и не читает её экран; для этого используйте termux_session_start или termux_session_read.",
     parameters = { InputSchema.Obj(properties = buildJsonObject {}) },
     execute = { _ ->
         preflight(context)?.let { return@Tool it }

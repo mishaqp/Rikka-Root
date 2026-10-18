@@ -83,17 +83,14 @@ private suspend fun withSavedHostSession(
 /** Upload a local file to a saved-host's remote path via SFTP. */
 fun sshUploadTool(context: Context, repo: SshHostRepository, access: LocalFileAccess = LocalFileAccess(context)): Tool = Tool(
     name = "ssh_upload",
-    description = """
-        Upload a local file from the device to a remote path on a saved SSH host using SFTP.
-        Both paths are absolute file paths. The remote directory must already exist.
-    """.trimIndent().replace("\n", " "),
+    description = "Передать локальный файл на сохранённый SSH-хост через SFTP. Выберите name через list_ssh_hosts; для локального копирования используйте copy_file, для HTTP — download_file. local_path должен разрешаться в доступный локальный файл scratch, upload, workspace или явно разрешённого общего хранилища; content:// не поддерживается. remote_path — путь файла на сервере, его родительская папка должна существовать. Существующий удалённый файл может быть перезаписан, атомарность удалённой замены не гарантируется. Таймаут 1–600 секунд, по умолчанию 60; при ошибке проверьте файлы перед повтором.",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                put("name", buildJsonObject { put("type", "string"); put("description", "Saved host name") })
-                put("local_path", buildJsonObject { put("type", "string"); put("description", "Absolute path on the device") })
-                put("remote_path", buildJsonObject { put("type", "string"); put("description", "Absolute remote path (full filename)") })
-                put("timeout_seconds", buildJsonObject { put("type", "integer"); put("description", "Total timeout, default 60, max 600") })
+                put("name", buildJsonObject { put("type", "string"); put("description", "Точное имя сохранённого хоста из list_ssh_hosts.") })
+                put("local_path", buildJsonObject { put("type", "string"); put("description", "Разрешённый локальный путь: /scratch, upload, workspace либо доступное общее хранилище. Не content://.") })
+                put("remote_path", buildJsonObject { put("type", "string"); put("description", "Путь файла на удалённом сервере; предпочтительно абсолютный, с именем файла.") })
+                put("timeout_seconds", buildJsonObject { put("type", "integer"); put("description", "Общий таймаут операции в секундах: 1–600, по умолчанию 60."); put("minimum", 1); put("maximum", 600); put("default", 60) })
             },
             required = listOf("name", "local_path", "remote_path")
         )
@@ -142,18 +139,14 @@ fun sshUploadTool(context: Context, repo: SshHostRepository, access: LocalFileAc
 /** Download a remote file from a saved host to a local path via SFTP. */
 fun sshDownloadTool(context: Context, repo: SshHostRepository, access: LocalFileAccess = LocalFileAccess(context)): Tool = Tool(
     name = "ssh_download",
-    description = """
-        Download a remote file from a saved SSH host to a local path on the device using SFTP.
-        Both paths are absolute file paths. The local directory must already exist (or be the
-        app's cache/files dir).
-    """.trimIndent().replace("\n", " "),
+    description = "Скачать файл с сохранённого SSH-хоста через SFTP в разрешённый локальный путь. Выберите name через list_ssh_hosts; для HTTP используйте download_file, для локальных файлов — copy_file. local_path должен разрешаться в доступный локальный файл scratch, upload, workspace или явно разрешённого общего хранилища; content:// не поддерживается. Папка назначения создаётся, если доступ разрешён. Скачивание идёт в собственный кэш приложения на томе назначения; после полного получения выполняется атомарная замена. Если такой кэш или атомарная замена недоступны, старый файл сохраняется. Таймаут 1–600 секунд, по умолчанию 60.",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                put("name", buildJsonObject { put("type", "string"); put("description", "Saved host name") })
-                put("remote_path", buildJsonObject { put("type", "string"); put("description", "Absolute remote file path") })
-                put("local_path", buildJsonObject { put("type", "string"); put("description", "Absolute local path on the device") })
-                put("timeout_seconds", buildJsonObject { put("type", "integer"); put("description", "Total timeout, default 60, max 600") })
+                put("name", buildJsonObject { put("type", "string"); put("description", "Точное имя сохранённого хоста из list_ssh_hosts.") })
+                put("remote_path", buildJsonObject { put("type", "string"); put("description", "Путь файла на удалённом сервере; предпочтительно абсолютный, с именем файла.") })
+                put("local_path", buildJsonObject { put("type", "string"); put("description", "Разрешённый локальный путь: /scratch, upload, workspace либо доступное общее хранилище. Не content://.") })
+                put("timeout_seconds", buildJsonObject { put("type", "integer"); put("description", "Общий таймаут операции в секундах: 1–600, по умолчанию 60."); put("minimum", 1); put("maximum", 600); put("default", 60) })
             },
             required = listOf("name", "remote_path", "local_path")
         )

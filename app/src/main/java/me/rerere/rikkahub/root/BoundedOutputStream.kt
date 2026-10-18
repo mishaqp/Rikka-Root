@@ -19,11 +19,13 @@ internal class BoundedOutputStream(private val cap: Int) : OutputStream() {
         if (remaining > 0) bytes.write(source, offset, minOf(length, remaining))
     }
 
+    @Synchronized fun isTruncated(): Boolean = total > cap
+
     @Synchronized fun snapshot(): String {
         val captured = bytes.toByteArray()
         if (total <= cap) return String(captured, Charsets.UTF_8)
         var keep = minOf(cap, captured.size)
         while (keep in 1 until captured.size && (captured[keep].toInt() and 0xc0) == 0x80) keep--
-        return String(captured, 0, keep, Charsets.UTF_8) + "\n…[truncated; ${total - keep} bytes more]"
+        return String(captured, 0, keep, Charsets.UTF_8) + "\n…[вывод сокращён; ещё ${total - keep} байт]"
     }
 }

@@ -674,4 +674,50 @@ class RootShellManagerTest {
             }
         }
     }
+
+    @Test fun `root tool exposes actual foreground truncation`() = assertRootClipping(headless = false)
+
+    @Test fun `root tool exposes actual prepared headless truncation`() = assertRootClipping(headless = true)
+
+    private fun assertRootClipping(headless: Boolean) = runBlocking {
+        run {
+            val (su, _) = fakeSu()
+            val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+            try {
+                if (headless) assertEquals(RootStatus.READY, manager.verifyRoot(prepareHeadless = true))
+                val tool = me.rerere.rikkahub.data.ai.tools.local.buildRootTool(manager)
+                val invocation = RootInvocation(automatic = false, automaticAllowed = { true })
+                val run = me.rerere.rikkahub.data.ai.tools.RunExecutionContext(kotlin.uuid.Uuid.random(),
+                    kotlin.uuid.Uuid.random(), me.rerere.rikkahub.data.ai.tools.RunOrigin.SUB_AGENT)
+                val context = if (headless) invocation + run else invocation
+                val result = kotlinx.coroutines.withContext(context) {
+                    val parts = tool.execute(kotlinx.serialization.json.Json.parseToJsonElement("""{"command":"head -c 9000 /dev/zero","timeout_ms":2000}"""))
+                    kotlinx.serialization.json.Json.parseToJsonElement((parts.single() as me.rerere.ai.ui.UIMessagePart.Text).text) as kotlinx.serialization.json.JsonObject
+                }
+                assertEquals("true", result["truncated"].toString())
+                assertEquals("true", result["stdout_truncated"].toString())
+                assertEquals("false", result["stderr_truncated"].toString())
+                val out = (result["stdout"] as kotlinx.serialization.json.JsonPrimitive).content
+                assertTrue(out.startsWith("\u0000".repeat(8000)))
+                assertTrue(out, out.contains("сокращён"))
+                val recovery = (result["recovery"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
+                assertTrue(recovery, recovery.contains("не повтор", ignoreCase = true))
+            } finally { manager.close() }
+        }
+    }
+
+    @Test fun `root printed truncation marker cannot manufacture actual clipping metadata`() = runBlocking {
+        val (su, _) = fakeSu()
+        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        try {
+            val tool = me.rerere.rikkahub.data.ai.tools.local.buildRootTool(manager)
+            val parts = kotlinx.coroutines.withContext(RootInvocation(automatic = false, automaticAllowed = { true })) {
+                tool.execute(kotlinx.serialization.json.Json.parseToJsonElement("""{"command":"printf '[truncated] вывод сокращён'","timeout_ms":2000}"""))
+            }
+            val result = kotlinx.serialization.json.Json.parseToJsonElement((parts.single() as me.rerere.ai.ui.UIMessagePart.Text).text) as kotlinx.serialization.json.JsonObject
+            assertEquals("[truncated] вывод сокращён", (result["stdout"] as kotlinx.serialization.json.JsonPrimitive).content)
+            assertFalse(result["truncated"].toString() == "true")
+            assertFalse(result.containsKey("recovery"))
+        } finally { manager.close() }
+    }
 }

@@ -337,9 +337,7 @@ internal fun classifyMcpError(message: String): Pair<String, String> {
 
 fun mcpListTool(settingsStore: SettingsStore, manager: McpManager, caller: McpControlCaller): Tool = Tool(
     name = "mcp_list",
-    description = """
-        Список всех настроенных серверов MCP, состояние подключения и число инструментов. Только чтение. Используйте перед добавлением сервера или для проверки ранее добавленного. enabled_for_assistant=false означает, что сервер подключён, но его инструменты не включены для текущего чата и вызовы будут недоступны. mcp_add автоматически включает созданный сервер для вызывающего чата. Секретные заголовки скрыты.
-    """.trimIndent(),
+    description = "Список всех настроенных серверов MCP, состояние подключения и число инструментов. Только чтение. Используйте перед добавлением сервера или для проверки ранее добавленного. enabled_for_assistant=false означает, что сервер подключён, но его инструменты не включены для текущего чата и вызовы будут недоступны. mcp_add автоматически включает созданный сервер для вызывающего чата. Секретные заголовки скрыты. Для схем и точных имён вызываемых инструментов используйте mcp_list_tools.",
     parameters = { InputSchema.Obj(properties = buildJsonObject {}, required = emptyList()) },
     execute = {
         val settings = settingsStore.settingsFlow.value
@@ -365,15 +363,13 @@ fun mcpListTool(settingsStore: SettingsStore, manager: McpManager, caller: McpCo
 
 fun mcpGetTool(settingsStore: SettingsStore, manager: McpManager, caller: McpControlCaller): Tool = Tool(
     name = "mcp_get",
-    description = """
-        Полная конфигурация одного сервера MCP по id, со скрытыми секретными заголовками и списком доступных инструментов. Только чтение.
-    """.trimIndent(),
+    description = "Полная конфигурация одного сервера MCP по id, со скрытыми секретными заголовками и списком доступных инструментов. Только чтение. Используйте для проверки конкретного сервера перед изменением; если id неизвестен — mcp_list, для имён вызова — mcp_list_tools.",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("id", buildJsonObject {
                     put("type", "string")
-                    put("description", "UUID сервера из mcp_list или mcp_add")
+                    put("description", "UUID существующего сервера из mcp_list или mcp_add.")
                 })
             },
             required = listOf("id"),
@@ -413,43 +409,46 @@ fun mcpGetTool(settingsStore: SettingsStore, manager: McpManager, caller: McpCon
 
 fun mcpAddTool(settingsStore: SettingsStore, manager: McpManager, caller: McpControlCaller, secretStore: McpControlSecretStore): Tool = Tool(
     name = "mcp_add",
-    description = """
-        Добавить сервер MCP. transport="sse" или "streamable_http", уникальное name (до 60 символов), публичный http(s) url, optional enabled (по умолчанию true), headers как список {name,value} (до 32). Секретные заголовки передавайте только ссылкой AndroidKeyStore из защищённого поля настроек MCP; не отправляйте токены в чат или URL. Локальные/частные IP, DNS на них и редиректы запрещены. После регистрации ожидает до connect_timeout_seconds (15 по умолчанию, максимум 60); если CONNECTING — используйте mcp_test. Обычно сервер устанавливают на удалённой машине и публикуют endpoint HTTP/SSE, затем вызывают mcp_add. Требуется одобрение изменения конфигурации.
-    """.trimIndent(),
+    description = "Добавить сервер MCP. transport=\"sse\" или \"streamable_http\", уникальное name (до 60 символов), публичный http(s) url, необязательный enabled (по умолчанию true), headers как список {name,value} (до 32). Секретные заголовки передавайте только ссылкой AndroidKeyStore из защищённого поля настроек MCP; не отправляйте токены в чат или URL. Локальные/частные IP, DNS на них и редиректы запрещены. После регистрации ожидает до connect_timeout_seconds (15 по умолчанию, максимум 60); если CONNECTING — используйте mcp_test. Обычно сервер устанавливают на удалённой машине и публикуют endpoint HTTP/SSE, затем вызывают mcp_add. Требуется одобрение изменения конфигурации. Для уже сохранённого сервера используйте mcp_update; для локальной команды — Termux или SSH, а не MCP stdio.",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("transport", buildJsonObject {
                     put("type", "string")
-                    put("description", "sse или streamable_http. Stdio не поддерживается.")
+                    put("description", "Транспорт MCP: sse или streamable_http. Stdio не поддерживается.")
                 })
                 put("name", buildJsonObject {
                     put("type", "string")
-                    put("description", "Отображаемое название: непустое, уникальное без учёта регистра, до 60 символов, без управляющих символов и частей пути «.» и «..».")
+                    put("description", "Название сервера: непустое, уникальное без учёта регистра, до 60 символов; без управляющих символов и частей пути «.»/«..».")
                 })
                 put("url", buildJsonObject {
                     put("type", "string")
-                    put("description", "Публичный http:// или https:// URL endpoint MCP. Другие схемы, локальные адреса и редиректы запрещены.")
+                    put("description", "Публичный http(s) URL endpoint MCP. Секреты в URL, локальные адреса и редиректы запрещены.")
                 })
                 put("enabled", buildJsonObject {
                     put("type", "boolean")
-                    put("description", "Включить сервер при создании. По умолчанию true.")
+                    put("description", "Включить при создании; по умолчанию true.")
+                    put("default", true)
                 })
                 put("headers", buildJsonObject {
                     put("type", "array")
-                    put("description", "Необязательные заголовки [{name,value},...], до 32. Для секретов используйте ссылки AndroidKeyStore из настроек MCP.")
+                    put("description", "Необязательный массив заголовков {name,value}, до 32. Секреты — только ссылки AndroidKeyStore из настроек MCP.")
                     put("items", buildJsonObject {
                         put("type", "object")
                         put("properties", buildJsonObject {
-                            put("name", buildJsonObject { put("type", "string") })
-                            put("value", buildJsonObject { put("type", "string") })
+                            put("name", buildJsonObject { put("type", "string"); put("description", "Имя HTTP-заголовка без пробелов, двоеточий и управляющих символов.") })
+                            put("value", buildJsonObject { put("type", "string"); put("description", "Значение заголовка; для секрета только ссылка AndroidKeyStore из настроек MCP, не исходный токен.") })
                         })
                         put("required", buildJsonArray { add("name"); add("value") })
                     })
+                    put("maxItems", 32)
                 })
                 put("connect_timeout_seconds", buildJsonObject {
                     put("type", "integer")
-                    put("description", "Секунды ожидания первой синхронизации. По умолчанию 15, максимум 60.")
+                    put("description", "Ожидание синхронизации в секундах: 1–60, по умолчанию 15. При CONNECTING проверьте позже через mcp_test.")
+                    put("minimum", 1)
+                    put("maximum", 60)
+                    put("default", 15)
                 })
             },
             required = listOf("transport", "name", "url"),
@@ -553,29 +552,29 @@ fun mcpAddTool(settingsStore: SettingsStore, manager: McpManager, caller: McpCon
 
 fun mcpUpdateTool(settingsStore: SettingsStore, manager: McpManager, secretStore: McpControlSecretStore): Tool = Tool(
     name = "mcp_update",
-    description = """
-        Изменить конфигурацию сервера MCP. Аргументы как у mcp_add плюс id; пропущенные enabled и headers сохраняются. При смене адреса OAuth и секретные заголовки сбрасываются, потребуется повторная авторизация. Старый клиент отключается, новый подключается: изменения transport, URL и headers применяются. Список известных инструментов сохраняется; синхронизация запускается автоматически. Секретные значения — только ссылки AndroidKeyStore из настроек MCP. Публичные адреса, без редиректов. Требуется одобрение изменения конфигурации.
-    """.trimIndent(),
+    description = "Изменить конфигурацию сервера MCP. Аргументы как у mcp_add плюс id; пропущенные enabled и headers сохраняются. При смене адреса OAuth и секретные заголовки сбрасываются, потребуется повторная авторизация. Старый клиент отключается, новый подключается: изменения transport, URL и headers применяются. Список известных инструментов сохраняется; синхронизация запускается автоматически. Секретные значения — только ссылки AndroidKeyStore из настроек MCP. Публичные адреса, без редиректов. Требуется одобрение изменения конфигурации. Используйте для исправления существующей конфигурации, а не создания копии. Для одного флага enabled достаточно mcp_set_enabled; id уточните через mcp_list.",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                put("id", buildJsonObject { put("type", "string") })
-                put("transport", buildJsonObject { put("type", "string") })
-                put("name", buildJsonObject { put("type", "string") })
-                put("url", buildJsonObject { put("type", "string") })
-                put("enabled", buildJsonObject { put("type", "boolean") })
+                put("id", buildJsonObject { put("type", "string"); put("description", "UUID существующего сервера из mcp_list или mcp_add.") })
+                put("transport", buildJsonObject { put("type", "string"); put("description", "Транспорт MCP: sse или streamable_http. Stdio не поддерживается.") })
+                put("name", buildJsonObject { put("type", "string"); put("description", "Название сервера: непустое, уникальное без учёта регистра, до 60 символов; без управляющих символов и частей пути «.»/«..».") })
+                put("url", buildJsonObject { put("type", "string"); put("description", "Публичный http(s) URL endpoint MCP. Секреты в URL, локальные адреса и редиректы запрещены.") })
+                put("enabled", buildJsonObject { put("type", "boolean"); put("description", "Необязательный флаг; при отсутствии сохраняется текущее состояние.") })
                 put("headers", buildJsonObject {
                     put("type", "array")
+                    put("description", "Необязательный массив {name,value}, до 32. При отсутствии сохраняются текущие заголовки; при смене origin секретные сбрасываются. Секреты задаются только ссылками AndroidKeyStore.")
                     put("items", buildJsonObject {
                         put("type", "object")
                         put("properties", buildJsonObject {
-                            put("name", buildJsonObject { put("type", "string") })
-                            put("value", buildJsonObject { put("type", "string") })
+                            put("name", buildJsonObject { put("type", "string"); put("description", "Имя HTTP-заголовка без пробелов, двоеточий и управляющих символов.") })
+                            put("value", buildJsonObject { put("type", "string"); put("description", "Значение заголовка; для секрета только ссылка AndroidKeyStore из настроек MCP, не исходный токен.") })
                         })
                         put("required", buildJsonArray { add("name"); add("value") })
                     })
+                    put("maxItems", 32)
                 })
-                put("connect_timeout_seconds", buildJsonObject { put("type", "integer") })
+                put("connect_timeout_seconds", buildJsonObject { put("type", "integer"); put("description", "Ожидание синхронизации в секундах: 1–60, по умолчанию 15. При CONNECTING проверьте позже через mcp_test."); put("minimum", 1); put("maximum", 60); put("default", 15) })
             },
             required = listOf("id", "transport", "name", "url"),
         )
@@ -717,12 +716,10 @@ fun mcpUpdateTool(settingsStore: SettingsStore, manager: McpManager, secretStore
 
 fun mcpDeleteTool(settingsStore: SettingsStore, manager: McpManager, caller: McpControlCaller): Tool = Tool(
     name = "mcp_delete",
-    description = """
-        Удалить сервер MCP: отключить клиент, отменить повторные подключения и удалить конфигурацию. Ассистенты и текущий чат потеряют доступ к его инструментам. Необратимое изменение, требует одобрения.
-    """.trimIndent(),
+    description = "Удалить сервер MCP: отключить клиент, отменить повторные подключения и удалить конфигурацию. Ассистенты и текущий чат потеряют доступ к его инструментам. Необратимое изменение, требует одобрения. Используйте для окончательного удаления записи; для временного отключения без потери конфигурации — mcp_set_enabled. id уточните через mcp_list.",
     parameters = {
         InputSchema.Obj(
-            properties = buildJsonObject { put("id", buildJsonObject { put("type", "string") }) },
+            properties = buildJsonObject { put("id", buildJsonObject { put("type", "string"); put("description", "UUID существующего сервера из mcp_list или mcp_add.") }) },
             required = listOf("id"),
         )
     },
@@ -757,14 +754,12 @@ fun mcpDeleteTool(settingsStore: SettingsStore, manager: McpManager, caller: Mcp
 
 fun mcpSetEnabledTool(settingsStore: SettingsStore, manager: McpManager, secretStore: McpControlSecretStore): Tool = Tool(
     name = "mcp_set_enabled",
-    description = """
-        Изменить флаг enabled сервера MCP. При отключении клиент закрывается, при включении подключается заново. Требует одобрения.
-    """.trimIndent(),
+    description = "Изменить флаг enabled сервера MCP. При отключении клиент закрывается, при включении подключается заново. Требует одобрения. Используйте для временного отключения без удаления конфигурации. Для изменения адреса — mcp_update, для повторной проверки — mcp_test.",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                put("id", buildJsonObject { put("type", "string") })
-                put("enabled", buildJsonObject { put("type", "boolean") })
+                put("id", buildJsonObject { put("type", "string"); put("description", "UUID существующего сервера из mcp_list или mcp_add.") })
+                put("enabled", buildJsonObject { put("type", "boolean"); put("description", "true — подключить сервер; false — отключить, сохранив конфигурацию.") })
             },
             required = listOf("id", "enabled"),
         )
@@ -809,14 +804,12 @@ fun mcpSetEnabledTool(settingsStore: SettingsStore, manager: McpManager, secretS
 
 fun mcpTestTool(settingsStore: SettingsStore, manager: McpManager, secretStore: McpControlSecretStore): Tool = Tool(
     name = "mcp_test",
-    description = """
-        Принудительно переподключить сервер MCP, синхронизировать инструменты и вернуть результат. Выполняется сетевое подключение к публичному адресу без редиректов; требуется одобрение. Полезно после mcp_add в состоянии CONNECTING или для проверки работы сервера. Повторное подключение начинается заново.
-    """.trimIndent(),
+    description = "Принудительно переподключить сервер MCP, синхронизировать инструменты и вернуть результат. Выполняется сетевое подключение к публичному адресу без редиректов; требуется одобрение. Полезно после mcp_add в состоянии CONNECTING или для проверки работы сервера. Повторное подключение начинается заново. Для чтения уже известного статуса без подключения используйте mcp_get.",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                put("id", buildJsonObject { put("type", "string") })
-                put("wait_seconds", buildJsonObject { put("type", "integer") })
+                put("id", buildJsonObject { put("type", "string"); put("description", "UUID существующего сервера из mcp_list или mcp_add.") })
+                put("wait_seconds", buildJsonObject { put("type", "integer"); put("description", "Ожидание синхронизации в секундах: 1–60, по умолчанию 15. При CONNECTING проверьте позже через mcp_test."); put("minimum", 1); put("maximum", 60); put("default", 15) })
             },
             required = listOf("id"),
         )
@@ -852,13 +845,11 @@ fun mcpTestTool(settingsStore: SettingsStore, manager: McpManager, secretStore: 
 
 fun mcpListToolsTool(settingsStore: SettingsStore, manager: McpManager, caller: McpControlCaller): Tool = Tool(
     name = "mcp_list_tools",
-    description = """
-        Список инструментов одного сервера по id или всех включённых серверов, если id отсутствует. Возвращает имя и id сервера, tool_name, dispatchable_name (точное имя для вызова; одного tool_name недостаточно), enabled_for_assistant (false — сервер не включён для текущего чата), необходимость одобрения и input_schema, если сервер её предоставил. Перед вызовом отключённого для чата сервера добавьте его через mcp_add или попросите пользователя включить его в настройках чата.
-    """.trimIndent(),
+    description = "Список инструментов одного сервера по id или всех включённых серверов, если id отсутствует. Возвращает имя и id сервера, tool_name, dispatchable_name (точное имя для вызова; одного tool_name недостаточно), enabled_for_assistant (false — сервер не включён для текущего чата), необходимость одобрения и input_schema, если сервер её предоставил. Перед вызовом отключённого для чата сервера добавьте его через mcp_add или попросите пользователя включить его в настройках чата. Для подключения или настройки сервера используйте mcp_add/mcp_update; этот инструмент только читает список.",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                put("id", buildJsonObject { put("type", "string") })
+                put("id", buildJsonObject { put("type", "string"); put("description", "Необязательный UUID сервера; без него перечисляются инструменты всех включённых серверов.") })
             },
             required = emptyList(),
         )
@@ -913,24 +904,22 @@ fun mcpListToolsTool(settingsStore: SettingsStore, manager: McpManager, caller: 
 
 fun mcpSetToolApprovalTool(settingsStore: SettingsStore): Tool = Tool(
     name = "mcp_set_tool_approval",
-    description = """
-        Включить дополнительное подтверждение для одного инструмента MCP на заданном сервере: needs_approval допускает только true. Отключить подтверждение можно только вручную в настройках MCP. Остальные инструменты не меняются. Включение требует одобрения.
-    """.trimIndent(),
+    description = "Включить дополнительное подтверждение для одного инструмента MCP на заданном сервере: needs_approval допускает только true. Отключить подтверждение можно только вручную в настройках MCP. Остальные инструменты не меняются. Включение требует одобрения. Точные server_id и tool_name уточните через mcp_list_tools; для выключения всего сервера используйте mcp_set_enabled.",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("server_id", buildJsonObject {
                     put("type", "string")
-                    put("description", "UUID сервера MCP, для которого нужно включить подтверждение.")
+                    put("description", "UUID сервера из mcp_list_tools.")
                 })
                 put("tool_name", buildJsonObject {
                     put("type", "string")
-                    put("description", "Точное исходное имя инструмента MCP на выбранном сервере.")
+                    put("description", "Точное исходное имя инструмента MCP на сервере, из mcp_list_tools; не dispatchable_name.")
                 })
                 put("needs_approval", buildJsonObject {
                     put("type", "boolean")
                     put("enum", buildJsonArray { add(true) })
-                    put("description", "Только true: включить дополнительное подтверждение. Отключение доступно только вручную в настройках MCP.")
+                    put("description", "Только true: включить дополнительное подтверждение. Отключение доступно вручную в настройках MCP.")
                 })
             },
             required = listOf("server_id", "tool_name", "needs_approval"),

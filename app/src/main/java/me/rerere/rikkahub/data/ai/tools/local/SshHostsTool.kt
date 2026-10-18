@@ -23,22 +23,17 @@ import me.rerere.rikkahub.data.repository.SshHostRepository
  */
 fun saveSshHostTool(repo: SshHostRepository): Tool = Tool(
     name = "save_ssh_host",
-    description = """
-        Persist an SSH host (host, port, user, credentials) under a short name so the LLM can
-        reference it later via ssh_exec_saved / ssh_upload / ssh_download without re-typing
-        credentials. Replaces any existing host with the same name. Pass either password OR
-        private_key for authentication.
-    """.trimIndent().replace("\n", " "),
+    description = "Сохранить SSH-хост под коротким именем для ssh_exec_saved, ssh_upload и ssh_download. Используйте для повторных подключений; для разовой команды — ssh_exec. Хост с тем же именем заменяется. Нужны host, user и пароль либо приватный ключ; безопаснее ввести секреты в настройках SSH приложения. Порт по умолчанию 22, допустимо 1–65535. Секреты не возвращаются.",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                put("name", buildJsonObject { put("type", "string"); put("description", "Short name (used as lookup key)") })
-                put("host", buildJsonObject { put("type", "string"); put("description", "Hostname or IP") })
-                put("port", buildJsonObject { put("type", "integer"); put("description", "SSH port, default 22") })
-                put("user", buildJsonObject { put("type", "string"); put("description", "SSH username") })
-                put("password", buildJsonObject { put("type", "string"); put("description", "Password (use only if no private_key)") })
-                put("private_key", buildJsonObject { put("type", "string"); put("description", "Full PEM/OpenSSH private key contents") })
-                put("passphrase", buildJsonObject { put("type", "string"); put("description", "Optional passphrase for the private key") })
+                put("name", buildJsonObject { put("type", "string"); put("description", "Короткое имя записи. Существующая запись с этим именем будет заменена.") })
+                put("host", buildJsonObject { put("type", "string"); put("description", "Имя DNS или IP-адрес SSH-сервера.") })
+                put("port", buildJsonObject { put("type", "integer"); put("description", "Порт SSH: 1–65535, по умолчанию 22."); put("minimum", 1); put("maximum", 65535); put("default", 22) })
+                put("user", buildJsonObject { put("type", "string"); put("description", "Имя пользователя на SSH-сервере.") })
+                put("password", buildJsonObject { put("type", "string"); put("description", "Пароль для входа, если не используется private_key. Безопаснее ввести в настройках SSH.") })
+                put("private_key", buildJsonObject { put("type", "string"); put("description", "Полный приватный ключ PEM/OpenSSH вместо пароля. Безопаснее сохранить в настройках SSH.") })
+                put("passphrase", buildJsonObject { put("type", "string"); put("description", "Необязательная парольная фраза для зашифрованного private_key.") })
             },
             required = listOf("name", "host", "user")
         )
@@ -82,7 +77,7 @@ fun saveSshHostTool(repo: SshHostRepository): Tool = Tool(
 /** List saved hosts. Secrets omitted — only metadata + which auth method is configured. */
 fun listSshHostsTool(repo: SshHostRepository): Tool = Tool(
     name = "list_ssh_hosts",
-    description = "List all saved SSH hosts (name, host, port, user, has_password, has_private_key). Secrets are not returned.".trimIndent().replace("\n", " "),
+    description = "Получить сохранённые SSH-хосты: name, host, port, user, has_password и has_private_key. Используйте, чтобы выбрать точное name для ssh_exec_saved или SFTP. Пароли и ключи не возвращаются; для изменения записи используйте save_ssh_host или настройки SSH.",
     parameters = { InputSchema.Obj(properties = buildJsonObject {}) },
     needsApproval = { true },
     execute = {
@@ -110,11 +105,11 @@ fun listSshHostsTool(repo: SshHostRepository): Tool = Tool(
 /** Delete a saved host by name. */
 fun deleteSshHostTool(repo: SshHostRepository): Tool = Tool(
     name = "delete_ssh_host",
-    description = "Delete a saved SSH host by name.".trimIndent().replace("\n", " "),
+    description = "Удалить сохранённый SSH-хост по точному name из list_ssh_hosts. Используйте для удаления ненужной записи; для изменения адреса или учётных данных — save_ssh_host либо настройки SSH. Удаление записи не удаляет файлы на сервере.",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                put("name", buildJsonObject { put("type", "string"); put("description", "Saved host name") })
+                put("name", buildJsonObject { put("type", "string"); put("description", "Точное имя сохранённого хоста из list_ssh_hosts.") })
             },
             required = listOf("name")
         )
@@ -144,16 +139,11 @@ fun deleteSshHostTool(repo: SshHostRepository): Tool = Tool(
  */
 fun forgetSshHostKeyTool(context: Context): Tool = Tool(
     name = "ssh_forget_host_key",
-    description = """
-        Remove the stored host key for an SSH host from known_hosts. Call this AFTER the user
-        explicitly confirms they reinstalled the remote machine — the next connect will trust
-        the new key. NEVER call this without user confirmation: a changed host key can also
-        indicate a man-in-the-middle attack.
-    """.trimIndent().replace("\n", " "),
+    description = "Удалить сохранённый ключ сервера SSH из known_hosts по host. Используйте только после явного подтверждения пользователем переустановки сервера: следующее подключение примет новый ключ. Не применяйте для обычного сбоя входа или обхода предупреждения — смена ключа может означать подмену сервера. Для просмотра адреса используйте list_ssh_hosts, для изменения пароля — настройки SSH.",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                put("host", buildJsonObject { put("type", "string"); put("description", "Hostname or IP whose stored key should be forgotten") })
+                put("host", buildJsonObject { put("type", "string"); put("description", "Фактический hostname или IP, а не имя записи. Удаляет сохранённый ключ только после подтверждения пользователя.") })
             },
             required = listOf("host")
         )
@@ -178,19 +168,15 @@ fun forgetSshHostKeyTool(context: Context): Tool = Tool(
 /** Run a command on a saved host without re-passing credentials. */
 fun sshExecSavedTool(context: Context, repo: SshHostRepository): Tool = Tool(
     name = "ssh_exec_saved",
-    description = """
-        Run a shell command on a previously-saved SSH host (looked up by name). Returns
-        stdout, stderr, exit_code. For destructive or system-level commands you should
-        explicitly confirm with the user before invoking.
-    """.trimIndent().replace("\n", " "),
+    description = "Выполнить команду на сохранённом SSH-хосте по name из list_ssh_hosts без повторной передачи секретов. Для нового хоста сначала используйте настройки SSH или save_ssh_host; для интерактивного терминала — termux_session_start. Возвращает stdout, stderr и exit_code; stdout ограничен 8000 байт, stderr 2000 байт. Таймаут 1–300 секунд, по умолчанию 30. background=true возвращает PID отсоединённой команды и несовместим со stdin. Разрушительные и системные команды требуют явного согласования с пользователем.",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                put("name", buildJsonObject { put("type", "string"); put("description", "Saved host name") })
-                put("command", buildJsonObject { put("type", "string"); put("description", "Shell command to run") })
-                put("stdin", buildJsonObject { put("type", "string"); put("description", "Optional data piped to the command's stdin (then EOF). Quote-free way to write a file (command=\"cat > /path\") or feed input; omit to send an immediate EOF.") })
-                put("background", buildJsonObject { put("type", "boolean"); put("description", "If true, launch the command fully detached (nohup, streams redirected) and return immediately with its PID instead of waiting. Default false.") })
-                put("timeout_seconds", buildJsonObject { put("type", "integer"); put("description", "Total timeout, default 30, max 300") })
+                put("name", buildJsonObject { put("type", "string"); put("description", "Точное имя сохранённого хоста из list_ssh_hosts.") })
+                put("command", buildJsonObject { put("type", "string"); put("description", "Команда оболочки на удалённом сервере.") })
+                put("stdin", buildJsonObject { put("type", "string"); put("description", "Данные для стандартного ввода команды, затем EOF; при отсутствии сразу EOF. Несовместимо с background=true.") })
+                put("background", buildJsonObject { put("type", "boolean"); put("description", "Отсоединить команду через nohup с перенаправлением потоков и вернуть PID. По умолчанию false; stdin недоступен."); put("default", false) })
+                put("timeout_seconds", buildJsonObject { put("type", "integer"); put("description", "Общий таймаут операции в секундах: 1–300, по умолчанию 30."); put("minimum", 1); put("maximum", 300); put("default", 30) })
             },
             required = listOf("name", "command")
         )
