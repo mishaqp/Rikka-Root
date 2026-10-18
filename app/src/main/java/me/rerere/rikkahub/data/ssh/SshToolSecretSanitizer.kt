@@ -73,6 +73,11 @@ class SshToolSecretSanitizer(private val store: SshCredentialStore) {
                 JsonObject(args.filterKeys { it !in FIELDS }).toString()
             } catch (_: Exception) { PLACEHOLDER }
         }
+        // A streamed name is not executable yet, but its arguments must not enter history raw.
+        internal fun incompleteToolNamePlaceholder(toolName: String): String? = PLACEHOLDER.takeIf {
+            toolName !in TOOLS && TOOLS.any { known -> known.startsWith(toolName) }
+        }
+
         private fun isSshTool(toolName: String): Boolean = toolName in TOOLS
         private val TOOLS = setOf("ssh_exec", "save_ssh_host")
         private val FIELDS = listOf("password", "private_key", "passphrase")
@@ -88,12 +93,15 @@ class SshToolSecretSanitizer(private val store: SshCredentialStore) {
 fun sanitizeSshToolMessages(messages: List<UIMessage>,
     sanitizeArgs: (String, String) -> String = ::sanitizeToolArgsForExport,
 ): List<UIMessage> {
+    fun sanitizeInput(toolName: String, input: String): String =
+        SshToolSecretSanitizer.incompleteToolNamePlaceholder(toolName) ?: sanitizeArgs(toolName, input)
+
     fun sanitizePart(part: UIMessagePart): UIMessagePart = when (part) {
-        is UIMessagePart.Tool -> part.copy(input = sanitizeArgs(part.toolName, part.input),
+        is UIMessagePart.Tool -> part.copy(input = sanitizeInput(part.toolName, part.input),
             output = part.output.map(::sanitizePart))
-        is UIMessagePart.ToolCall -> part.copy(arguments = sanitizeArgs(part.toolName, part.arguments))
+        is UIMessagePart.ToolCall -> part.copy(arguments = sanitizeInput(part.toolName, part.arguments))
         is UIMessagePart.ToolResult -> part.copy(arguments = Json.parseToJsonElement(
-            sanitizeArgs(part.toolName, part.arguments.toString())))
+            sanitizeInput(part.toolName, part.arguments.toString())))
         else -> part
     }
     return messages.map { message -> message.copy(parts = message.parts.map(::sanitizePart)) }

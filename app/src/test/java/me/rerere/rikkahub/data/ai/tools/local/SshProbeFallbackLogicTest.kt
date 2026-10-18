@@ -10,6 +10,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
+import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
@@ -55,6 +56,7 @@ class SshProbeFallbackLogicTest {
         val file = folder.newFile("upload.txt").apply { writeText("payload") }
         val access = mockk<LocalFileAccess>()
         coEvery { access.resolve(file.absolutePath, false) } returns LocalFileSource.Local(file)
+        every { access.checkFile(file, false) } returns file
 
         withDefaultRouteProbe(context, session) {
             val parts = sshUploadTool(context, repository, access).execute(buildJsonObject {
@@ -64,6 +66,7 @@ class SshProbeFallbackLogicTest {
             assertEquals("A successful unbound default-route probe is reachable: $result",
                 "true", result["success"]?.jsonPrimitive?.content)
             assertEquals("7", result["bytes"]?.jsonPrimitive?.content)
+            verify(exactly = 2) { access.checkFile(file, false) }
         }
     }
 
