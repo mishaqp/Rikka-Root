@@ -281,5 +281,5 @@ class McpCollisionNamespacePersistenceAuditTest {
     private fun frozen() = SettingsStore(context, AppScope().apply { cancel() })
     private fun singletonField() = Class.forName("me.rerere.rikkahub.data.datastore.PreferencesStoreKt")
         .getDeclaredField("settingsDataStore").also { it.isAccessible = true }
-    @Suppress("UNCHECKED_CAST") private fun persisted() = singletonField().get(null) as? DataStore<Preferences>
+    private fun persisted() = singletonField().get(null) as? DataStore<Preferences>
 }

@@ -22,7 +22,13 @@ class McpToolDispatchAuditTest {
         val serverId = Uuid.random()
         val originalName = "прочитать/" + "very-long-tool-name".repeat(12)
         val manager = mockk<McpManager>()
-        every { manager.getAllAvailableTools(any(), any()) } returns listOf(Triple(serverId, "Мой сервер", McpTool(name = originalName)))
+        // The same regression is copied into the original audit baseline, which has one argument.
+        val enumerate = McpManager::class.java.methods.single { it.name == "getAllAvailableTools" }
+        assertTrue("Unsupported MCP enumeration signature", enumerate.parameterCount in 1..2)
+        every {
+            if (enumerate.parameterCount == 1) enumerate.invoke(manager, any<Assistant>())
+            else enumerate.invoke(manager, any<Assistant>(), any<Settings>())
+        } returns listOf(Triple(serverId, "Мой сервер", McpTool(name = originalName)))
         coEvery { manager.callTool(serverId, originalName, any()) } returns listOf(UIMessagePart.Text("remote-result"))
         val localTools = mockk<LocalTools>(relaxed = true)
         val factory = ChatToolFactory(

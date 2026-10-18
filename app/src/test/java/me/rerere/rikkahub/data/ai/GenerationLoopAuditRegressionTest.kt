@@ -404,6 +404,23 @@ class GenerationLoopAuditRegressionTest {
         } finally { ToolRuntimeLimits.turnBudgetMs = original }
     }
 
+    // Before the provider-only notice filter existed, the model saw the unchanged history.
+    private fun modelVisibleMessages(messages: List<UIMessage>): List<UIMessage> {
+        val generationLoopClass = try {
+            Class.forName("me.rerere.rikkahub.data.ai.GenerationLoopKt")
+        } catch (_: ClassNotFoundException) {
+            return messages
+        }
+        val filter = try {
+            generationLoopClass.getDeclaredMethod("modelVisibleMessages", List::class.java)
+        } catch (_: NoSuchMethodException) {
+            return messages
+        }
+        val result = filter.invoke(null, messages)
+        check(result is List<*>) { "Invalid modelVisibleMessages result" }
+        return result.map { it as UIMessage }
+    }
+
     private class Fixture(val directory: File, private val first: String = FINAL, private val final: String = FINAL) : Closeable {
         val requests = AtomicInteger()
         val bodies = java.util.concurrent.CopyOnWriteArrayList<String>()
@@ -429,9 +446,22 @@ class GenerationLoopAuditRegressionTest {
             approveEverything: Boolean = false,
             prepareApproval: (String, JsonElement) -> JsonElement = { _, args -> args }) {
             latest = messages
-            loop.generateText(settings, model, messages, assistant = owner, tools = tools, maxSteps = maxSteps,
-                isToolAutoApproved = autoApproved, approveEverything = { approveEverything },
-                prepareToolApproval = prepareApproval).collect { chunk -> when (chunk) {
+            // This fixture is also copied to the original audit baseline, before approveEverything.
+            val generateText = loop::generateText
+            val approveAll: suspend () -> Boolean = { approveEverything }
+            val arguments = mapOf<String, Any>(
+                "settings" to settings, "model" to model, "messages" to messages,
+                "assistant" to owner, "tools" to tools, "maxSteps" to maxSteps,
+                "isToolAutoApproved" to autoApproved, "approveEverything" to approveAll,
+                "prepareToolApproval" to prepareApproval,
+            )
+            val supported = generateText.parameters.mapNotNull { it.name }.toSet()
+            val unsupported = arguments.keys - supported
+            assertTrue("Unsupported generation arguments: $unsupported", unsupported.all { it == "approveEverything" })
+            val supplied = generateText.parameters.filter { it.name in arguments }.associateWith {
+                arguments.getValue(requireNotNull(it.name))
+            }
+            generateText.callBy(supplied).collect { chunk -> when (chunk) {
                 is GenerationChunk.Messages -> { latest = chunk.messages; snapshots += latest }
                 is GenerationChunk.RootExecutionCheckpoint -> { latest = chunk.messages; chunk.ack.complete(Unit) }
             } }
