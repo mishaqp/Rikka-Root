@@ -53,6 +53,8 @@ class RootModeTest {
             "am start -a android.intent.action.SET_ALARM --ei android.intent.extra.alarm.HOUR 7 --ei android.intent.extra.alarm.MINUTES 30 --es android.intent.extra.alarm.MESSAGE 'Подпись' --ez android.intent.extra.alarm.SKIP_UI true",
             "am start -a android.intent.action.SET_TIMER --ei android.intent.extra.alarm.LENGTH 90 --ez android.intent.extra.alarm.SKIP_UI true",
             "am start -a android.intent.action.SHOW_ALARMS",
+            "dumpsys alarm | grep -A6 deskclock", "pm list packages deskclock",
+            "content query --uri content://com.android.contacts/data/phones --projection display_name:data1 --sort '_id DESC'",
             "pm list packages -3", "monkey -p com.example -c android.intent.category.LAUNCHER 1", "am force-stop com.example",
             "am start -a android.intent.action.VIEW -d 'https://example.com'",
             "mkdir -p /sdcard/Documents/Notes && printf '%s\\n' 'строка 1' > '/sdcard/Documents/Notes/Имя.md'",

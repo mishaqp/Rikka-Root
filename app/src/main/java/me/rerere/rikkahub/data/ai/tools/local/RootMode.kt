@@ -54,8 +54,8 @@ object RootMode {
 - Время: date '+%Y-%m-%d %H:%M:%S %Z'
 - Будильник: am start -a android.intent.action.SET_ALARM --ei android.intent.extra.alarm.HOUR 7 --ei android.intent.extra.alarm.MINUTES 30 --es android.intent.extra.alarm.MESSAGE 'Подпись' --ez android.intent.extra.alarm.SKIP_UI true
 - Таймер (секунды, до 86400): am start -a android.intent.action.SET_TIMER --ei android.intent.extra.alarm.LENGTH 90 --es android.intent.extra.alarm.MESSAGE 'Подпись' --ez android.intent.extra.alarm.SKIP_UI true
-- Показать будильники: am start -a android.intent.action.SHOW_ALARMS
-- Приложения: pm list packages -3 (установленные); имя по пакету: dumpsys package ПАКЕТ | grep -m1 versionName; запустить: monkey -p ПАКЕТ -c android.intent.category.LAUNCHER 1; закрыть: am force-stop ПАКЕТ
+- Показать будильники: am start -a android.intent.action.SHOW_ALARMS. Проверить, что будильник или таймер поставлен: dumpsys alarm | grep -A6 deskclock (подпись там не видна, сверяй время)
+- Приложения: pm list packages -3 (установленные); найти пакет по части имени: pm list packages ЧАСТЬ; имя по пакету: dumpsys package ПАКЕТ | grep -m1 versionName; запустить: monkey -p ПАКЕТ -c android.intent.category.LAUNCHER 1; закрыть: am force-stop ПАКЕТ
 - Открыть ссылку или файл: am start -a android.intent.action.VIEW -d 'https://example.com'
 - Заметка: mkdir -p /sdcard/Documents/Notes && printf '%s\n' 'строка 1' 'строка 2' > '/sdcard/Documents/Notes/Имя.md' (>> — дописать); отправить текст в приложение: am start -a android.intent.action.SEND -t text/plain --es android.intent.extra.TEXT 'текст'
 - Уведомление: cmd notification post -S bigtext -t 'Заголовок' rikka 'Текст'
@@ -66,7 +66,7 @@ object RootMode {
 - Громкость (поток 3 — музыка, 2 — звонок, 4 — будильник, 5 — уведомления): cmd media_session volume --stream 3 --get; --set 8. На старых Android: media volume --stream 3 --set 8
 - Яркость: settings put system screen_brightness_mode 0; settings put system screen_brightness 128 (0–255)
 - Экран: input tap X Y; input swipe X1 Y1 X2 Y2 300; input text 'abc' (пробел — %s); input keyevent KEYCODE_HOME | KEYCODE_BACK | KEYCODE_ENTER | KEYCODE_WAKEUP. Разметка с координатами: uiautomator dump /sdcard/window.xml >/dev/null && cat /sdcard/window.xml. Скриншот: screencap -p /sdcard/Pictures/screen.png
-- Контакты: content query --uri content://com.android.contacts/data/phones --projection display_name:data1
+- Контакты: content query --uri content://com.android.contacts/data/phones --projection display_name:data1 (последние добавленные: --sort '_id DESC')
 - SMS: content query --uri content://sms/inbox --projection address:date:body --sort 'date DESC' | head -n 40
 - Журнал звонков: content query --uri content://call_log/calls --projection number:name:date:type --sort 'date DESC' | head -n 40
 Правила: команда не должна ждать ввода (никаких vi, less, top без -n 1). Значения с пробелами бери в одинарные кавычки. Если команда не сработала, прочитай stderr и попробуй другой способ, а не ту же команду. Перед изменением системных настроек и удалением убедись, что пользователь этого хочет.
