@@ -14,12 +14,14 @@ import me.rerere.ai.ui.ServerToolMetadata
 import me.rerere.ai.ui.ServerToolProtocol
 import me.rerere.ai.ui.ServerToolStatus
 import me.rerere.ai.ui.StreamChunk
+import me.rerere.ai.ui.uniqueToolCallId
 import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.json
 import me.rerere.ai.util.parseErrorDetail
 
 internal class ClaudeStreamDecoder : StreamChunkDecoder {
     private val blocks = mutableMapOf<Int, ClaudeStreamBlock>()
+    private val usedClientToolIds = mutableSetOf<String>()
     private var responseId: String? = null
     private var responseModel: String? = null
     private var finishReason: String? = null
@@ -49,9 +51,10 @@ internal class ClaudeStreamDecoder : StreamChunkDecoder {
 
             if (event.event == "content_block_start" && index != null && contentBlock != null) {
                 val kind = contentBlock["type"]?.jsonPrimitive?.contentOrNull ?: ""
-                val blockId = contentBlock["id"]?.jsonPrimitive?.contentOrNull
+                val rawBlockId = contentBlock["id"]?.jsonPrimitive?.contentOrNull
                     ?: contentBlock["tool_use_id"]?.jsonPrimitive?.contentOrNull
                     ?: "${responseId ?: event.id ?: "response"}:block-$index"
+                val blockId = if (kind == "tool_use") uniqueToolCallId(rawBlockId, usedClientToolIds) else rawBlockId
                 val metadata = when (kind) {
                     "thinking" -> contentBlock["signature"]?.jsonPrimitive?.contentOrNull?.let {
                         ClaudeReasoningMetadata(signature = it).toMetadata()

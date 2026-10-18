@@ -99,7 +99,9 @@ class LocalTools(
             val live = settingsStore.settingsFlow.value.assistants.singleOrNull { it.id.toString() == callerId }
             val reason = when {
                 live == null -> "Ассистент недоступен. Откройте чат заново перед вызовом инструмента."
-                option !in live.localTools -> "Функция отключена у ассистента. Включите её в настройках инструментов перед новым вызовом."
+                option !in live.localTools && !(option == LocalToolOption.Root &&
+                    RootMode.isActive(live.rootMode, rootShellManager.status.value)) ->
+                    "Функция отключена у ассистента. Включите её в настройках инструментов перед новым вызовом."
                 else -> null
             }
             if (reason != null) listOf(UIMessagePart.Text(deviceToolError(reason).toString())) else tool.execute(input)

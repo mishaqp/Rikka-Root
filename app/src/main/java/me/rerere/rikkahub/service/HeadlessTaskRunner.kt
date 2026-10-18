@@ -21,6 +21,8 @@ import me.rerere.rikkahub.costguards.TokenBudgetExceededException
 import me.rerere.rikkahub.costguards.TokenBudgetLedger
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.Tool
+import me.rerere.ai.core.ToolArgumentException
+import me.rerere.ai.core.prepareArguments
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
@@ -98,7 +100,7 @@ internal suspend fun runHeadlessDeadline(timeoutMillis: Long, block: suspend () 
         ?: HeadlessTaskResult(HeadlessTaskStatus.TIMED_OUT, errorCode = "deadline_exceeded")
 }
 
-private class HeadlessStop(val outcome: HeadlessTaskStatus, val code: String) :
+private class HeadlessStop(val outcome: HeadlessTaskStatus, val code: String, val detail: String? = null) :
     me.rerere.rikkahub.data.ai.tools.ToolExecutionAbortedException(code)
 
 /** Runs a fresh in-memory side conversation, retaining the normal generation and tool engines. */
@@ -223,7 +225,8 @@ class HeadlessTaskRunner internal constructor(
                             for ((index, action) in request.actions.withIndex()) {
                                 val definition = tools.singleOrNull { it.name == action.name }
                                     ?: stop(HeadlessTaskStatus.BLOCKED, "tool_not_allowed")
-                                checkTool(definition, action.arguments, execution)
+                                val arguments = preparedArguments(definition, action.arguments)
+                                checkTool(definition, arguments, execution)
                                 val callId = "direct-$index"
                                 suspend fun checkpoint() {
                                     started += callId
@@ -231,14 +234,14 @@ class HeadlessTaskRunner internal constructor(
                                 }
                                 val output = if (action.name == "root_exec") {
                                     val call = UIMessagePart.Tool(toolCallId = callId, toolName = action.name,
-                                        input = action.arguments.toString(), approvalState = ToolApprovalState.Auto)
+                                        input = arguments.toString(), approvalState = ToolApprovalState.Auto)
                                     executeRootToolOnce(call, persistStarted = { checkpoint() },
-                                        automaticAllowed = { authorize(execution, action.name, action.arguments) }) {
-                                        definition.execute(action.arguments)
+                                        automaticAllowed = { authorize(execution, action.name, arguments) }) {
+                                        definition.execute(arguments)
                                     }
                                 } else {
                                     checkpoint()
-                                    definition.execute(action.arguments)
+                                    definition.execute(arguments)
                                 }
                                 outputs += output.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }
                                 steps++
@@ -251,7 +254,7 @@ class HeadlessTaskRunner internal constructor(
             return decorate(if (result.status == HeadlessTaskStatus.TIMED_OUT && execution.executionState.effectsInFlight)
                 result.copy(status = HeadlessTaskStatus.INDETERMINATE, errorCode = "execution_interrupted") else result, execution, latest, steps)
         } catch (stop: HeadlessStop) {
-            return decorate(HeadlessTaskResult(stop.outcome, errorCode = stop.code), execution, latest, steps)
+            return decorate(HeadlessTaskResult(stop.outcome, output = stop.detail, errorCode = stop.code), execution, latest, steps)
         } catch (_: TimeoutCancellationException) {
             currentCoroutineContext().ensureActive()
             return decorate(HeadlessTaskResult(HeadlessTaskStatus.INDETERMINATE,
@@ -270,7 +273,8 @@ class HeadlessTaskRunner internal constructor(
         }
     }
 
-    private fun guarded(tool: Tool, context: RunExecutionContext): Tool = tool.copy(execute = { args ->
+    private fun guarded(tool: Tool, context: RunExecutionContext): Tool = tool.copy(execute = { input ->
+        val args = preparedArguments(tool, input)
         checkTool(tool, args, context)
         currentCoroutineContext().ensureActive()
         context.executionState.effectsInFlight = true
@@ -304,7 +308,9 @@ class HeadlessTaskRunner internal constructor(
         if (tool.needsApproval(args) && !authorize(context, tool.name, args)) stop(HeadlessTaskStatus.BLOCKED, "approval_required")
     }
     private suspend fun markWeb(context: RunExecutionContext) { context.webTaint.mark(); onWebContent(context) }
-    private fun stop(status: HeadlessTaskStatus, code: String): Nothing = throw HeadlessStop(status, code)
+    private fun preparedArguments(tool: Tool, input: JsonElement): JsonElement = try { tool.prepareArguments(input) }
+    catch (error: ToolArgumentException) { stop(HeadlessTaskStatus.BLOCKED, "invalid_tool_arguments", error.message) }
+    private fun stop(status: HeadlessTaskStatus, code: String, detail: String? = null): Nothing = throw HeadlessStop(status, code, detail)
     private fun decorate(result: HeadlessTaskResult, context: RunExecutionContext, messages: List<UIMessage>, steps: Int) = result.copy(
         tokensIn = messages.sumOf { (it.usage?.promptTokens ?: 0).coerceAtLeast(0).toLong() },
         tokensOut = messages.sumOf { (it.usage?.completionTokens ?: 0).coerceAtLeast(0).toLong() },

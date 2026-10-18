@@ -60,6 +60,7 @@ class StreamChunkHandler(private val model: Model? = null) {
     private val reasoningPartIndexes = mutableMapOf<String, Int>()
     private val imagePartIndexes = mutableMapOf<String, Int>()
     private val serverToolInputBuffers = mutableMapOf<String, StringBuilder>()
+    private val toolCallIds = mutableMapOf<String, String>()
 
     /**
      * 将一个 [chunk] 合并进消息列表末尾的助手消息，并返回新的消息列表。
@@ -153,9 +154,12 @@ class StreamChunkHandler(private val model: Model? = null) {
             }
 
             is StreamChunk.ToolCallStart -> {
-                if (parts.any { it is UIMessagePart.Tool && it.toolCallId == chunk.id }) this
+                val id = toolCallIds.getOrPut(chunk.id) {
+                    uniqueToolCallId(chunk.id, parts.filterIsInstance<UIMessagePart.Tool>().mapTo(mutableSetOf()) { it.toolCallId })
+                }
+                if (parts.any { it is UIMessagePart.Tool && it.toolCallId == id }) this
                 else copy(parts = parts + UIMessagePart.Tool(
-                    toolCallId = chunk.id,
+                    toolCallId = id,
                     toolName = chunk.toolName,
                     input = "",
                     metadata = chunk.metadata,
@@ -164,7 +168,7 @@ class StreamChunkHandler(private val model: Model? = null) {
 
             is StreamChunk.ToolCallDelta -> copy(parts = parts.map { part ->
                 // 工具调用可以并行生成，通过 toolCallId 而不是 part 位置识别目标。
-                if (part is UIMessagePart.Tool && part.toolCallId == chunk.id) {
+                if (part is UIMessagePart.Tool && part.toolCallId == (toolCallIds[chunk.id] ?: chunk.id)) {
                     part.copy(
                         toolName = part.toolName + chunk.toolNameDelta,
                         input = part.input + chunk.inputDelta,
@@ -298,6 +302,7 @@ class StreamChunkHandler(private val model: Model? = null) {
                 reasoningPartIndexes.clear()
                 imagePartIndexes.clear()
                 serverToolInputBuffers.clear()
+                toolCallIds.clear()
             }
         }
     }
@@ -325,7 +330,13 @@ fun List<UIMessage>.handleTextGenerationResult(
     model: Model? = null,
 ): List<UIMessage> {
     require(isNotEmpty()) { "messages must not be empty" }
+    // Full responses must allocate IDs before appendMessage can merge calls by identity.
+    val usedToolIds = if (last().role == result.message.role)
+        last().getTools().mapTo(mutableSetOf()) { it.toolCallId } else mutableSetOf()
     val incoming = result.message.copy(
+        parts = result.message.parts.map { part ->
+            if (part is UIMessagePart.Tool) part.copy(toolCallId = uniqueToolCallId(part.toolCallId, usedToolIds)) else part
+        },
         modelId = model?.id,
         usage = result.usage,
         finishedAt = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()),

@@ -15,6 +15,7 @@ import me.rerere.ai.ui.OpenAIReasoningMetadata
 import me.rerere.ai.ui.ReasoningType
 import me.rerere.ai.ui.ServerToolStatus
 import me.rerere.ai.ui.StreamChunk
+import me.rerere.ai.ui.uniqueToolCallId
 import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.json
 import me.rerere.ai.util.parseErrorDetail
@@ -86,8 +87,16 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
                 val id = item.itemIdOrCallId() ?: error("chunk id not found")
                 when (type) {
                     "function_call" -> {
-                        val callId = item["call_id"]?.jsonPrimitive?.contentOrNull ?: id
-                        state.toolCallIdsByItemId[id] = callId
+                        val rawCallId = item["call_id"]?.jsonPrimitive?.contentOrNull ?: id
+                        val existingItemCall = state.toolCallIdsByItemId[id]
+                        val callId = outputIndex?.let { state.toolCallIdsByOutputIndex[it] }
+                            ?: existingItemCall?.takeIf { outputIndex == null }
+                            ?: uniqueToolCallId(rawCallId, state.usedClientToolIds)
+                        state.toolCallIdsByProviderId.getOrPut(rawCallId) { linkedSetOf() }.add(callId)
+                        if (existingItemCall != null && existingItemCall != callId) {
+                            state.ambiguousItemIds.add(id)
+                            state.toolCallIdsByItemId.remove(id)
+                        } else if (id !in state.ambiguousItemIds) state.toolCallIdsByItemId[id] = callId
                         outputIndex?.let { state.toolCallIdsByOutputIndex[it] = callId }
                         state.startTool(
                             id = callId,
@@ -128,7 +137,7 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
                         }
                         addAll(state.endImage(id))
                     }
-                    "function_call" -> state.endTool(state.toolCallIdsByItemId.remove(id) ?: id)
+                    "function_call" -> state.endTool(resolveToolCallId(payload, id, outputIndex))
                     else -> if (isOpenAIServerToolCall(type)) {
                         val tool = item.toOpenAIServerTool()
                         state.endServerTool(
@@ -175,12 +184,16 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
         }
     }
 
-    // 部分兼容网关的 arguments 事件不带 item_id，只带 call_id，依次回退到 call_id、output_index
-    private fun resolveToolCallId(payload: JsonObject, itemId: String?, outputIndex: Int?): String =
-        itemId?.let { state.toolCallIdsByItemId[it] ?: it }
-            ?: payload["call_id"]?.jsonPrimitive?.contentOrNull
-            ?: outputIndex?.let { state.toolCallIdsByOutputIndex[it] }
-            ?: error("item_id not found")
+    // Route by the logical output index/item first; raw call IDs are safe only when unambiguous.
+    private fun resolveToolCallId(payload: JsonObject, itemId: String?, outputIndex: Int?): String {
+        outputIndex?.let { state.toolCallIdsByOutputIndex[it] }?.let { return it }
+        if (itemId != null && itemId in state.ambiguousItemIds) error("Неоднозначный идентификатор элемента вызова: требуется output_index.")
+        itemId?.let { state.toolCallIdsByItemId[it] }?.let { return it }
+        val raw = payload["call_id"]?.jsonPrimitive?.contentOrNull ?: itemId ?: error("item_id not found")
+        val matches = state.toolCallIdsByProviderId[raw]
+        if (matches != null && matches.size > 1) error("Неоднозначный идентификатор вызова: требуется item_id или output_index.")
+        return matches?.singleOrNull() ?: raw
+    }
 
     // function_call 的 item.id 在规范中是可选的，只有 call_id 必填
     private fun JsonObject.itemIdOrCallId(): String? =
@@ -247,6 +260,9 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
 
     private class ResponseStreamState {
         val toolCallIdsByItemId = mutableMapOf<String, String>()
+        val toolCallIdsByProviderId = mutableMapOf<String, MutableSet<String>>()
+        val ambiguousItemIds = mutableSetOf<String>()
+        val usedClientToolIds = mutableSetOf<String>()
         val toolCallIdsByOutputIndex = mutableMapOf<Int, String>()
         val toolIdsWithInput = mutableSetOf<String>()
         val reasoningMetadata = mutableMapOf<String, JsonObject>()

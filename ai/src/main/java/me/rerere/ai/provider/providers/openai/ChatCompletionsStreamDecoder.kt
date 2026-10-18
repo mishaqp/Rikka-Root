@@ -18,6 +18,7 @@ import me.rerere.ai.ui.OpenRouterReasoningMetadata
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.ui.uniqueToolCallId
 import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.json
 import me.rerere.ai.util.parseErrorDetail
@@ -30,6 +31,7 @@ import kotlin.uuid.Uuid
 internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
     private val streamState = ChatCompletionsStreamState()
     private val toolIdsByIndex = mutableMapOf<Int, String>()
+    private val usedToolIds = mutableSetOf<String>()
     private val reasoningDetailsByIndex = linkedMapOf<Int, JsonObject>()
     private var responseId: String = Uuid.random().toString()
     private var responseModel: String? = null
@@ -57,12 +59,11 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
                         message["tool_calls"]?.jsonArrayOrNull?.forEachIndexed { fallbackIndex, element ->
                             val toolCall = element.jsonObjectOrNull ?: return@forEachIndexed
                             val index = toolCall["index"]?.jsonPrimitive?.intOrNull ?: fallbackIndex
-                            val toolId = toolCall["id"]?.jsonPrimitive?.contentOrNull
-                                ?.takeIf(String::isNotBlank)
-                                ?.also { toolIdsByIndex[index] = it }
-                                ?: toolIdsByIndex.getOrPut(index) {
-                                    Uuid.random().toString()
-                                }
+                            // Index owns identity for the whole stream. Later blank/changed IDs
+                            // cannot erase an emitted identity or merge another parallel index.
+                            val toolId = toolIdsByIndex.getOrPut(index) {
+                                uniqueToolCallId(toolCall["id"]?.jsonPrimitive?.contentOrNull, usedToolIds)
+                            }
                             val function = toolCall["function"]?.jsonObjectOrNull
                             addAll(streamState.append(
                                 UIMessage(

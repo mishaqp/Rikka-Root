@@ -9,6 +9,7 @@ import me.rerere.ai.provider.stream.StreamChunkDecoder
 import me.rerere.ai.ui.ServerToolMetadata
 import me.rerere.ai.ui.ServerToolProtocol
 import me.rerere.ai.ui.StreamChunk
+import me.rerere.ai.ui.uniqueToolCallId
 import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.json
 import me.rerere.ai.util.parseErrorDetail
@@ -24,6 +25,7 @@ internal class InteractionsStreamDecoder(
     private val fallbackModel: String? = null,
 ) : StreamChunkDecoder {
     private val steps = linkedMapOf<Int, StepState>()
+    private val usedClientToolIds = mutableSetOf<String>()
     private var interactionId: String? = null
     private var model: String? = null
     private var status: String? = null
@@ -259,7 +261,8 @@ internal class InteractionsStreamDecoder(
         }
     }
 
-    private class StepState(val index: Int, val type: String, var raw: JsonObject) {
+    private inner class StepState(val index: Int, val type: String, var raw: JsonObject) {
+        private var allocatedToolId: String? = null
         var signature: String? = raw.stringOrNull("signature")?.takeIf { it.isNotEmpty() }
         var textId: String? = null
         var hasArgumentsDelta = false
@@ -269,8 +272,9 @@ internal class InteractionsStreamDecoder(
 
         fun nextPartId(kind: String): String = "step-$index:$kind-${++partSequence}"
 
-        fun toolCallId(interactionId: String?): String =
-            raw.stringOrNull("id") ?: "${interactionId ?: "interaction"}:tool-$index"
+        fun toolCallId(interactionId: String?): String = allocatedToolId ?: uniqueToolCallId(
+            raw.stringOrNull("id") ?: "${interactionId ?: "interaction"}:tool-$index", usedClientToolIds,
+        ).also { allocatedToolId = it }
 
         fun closeText(): List<StreamChunk> =
             textId?.let { textId = null; listOf(StreamChunk.TextEnd(it)) }.orEmpty()

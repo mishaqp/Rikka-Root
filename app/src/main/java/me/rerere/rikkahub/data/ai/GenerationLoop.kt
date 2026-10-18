@@ -22,6 +22,8 @@ import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -29,6 +31,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.Tool
+import me.rerere.ai.core.ToolArgumentException
+import me.rerere.ai.core.prepareArguments
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderManager
@@ -174,10 +178,40 @@ class GenerationLoop(
         fun validateArguments(tool: UIMessagePart.Tool): UIMessagePart.Tool {
             if (tool.isExecuted) return tool
             val arguments = runCatching { json.parseToJsonElement(tool.input.ifBlank { "{}" }) }.getOrNull()
-            return if (arguments is JsonObject) tool else tool.copy(output = toolError(
+            if (arguments !is JsonObject) return tool.copy(output = toolError(
                 "invalid_tool_arguments", "Некорректные аргументы инструмента: ожидается корректный JSON-объект. Исправьте параметры и повторите вызов."
             ))
+            return try {
+                val canonical = tools.find { it.name == tool.toolName }?.prepareArguments(arguments) ?: arguments
+                tool.copy(input = canonical.toString())
+            } catch (error: ToolArgumentException) {
+                tool.copy(output = toolError("invalid_tool_arguments", error.message.orEmpty()))
+            }
         }
+
+        // Older stored cards may share an ID. An ambiguous approval must never transfer
+        // to another call; completed evidence stays attached to its original part.
+        val duplicateUnexecutedIds = messages.flatMap { it.getTools() }.filterNot { it.isExecuted }
+            .groupingBy { it.toolCallId }.eachCount().filterValues { it > 1 }.keys
+        val repaired = messages.map { message ->
+            val calls = message.getTools()
+            val ambiguous = calls.groupingBy { it.toolCallId }.eachCount().filter { (id, count) -> id.isBlank() || count > 1 }.keys
+            fun affected(call: UIMessagePart.Tool) = call.toolCallId in ambiguous ||
+                (!call.isExecuted && call.toolCallId in duplicateUnexecutedIds)
+            if (calls.none(::affected)) message else {
+                val used = calls.filterNot(::affected).mapTo(mutableSetOf()) { it.toolCallId }
+                message.copy(parts = message.parts.map { part ->
+                    if (part !is UIMessagePart.Tool || !affected(part)) part else {
+                        var id: String
+                        do { id = "call_${Uuid.random()}" } while (!used.add(id))
+                        part.copy(toolCallId = id, output = if (part.isExecuted) part.output else toolError(
+                            "duplicate_tool_call_id", "Сохранённые вызовы имеют неоднозначный идентификатор. Проверьте результат и запросите новый вызов с отдельным подтверждением."
+                        ))
+                    }
+                })
+            }
+        }
+        if (repaired != messages) { messages = repaired; emit(GenerationChunk.Messages(messages)) }
 
         val turnStartMs = SystemClock.elapsedRealtime()
         val turnBudgetMs = ToolRuntimeLimits.turnBudgetMs
@@ -310,12 +344,12 @@ class GenerationLoop(
                 // Check for tools that need approval
                 var hasPendingApproval = false
                 val updatedTools = ArrayList<UIMessagePart.Tool>(toolCalls.size)
-                for (tool in toolCalls) {
+                for (original in toolCalls) {
+                    val tool = validateArguments(original)
                     val toolDef = tools.find { it.name == tool.toolName }
-                    val checked = validateArguments(tool)
                     val hardlineReason = HardlineCommandGuard.checkTool(tool.toolName, tool.input)
                     val updated = when {
-                        checked.isExecuted -> checked
+                        tool.isExecuted -> tool
                         hardlineReason != null -> {
                             Log.w(TAG, "hardline-blocked ${tool.toolName}: $hardlineReason")
                             tool.copy(output = toolError("hardline_blocked", hardlineMessage(hardlineReason)))
@@ -905,11 +939,36 @@ private fun UIMessagePart.isGenerationNotice(): Boolean =
  * model's own words, and tool results are bounded.
  */
 internal fun modelVisibleMessages(messages: List<UIMessage>): List<UIMessage> = boundToolOutputsForModel(
-    messages.mapNotNull { message ->
+    repeatedToolWarnings(messages).mapNotNull { message ->
         if (message.parts.none { it.isGenerationNotice() }) return@mapNotNull message
         message.copy(parts = message.parts.filterNot { it.isGenerationNotice() }).takeIf { it.parts.isNotEmpty() }
     }
 )
+
+private fun repeatedToolWarnings(messages: List<UIMessage>): List<UIMessage> {
+    val turnStart = messages.indexOfLast { it.role == MessageRole.USER }
+    if (turnStart < 0) return messages
+    val seen = mutableSetOf<Pair<String, JsonElement>>()
+    return messages.mapIndexed { index, message ->
+        if (index <= turnStart) message else message.copy(parts = message.parts.map { part ->
+            if (part !is UIMessagePart.Tool || !part.isExecuted) part else {
+                val arguments = runCatching { Json.parseToJsonElement(part.input.ifBlank { "{}" }) }.getOrNull()
+                if (arguments == null || seen.add(part.toolName to stableToolArguments(arguments))) part
+                // Put the notice first so the existing result cap cannot clip it away.
+                else part.copy(output = listOf(UIMessagePart.Text(
+                    "Предупреждение: повторный вызов этого инструмента с теми же параметрами в текущем ходе. Проверьте предыдущий результат; при необходимости измените параметры или выберите другой способ."
+                )) + part.output)
+            }
+        })
+    }
+}
+
+private fun stableToolArguments(value: JsonElement): JsonElement = when (value) {
+    is JsonObject -> JsonObject(value.toSortedMap().mapValues { stableToolArguments(it.value) })
+    is JsonArray -> JsonArray(value.map(::stableToolArguments))
+    is JsonPrimitive -> if (value.isString || value.contentOrNull == null || value.booleanOrNull != null) value else
+        runCatching { Json.parseToJsonElement(java.math.BigDecimal(value.content).stripTrailingZeros().toString()) }.getOrDefault(value)
+}
 
 /**
  * Bounds every tool result in the provider request. Stored messages keep the full output, so

@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.service
 
 import android.app.Application
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import android.util.Log
 import androidx.core.net.toUri
 import kotlinx.coroutines.CancellationException
@@ -45,6 +47,8 @@ import me.rerere.rikkahub.costguards.TokenBudgetStore
 import me.rerere.rikkahub.subagent.SubAgentRegistry
 import me.rerere.rikkahub.subagent.SubAgentOwner
 import me.rerere.ai.ui.ToolApprovalState
+import me.rerere.ai.core.ToolArgumentException
+import me.rerere.ai.core.prepareArguments
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.canResumeToolExecution
@@ -860,6 +864,57 @@ class ChatService(
 
     // ---- 处理工具调用审批 ----
 
+    private data class PendingApproval(
+        val messageId: Uuid,
+        val tool: UIMessagePart.Tool,
+        val canonicalInput: JsonElement? = null,
+    )
+
+    private fun pendingApproval(conversation: Conversation, callId: String): PendingApproval? {
+        val candidates = conversation.currentMessages.flatMap { message ->
+            message.getTools().filter { it.toolCallId == callId && it.isPending }.map { PendingApproval(message.id, it) }
+        }
+        if (candidates.isEmpty()) return null // Double tap or a completed/inactive card.
+        if (candidates.size != 1) throw ToolArgumentException(
+            "Идентификатор ожидающего вызова неоднозначен. Обновите чат и запросите отдельный вызов перед подтверждением.")
+        val candidate = candidates.single()
+        val message = conversation.currentMessages.single { it.id == candidate.messageId }
+        if (message.getTools().count { it.toolCallId == callId } != 1) throw ToolArgumentException(
+            "Идентификатор вызова совпадает с другим вызовом в карточке. Проверьте результаты и запросите новый вызов.")
+        return candidate
+    }
+
+    private fun samePendingApproval(first: PendingApproval, second: PendingApproval): Boolean =
+        first.messageId == second.messageId && first.tool.toolCallId == second.tool.toolCallId &&
+            first.tool.toolName == second.tool.toolName && first.tool.input == second.tool.input
+
+    private suspend fun validatedPendingApproval(
+        conversationId: Uuid, callId: String, validateInput: Boolean, expected: PendingApproval? = null,
+    ): PendingApproval? {
+        val conversation = requireWritableConversation(conversationId)
+        val candidate = pendingApproval(conversation, callId) ?: return null
+        if (expected != null && !samePendingApproval(expected, candidate)) throw ToolArgumentException(
+            "Ожидающий вызов изменился. Обновите чат и проверьте новые параметры перед подтверждением.")
+        if (!validateInput) return candidate
+        val settings = loadedSettings()
+        val assistant = settings.getAssistantOf(conversation)
+        val model = settings.getChatModelOf(conversation) ?: throw ToolArgumentException(
+            "Модель чата недоступна. Выберите модель и запросите новый вызов перед подтверждением.")
+        val definition = chatToolFactory.createTools(settings, assistant, model,
+            workspaceCwd = conversation.workspaceCwd, conversationId = conversationId.toString(),
+            messages = conversation.currentMessages).singleOrNull { it.name == candidate.tool.toolName }
+            ?: throw ToolArgumentException("Инструмент больше недоступен. Проверьте настройки и запросите новый вызов.")
+        val input = runCatching { Json.parseToJsonElement(candidate.tool.input.ifBlank { "{}" }) }.getOrNull()
+            ?: throw ToolArgumentException("Аргументы вызова повреждены. Запросите новый вызов с корректным JSON-объектом.")
+        val canonical = definition.prepareArguments(input)
+        val live = pendingApproval(requireWritableConversation(conversationId), callId)
+            ?: throw ToolArgumentException("Вызов больше не ожидает подтверждения. Обновите чат и проверьте результат.")
+        if (!samePendingApproval(candidate, live) ||
+            (expected?.canonicalInput != null && expected.canonicalInput != canonical)) throw ToolArgumentException(
+            "Ожидающий вызов или его параметры изменились. Обновите чат и подтвердите новый вызов отдельно.")
+        return live.copy(canonicalInput = canonical)
+    }
+
     enum class ApprovalScope { Once, ChatScope, Always }
 
     fun handleToolApproval(
@@ -880,17 +935,20 @@ class ChatService(
             }
         }
 
+        var prepared: PendingApproval? = null
         session.launchToolApproval(
             appScope = appScope,
-            grant = {
+            grant = grant@{
+                val candidate = validatedPendingApproval(conversationId, toolCallId, approved && answer == null)
+                    ?: return@grant
+                if (approved && toolName != null && candidate.tool.toolName != toolName) throw ToolArgumentException(
+                    "Инструмент в карточке изменился. Обновите чат и проверьте вызов перед подтверждением.")
+                prepared = candidate
                 if (answer == null && approved && toolName != null && scope != ApprovalScope.Once) {
-                    ensureInitialized(session)
-                    requireWritableSession(session)
-                    val tool = session.state.value.currentMessages.flatMap { it.getTools() }
-                        .firstOrNull { it.toolCallId == toolCallId && it.isPending }
-                    if (tool?.toolName == toolName && when (scope) {
-                            ApprovalScope.ChatScope -> ToolPermissionPolicy.canGrantForChat(toolName, tool.inputAsJson())
-                            ApprovalScope.Always -> ToolPermissionPolicy.canGrantAlways(toolName, tool.inputAsJson())
+                    val arguments = requireNotNull(candidate.canonicalInput)
+                    if (when (scope) {
+                            ApprovalScope.ChatScope -> ToolPermissionPolicy.canGrantForChat(toolName, arguments)
+                            ApprovalScope.Always -> ToolPermissionPolicy.canGrantAlways(toolName, arguments)
                             ApprovalScope.Once -> true
                         }) {
                         when (scope) {
@@ -907,19 +965,19 @@ class ChatService(
                     catch (e: Exception) {
                         if (e is CancellationException) throw e
                         session.messageQueue.pause()
-                        addError(IllegalStateException("Не удалось сохранить одобрение инструмента."), conversationId,
+                        addError(if (e is ToolArgumentException) e else
+                            IllegalStateException("Не удалось сохранить одобрение инструмента. Обновите чат и повторите подтверждение."), conversationId,
                             title = context.getString(R.string.error_title_tool_approval))
                     }
                 }
             },
         ) {
             try {
-                ensureInitialized(session)
-                val conversation = requireWritableSession(session)
-                // Ignore double taps and stale approvals for completed or inactive tools.
-                val pendingTool = conversation.currentMessages.asSequence().flatMap { it.getTools() }
-                    .firstOrNull { it.toolCallId == toolCallId && it.isPending }
+                val expected = prepared ?: return@launchToolApproval
+                val current = validatedPendingApproval(conversationId, toolCallId, approved && answer == null, expected)
                     ?: return@launchToolApproval
+                val conversation = requireWritableSession(session)
+                val pendingTool = current.tool
                 if (answer != null && pendingTool.toolName != "ask_user") return@launchToolApproval
                 val newApprovalState = when {
                     answer != null -> ToolApprovalState.Answered(answer)
@@ -931,12 +989,13 @@ class ChatService(
                 val updatedNodes = conversation.messageNodes.map { node ->
                     node.copy(
                         messages = node.messages.map { msg ->
-                            msg.copy(
+                            if (msg.id != current.messageId) msg else msg.copy(
                                 parts = msg.parts.map { part ->
                                     when {
                                         part is UIMessagePart.Tool && part.toolCallId == toolCallId && part.isPending &&
+                                            part.toolName == pendingTool.toolName && part.input == pendingTool.input &&
                                             (answer == null || part.toolName == "ask_user") -> {
-                                            part.copy(approvalState = newApprovalState)
+                                            part.copy(input = current.canonicalInput?.toString() ?: part.input, approvalState = newApprovalState)
                                         }
 
                                         else -> part

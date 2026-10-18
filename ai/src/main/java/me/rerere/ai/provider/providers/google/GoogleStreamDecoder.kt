@@ -20,6 +20,7 @@ import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.ui.uniqueToolCallId
 import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.json
 import me.rerere.common.http.jsonPrimitiveOrNull
@@ -33,6 +34,7 @@ internal class GoogleStreamDecoder(
     private var finishReason: String? = null
     private var finished = false
     private var toolSequence = 0
+    private val usedClientToolIds = mutableSetOf<String>()
 
     override fun accept(event: SseEvent): DecodeResult {
         if (finished) return DecodeResult(completed = true)
@@ -87,8 +89,9 @@ internal class GoogleStreamDecoder(
         }
         part.containsKey("functionCall") -> {
             val functionCall = part["functionCall"]!!.jsonObject
-            val toolCallId = functionCall["id"]?.jsonPrimitive?.contentOrNull
-                ?: "$responseId:tool-${++toolSequence}"
+            // Each functionCall part contains a complete JSON args object, not a token delta.
+            val toolCallId = uniqueToolCallId(functionCall["id"]?.jsonPrimitive?.contentOrNull
+                ?: "$responseId:tool-${++toolSequence}", usedClientToolIds)
             UIMessagePart.Tool(
                 toolCallId = toolCallId,
                 toolName = functionCall["name"]?.jsonPrimitive?.contentOrNull ?: "",

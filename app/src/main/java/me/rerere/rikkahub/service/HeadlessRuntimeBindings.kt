@@ -14,6 +14,7 @@ import me.rerere.rikkahub.data.ai.tools.RunExecutionContext
 import me.rerere.rikkahub.data.ai.tools.RunOrigin
 import me.rerere.rikkahub.data.ai.tools.RunWebTaint
 import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
+import me.rerere.rikkahub.data.ai.tools.local.RootMode
 import me.rerere.rikkahub.data.ai.tools.local.missingLocalToolPermissions
 import me.rerere.rikkahub.data.ai.tools.resolveToolAutoApproval
 import me.rerere.rikkahub.data.ai.tools.resolveWorkspaceToolApproval
@@ -109,7 +110,8 @@ class HeadlessRuntimeBindings(
         if (execution.allowedTools != null && name !in execution.allowedTools) return "tool_not_allowed"
         val option = localOptionForHeadlessTool(name)
         if (option != null) {
-            if (option !in assistant.localTools) return "tool_feature_disabled"
+            if (option !in assistant.localTools && !(option == LocalToolOption.Root &&
+                    RootMode.isActive(assistant.rootMode, rootShellManager.status.value))) return "tool_feature_disabled"
             if (missingLocalToolPermissions(androidContext, option).isNotEmpty()) return "android_permission_required"
         }
         val config = execution.callerConversationConfig
