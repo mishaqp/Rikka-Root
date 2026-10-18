@@ -39,12 +39,12 @@ private suspend fun nextNotificationId(context: Context): Int? = withContext(Dis
 
 fun notificationTool(context: Context, conversationId: String? = null): Tool = Tool(
     name = "post_notification",
-    description = "Post an Android notification after approval. title is required, body and id are optional. Tapping it opens the originating conversation.",
+    description = "Опубликовать уведомление Android после одобрения. Нужен title, body и id необязательны; текст не отправляется в другие приложения. Нажатие открывает исходный диалог, если он известен вызову.",
     needsApproval = { true },
     parameters = { InputSchema.Obj(buildJsonObject {
-        put("title", buildJsonObject { put("type", "string") })
-        put("body", buildJsonObject { put("type", "string") })
-        put("id", buildJsonObject { put("type", "integer"); put("minimum", 0) })
+        put("title", buildJsonObject { put("type", "string"); put("minLength", 1); put("maxLength", 512); put("description", "Непустой заголовок уведомления: 1–512 символов.") })
+        put("body", buildJsonObject { put("type", "string"); put("maxLength", 16000); put("description", "Необязательный текст уведомления: до 16000 символов.") })
+        put("id", buildJsonObject { put("type", "integer"); put("minimum", 0); put("maximum", Int.MAX_VALUE); put("description", "Необязательный ID уведомления Android от 0 до 2147483647; одинаковый ID заменяет прежнее уведомление этого инструмента. Без него приложение выделяет новый ID.") })
     }, required = listOf("title")) },
     execute = { input -> deviceToolResult {
         val params = input as? JsonObject ?: return@deviceToolResult deviceToolError("Ожидался объект параметров.")

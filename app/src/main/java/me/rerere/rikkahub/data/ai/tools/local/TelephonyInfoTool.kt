@@ -36,7 +36,7 @@ private fun networkTypeName(type: Int): String = when (type) {
 
 fun telephonyInfoTool(context: Context): Tool = Tool(
     name = "get_telephony_info",
-    description = "Read SIM availability, carrier, network country and radio type. Does not read phone numbers, calls or messages.",
+    description = "Проверить наличие SIM, оператора, страну сети и тип мобильной связи. Нужен доступ к состоянию телефона; номера, звонки и сообщения не читаются.",
     parameters = { InputSchema.Obj(buildJsonObject {}) },
     execute = { deviceToolResult {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {

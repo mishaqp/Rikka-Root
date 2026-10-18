@@ -69,10 +69,10 @@ class WorkspaceReminderTransformer(
             appendLine()
             appendLine()
             appendLine("<workspace_instructions>")
-            appendLine("Follow the AGENTS.md instructions below.")
+            appendLine("Следуйте приведённым ниже инструкциям AGENTS.md.")
             instructions.forEach { (path, content) ->
                 appendLine()
-                appendLine("AGENTS.md source: $path")
+                appendLine("Источник AGENTS.md: $path")
                 appendLine(content)
             }
             append("</workspace_instructions>")
@@ -131,27 +131,27 @@ private fun buildWorkspacePrompt(
     cwd: String? = null,
 ): String = buildString {
     appendLine("<workspace>")
-    appendLine("You have access to a persistent Linux workspace named \"${workspace.name}\", running in a sandboxed proot rootfs environment.")
-    appendLine("- The workspace files area is mounted at `/workspace`. Use it as your working directory; files written there persist across turns of this conversation.")
-    appendLine("- All paths passed to workspace tools must be absolute and inside the Rootfs (for example `/workspace/notes.md`).")
+    appendLine("Вам доступна постоянная рабочая папка Linux \"${workspace.name}\" в изолированном окружении proot Rootfs.")
+    appendLine("- Файлы рабочей папки смонтированы в `/workspace`. Используйте этот каталог для работы: записанные файлы сохраняются между сообщениями текущего диалога.")
+    appendLine("- Все пути для инструментов рабочей папки должны быть абсолютными внутри Rootfs, например `/workspace/notes.md`.")
     if (distro != null) {
-        appendLine("- The Rootfs distribution is $distro. Use its native package manager when you need to install missing tools.")
+        appendLine("- Дистрибутив Rootfs: $distro. Для установки недостающих инструментов используйте его штатный менеджер пакетов.")
     }
     if (shell == "/bin/bash") {
-        appendLine("- `workspace_shell` runs commands with `/bin/bash`.")
+        appendLine("- `workspace_shell` выполняет команды через `/bin/bash`.")
     } else {
-        appendLine("- `workspace_shell` runs commands with `$shell`, a POSIX shell. Bash is not installed, so avoid bash-only syntax such as arrays, here-strings (`<<<`) and brace expansion.")
+        appendLine("- `workspace_shell` выполняет команды через POSIX-оболочку `$shell`. Bash не установлен: не используйте его специфичный синтаксис, например массивы, here-strings (`<<<`) и раскрытие фигурных скобок.")
     }
-    appendLine("- Available tools:")
-    appendLine("  - `workspace_read_file`: read file contents.")
-    appendLine("  - `workspace_write_file` / `workspace_edit_file`: create files, or make precise edits to existing files.")
-    appendLine("  - `workspace_shell`: run shell commands (the files area is mounted at /workspace).")
-    appendLine("- Prefer `workspace_shell` for tasks that standard Unix tools handle well, and prefer `workspace_edit_file` for targeted edits over rewriting whole files.")
-    appendLine("- The skills directory is mounted at `/skills`. Each skill is a subdirectory `/skills/<skill-name>/` containing a `SKILL.md` (with `name` and `description` frontmatter) plus any supporting files. Read a skill's `SKILL.md` before using it, and follow its instructions.")
-    appendLine("- Built-in skills shipped with the app are mounted at `/builtin_skills/<skill-name>/` with the same layout. Treat `/builtin_skills` as READ-ONLY: you may read files and run scripts there, but never modify, overwrite, or delete anything. A skill in `/skills` with the same name overrides the built-in one.")
-    appendLine("- Files the user uploaded are mounted at `/upload`. Treat `/upload` as READ-ONLY: read uploaded files from `/upload/<file-name>`, but never modify, overwrite, or delete anything there. If you need to change an uploaded file, copy it into `/workspace` first and edit the copy.")
+    appendLine("- Доступные инструменты:")
+    appendLine("  - `workspace_read_file`: прочитать содержимое файла.")
+    appendLine("  - `workspace_write_file` / `workspace_edit_file`: создать файл или точечно изменить существующий.")
+    appendLine("  - `workspace_shell`: выполнить команды оболочки; файлы рабочей папки смонтированы в /workspace.")
+    appendLine("- Для задач, решаемых стандартными утилитами Unix, предпочитайте `workspace_shell`. Для точечных правок используйте `workspace_edit_file` вместо перезаписи целого файла.")
+    appendLine("- Каталог навыков смонтирован в `/skills`. Каждый навык находится в `/skills/<skill-name>/`: файл `SKILL.md` с полями frontmatter `name` и `description` и дополнительные файлы. Перед использованием прочитайте `SKILL.md` и следуйте его инструкциям.")
+    appendLine("- Встроенные навыки приложения смонтированы в `/builtin_skills/<skill-name>/` с той же структурой. Каталог `/builtin_skills` доступен ТОЛЬКО ДЛЯ ЧТЕНИЯ: читать файлы и запускать скрипты можно, но изменять, перезаписывать и удалять что-либо нельзя. Навык из `/skills` с тем же именем заменяет встроенный.")
+    appendLine("- Загруженные пользователем файлы смонтированы в `/upload`. Каталог `/upload` доступен ТОЛЬКО ДЛЯ ЧТЕНИЯ: читайте `/upload/<file-name>`, но ничего там не изменяйте, не перезаписывайте и не удаляйте. Для изменения файла сначала скопируйте его в `/workspace` и правьте копию.")
     if (!cwd.isNullOrBlank()) {
-        appendLine("- Current working directory: `$cwd`. Use this as the default context for file operations and shell commands.")
+        appendLine("- Текущий рабочий каталог: `$cwd`. Используйте его по умолчанию для файловых операций и команд оболочки.")
     }
     append("</workspace>")
 }

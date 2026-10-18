@@ -40,8 +40,8 @@ fun createSkillTools(
         Tool(
             name = "use_skill",
             description = """
-                Load and apply a skill to get specialized instructions or capabilities.
-                Call this tool when the user's request matches one of the available skills.
+                Загрузить и применить навык со специальными инструкциями или возможностями.
+                Вызывайте, когда запрос пользователя соответствует одному из доступных навыков.
             """.trimIndent(),
             systemPrompt = { _, _ ->
                 buildString {
@@ -78,8 +78,8 @@ fun createSkillTools(
                     // Lazy skills — listed for discovery; loaded on demand via `use_skill`.
                     val lazy = available.filterNot { it.autoLoad }
                     if (lazy.isNotEmpty()) {
-                        appendLine("**Skills**")
-                        appendLine("You have access to the following skills. Use the `use_skill` tool to load a skill's instructions when the user's request matches.")
+                        appendLine("**Навыки**")
+                        appendLine("Вам доступны следующие навыки. Когда запрос пользователя соответствует навыку, вызовите `use_skill`, чтобы загрузить его инструкции.")
                         appendLine("<available_skills>")
                         lazy.forEach { skill ->
                             appendLine("  <skill>")
@@ -97,13 +97,13 @@ fun createSkillTools(
                     properties = buildJsonObject {
                         put("name", buildJsonObject {
                             put("type", "string")
-                            put("description", "The name of the skill to use")
+                            put("description", "Имя навыка, который нужно применить.")
                         })
                         put("path", buildJsonObject {
                             put("type", "string")
                             put(
                                 "description",
-                                "Optional relative path to a file inside the skill directory. Omit to read the default SKILL.md instructions. Only use paths extracted from Markdown links in the SKILL.md content. Do NOT guess or infer paths."
+                                "Необязательный относительный путь к файлу внутри папки навыка. Без него читаются инструкции SKILL.md. Используйте только пути из Markdown-ссылок в SKILL.md; не угадывайте и не придумывайте пути."
                             )
                         })
                     },
@@ -165,14 +165,14 @@ fun createSkillTools(
                 val suppliedName = it.jsonObject["name"]?.jsonPrimitive?.content
                     ?: return@Tool err(
                         "missing_required_arg",
-                        "use_skill requires a 'name' argument identifying which skill to load.",
+                        "Для use_skill укажите аргумент name с именем навыка.",
                     )
                 // Preserve Root's upstream escaped-name round trip.
                 val name = available.firstOrNull { skill -> skill.name.escapeXml() == suppliedName }?.name ?: suppliedName
                 if (name !in enabledSkills) {
                     return@Tool err(
                         "skill_not_enabled",
-                        "Skill '$name' is not in the enabled-skills set for this assistant.",
+                        "Навык '$name' не включён для текущего ассистента.",
                     )
                 }
                 // Resolve through the skill's own directory rather than looking it up by
@@ -182,7 +182,7 @@ fun createSkillTools(
                 val skill = available.firstOrNull { skill -> skill.name == name }
                     ?: return@Tool err(
                         "skill_not_found",
-                        "Skill '$name' is enabled but has no metadata entry on disk.",
+                        "Навык '$name' включён, но его метаданные не найдены на устройстве.",
                     )
                 val path = it.jsonObject["path"]?.jsonPrimitive?.content
                 if (path.isNullOrBlank()) {
@@ -190,7 +190,7 @@ fun createSkillTools(
                     if (!skillMd.exists()) {
                         return@Tool err(
                             "skill_body_not_found",
-                            "Skill '$name' is enabled but its SKILL.md body could not be read on disk.",
+                            "Навык '$name' включён, но его файл SKILL.md не найден на устройстве.",
                         )
                     }
                     if (skillMd.length() > SkillManager.MAX_SKILL_FILE_BYTES) {
@@ -202,12 +202,12 @@ fun createSkillTools(
                 val target = SkillPaths.resolveSkillFile(skill.skillDir, path)
                     ?: return@Tool err(
                         "path_outside_skill",
-                        "Path '$path' resolves outside the '$name' skill directory.",
+                        "Путь '$path' выходит за папку навыка '$name'.",
                     )
                 if (!target.exists()) {
                     return@Tool err(
                         "skill_file_not_found",
-                        "File '$path' does not exist in skill '$name'. Use only paths from Markdown links inside SKILL.md.",
+                        "Файл '$path' не найден в навыке '$name'. Используйте только пути из Markdown-ссылок в SKILL.md.",
                     )
                 }
                 if (!target.isFile) {

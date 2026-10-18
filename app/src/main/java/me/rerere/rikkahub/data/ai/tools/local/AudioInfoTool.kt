@@ -35,8 +35,8 @@ private fun audioDeviceTypeName(type: Int): String = when (type) {
 fun audioInfoTool(context: Context): Tool = Tool(
     name = "get_audio_info",
     description = """
-        Get the device's current audio state, including ringer mode, whether music is
-        currently playing, and whether wired/Bluetooth headphones are connected.
+        Проверить состояние звука: режим звонка, активность воспроизведения музыки,
+        подключённые проводные, Bluetooth- и USB-наушники. Громкость и воспроизведение не меняются.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(properties = buildJsonObject { })

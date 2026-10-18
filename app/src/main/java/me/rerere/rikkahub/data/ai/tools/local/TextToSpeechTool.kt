@@ -21,10 +21,9 @@ internal fun buildTextToSpeechTool(
 ): Tool = Tool(
     name = "text_to_speech",
     description = """
-        Speak text aloud to the user using the device's text-to-speech engine.
-        Use this when the user asks you to read something aloud, or when audio output is appropriate.
-        The tool returns immediately; audio plays in the background on the device.
-        Provide natural, readable text without markdown formatting.
+        Озвучить текст выбранным движком синтеза речи по просьбе пользователя или когда полезен
+        голосовой ответ. Вызов возвращается сразу, звук воспроизводится в фоне на устройстве.
+        Передавайте естественный текст без Markdown, не более $MAX_SPEAK_CHARS символов.
     """.trimIndent().replace("\n", " "),
     systemPrompt = { _, _ ->
         // 当前选中的 TTS provider 若硬编码了语气标记引导，则注入 system prompt（否则为空）
@@ -37,7 +36,8 @@ internal fun buildTextToSpeechTool(
             properties = buildJsonObject {
                 put("text", buildJsonObject {
                     put("type", "string")
-                    put("description", "The text to speak aloud")
+                    put("description", "Текст для озвучивания без Markdown: не более $MAX_SPEAK_CHARS символов.")
+                    put("maxLength", MAX_SPEAK_CHARS)
                 })
             },
             required = listOf("text")

@@ -21,7 +21,7 @@ private fun storageStats(path: String): JsonObject {
 
 fun storageTool(): Tool = Tool(
     name = "get_storage_info",
-    description = "Read total, free and used space on internal and primary external storage. Does not read or enumerate files.",
+    description = "Проверить общий, свободный и занятый объём внутренней и основной внешней памяти. Используйте для оценки свободного места; содержимое и список файлов не читаются.",
     parameters = { InputSchema.Obj(buildJsonObject {}) },
     execute = { deviceToolResult {
         val internal = storageStats(Environment.getDataDirectory().path)

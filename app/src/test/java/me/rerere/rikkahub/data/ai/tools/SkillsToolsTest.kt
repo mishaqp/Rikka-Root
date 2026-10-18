@@ -1,5 +1,10 @@
 package me.rerere.rikkahub.data.ai.tools
 
+import io.mockk.every
+import io.mockk.mockk
+import me.rerere.rikkahub.data.files.SkillManager
+import java.io.File
+
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.Json
@@ -97,4 +102,29 @@ class SkillsToolsTest {
         val result = tool.execute(buildJsonObject { put("name", "a&amp;b") })
         assertEquals("Escaped body", (result.single() as UIMessagePart.Text).text)
     }
+
+    @Test fun lazySkillSystemPromptUsesRussianFramingAndKeepsExternalMetadataExact() {
+        val metadata = SkillMetadata(name = "external&skill", description = "User-provided English description 中文",
+            skillDir = File("unused-no-read"))
+        val tool = createSkillTools(setOf(metadata.name), listOf(metadata)).single { it.name == "use_skill" }
+        val prompt = tool.systemPrompt(Model(), emptyList())
+        val framing = prompt.substringBefore("<available_skills>")
+        assertTrue("Built-in skill instructions must be Russian: $framing", Regex("[А-Яа-яЁё]").containsMatchIn(framing))
+        val untranslated = framing.lineSequence().map(String::trim).filter(String::isNotEmpty)
+            .filterNot { Regex("[А-Яа-яЁё]").containsMatchIn(it) }.toList()
+        assertTrue("Every built-in framing line must be Russian: ${untranslated.joinToString(" | ")}", untranslated.isEmpty())
+        assertEquals(1, Regex("<available_skills>").findAll(prompt).count())
+        assertTrue(prompt.contains("<name>external&amp;skill</name>"))
+        assertTrue(prompt.contains("<description>${metadata.description}</description>"))
+        assertTrue(prompt.contains("use_skill"))
+    }
+
+    @Test fun autoLoadedSkillSystemPromptPreservesUserAuthoredBodyWithoutTranslationOrDiskRead() {
+        val body = "User-authored English instructions.\n用户提供的中文内容。"
+        val manager = mockk<SkillManager> { every { readSkillBody("user_auto") } returns body }
+        val metadata = SkillMetadata("user_auto", "External description", autoLoad = true, skillDir = File("unused-no-read"))
+        val tool = createSkillTools(setOf(metadata.name), listOf(metadata), manager).single { it.name == "use_skill" }
+        assertEquals("$body\n\n", tool.systemPrompt(Model(), emptyList()))
+    }
+
 }

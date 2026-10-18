@@ -31,13 +31,13 @@ import kotlin.coroutines.resumeWithException
 
 fun mediaScannerTool(context: Context, access: LocalFileAccess = LocalFileAccess(context)): Tool = Tool(
     name = "scan_media",
-    description = "Ask Android to index media files and wait for results. Accepts guarded local files and user-granted " +
-        "SAF documents from Android's external-storage provider on a known primary or removable storage volume. " +
-        "Cloud/other document providers have no supported scanner path. Android may reject app-private media.",
+    description = "Попросить Android проиндексировать 1–64 медиафайла и ждать результат до 15 секунд. " +
+        "Принимает разрешённые локальные файлы и документы SAF из системного поставщика внешней памяти " +
+        "на известном основном или съёмном накопителе. Облачные и другие поставщики документов не поддерживаются; Android может отклонить файлы во внутренней папке приложения.",
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {
             put("paths", buildJsonObject {
-                put("type", "array"); put("description", "1–64 allowed local paths or granted external-storage document URIs")
+                put("type", "array"); put("minItems", 1); put("maxItems", 64); put("description", "От 1 до 64 разрешённых локальных путей или URI документов внешней памяти с пользовательским SAF-доступом; каждый элемент указывает существующий файл.")
                 put("items", buildJsonObject { put("type", "string") })
             })
         }, required = listOf("paths"))

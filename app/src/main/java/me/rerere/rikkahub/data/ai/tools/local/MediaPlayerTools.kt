@@ -47,14 +47,17 @@ private fun emptyMediaSchema() = InputSchema.Obj(properties = buildJsonObject { 
 
 fun playMediaTool(context: Context, access: LocalFileAccess = LocalFileAccess(context)): Tool = Tool(
     name = "play_media",
-    description = "Start a new track at position zero using native Android media controls. Replaces the active session. " +
-        "Use pause_media/resume_media to continue an existing track and seek_media to change its position. " +
-        "Sources must be HTTP(S), allowed workspace/scratch files or user-granted SAF documents. Waits for preparation.",
+    description = "Начать новый медиафайл с нулевой позиции через Android, заменив текущий сеанс. " +
+        "Для продолжения используйте pause_media/resume_media, для перемотки — seek_media. " +
+        "Источник: HTTP(S), разрешённый файл workspace/scratch или документ SAF с пользовательским доступом. Вызов ожидает подготовки проигрывателя.",
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {
-            put("source", buildJsonObject { put("type", "string"); put("description", "Allowed file reference or HTTP(S) URL") })
-            listOf("title", "artist", "album").forEach { key -> put(key, buildJsonObject { put("type", "string"); put("description", "Optional media metadata") }) }
-            put("artwork_uri", buildJsonObject { put("type", "string"); put("description", "Optional allowed artwork reference; cover display is not supported") })
+            put("source", buildJsonObject { put("type", "string"); put("description", "Источник медиа: разрешённый путь к файлу, URI документа SAF или URL по HTTP(S).") })
+            listOf("title", "artist", "album").forEach { key -> put(key, buildJsonObject {
+                put("type", "string")
+                put("description", when (key) { "title" -> "Необязательное название медиа для проигрывателя."; "artist" -> "Необязательное имя исполнителя."; else -> "Необязательное название альбома." })
+            }) }
+            put("artwork_uri", buildJsonObject { put("type", "string"); put("description", "Необязательная разрешённая ссылка на обложку; проверяется доступ к файлу, но показ обложки не поддерживается.") })
         }, required = listOf("source"))
     },
     needsApproval = { true },
@@ -70,7 +73,7 @@ fun playMediaTool(context: Context, access: LocalFileAccess = LocalFileAccess(co
 
 fun pauseMediaTool(context: Context): Tool = Tool(
     name = "pause_media",
-    description = "Pause the active native media session and preserve the current position. Use resume_media to continue.",
+    description = "Приостановить текущий медиасеанс, сохранив позицию. Для продолжения используйте resume_media, для завершения — stop_media.",
     parameters = { emptyMediaSchema() },
     needsApproval = { true },
     execute = { deviceToolResult { ToolMediaPlaybackService.command(context, ToolMediaPlaybackService.ACTION_PAUSE).payload() } }
@@ -78,7 +81,7 @@ fun pauseMediaTool(context: Context): Tool = Tool(
 
 fun resumeMediaTool(context: Context, access: LocalFileAccess = LocalFileAccess(context)): Tool = Tool(
     name = "resume_media",
-    description = "Resume the active track from its current position. If stopped, restore the last stopped track and position while the app process still exists.",
+    description = "Продолжить текущую запись с сохранённой позиции. После stop_media восстанавливает последний остановленный файл и позицию, пока жив процесс приложения.",
     parameters = { emptyMediaSchema() },
     needsApproval = { true },
     execute = { deviceToolResult {
@@ -92,7 +95,7 @@ fun resumeMediaTool(context: Context, access: LocalFileAccess = LocalFileAccess(
 
 fun stopMediaTool(context: Context): Tool = Tool(
     name = "stop_media",
-    description = "Stop and release the active media player and dismiss its notification. Use pause_media for a temporary break.",
+    description = "Остановить медиапроигрыватель, освободить его и убрать уведомление. Для временной паузы используйте pause_media.",
     parameters = { emptyMediaSchema() },
     needsApproval = { true },
     execute = { deviceToolResult { ToolMediaPlaybackService.command(context, ToolMediaPlaybackService.ACTION_STOP).payload() } }
@@ -100,10 +103,10 @@ fun stopMediaTool(context: Context): Tool = Tool(
 
 fun seekMediaTool(context: Context): Tool = Tool(
     name = "seek_media",
-    description = "Seek to a nonnegative millisecond position in the ready native media session, preserving its playing or paused state. Clamps to the duration.",
+    description = "Перемотать подготовленный медиасеанс к неотрицательной позиции в миллисекундах, сохранив воспроизведение или паузу. Позиция ограничивается длительностью записи.",
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {
-            put("position_ms", buildJsonObject { put("type", "integer"); put("description", "Nonnegative target position in milliseconds") })
+            put("position_ms", buildJsonObject { put("type", "integer"); put("minimum", 0); put("description", "Целевая позиция в миллисекундах: целое число не меньше 0; позиция за концом ограничивается длительностью записи.") })
         }, required = listOf("position_ms"))
     },
     needsApproval = { true },
@@ -116,7 +119,7 @@ fun seekMediaTool(context: Context): Tool = Tool(
 
 fun getMediaStatusTool(): Tool = Tool(
     name = "get_media_status",
-    description = "Read the native media session state, source, current position, duration and metadata. This operation requires tool approval.",
+    description = "Проверить состояние медиасеанса, источник, позицию, длительность и метаданные, не меняя воспроизведение. Вызов требует одобрения инструмента.",
     parameters = { emptyMediaSchema() },
     needsApproval = { true },
     execute = { deviceToolResult { ToolMediaPlaybackService.status().payload() } }

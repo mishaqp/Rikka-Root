@@ -39,7 +39,7 @@ private val SENSOR_UNITS = mapOf(
 
 fun listSensorsTool(context: Context): Tool = Tool(
     name = "list_sensors",
-    description = "List available sensors, their types, vendors, ranges and resolutions. Does not start sampling.",
+    description = "Показать все доступные датчики, их типы, производителей, диапазоны и точность. Используйте для выбора датчика; измерение не запускается.",
     parameters = { InputSchema.Obj(buildJsonObject {}) },
     execute = { deviceToolResult {
         val manager = context.getSystemService(SensorManager::class.java)
@@ -62,13 +62,14 @@ fun listSensorsTool(context: Context): Tool = Tool(
 
 fun readSensorTool(context: Context): Tool = Tool(
     name = "read_sensor",
-    description = "Read an averaged sensor sample. type is a sensor name such as accelerometer, light or step_counter. duration_ms defaults to 200, maximum 5000; absent readings return an error.",
+    description = "Измерить усреднённые показания выбранного датчика за 1–5000 мс, по умолчанию 200 мс. Выберите type из списка; отсутствие датчика или показаний возвращает ошибку. Шагомер на Android 10+ требует разрешения физической активности.",
     parameters = { InputSchema.Obj(buildJsonObject {
         put("type", buildJsonObject {
             put("type", "string")
             put("enum", buildJsonArray { SENSOR_TYPES.keys.forEach { add(it) } })
+            put("description", "Тип измерения из списка enum, например accelerometer, light или step_counter; сведения о доступных датчиках даёт list_sensors.")
         })
-        put("duration_ms", buildJsonObject { put("type", "integer"); put("minimum", 1); put("maximum", 5000) })
+        put("duration_ms", buildJsonObject { put("type", "integer"); put("minimum", 1); put("maximum", 5000); put("default", 200); put("description", "Продолжительность измерения в миллисекундах: 1–5000, по умолчанию 200.") })
     }, required = listOf("type")) },
     execute = { input -> deviceToolResult {
         val params = input as? JsonObject ?: return@deviceToolResult deviceToolError("Ожидался объект параметров.")

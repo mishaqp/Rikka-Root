@@ -22,19 +22,17 @@ import kotlin.time.Duration.Companion.milliseconds
 internal fun buildJavascriptTool(): Tool = Tool(
     name = "eval_javascript",
     description = """
-        Execute JavaScript code using QuickJS engine (ES2020).
-        The result is the value of the last expression in the code.
-        For calculations with decimals, use toFixed() to control precision.
-        Console output (log/info/warn/error) is captured and returned in 'logs' field.
-        No DOM or Node.js APIs available.
-        Example: '1 + 2' returns 3; 'const x = 5; x * 2' returns 10.
+        Выполнить JavaScript в QuickJS (ES2020) для вычислений и обработки данных.
+        Возвращается значение последнего выражения; для десятичных чисел используйте toFixed().
+        Сообщения console возвращаются в logs. DOM и API Node.js недоступны.
+        Лимит выполнения — $JS_EXECUTION_TIMEOUT_MS мс; код вроде '1 + 2' возвращает 3.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("code", buildJsonObject {
                     put("type", "string")
-                    put("description", "The JavaScript code to execute")
+                    put("description", "Код JavaScript для выполнения в QuickJS без DOM и API Node.js; результат — последнее выражение.")
                 })
             },
             required = listOf("code")
@@ -42,7 +40,7 @@ internal fun buildJavascriptTool(): Tool = Tool(
     },
     execute = {
         val code = requireNotNull(it.jsonObject["code"]?.jsonPrimitive?.contentOrNull) {
-            "JavaScript code is required"
+            "Укажите код JavaScript в code."
         }
         listOf(UIMessagePart.Text(evaluateJavascript(code)))
     }
@@ -102,7 +100,7 @@ internal suspend fun evaluateJavascript(
                                 for (const arg of args) {
                                     line += ' ' + format(arg);
                                     if (line.length > $JS_MAX_LOG_CHARS) {
-                                        line = line.slice(0, $JS_MAX_LOG_CHARS) + ' [truncated]';
+                                        line = line.slice(0, $JS_MAX_LOG_CHARS) + ' [усечено]';
                                         break;
                                     }
                                 }
@@ -115,7 +113,7 @@ internal suspend fun evaluateJavascript(
                         const text = type === 'object' || type === 'function'
                             ? stringify(result) : toString(result);
                         if (text != null && text.length > $JS_MAX_RESULT_CHARS) {
-                            throw new Error('JavaScript result exceeds output limit');
+                            throw new Error('Результат JavaScript превышает допустимый размер');
                         }
                         return text == null ? null : text;
                     })()
@@ -123,16 +121,17 @@ internal suspend fun evaluateJavascript(
                 )
                 buildJsonObject {
                     if (logs.isNotEmpty()) {
-                        put("logs", logs.toString() + if (logsTruncated) "\n[Logs truncated]" else "")
+                        put("logs", logs.toString() + if (logsTruncated) "\n[Журнал усечён]" else "")
                     }
+                    put("logs_truncated", logsTruncated)
                     put("result", result?.let(::JsonPrimitive) ?: JsonNull)
                 }.toString()
             }
-        } ?: errorPayload("JavaScript execution timed out after ${timeoutMillis}ms")
+        } ?: errorPayload("Превышено время выполнения JavaScript: ${timeoutMillis} мс")
     } catch (_: QuickJsInterruptedException) {
-        errorPayload("JavaScript execution timed out after ${timeoutMillis}ms")
+        errorPayload("Превышено время выполнения JavaScript: ${timeoutMillis} мс")
     } catch (e: QuickJsException) {
-        errorPayload((e.message ?: "JavaScript execution failed").take(JS_MAX_LOG_CHARS))
+        errorPayload((e.message ?: "Не удалось выполнить JavaScript").take(JS_MAX_LOG_CHARS))
     }
 }
 

@@ -75,7 +75,7 @@ internal fun safGrantWarning(treeUri: String): String? {
 
 fun listStorageVolumesTool(context: Context): Tool = Tool(
     name = "list_storage_volumes",
-    description = "Показать физические накопители и сведения о сохранённом доступе к их папкам. Для облачных папок используйте list_granted_directories.",
+    description = "Показать до 64 физических накопителей и сохранённый доступ к их папкам. Для облачных папок используйте list_granted_directories; этот вызов не выдаёт новый доступ.",
     parameters = { InputSchema.Obj(buildJsonObject {}) },
     needsApproval = { true },
     execute = {
@@ -85,8 +85,9 @@ fun listStorageVolumesTool(context: Context): Tool = Tool(
                     ?: return@withContext storageError("Android не предоставляет сведения о накопителях.")
                 val grants = context.contentResolver.persistedUriPermissions.filter { it.isReadPermission && DocumentsContract.isTreeUri(it.uri) }
                 val active = coroutineContext
+                val allVolumes = storage.storageVolumes
                 val volumes = buildJsonArray {
-                    for (volume in storage.storageVolumes.take(64)) {
+                    for (volume in allVolumes.take(64)) {
                         active.ensureActive()
                         val directory = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) volume.directory else null
                         val volumeId = if (volume.isPrimary) "primary" else volume.uuid
@@ -108,7 +109,13 @@ fun listStorageVolumesTool(context: Context): Tool = Tool(
                         }
                     }
                 }
-                storageParts(buildJsonObject { put("volumes", volumes) })
+                storageParts(buildJsonObject {
+                    put("volumes", volumes)
+                    put("count", volumes.size)
+                    put("total", allVolumes.size)
+                    put("truncated", allVolumes.size > volumes.size)
+                    if (allVolumes.size > volumes.size) put("message", "Показаны первые 64 накопителя из ${allVolumes.size}. Остальные не включены; постраничного чтения у инструмента нет.")
+                })
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { storageError("Не удалось получить сведения о накопителях Android.") }
         }
@@ -118,7 +125,7 @@ fun listStorageVolumesTool(context: Context): Tool = Tool(
 /** Android's persisted permission list is the only grant store, including revocations. */
 fun listGrantedDirectoriesTool(context: Context): Tool = Tool(
     name = "list_granted_directories",
-    description = "Показать папки с постоянным доступом, выданным через системный выбор папки. Отозванный в Android доступ автоматически исчезает из списка.",
+    description = "Показать до 256 папок с постоянным доступом, выданным системным выбором папки, включая облачные. Отозванный в Android доступ исчезает из списка; для нового доступа нужен grant_directory_access.",
     parameters = { InputSchema.Obj(buildJsonObject {}) },
     needsApproval = { true },
     execute = {
@@ -141,7 +148,13 @@ fun listGrantedDirectoriesTool(context: Context): Tool = Tool(
                         }
                     }
                 }
-                storageParts(buildJsonObject { put("directories", directories) })
+                storageParts(buildJsonObject {
+                    put("directories", directories)
+                    put("count", directories.size)
+                    put("total", grants.size)
+                    put("truncated", grants.size > directories.size)
+                    if (grants.size > directories.size) put("message", "Показаны первые 256 папок с доступом на чтение из ${grants.size}. Остальные не включены; постраничного чтения у инструмента нет.")
+                })
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { storageError("Не удалось прочитать сохранённые разрешения Android.") }
         }
@@ -153,7 +166,7 @@ fun revokeDirectoryAccessTool(context: Context): Tool = Tool(
     name = "revoke_directory_access",
     description = "Отозвать постоянный доступ к папке, выданный через grant_directory_access. content_uri берите из list_granted_directories.",
     parameters = { InputSchema.Obj(buildJsonObject {
-        put("content_uri", buildJsonObject { put("type", "string"); put("description", "content:// URI папки из list_granted_directories") })
+        put("content_uri", buildJsonObject { put("type", "string"); put("description", "Точный content:// URI папки из list_granted_directories, доступ к которой нужно отозвать.") })
     }, required = listOf("content_uri")) },
     needsApproval = { true },
     execute = { input ->
@@ -178,8 +191,8 @@ fun grantDirectoryAccessTool(context: Context): Tool = Tool(
     name = "grant_directory_access",
     description = "Открыть системный выбор папки для постоянного доступа к SD, USB, загрузкам или облачному хранилищу. Требуется открытое приложение. Выбор открывается в Download; для записи выбирайте саму папку, а не корень памяти. initial_uri и request_label необязательны.",
     parameters = { InputSchema.Obj(buildJsonObject {
-        put("initial_uri", buildJsonObject { put("type", "string"); put("description", "Папка, с которой откроется выбор: content:// URI или путь вроде /sdcard/Documents. По умолчанию Download") })
-        put("request_label", buildJsonObject { put("type", "string"); put("description", "Подпись запроса доступа") })
+        put("initial_uri", buildJsonObject { put("type", "string"); put("description", "Необязательная начальная папка: content:// URI или путь вроде /sdcard/Documents. После обрезки пробелов — до 4096 символов без управляющих знаков. По умолчанию Download.") })
+        put("request_label", buildJsonObject { put("type", "string"); put("description", "Необязательная подпись запроса доступа; используются первые 256 символов.") })
     }) },
     needsApproval = { true },
     execute = { input ->

@@ -15,7 +15,7 @@ import java.net.Inet4Address
 
 fun wifiInfoTool(context: Context): Tool = Tool(
     name = "get_wifi_info",
-    description = "Read active Wi-Fi connection, IP, RSSI, frequency and link speed with approximate location. SSID/BSSID require precise location. Android may redact identifiers; ssid_redacted does not mean disconnected.",
+    description = "Прочитать подключение Wi-Fi, IP, уровень сигнала, частоту и скорость соединения. Для основных сведений достаточно приблизительной геолокации; SSID/BSSID требуют точной. Android может скрыть идентификаторы: ssid_redacted не означает отключение сети.",
     parameters = { InputSchema.Obj(buildJsonObject {}) },
     execute = { deviceToolResult {
         if (missingLocalToolPermissions(context, LocalToolOption.WifiInfo).isNotEmpty()) {

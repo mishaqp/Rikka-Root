@@ -65,7 +65,7 @@ class LocalToolMetadataTest {
 
         val prompt = skillPromptForAssistant(assistant, skills, Model())
 
-        assertTrue(prompt.startsWith("Core instructions\n\n**Skills**\n"))
+        assertTrue(prompt.startsWith("Core instructions\n\n**Навыки**\n"))
         assertTrue(prompt.contains("<description>Discovery &amp; hints</description>"))
         assertTrue(!prompt.contains("Lazy body is loaded on demand"))
         assertTrue(!prompt.contains("disabled"))

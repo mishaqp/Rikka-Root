@@ -63,4 +63,23 @@ class MiMoTTSProviderTest {
         assertNotNull(thrown)
         assertTrue(thrown is IllegalStateException)
     }
+
+    @Test fun staticMimoPromptGuidanceUsesRussianInstructionalText() {
+        val guidance = MiMoTTSProvider().promptGuidance
+        val nonRussian = guidance.lineSequence().map(String::trim).filter(String::isNotEmpty)
+            .filterNot { Regex("[А-Яа-яЁё]").containsMatchIn(it) }.toList()
+        assertTrue("Built-in instructional lines must be Russian: ${nonRussian.joinToString(" | ")}", nonRussian.isEmpty())
+    }
+
+    @Test fun staticMimoPromptGuidanceRetainsExactProviderTagsExamplesAndApiMarkers() {
+        val guidance = MiMoTTSProvider().promptGuidance
+        val styles = "开心/悲伤/愤怒/恐惧/惊讶/兴奋/委屈/平静/冷漠/怅然/欣慰/无奈/释然/温柔/高冷/活泼/严肃/慵懒/俏皮/深沉/磁性/醇厚/清亮/空灵/甜美/沙哑/御姐音/正太音/大叔音/台湾腔/东北话/四川话/河南话/粤语"
+        val audioTags = "[吸气] [深呼吸] [叹气] [笑] [轻笑] [大笑] [冷笑] [抽泣] [哽咽] [颤抖] [气声] [撒娇] [疲惫] [震惊]"
+        for (literal in listOf(styles, audioTags, "text_to_speech", "\"text\"", "(style)", "(开心 磁性)", "(唱歌)",
+            "()", "（）", "[]", "(紧张 深呼吸)", "(紧张，深呼吸)",
+            "(磁性)夜已经深了[叹气]城市还在呼吸。我是今晚陪你的人。")) {
+            assertTrue("Provider literal changed: $literal", guidance.contains(literal))
+        }
+    }
+
 }

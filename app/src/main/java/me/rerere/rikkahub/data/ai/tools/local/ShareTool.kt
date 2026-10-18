@@ -13,10 +13,17 @@ import me.rerere.ai.core.Tool
 
 fun shareTool(context: Context): Tool = Tool(
     name = "share",
-    description = "Open the system chooser to share text or a URL. Requires approval. The user selects the receiving app and confirms sending; opening the chooser does not mean delivery.",
+    description = "Открыть системное меню отправки текста или URL после одобрения. Пользователь выбирает приложение и подтверждает отправку; открытие меню не означает доставку. Нужен text или url, суммарно до 128000 символов.",
     needsApproval = { true },
     parameters = { InputSchema.Obj(buildJsonObject {
-        listOf("text", "url", "subject").forEach { put(it, buildJsonObject { put("type", "string") }) }
+        listOf("text", "url", "subject").forEach { key -> put(key, buildJsonObject {
+            put("type", "string"); put("maxLength", if (key == "subject") 512 else 128000)
+            put("description", when (key) {
+                "text" -> "Текст для отправки; обязателен text или url. Суммарная длина text и url с разделяющим переводом строки — до 128000 символов."
+                "url" -> "Ссылка для отправки как текст. Укажите url или text; общий текст отправки — до 128000 символов."
+                else -> "Необязательная тема отправки: до 512 символов."
+            })
+        }) }
     }) },
     execute = { input -> deviceToolResult {
         val params = input as? JsonObject ?: return@deviceToolResult deviceToolError("Ожидался объект параметров.")

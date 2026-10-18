@@ -23,16 +23,14 @@ private val HEX_COLOR_REGEX = Regex("^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 internal fun buildChartDisplayTool(): Tool = Tool(
     name = "chart_display",
     description = """
-        Display a line, bar, or scatter chart to the user inside the chat.
-        For line and bar charts, every series must use 'values' (numbers aligned by position with x_axis.data)
-        and must not use 'points'. For scatter charts, every series must use 'points' ({x, y} numbers)
-        and must not use 'values'.
-        Bar charts always start from 0, so axis 'min'/'max' are not allowed for bar charts.
-        For line and bar charts the X axis is categorical: x_axis only supports 'title' and 'data',
-        so x_axis 'min'/'max' and log scale are not allowed; use y_axis for range and log scale.
-        Axis 'data' labels are only allowed on x_axis for line and bar charts.
-        At most $MAX_SERIES series, and at most $MAX_SERIES_POINTS values/points per series.
-        The chart is rendered for the user directly; you don't need to repeat the raw data in your reply.
+        Показать линейный, столбчатый или точечный график прямо в чате.
+        Для line/bar у каждого ряда нужны values, согласованные по позиции с x_axis.data;
+        points запрещены. Для scatter нужны points с числовыми x/y, а values запрещены.
+        В bar столбцы начинаются с 0: min/max осей недоступны. Для line/bar ось X содержит
+        категории: её min/max и log недоступны; диапазон и log задавайте через y_axis.
+        Подписи data допустимы только в x_axis для line/bar. Не более $MAX_SERIES рядов
+        и $MAX_SERIES_POINTS значений или точек на ряд. Пользователь сразу увидит график;
+        повторять исходные данные в ответе не нужно.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
@@ -40,44 +38,47 @@ internal fun buildChartDisplayTool(): Tool = Tool(
                 put("style", buildJsonObject {
                     put("type", "string")
                     put("enum", buildJsonArray { CHART_STYLES.forEach { add(it) } })
-                    put("description", "Chart type.")
+                    put("description", "Вид графика: line — линейный, bar — столбчатый, scatter — точечный.")
                 })
                 put("title", buildJsonObject {
                     put("type", "string")
-                    put("description", "Chart title, shown at the top.")
+                    put("description", "Необязательный заголовок графика над изображением.")
                 })
-                put("x_axis", buildAxisSchema())
-                put("y_axis", buildAxisSchema())
+                put("x_axis", buildAxisSchema("Настройки оси X: категории для line/bar или числовые координаты для scatter."))
+                put("y_axis", buildAxisSchema("Настройки числовой оси Y: заголовок, диапазон и масштаб."))
                 put("series", buildJsonObject {
                     put("type", "array")
-                    put("description", "One or more data series (1-$MAX_SERIES).")
+                    put("description", "Ряды данных: от 1 до $MAX_SERIES; формат values или points зависит от style.")
+                    put("minItems", 1); put("maxItems", MAX_SERIES)
                     put("items", buildJsonObject {
                         put("type", "object")
                         put("properties", buildJsonObject {
                             put("name", buildJsonObject {
                                 put("type", "string")
-                                put("description", "Series name; used for the legend when there are multiple series.")
+                                put("description", "Необязательное имя ряда для легенды, когда рядов несколько.")
                             })
                             put("color", buildJsonObject {
                                 put("type", "string")
-                                put("description", "Hex color such as '#FF8800' or '#F80'. Some clients may ignore it.")
+                                put("description", "Необязательный цвет #FF8800 или #F80; некоторые клиенты могут его игнорировать.")
+                                put("pattern", HEX_COLOR_REGEX.pattern)
                             })
                             put("values", buildJsonObject {
                                 put("type", "array")
-                                put("items", buildJsonObject { put("type", "number") })
+                                put("items", buildJsonObject { put("type", "number") }); put("maxItems", MAX_SERIES_POINTS)
                                 put(
                                     "description",
-                                    "1D data for line/bar charts, aligned by position with x_axis.data."
+                                    "Числовые значения для line/bar, согласованные по позиции с x_axis.data. Не более $MAX_SERIES_POINTS значений; в scatter это поле запрещено."
                                 )
                             })
                             put("points", buildJsonObject {
                                 put("type", "array")
-                                put("description", "2D data points for scatter charts.")
+                                put("description", "Точки с числовыми координатами x/y для scatter: не более $MAX_SERIES_POINTS. Для line/bar используйте values.")
+                                put("maxItems", MAX_SERIES_POINTS)
                                 put("items", buildJsonObject {
                                     put("type", "object")
                                     put("properties", buildJsonObject {
-                                        put("x", buildJsonObject { put("type", "number") })
-                                        put("y", buildJsonObject { put("type", "number") })
+                                        put("x", buildJsonObject { put("type", "number"); put("description", "Конечная числовая координата X; для логарифмической оси должна быть больше 0.") })
+                                        put("y", buildJsonObject { put("type", "number"); put("description", "Конечная числовая координата Y; для логарифмической оси должна быть больше 0.") })
                                     })
                                     put("required", buildJsonArray {
                                         add("x")
@@ -109,38 +110,38 @@ internal fun buildChartDisplayTool(): Tool = Tool(
     }
 )
 
-private fun buildAxisSchema(): JsonObject = buildJsonObject {
-    put("type", "object")
+private fun buildAxisSchema(description: String): JsonObject = buildJsonObject {
+    put("type", "object"); put("description", description)
     put("properties", buildJsonObject {
         put("title", buildJsonObject {
             put("type", "string")
-            put("description", "Axis title, usually including the unit.")
+            put("description", "Необязательный заголовок оси, обычно с единицей измерения.")
         })
         put("data", buildJsonObject {
             put("type", "array")
             put("items", buildJsonObject { put("type", "string") })
-            put("description", "Category labels (e.g. months) for line/bar charts, aligned with series values. " +
-                "Only allowed on x_axis, and not for scatter charts.")
+            put("description", "Подписи категорий, например месяцев, по позициям значений рядов. " +
+                "Допустимы только в x_axis для line/bar; число подписей должно совпадать с числом values каждого ряда.")
         })
         put("min", buildJsonObject {
             put("type", "number")
-            put("description", "Lower bound of the display range. Allowed on y_axis for line charts and on both axes for scatter charts.")
+            put("description", "Нижняя граница отображаемого диапазона. Допустима в y_axis для line и на обеих осях scatter; должна быть меньше max. В bar недоступна.")
         })
         put("max", buildJsonObject {
             put("type", "number")
-            put("description", "Upper bound of the display range. Allowed on y_axis for line charts and on both axes for scatter charts.")
+            put("description", "Верхняя граница отображаемого диапазона. Допустима в y_axis для line и на обеих осях scatter; должна быть больше min. В bar недоступна.")
         })
         put("scale", buildJsonObject {
             put("type", "string")
             put("enum", buildJsonArray { AXIS_SCALES.forEach { add(it) } })
-            put("description", "Scale type, default linear. Log is allowed on y_axis for all charts and on x_axis for scatter charts only.")
+            put("description", "Масштаб оси: linear — линейный (обычный), log — логарифмический. log допустим в y_axis и в x_axis только для scatter; значения и заданная min должны быть больше 0.")
         })
         put("format", buildJsonObject {
             put("type", "string")
             put(
                 "description",
-                "Label format: f-style for numbers (e.g. '.1f'), strftime-style for dates (e.g. '%Y-%m'). " +
-                    "Some clients may ignore it."
+                "Формат подписей: f-стиль для чисел (например .1f), strftime для дат (например %Y-%m). " +
+                    "Некоторые клиенты могут его игнорировать."
             )
         })
     })

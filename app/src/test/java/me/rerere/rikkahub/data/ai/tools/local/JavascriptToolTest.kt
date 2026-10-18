@@ -36,7 +36,7 @@ class JavascriptToolTest {
             "({toJSON() { while (true) {} }})",
             "while (true) { console.log('spam'); }",
         )) {
-            assertTrue(evaluate(code, 100)["error"]!!.jsonPrimitive.content.contains("timed out"))
+            assertTrue(evaluate(code, 100)["error"]!!.jsonPrimitive.content.contains("Превышено время выполнения"))
             assertEquals("2", evaluate("1 + 1")["result"]?.jsonPrimitive?.content)
         }
     }
@@ -45,7 +45,8 @@ class JavascriptToolTest {
     fun `bounds logs and output`() = runBlocking {
         val logs = evaluate("for (let i = 0; i < 10000; i++) console.log('1234567890'); 1")
         assertTrue(logs["logs"]!!.jsonPrimitive.content.length < 66_000)
-        assertTrue(logs["logs"]!!.jsonPrimitive.content.endsWith("[Logs truncated]"))
+        assertTrue(logs["logs"]!!.jsonPrimitive.content.endsWith("[Журнал усечён]"))
+        assertEquals("true", logs["logs_truncated"]?.jsonPrimitive?.content)
         assertTrue(evaluate("'x'.repeat(2 * 1024 * 1024)").containsKey("error"))
     }
 

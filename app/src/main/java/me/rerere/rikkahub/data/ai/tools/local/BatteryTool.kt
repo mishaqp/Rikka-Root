@@ -13,8 +13,8 @@ import me.rerere.ai.core.Tool
 fun batteryTool(context: Context): Tool = Tool(
     name = "get_battery_status",
     description = """
-        Get the current battery status of the device, including charge percentage,
-        charging state, plug type, health, temperature, voltage, and battery technology.
+        Прочитать состояние батареи: процент заряда, зарядку, источник питания, состояние,
+        температуру, напряжение и технологию. Используйте для проверки заряда; настройки не меняются.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(properties = buildJsonObject { })

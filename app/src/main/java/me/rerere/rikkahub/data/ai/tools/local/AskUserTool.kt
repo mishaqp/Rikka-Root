@@ -10,34 +10,33 @@ import me.rerere.ai.core.Tool
 internal fun buildAskUserTool(): Tool = Tool(
     name = "ask_user",
     description = """
-        Ask the user one or more questions when you need clarification, additional information, or confirmation.
-        Each question can optionally provide a list of suggested options for the user to choose from.
-        The user may provide a free-text answer for every question, including single and multi selection questions.
-        For multi selection questions, custom text can be combined with selected options.
-        The answers will be returned as a JSON object mapping question IDs to the user's responses.
+        Задать пользователю вопросы для уточнения задачи, получения информации или подтверждения.
+        Можно предложить варианты, но пользователь всегда может ответить своим текстом.
+        При множественном выборе можно сочетать выбранные варианты и свой ответ.
+        Ответ возвращается JSON-объектом, где ID вопросов соответствуют ответам пользователя.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("questions", buildJsonObject {
                     put("type", "array")
-                    put("description", "List of questions to ask the user")
+                    put("description", "Вопросы, которые нужно показать пользователю для уточнения задачи или подтверждения.")
                     put("items", buildJsonObject {
                         put("type", "object")
                         put("properties", buildJsonObject {
                             put("id", buildJsonObject {
                                 put("type", "string")
-                                put("description", "Unique identifier for this question")
+                                put("description", "Уникальный ID вопроса для сопоставления с ответом пользователя.")
                             })
                             put("question", buildJsonObject {
                                 put("type", "string")
-                                put("description", "The question text to display to the user")
+                                put("description", "Текст вопроса, который увидит пользователь.")
                             })
                             put("options", buildJsonObject {
                                 put("type", "array")
                                 put(
                                     "description",
-                                    "Optional list of suggested options for the user to choose from"
+                                    "Необязательный список предлагаемых вариантов; пользователь также может ввести свой ответ."
                                 )
                                 put("items", buildJsonObject {
                                     put("type", "string")
@@ -55,7 +54,7 @@ internal fun buildAskUserTool(): Tool = Tool(
                                 )
                                 put(
                                     "description",
-                                    "Answer type: text (free text input, default), single (select one option or enter custom text), multi (select options and/or enter custom text)"
+                                    "Вид ответа: text — свободный текст (обычный режим), single — один вариант или свой текст, multi — несколько вариантов и/или свой текст."
                                 )
                             })
                         })
