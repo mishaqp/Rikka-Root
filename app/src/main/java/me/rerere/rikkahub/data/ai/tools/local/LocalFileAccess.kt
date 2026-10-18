@@ -1024,7 +1024,7 @@ class LocalFileAccess internal constructor(
                             // Android's emulated storage and FAT cards cannot create hard links.
                             // CREATE_NEW still reserves the destination without replacing a raced file.
                             installNewSharedStorageFile(staging, target, verifyAccess = { checkFile(staging); checkFile(target, true) })
-                        } else installPrivateNewFile(staging, target) }
+                        } else installPrivateNewFile(staging, target, verifyAccess = { checkFile(staging); checkFile(target, true) }) }
                     catch (_: java.nio.file.AtomicMoveNotSupportedException) {
                         if (overwrite) Files.move(staging.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
                         else throw IllegalStateException("Хранилище не поддерживает безопасное создание файла.")
@@ -1090,21 +1090,20 @@ internal var privateHardLink: (target: java.nio.file.Path, staging: java.nio.fil
 
 /**
  * link(2) installs a complete inode without replacing a raced target. Android forbids
- * hard links in app-private storage (EACCES), so there a no-replace rename is used:
- * scratch/workspace belong to this app, and Files.move without REPLACE_EXISTING still
- * refuses an existing target.
+ * hard links in app-private storage (EACCES), so use exclusive CREATE_NEW installation
+ * there. A plain Files.move can replace a target created between its lstat and rename.
  */
-private fun installPrivateNewFile(staging: File, target: File) {
+private suspend fun installPrivateNewFile(staging: File, target: File, verifyAccess: () -> Unit) {
     try {
         privateHardLink(target.toPath(), staging.toPath())
     } catch (existing: java.nio.file.FileAlreadyExistsException) {
         throw existing
     } catch (_: java.nio.file.FileSystemException) {
-        Files.move(staging.toPath(), target.toPath())
+        installNewSharedStorageFile(staging, target, verifyAccess)
     } catch (_: UnsupportedOperationException) {
-        Files.move(staging.toPath(), target.toPath())
+        installNewSharedStorageFile(staging, target, verifyAccess)
     } catch (_: SecurityException) {
-        Files.move(staging.toPath(), target.toPath())
+        installNewSharedStorageFile(staging, target, verifyAccess)
     }
 }
 
