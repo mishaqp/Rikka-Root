@@ -2,7 +2,7 @@
 
 Часть 2 начата после полного [Daily Build39101163177](https://github.com/mishaqp/Rikka-Root/actions/runs/39101163177) на `b89203ef`: 5325 обычных тестов без failures/errors/skips, 13 lint-отчётов, 0 ошибок. [Часть 1 и 60 пунктов](tools-audit-2026-10-status.md), [13 регрессий независимого ревью](tools-review-regressions-2026-10.md). Часть 3 ещё не начата.
 
-Статус: работа идёт; этот документ не объявляет завершёнными ещё не опубликованные группы. Новые тесты воспроизводились на производственном коде `b89203ef`; параллельный `c56c52a8` добавляет только RootMode.GUIDE и его проверки и сохранён при pull --rebase. Код и тесты режимов «Всё через root» и private hardlink fallback не откатываются.
+Статус: работа идёт; этот документ не объявляет завершёнными ещё не опубликованные группы. Первоначальные RED воспроизводились на производственном коде `b89203ef`; последующие адресные RED — на соответствующих кандидатах, указанных в evidence; параллельный `c56c52a8` добавляет только RootMode.GUIDE и его проверки и сохранён при pull --rebase. Код и тесты режимов «Всё через root» и private hardlink fallback не откатываются.
 
 ## Реальный реестр
 
@@ -19,10 +19,10 @@
 | RootMode | Продвинутый root_exec проходит live feature guard только пока режим действительно активен; отзыв режима и все command/headless approval guards остаются. | Daily Build39107670074: GREEN5419/0; lint13/0 |
 | Файлы/архивы/download/document | Русские metadata и реальные defaults/bounds; некорректные необязательные флаги и compression отклоняются до файлового/network effect; в подсказках настоящее workspace_shell. | Daily Build39107670074: GREEN5419/0; lint13/0 |
 | Root/SSH/Termux/browser/MCP | Русские metadata, фактические limits. Усечение определяется счётчиками, а не строкой внешнего вывода; продолжение не советует повторять изменяющую команду. Browser content/scripts/permissions не усиливаются. | Daily Build39107670074: GREEN5419/0; lint13/0 |
-| Телефон/экран и новые локальные tools | Русские metadata, фактические ограничения, проверка параметров до root/Android effects; корректное усечение listings. | Пакет 2B: финальный локальный GREEN638/0; lint13/0; полный Daily Build2B ожидается |
-| Личные данные/KeyStore | Русские схемы, N+1 для честного truncated/has_more; ограниченные детали и top apps показывают усечение. Scoped секреты и permissions сохраняются. | Пакет 2B: финальный локальный GREEN638/0; lint13/0; полный Daily Build2B ожидается |
-| Management/workspace/cron/workflow | Русские schemas, строгие leaf-типы, компактные результаты, числовое время, честное продолжение. Старые history-массивы UI остаются читаемыми. | Пакет 2B: финальный локальный GREEN638/0; lint13/0; полный Daily Build2B ожидается |
-| Остальные info/media/UI и contextual/search/skills | Русские metadata без изменения effects/approval/systemPrompt; фактические лимиты, точные альтернативы. | RED подтверждён; отдельная группа впереди |
+| Телефон/экран и новые локальные tools | Русские metadata, фактические ограничения, проверка параметров до root/Android effects; корректное усечение listings. | Daily Build39110934464: GREEN5504/0; lint13/0 |
+| Личные данные/KeyStore | Русские схемы, N+1 для честного truncated/has_more; ограниченные детали и top apps показывают усечение. Scoped секреты и permissions сохраняются. | Daily Build39110934464: GREEN5504/0; lint13/0 |
+| Management/workspace/cron/workflow | Русские schemas, строгие leaf-типы, компактные результаты, числовое время, честное продолжение. Старые history-массивы UI остаются читаемыми. | Daily Build39110934464: GREEN5504/0; lint13/0 |
+| Остальные info/media/UI и contextual/search/skills | Русские metadata и отдельные runtime/model-prompt исправления при сохранении effects/approval-политик; фактические лимиты, точные альтернативы. | Пакет 2C: локальный GREEN2145/0, lint выполняется; полный CI ожидается |
 | Мягкое предупреждение цикла | Повтор того же canonical вызова в текущем ходе помечается только в provider-copy, внутри общего cap; действия не блокируются, сохранённый JSON не изменяется. | Daily Build39107670074: GREEN5419/0; lint13/0 |
 
 Публикация разбита на пакеты до 60 уникальных путей с отдельным зелёным Daily Build. Общий тест, который проверяет ещё не исправленные группы, будет опубликован вместе с последней группой; существующие проверки не отключаются и не ослабляются.
@@ -80,7 +80,7 @@
 
 ## Пакет 2B: телефон, личные данные и management
 
-Пакет содержит 57 уникальных путей: телефон/экран —23, личные данные/KeyStore —13, management/workspace/cron/workflow —20, этот документ —1. Публикация подготовлена после полного GREEN пакета 2A; локальные проверки 2B завершены. Собственный полный Daily Build2B обязателен перед публикацией 2C. Часть 2 ещё не завершена: пакет 2C и финальная проверка общего реестра остаются впереди. Часть 3 не начата.
+Пакет содержит 57 уникальных путей: телефон/экран —23, личные данные/KeyStore —13, management/workspace/cron/workflow —20, этот документ —1. Пакет опубликован после полного GREEN пакета 2A; локальные проверки 2B завершены. Собственный полный Daily Build2B обязателен перед публикацией 2C. Часть 2 ещё не завершена: пакет 2C и финальная проверка общего реестра остаются впереди. Часть 3 не начата.
 
 - Телефон/экран: русские описания 39 создателей инструментов и их параметров, реальные defaults/limits/альтернативы. Некорректные screenshot-параметры, включая переполнение display_id, отклоняются до root-вызова; поддерживается только display_id=0. Clipboard не превращает произвольный JSON в текст и проверяет reveal; NFC принимает язык по умолчанию только при отсутствии поля. Списки приложений/activities сообщают усечение. HTTP сохраняет настоящие headers; разрешения, root-guards, приватное хранение снимков и подтверждения сохранены.
 - Личные данные: русские metadata для 21 создателя; contacts/calls/SMS/calendar читают дополнительную строку и сообщают фактические count/truncated/has_more без выдуманного общего размера. Вложенные phones/emails ограничены 20 с явным признаком усечения; сокращённые имена/номера/адреса помечаются отдельно. ScreenTime сообщает returned/total_apps, сохраняя total_ms по всем приложениям. Продолжение предлагает только существующие фильтры или увеличение ограниченного limit/top, без обещания cursor. Scoped KeyStore handles, plaintext/zeroing, permissions и crypto effects не менялись.
@@ -109,4 +109,80 @@
 
 До follow-up сверка17 management-путей с переданными артефактами дала побайтное совпадение; follow-up расширил группу до20 путей и проверен финальным GREEN638. В трёх новых тестклассах сохранены все101 строки assertions/verify из RED. Две прежние fixture изменены только для дополнительного search-limit, нового history-reader и чтения items; точный owner в FTS-моке и все isolation assertions сохранены. Существующие проверки не отключались и не ослаблялись.
 
-Коммиты исходного кода 2B: телефон — `4540b4b8`, личные данные — `1a630c9b`, management — `579f1dd8`. Полный CI2A39107670074 подтверждён; результат CI2B будет указан после его завершения.
+Коммиты исходного кода 2B: телефон — `4540b4b8`, личные данные — `1a630c9b`, management — `579f1dd8`. Полный CI2A39107670074 подтверждён. [CI2B39110934464](https://github.com/mishaqp/Rikka-Root/actions/runs/39110934464) полностью GREEN:5504 обычных теста,0 failures/errors/skips;13 lint-отчётов/0 ошибок. Подпись, единственный arm64 ABI и SHA256 APK совпали с опубликованным release asset.
+
+## Пакет 2C: общий реестр, оставшиеся metadata и модельные результаты
+
+**Кандидат 2C собран локально; финальный локальный GREEN2145/0 подтверждён, lint13/0 подтверждён, полный CI ещё ожидается.** Промежуточные проверки отдельных классов приведены отдельно и не означают завершения пакета. Ниже описан scope кандидата и фактический RED, а не опубликованный результат. Итоговый manifest содержит53 уникальных пути; три коммита исходного кода указаны ниже; пересекающиеся слои нельзя складывать как число файлов. Пакет 2A имеет подтверждённый полный GREEN; пакет 2B опубликован, полный CI39110934464 GREEN5504/0 и lint13/0 подтверждены. Часть2 и общий read-only аудит части3 не объявляются завершёнными.
+
+| Слой 2C | Контракт кандидата | Локальная проверка |
+|---|---|---|
+| GLOBAL: настоящий реестр и schema transforms | Восемь тестов вызывают LocalTools/ChatToolFactory во всех описанных выше представлениях. Проверяются RU metadata встроенных tools, names, required/types/enum/nested/compositions и реальные Claude/Gemini преобразования; все20 SDK search providers и CustomJS scrape-вариант сохраняют недескриптивные schema nodes. Внешний MCP metadata/dispatch остаётся точным. | Локальный GREEN2145/0; полный CI2C ожидается |
+| Misc metadata:17 source paths |26 создателей info/media/UI/storage/sensor/notification/JS и связанных tools: русские описания, реальные defaults, caps и альтернативы. Dynamic значения не объявляются константными defaults; empty chart arrays не получают выдуманный minItems. Metadata-слой сохраняет execute/approval/systemPrompt. | Локальный GREEN2145/0; полный CI2C ожидается |
+| Contextual metadata:7 source paths | Search, skills/install/run_js, subagent и external automation: перевод встроенных descriptions. Search adapter меняет только descriptions13 существующих input keys, сохраняя required, типы, enum и ограничения SDK; effects не меняются. | Локальный GREEN2145/0; полный CI2C ожидается |
+| Встроенные model prompts:3 source paths | Русское framing lazy skills, статические инструкции MiMo и workspace reminder (Bash/POSIX, AGENTS.md). Пользовательские skill/body/system instructions, имена/пути, XML/API markers, китайские MiMo tags и exact examples сохраняются. RootMode.GUIDE и attachment prompt не меняются. | Локальный GREEN2145/0; полный CI2C ожидается |
+| Runtime results:8 source paths | Русские owned skill/install/run_js/JavaScript diagnostics; compact JSON для пустого успешного run_js; реальные flags/счётчики storage и subagent. Лимиты, permissions, path/namespace/network guards и approvals сохраняются. | Локальный GREEN2145/0; полный CI2C ожидается |
+| Metadata accuracy:3 source paths | Машинные bounds/defaults субагента соответствуют реальным константам. run_js data — до65536 единиц UTF-16, skill_install_from_text content — до262144 единиц UTF-16, а не байтов. Установщик не обещает второго review итогового имени: подтверждается вызов, имя вычисляется при исполнении и возвращается в результате. | Локальный GREEN2145/0; полный CI2C ожидается |
+| Notification accuracy:1 source path | post_notification.id описывает фактический диапазон0..2147483647; dynamic generated id не получает schema default. Прежнее отклонение переполнения до Android effect сохраняется. | Локальный GREEN2145/0; полный CI2C ожидается |
+| Provider output / archive | Generic JSON-конверт в пределах прежнего provider cap, безопасный архив с непрозрачным именем и привязанным дескриптором каталога; исходный результат и полномочия сохраняются. | Локальный GREEN2145/0; полный CI2C ожидается |
+| Numeric integer guard | Дробный BigDecimal отклоняется до потенциально дорогого преобразования масштаба; native/union/freeform семантика сохраняется. | Локальный GREEN2145/0; полный CI2C ожидается |
+
+Эти числа описывают слои, а не непересекающиеся группы: например SkillsTools входит в metadata, runtime и model-prompt изменения. Итоговый manifest: 53 уникальных пути (28 misc/prompt,18 contextual/реестр,5 runtime/output,2 docs). Коммиты: `6dbd80af`, `e8332789`, `32be5b9a`.
+
+### Результаты и границы данных
+
+Runtime draft локализует только текст, которым приложение объясняет операцию. JavaScript result/stdout и пользовательские исключения остаются точными; английский текст навыка, его metadata и пользовательские instructions не переводятся. Для known owned JS timeout/output-limit причины меняются в месте создания; фактический logs_truncated сопровождает прежние ограничения вывода. Старые literal-only locale expectations обновлены отдельной fixture-поправкой с сохранением size/recovery/cancellation/user-data assertions; их проверки входят в GREEN2145/0. Импортёр навыков и его сетевые проверки не меняются; tool boundary различает известный owned diagnostic и внешнюю ошибку.
+
+Storage listings сохраняют caps64 volumes/256 directories. count — выданные строки, total — размер фактического snapshot, для grants только readable tree permissions. truncated вычисляется по этим данным, сообщение честно объясняет отсутствие paging; не создаются новые разрешения или доступ.
+
+Subagent draft сохраняет максимум65536 единиц UTF-16, не разрезая корректную surrogate pair. Engine передаёт известные result_truncated/result_total_chars в сериализуемую запись, затем проверяется настоящий Registry→AES-GCM storage→reload→subagent_get путь. Для нового результата ровно на границе флаг false, для превышения true; отсутствие результата не используется для догадок. Старые зашифрованные записи без полей остаются с неизвестными metadata даже при длине65536. При noResult тело и производные длина/флаг не сохраняются и не выдаются; result_suppressed остаётся. Это additive nullable metadata в существующем envelope, без Room migration и изменения cipher/owner/status/cancellation.
+
+В draft review обнаружено, что errorCode перезаписывает подсказку об усечённом частичном результате. После actual RED объяснение ошибки для родительского ассистента объединено с truncation/non-replay hint: subagent_get не восстанавливает отброшенный хвост, повтор задачи с побочными действиями не предлагается ради вывода. Семь subagent-тестов прошли в промежуточном output-proposal-check и входят в финальный локальный GREEN2145/0; полный CI2C ещё требуется.
+
+### Общий provider cap, архив и числовая граница
+
+Generic overflow теперь представляет provider-copy как компактный JSON `{truncated:true,total_chars,preview,message}`. Сериализованный конверт целиком, включая escaping и русскую подсказку, помещается в прежние32768 единиц UTF-16. preview — точный безопасный префикс без разрыва surrogate pair; total_chars измеряет исходный объединённый текст, включая настоящий repeat warning и разделитель. Полный вход не парсится и не сериализуется целиком ради обрезки. Structured-search/citation обработка остаётся первой, изображения и прочие nontext части сохраняются; сохранённые сообщения, ID/input/approval/web-taint не меняются. Подсказка не обещает несуществующего retrieval path и не советует повторять изменяющее действие.
+
+Архив полного вывода использует отдельный непрозрачный UUID basename, эксклюзивное создание и тот же открытый канал для записи; toolCallId не становится частью пути. JSON-квитанция содержит `/tool_outputs/` path, UTF-16-safe preview до4096, truncated/total_chars и русское сообщение, не подменяя успех исходного инструмента. Проверка parent-directory закрывает как заранее подставленный symlink, так и замену каталога между проверкой и открытием. Кандидат привязывает относительный CREATE_NEW/NOFOLLOW write к SecureDirectoryStream, сверяет идентичность каталога по fd/fileKey и NOFOLLOW до/после записи. При IOException/неподдерживаемой файловой системе возвращается точный исходный результат; удаление потенциально подменённого pathname не выполняется. Media, исходный raw текст, идентификаторы и подтверждения сохраняются. Целевые96/0 и расширенные2145/0 подтвердили эту версию; полный CI2C ожидается.
+
+Отдельный числовой RED использует безопасный witness `1e-10000`: при объявленном integer старый путь дошёл до перехваченного scale-expanding conversion, хотя обязан был отклонить ненулевую дробь раньше. Huge exponent/OOM не исполнялся и on-device исчерпание ресурсов не заявляется. Минимальная правка проверяет `stripTrailingZeros().scale() > 0` перед `toBigIntegerExact()`; zero,5.0,1e2,-3.000 остаются корректными. Number/scientific form, native unions, произвольные строки и approvals не получают нового глобального exponent limit. Genuine RED27/1 включает26 GREEN controls; финальный локальный GREEN2145/0 подтверждён; полный CI2C ожидается.
+
+### Фактические RED 2C
+
+Срезы пересекаются; их нельзя суммировать как уникальные тесты или ошибки. Все приведённые результаты получены из свежих JUnit, без errors/skips.
+
+| Evidence | Тесты / failures / errors / skips | Что действительно проверено |
+|---|---|---|
+| [package-c-extra-red](/workspace/.reliability-state/part2/package-c-extra-red.json) |39 /20 /0 /0 | Runtime/storage/skills/JS/subagent и встроенные prompts; runtime-срез22/17 с5 GREEN controls |
+| [package-c-accuracy-red](/workspace/.reliability-state/part2/package-c-accuracy-red.json) |14 /12 /0 /0 | Accuracy7/7; Subagent7/5, включая частичный failed-result/message collision. Non-ASCII boundary и отсутствие effects проверены до metadata assertions |
+| [package-c-notification-red](/workspace/.reliability-state/part2/package-c-notification-red.json) |1 /1 /0 /0 | Настоящие2147483648/Long.MAX_VALUE отклоняются без Context effects, затем падает assertion отсутствующего schema maximum |
+| [output-boundary, corrected fixture](/workspace/.reliability-state/part2/package-c-output-boundary-red-corrected-fixture.json) |18 /14 /0 /0 | Generic provider7/5 и архив11/9;2 контроли каждого класса GREEN. Не смешивается с первоначальными невалидными fixtures |
+| [archive parent RED](/workspace/.reliability-state/part2/package-c-archive-parent-red.json) |1 /1 /0 /0 | Настоящая запись UUID-файла за пределами архива через parent symlink |
+| [archive race, private seam RED](/workspace/.reliability-state/part2/package-c-archive-parent-race-seam-red.json) |1 /1 /0 /0 | Выполнена подмена parent перед открытием, затем наблюдена настоящая запись во внешний каталог |
+| [numeric compatible fixture RED](/workspace/.reliability-state/part2/package-c-numeric-red-compatible-fixture.json) |27 /1 /0 /0 | unsafeEntries ожидался0, получен1 для1e-10000;26 остальных controls GREEN |
+
+В extra batch отдельные noResult и legacy-unknown контроли прошли на исходном коде; это не дефекты и не RED. Также прошли exact skill content, внешние JS text/errors и пользовательские JS logs/results. Model-prompt controls сохранили AGENTS.md/user body, имена/пути и MiMo protocol tags/examples. Их сохранность повторно подтверждена после применения всех слоёв в финальном локальном GREEN2145/0; полный CI2C ещё требуется. Первоначальная notification fixture остановилась на пропущенном import `io.mockk.Called`: это NOT-RED; исправлен только import, приведённый выше1/1 — последующий реальный assertion RED.
+
+Первые archive fixtures потребовали исправления Robolectric Application/manifest (повторный запуск Koin) и ошибочного escaping в filename regex; ранние fixture ошибки не используются вместо соответствующих поведенческих доказательств. Исправленный прогон18/14 приведён отдельно. Дальнейшие варианты race со static mock `Files` ломались на classloading/MockK: эти запуски **NOT-RED**, независимо от числа отмеченных failures. Genuine race получен после private I/O seam, сохранившего прежний unsafe writer по умолчанию и все13 domain tests/assertions; положительное наблюдение — внешний UUID-файл после фактической подмены. Это воспроизведение на кандидате, а не утверждение об отдельном опубликованном исправлении. Первые numeric module-access/fixture ошибки также NOT-RED; учитывается только совместимый прогон27/1.
+
+Промежуточные проверки: [proposal-initial](/workspace/.reliability-state/part2/package-c-proposal-initial.json)72/1, в том числе настоящий GLOBAL8/0; единственный отказ относился к partial-result hint. [output-proposal-check](/workspace/.reliability-state/part2/package-c-output-proposal-check.json)91/2: generic7/0 и subagent7/0, но parent archive ещё RED, а старый широкий substring assertion ошибочно считал фразу «Не повторяйте» в safety guidance признаком loop warning. Fixture теперь проверяет actual preview, точные correlation IDs/counts/full saved output и общий cap; security assertions не ослаблены. Эти промежуточные итоги не складываются с RED или между собой и не означают финальный GREEN2C.
+
+Финальные результаты 2C: локальный **2145 тестов,0 failures/errors/skips** ([сводка свежих XML](/workspace/.reliability-state/part2/package-c-final-affected-green-v2.json)), полный lint **13 отчётов/0 ошибок,10м01с** ([сводка](/workspace/.reliability-state/part2/package-c-final-lint-summary.json)), Daily Build `ожидается после публикации2C`, APK `будет проверен по завершении CI2C`. До этих проверок общий реестр и вся часть2 остаются незавершёнными.
+
+
+Дополнительное заключительное ревью воспроизвело две app-owned английские ошибки: `set_text` для нередактируемого элемента и `skill_get_content` с пустым/пробельным именем после настоящего `prepareArguments`. [RED2/2](/workspace/.reliability-state/part2/package-c-owned-errors-red.json), без errors/skips. Исправлены только recovery/detail, коды и отсутствие input/read effects сохраняются. Старый locale-only assertion заголовка навыков обновлён с `Skills` на `Навыки`, остальные lazy/user-body assertions сохранены. Расширенный промежуточный прогон2143/1 показал только этот устаревший literal; финальная проверка2145/0 завершена.
+
+
+### Дополнительная проверка 2C на телефоне
+
+1. В обычном режиме попросить заряд, Wi-Fi и список хранилищ; включить «Всё через root» и повторить. Описания и пояснения ошибок русские; root-команды сохраняют обязательные подтверждения.
+2. Попросить `workspace_shell` вывести длинный тестовый текст, затем прочитать нужный фрагмент по возвращённому `path`. Ответ явно помечает усечение; повтор действия для получения хвоста не предлагается автоматически.
+3. Получить большой результат без workspace: модель получает ограниченный JSON с `truncated`, пользователь видит полный исходный результат в истории; остановка ответа продолжает работать.
+4. Попросить ввести текст в нередактируемую подпись на экране: видна русская подсказка, нажатие/ввод не выполняется. Пустое имя навыка возвращает понятную ошибку и доступные имена.
+5. Повторить поиск у настроенного провайдера и загрузку собственного навыка. Поисковые citations, точные имена/пути и пользовательский текст навыка сохраняются.
+
+
+Финальный локальный GREEN2C: app1869 + ai267 + workspace3 + speech6 =2145,0 failures/errors/skips; CI-скрипты34/0, YAML валиден, inventory добавлен в существующий artifact отчётов. `RootMode`, его исходный тест, mandatory/Hardline/Root/Termux policies побайтно сохранены относительно2B. Полный lint завершён успешно:13 отчётов/0 ошибок,10м01с; полный CI2C ещё обязателен.
+
+
+Проверенный APK2B: `Rikka-Root-2.5.6-root.2-cf323874-arm64-v8a.apk`, SHA256 `cc7e512ff17a643fee0454e6839a06aaaaf16f64e6eba874feb507860a8de0be`; сертификат7050d80a…2a0db16. Следующая публикация2C требует собственной полной проверки.
