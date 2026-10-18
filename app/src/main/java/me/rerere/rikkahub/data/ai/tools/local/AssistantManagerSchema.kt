@@ -83,6 +83,7 @@ internal fun assistantSettingsSchema(): JsonObject = buildJsonObject {
     }
     array("mcpServers", "Серверы MCP")
     array("localTools", "Локальные инструменты", "Строковые serialName из list_options.localTools; изменяет доступные функции, не правила безопасности и подтверждений.")
+    field("rootMode", "Всё через root", "boolean", "При доступном root заменяет инструменты телефона на root_exec со шпаргалкой; сохраняет выбранные инструменты и не меняет разрешения, подтверждения и защиту команд.")
     field("enableWebSearch", "Веб-поиск", "boolean")
     field("workspaceId", "Рабочая папка", "string", "UUID из list_options.workspaces; null — без папки.", nullable = true)
     field("background", "Фон чата", "string", "URI или URL изображения; null — без фонового изображения.", nullable = true)
