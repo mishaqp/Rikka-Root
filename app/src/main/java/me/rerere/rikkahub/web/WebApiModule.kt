@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.web
 
+import kotlinx.coroutines.sync.withLock
 import android.content.Context
 import com.auth0.jwt.JWT
 import com.auth0.jwt.JWTVerifier
@@ -152,6 +153,9 @@ fun Application.configureWebApi(
 
                 val request = call.receive<WebAuthTokenRequest>()
                 if (!secureEquals(request.password, accessPassword)) {
+                    // Wrong passwords are answered one per second in total, so a device on the
+                    // network cannot brute-force the password quickly with parallel requests.
+                    passwordFailureLock.withLock { kotlinx.coroutines.delay(1_000) }
                     throw UnauthorizedException("Invalid password")
                 }
 
@@ -224,3 +228,5 @@ private fun extractAccessToken(authorizationHeader: String?, queryToken: String?
 private fun secureEquals(left: String, right: String): Boolean {
     return MessageDigest.isEqual(left.toByteArray(Charsets.UTF_8), right.toByteArray(Charsets.UTF_8))
 }
+
+private val passwordFailureLock = kotlinx.coroutines.sync.Mutex()

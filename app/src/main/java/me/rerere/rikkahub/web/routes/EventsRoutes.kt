@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.web.routes
 
+import me.rerere.rikkahub.web.WebSecretScrubber
+import kotlinx.serialization.json.encodeToJsonElement
 import io.ktor.server.routing.Route
 import io.ktor.server.sse.heartbeat
 import io.ktor.server.sse.sse
@@ -43,7 +45,8 @@ fun Route.eventsRoutes(
 
         // Full settings snapshot; StateFlow emits the current value immediately on connect.
         val settingsEvents = settingsStore.settingsFlow.map { settings ->
-            EventPayload(event = "settings", json = JsonInstant.encodeToString(settings))
+            // Browsers get settings without keys and passwords (see WebSecretScrubber).
+            EventPayload(event = "settings", json = WebSecretScrubber.scrub(JsonInstant.encodeToJsonElement(settings)).toString())
         }
 
         // Conversation list invalidation, scoped to the currently selected assistant.

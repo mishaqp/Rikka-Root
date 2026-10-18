@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.web.routes
 
+import me.rerere.rikkahub.data.files.FileFolders
 import android.content.Context
 import androidx.core.net.toUri
 import io.ktor.http.ContentType
@@ -124,11 +125,14 @@ fun Route.filesRoutes(
                 throw BadRequestException("Invalid file path")
             }
 
-            val filesDir = context.filesDir
-            val file = File(filesDir, relativePath)
-
-            // Ensure the file is within the app's files directory
-            if (!file.canonicalPath.startsWith(filesDir.canonicalPath)) {
+            // Only chat attachments are served; settings, databases and workspaces stay private.
+            val folder = relativePath.substringBefore('/')
+            if (folder !in WEB_FILE_FOLDERS || '/' !in relativePath) {
+                throw NotFoundException("File not found")
+            }
+            val root = File(context.filesDir, folder).canonicalFile
+            val file = File(context.filesDir, relativePath)
+            if (!file.canonicalPath.startsWith(root.path + File.separator)) {
                 throw BadRequestException("Invalid file path")
             }
 
@@ -246,3 +250,5 @@ private fun ManagedFileEntity.toUploadedFileDto(filesManager: FilesManager) = Up
     mime = mimeType,
     size = sizeBytes,
 )
+
+private val WEB_FILE_FOLDERS = setOf(FileFolders.UPLOAD, FileFolders.MEDIA_CREATION)

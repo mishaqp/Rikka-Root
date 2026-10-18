@@ -261,7 +261,8 @@ fun SettingWebPage() {
                                         }
                                     }
                                 },
-                                enabled = settings.webServerJwtEnabled || accessPasswordText.isNotBlank(),
+                                // Routes are built once at start; a change while running would not apply.
+                                enabled = !serverState.isRunning && (settings.webServerJwtEnabled || accessPasswordText.isNotBlank()),
                             )
                         },
                     )
