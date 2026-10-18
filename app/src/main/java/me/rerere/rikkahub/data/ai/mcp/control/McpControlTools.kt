@@ -911,14 +911,24 @@ fun mcpListToolsTool(settingsStore: SettingsStore, manager: McpManager, caller: 
 fun mcpSetToolApprovalTool(settingsStore: SettingsStore): Tool = Tool(
     name = "mcp_set_tool_approval",
     description = """
-        Установить needsApproval для одного инструмента MCP на заданном сервере. Позволяет пометить конкретный инструмент как требующий одобрения без изменения остальных инструментов. Любое изменение требует одобрения.
+        Включить дополнительное подтверждение для одного инструмента MCP на заданном сервере: needs_approval допускает только true. Отключить подтверждение можно только вручную в настройках MCP. Остальные инструменты не меняются. Включение требует одобрения.
     """.trimIndent(),
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                put("server_id", buildJsonObject { put("type", "string") })
-                put("tool_name", buildJsonObject { put("type", "string") })
-                put("needs_approval", buildJsonObject { put("type", "boolean") })
+                put("server_id", buildJsonObject {
+                    put("type", "string")
+                    put("description", "UUID сервера MCP, для которого нужно включить подтверждение.")
+                })
+                put("tool_name", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Точное исходное имя инструмента MCP на выбранном сервере.")
+                })
+                put("needs_approval", buildJsonObject {
+                    put("type", "boolean")
+                    put("enum", buildJsonArray { add(true) })
+                    put("description", "Только true: включить дополнительное подтверждение. Отключение доступно только вручную в настройках MCP.")
+                })
             },
             required = listOf("server_id", "tool_name", "needs_approval"),
         )
@@ -932,7 +942,10 @@ fun mcpSetToolApprovalTool(settingsStore: SettingsStore): Tool = Tool(
         val toolName = params["tool_name"]?.jsonPrimitive?.contentOrNull
             ?: return@Tool errEnv("invalid_tool_name", "tool_name обязателен")
         val needs = params["needs_approval"]?.jsonPrimitive?.booleanOrNull
-            ?: return@Tool errEnv("invalid_needs_approval", "needs_approval обязателен: true или false")
+            ?: return@Tool errEnv("invalid_needs_approval", "needs_approval обязателен: true")
+        if (!needs) {
+            return@Tool errEnv("manual_tool_approval_disable_required", "Инструменты управления MCP не могут отключать подтверждения. При необходимости отключите дополнительное подтверждение вручную в настройках MCP.")
+        }
         val all = settingsStore.settingsFlow.value.mcpServers
         val server = all.firstOrNull { it.id == serverId }
             ?: return@Tool errEnv("unknown_mcp_server_id", "Сервер MCP с id $serverId не найден")
@@ -954,7 +967,7 @@ fun mcpSetToolApprovalTool(settingsStore: SettingsStore): Tool = Tool(
         }
         okEnv {
             put("server_id", serverId.toString())
-            put("tool_name", toolName)
+            put("tool_name", redactedMcpText(toolName))
             put("needs_approval", needs)
             put("changed", changed)
         }

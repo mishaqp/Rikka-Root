@@ -823,3 +823,95 @@ class McpProjectionAndAtomicUpdateAuditTest {
         private const val NEW_URL = "https://1.1.1.1/mcp"
     }
 }
+
+
+/** Management may add a confirmation requirement; disabling remains a manual settings action. */
+class McpToolApprovalSetterAuditTest {
+    @Test fun disablingToolApprovalIsManualOnlyAndNeverWritesSettings() = runBlocking {
+        val target = McpTool(name = "write_file", needsApproval = true)
+        val config = server("Remote123", listOf(target, McpTool(name = "read_file", needsApproval = false)))
+        val fixture = Fixture(listOf(config))
+        val before = fixture.state.value
+
+        val result = payload(mcpSetToolApprovalTool(fixture.store).execute(args(config, target.name, false)))
+
+        assertEquals(result.toString(), "manual_tool_approval_disable_required", result["error"]?.jsonPrimitive?.content)
+        assertTrue(result["detail"]!!.jsonPrimitive.content.any { it in 'А'..'я' })
+        assertEquals(before, fixture.state.value)
+        assertTrue(fixture.state.value.mcpServers.single().commonOptions.tools.first().needsApproval)
+        coVerify(exactly = 0) { fixture.store.update(any()) }
+    }
+
+    @Test fun unknownToolErrorsHideAKnownCredentialInTheStoredServerNameWithoutWriting() = runBlocking {
+        val config = server("Сервер $SECRET", listOf(McpTool(name = "read_file")))
+        val fixture = Fixture(listOf(config))
+        val before = fixture.state.value
+
+        val result = payload(mcpSetToolApprovalTool(fixture.store).execute(args(config, "missing_tool", true)))
+
+        assertEquals("unknown_tool_name", result["error"]?.jsonPrimitive?.content)
+        assertHidden(result)
+        assertTrue(result["detail"]!!.jsonPrimitive.content.contains("missing_tool"))
+        assertEquals(before, fixture.state.value)
+        coVerify(exactly = 0) { fixture.store.update(any()) }
+    }
+
+    @Test fun enablingApprovalUsesTheExactRawLookupChangesOnlyItsFlagAndRedactsTheResultName() = runBlocking {
+        val target = McpTool(name = SECRET, description = "Исходное описание", enable = false,
+            needsApproval = false, inputSchema = InputSchema.Obj(
+                properties = buildJsonObject { put("path", buildJsonObject { put("type", "string") }) },
+                required = listOf("path")))
+        val maskedNameDecoy = McpTool(name = redactedMcpText(SECRET), needsApproval = false)
+        val ordinary = McpTool(name = "read_file", needsApproval = true)
+        val config = server("Remote123", listOf(target, maskedNameDecoy, ordinary))
+        val otherServer = server("Other456", listOf(target))
+        val fixture = Fixture(listOf(config, otherServer))
+        val before = fixture.state.value
+
+        val result = payload(mcpSetToolApprovalTool(fixture.store).execute(args(config, SECRET, true)))
+
+        assertFalse(result.toString(), result.containsKey("error"))
+        assertTrue(result["needs_approval"]!!.jsonPrimitive.boolean)
+        assertTrue(result["changed"]!!.jsonPrimitive.boolean)
+        assertEquals(config.id.toString(), result["server_id"]!!.jsonPrimitive.content)
+        assertHidden(result)
+        assertEquals(redactedMcpText(SECRET), result["tool_name"]!!.jsonPrimitive.content)
+        val expected = config.copy(commonOptions = config.commonOptions.copy(
+            tools = listOf(target.copy(needsApproval = true), maskedNameDecoy, ordinary)))
+        assertEquals(before.copy(mcpServers = listOf(expected, otherServer)), fixture.state.value)
+        assertEquals(SECRET, fixture.state.value.mcpServers.first().commonOptions.tools.first().name)
+        coVerify(exactly = 1) { fixture.store.update(any()) }
+    }
+
+    private fun server(name: String, tools: List<McpTool>) = McpServerConfig.StreamableHTTPServer(
+        url = "https://8.8.8.8/mcp", commonOptions = McpCommonOptions(name = name, enable = false, tools = tools))
+
+    private fun args(server: McpServerConfig, name: String, needsApproval: Boolean) = buildJsonObject {
+        put("server_id", server.id.toString())
+        put("tool_name", name)
+        put("needs_approval", needsApproval)
+    }
+
+    private fun assertHidden(result: JsonObject) {
+        assertFalse("The management response must hide the entire stored credential", result.toString().contains(SECRET))
+        assertFalse("The credential prefix must not remain after masking", result.toString().contains("sk-proj-"))
+    }
+
+    private fun payload(parts: List<UIMessagePart>) =
+        Json.parseToJsonElement((parts.single() as UIMessagePart.Text).text).jsonObject
+
+    private class Fixture(configs: List<McpServerConfig>) {
+        val state = MutableStateFlow(Settings(mcpServers = configs))
+        val store = mockk<SettingsStore>()
+        init {
+            every { store.settingsFlow } returns state
+            coEvery { store.update(any()) } coAnswers {
+                firstArg<(Settings) -> Settings>()(state.value).also { state.value = it }
+            }
+        }
+    }
+
+    companion object {
+        private const val SECRET = "sk-proj-abcdef_key_Canary_987654321"
+    }
+}
