@@ -259,6 +259,12 @@ class ChatVM(
         return chatService.forkConversationAtMessage(_conversationId, message.id)
     }
 
+    fun selectMessageNode(nodeId: Uuid, selectIndex: Int) {
+        launchMutation {
+            chatService.selectMessageNode(_conversationId, nodeId, selectIndex)
+        }
+    }
+
     fun deleteMessage(message: UIMessage) {
         launchMutation {
             chatService.deleteMessage(_conversationId, message)

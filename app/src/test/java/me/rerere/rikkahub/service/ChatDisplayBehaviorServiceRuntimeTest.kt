@@ -7,7 +7,11 @@ import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
@@ -16,7 +20,9 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.costguards.TokenBudgetLedger
 import me.rerere.rikkahub.costguards.TokenBudgetStore
@@ -36,6 +42,7 @@ import me.rerere.rikkahub.data.repository.ConversationRepository
 import java.time.Instant
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -58,6 +65,10 @@ class ChatDisplayBehaviorServiceRuntimeTest {
     private val assistant = Assistant(enableWebSearch = false)
     private val model = Model(modelId = "fixture")
     private var requestedTexts = emptyList<String>()
+    private var requestedIds = emptyList<kotlin.uuid.Uuid>()
+    private var respond: (List<UIMessage>) -> Flow<GenerationChunk> = { input ->
+        flowOf(GenerationChunk.Messages(input + UIMessage.assistant("Новый ответ")))
+    }
 
     @Before fun install() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
@@ -79,7 +90,8 @@ class ChatDisplayBehaviorServiceRuntimeTest {
             prepareToolApproval = any(), beforeModelRequest = any(), approveEverything = any()) } answers {
             val input = arg<List<UIMessage>>(2)
             requestedTexts = input.map { it.toText() }
-            flowOf(GenerationChunk.Messages(input + UIMessage.assistant("Новый ответ")))
+            requestedIds = input.map { it.id }
+            respond(input)
         }
         appScope = AppScope()
         service = ChatService(context = application, appScope = appScope, appEventBus = mockk(relaxed = true),
@@ -147,5 +159,100 @@ class ChatDisplayBehaviorServiceRuntimeTest {
             if (!deleteTrailing) assertEquals(source.messageNodes.last(), live.messageNodes.last())
             assertTrue(service.errors.value.isEmpty())
         }
+    }
+
+    @Test(timeout = 30_000) fun regeneratingUserMessageFromChangedUiCopyKeepsHistoryAndTruncatesById() = runBlocking {
+        val source = seed()
+        // A streaming translation makes the UI copy differ from the stored message.
+        service.regenerateAtMessage(source.id, source.messageNodes[0].currentMessage.copy(translation = "Question"))
+        service.getGenerationJobStateFlow(source.id).first()?.join()
+        val live = service.getConversationFlow(source.id).value
+        assertEquals(listOf("Вопрос"), requestedTexts)
+        assertEquals(listOf("Вопрос", "Новый ответ"), live.currentMessages.map { it.toText() })
+        assertEquals(source.messageNodes[0], live.messageNodes[0])
+        assertPersisted(live, requireNotNull(repository.getConversationById(source.id)))
+        assertTrue(service.errors.value.isEmpty())
+    }
+
+    @Test(timeout = 30_000) fun regeneratingMissingMessageReportsErrorAndNeverSavesTruncatedHistory() = runBlocking {
+        val source = seed()
+        service.regenerateAtMessage(source.id, UIMessage.user("Сообщение из другого чата"))
+        service.getGenerationJobStateFlow(source.id).first()?.join()
+        assertEquals(source.messageNodes, service.getConversationFlow(source.id).value.messageNodes)
+        assertEquals(source.messageNodes, requireNotNull(repository.getConversationById(source.id)).messageNodes)
+        assertTrue("A missing regeneration target needs a visible error", service.errors.value.any { it.conversationId == source.id })
+        assertTrue(requestedTexts.isEmpty())
+    }
+
+    @Test(timeout = 30_000) fun regeneratingAssistantFromChangedUiCopyWritesIntoItsOwnNode() = runBlocking {
+        val source = seed()
+        service.regenerateAtMessage(source.id, source.messageNodes[1].currentMessage.copy(translation = "Translated"))
+        service.getGenerationJobStateFlow(source.id).first()?.join()
+        val live = service.getConversationFlow(source.id).value
+        assertEquals(listOf("Вопрос"), requestedTexts)
+        assertEquals(3, live.messageNodes.size)
+        assertEquals(listOf("Первый ответ", "Выбранный ответ", "Новый ответ"), live.messageNodes[1].messages.map { it.toText() })
+        assertEquals(source.messageNodes.last(), live.messageNodes.last())
+        assertTrue(service.errors.value.isEmpty())
+    }
+
+    private suspend fun seedEarlierToolReply(state: ToolApprovalState): Conversation {
+        val reply = UIMessage.assistant("").copy(parts = listOf(UIMessagePart.Text("Нужно подтверждение"),
+            UIMessagePart.Tool("earlier-call", "ask_user", "{}", approvalState = state)))
+        val source = Conversation(assistantId = assistant.id, title = "Чат с инструментом", config = ConversationConfig(chatModelId = model.id),
+            messageNodes = listOf(UIMessage.user("Вопрос").toMessageNode(),
+                MessageNode(messages = listOf(UIMessage.assistant("Первый ответ"), reply), selectIndex = 1),
+                UIMessage.user("Продолжение").toMessageNode(), UIMessage.assistant("Второй ответ").toMessageNode()),
+            createAt = Instant.ofEpochMilli(1_000), updateAt = Instant.ofEpochMilli(2_000))
+        repository.insertConversation(source)
+        service.initializeConversation(source.id)
+        service.addConversationReference(source.id)
+        return source
+    }
+
+    @Test(timeout = 30_000) fun handledToolInEarlierRegeneratedReplyResumesThatReply() = runBlocking {
+        val source = seedEarlierToolReply(ToolApprovalState.Pending)
+        val reply = source.messageNodes[1].currentMessage
+        respond = { input ->
+            val last = input.last()
+            flowOf(GenerationChunk.Messages(input.dropLast(1) + last.copy(parts = last.parts + UIMessagePart.Text("Продолжение ответа"))))
+        }
+        service.handleToolApproval(source.id, "earlier-call", approved = false, reason = "Не нужно").join()
+        val live = service.getConversationFlow(source.id).value
+        assertEquals("The request must end with the reply that owns the tool", reply.id, requestedIds.last())
+        assertEquals(listOf("Вопрос", reply.toText()), requestedTexts)
+        assertEquals(4, live.messageNodes.size)
+        assertTrue(live.messageNodes[1].currentMessage.toText().contains("Продолжение ответа"))
+        assertEquals(source.messageNodes[2], live.messageNodes[2])
+        assertEquals("A later reply must not receive the resumed output", source.messageNodes[3], live.messageNodes[3])
+        assertEquals(live.messageNodes, requireNotNull(repository.getConversationById(source.id)).messageNodes)
+        assertTrue(service.errors.value.isEmpty())
+    }
+
+    @Test(timeout = 30_000) fun stopClosesPendingToolOfRegeneratedEarlierReplySoQueueIsNotBlocked() = runBlocking {
+        val source = seed()
+        val emitted = CompletableDeferred<Unit>()
+        respond = { input ->
+            flow {
+                emit(GenerationChunk.Messages(input + UIMessage.assistant("").copy(parts = listOf(
+                    UIMessagePart.Tool("regenerated-call", "ask_user", "{}", approvalState = ToolApprovalState.Pending)))))
+                emitted.complete(Unit)
+                awaitCancellation()
+            }
+        }
+        service.regenerateAtMessage(source.id, source.messageNodes[1].currentMessage)
+        emitted.await()
+        service.stopGeneration(source.id)
+        val live = service.getConversationFlow(source.id).value
+        val tool = live.messageNodes[1].currentMessage.getTools().single { it.toolCallId == "regenerated-call" }
+        assertFalse("Stop must close the pending tool of an earlier reply", tool.isPending)
+        assertTrue(tool.isExecuted)
+        assertEquals(live.messageNodes, requireNotNull(repository.getConversationById(source.id)).messageNodes)
+
+        service.resumeMessageQueue(source.id)
+        service.sendMessage(source.id, listOf(UIMessagePart.Text("Следующий вопрос")), answer = false)
+        service.getGenerationJobStateFlow(source.id).first()?.join()
+        assertEquals("Следующий вопрос", service.getConversationFlow(source.id).value.currentMessages.last().toText())
+        assertTrue(service.getMessageQueueFlow(source.id).value.messages.isEmpty())
     }
 }

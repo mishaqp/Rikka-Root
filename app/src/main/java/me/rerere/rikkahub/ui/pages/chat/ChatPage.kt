@@ -490,18 +490,9 @@ private fun ChatPageContent(
                         vm.deleteMessage(it)
                     }
                 },
+                // Branch arrows change only the selection; the service applies it to the live history.
                 onUpdateMessage = { newNode ->
-                    vm.updateConversation(
-                        conversation.copy(
-                            messageNodes = conversation.messageNodes.map { node ->
-                                if (node.id == newNode.id) {
-                                    newNode
-                                } else {
-                                    node
-                                }
-                            }
-                        ))
-                    vm.saveConversationAsync()
+                    vm.selectMessageNode(newNode.id, newNode.selectIndex)
                 },
                 onClickSuggestion = { suggestion ->
                     if (inputState.isEditing()) inputState.clearInput()

@@ -738,7 +738,19 @@ class ChatService(
                         parts = processedContent,
                     ).toMessageNode(),
                 )
-                saveConversation(conversationId, newConversation)
+                try {
+                    saveConversation(conversationId, newConversation)
+                } catch (cancelled: CancellationException) {
+                    // Stop can land after the row commit: the saved input must not stay in the durable queue.
+                    // With the id in live history, this cancellation is the check after the NonCancellable write.
+                    val reachedHistory = session.state.value.messageNodes.any { node ->
+                        node.messages.any { it.id == queued.id }
+                    }
+                    if (messageQueueStore != null && reachedHistory) withContext(NonCancellable + Dispatchers.IO) {
+                        session.messageQueue.acknowledgeSubmission(queued.id)
+                    }
+                    throw cancelled
+                }
                 if (messageQueueStore != null) withContext(NonCancellable + Dispatchers.IO) {
                     session.messageQueue.acknowledgeSubmission(queued.id)
                 }
@@ -826,8 +838,8 @@ class ChatService(
 
                 if (message.role == MessageRole.USER) {
                     // 如果是用户消息，则截止到当前消息
-                    val node = conversation.getMessageNodeByMessage(message)
-                    val indexAt = conversation.messageNodes.indexOf(node)
+                    // The UI copy may differ (e.g. a streaming translation): match by id, never truncate on a miss.
+                    val indexAt = regenerationNodeIndex(conversation, message.id)
                     val newConversation = conversation.copy(
                         messageNodes = conversation.messageNodes.subList(0, indexAt + 1)
                     )
@@ -843,8 +855,7 @@ class ChatService(
                         if (regenerationConversation !== conversation) {
                             saveConversation(conversationId, regenerationConversation)
                         }
-                        val node = regenerationConversation.getMessageNodeByMessage(message)
-                        val nodeIndex = regenerationConversation.messageNodes.indexOf(node)
+                        val nodeIndex = regenerationNodeIndex(regenerationConversation, message.id)
                         handleMessageComplete(conversationId, messageRange = 0..<nodeIndex)
                     } else {
                         saveConversation(conversationId, conversation)
@@ -861,6 +872,10 @@ class ChatService(
 
         session.setJob(job)
     }
+
+    private fun regenerationNodeIndex(conversation: Conversation, messageId: Uuid): Int =
+        conversation.messageNodes.indexOfFirst { node -> node.messages.any { it.id == messageId } }
+            .also { check(it >= 0) { "Сообщение для повторной генерации не найдено. Обновите чат и повторите попытку." } }
 
     // ---- 处理工具调用审批 ----
 
@@ -1017,7 +1032,11 @@ class ChatService(
 
                 // Only continue generation when all pending tools are handled
                 if (!hasPendingTools) {
-                    handleMessageComplete(conversationId)
+                    // Continue the reply that owns the tool, even when it is an earlier regenerated reply.
+                    val toolNodeIndex = updatedNodes.indexOfFirst { node -> node.currentMessage.id == current.messageId }
+                    val resumeNodeId = updatedNodes.getOrNull(toolNodeIndex)
+                        ?.takeIf { toolNodeIndex < updatedNodes.lastIndex }?.id
+                    handleMessageComplete(conversationId, resumeNodeId = resumeNodeId)
                 }
 
                 _generationDoneFlow.emit(conversationId)
@@ -1046,7 +1065,9 @@ class ChatService(
 
     private suspend fun handleMessageComplete(
         conversationId: Uuid,
-        messageRange: ClosedRange<Int>? = null
+        messageRange: ClosedRange<Int>? = null,
+        // Continue the reply stored in this node instead of the last one; later nodes stay unchanged.
+        resumeNodeId: Uuid? = null,
     ) {
         val settings = settingsStore.settingsFlow.first()
         val initialConversation = requireWritableConversation(conversationId)
@@ -1091,10 +1112,17 @@ class ChatService(
             checkInvalidMessages(conversationId)
             val conversation = getConversationFlow(conversationId).value
 
+            // Output is merged into this node; the request ends before requestEndNodeId (null: whole history).
             val regenerationNodeId = messageRange?.let { conversation.messageNodes.getOrNull(it.endInclusive + 1)?.id }
+                ?: resumeNodeId
+            val requestEndNodeId = if (messageRange != null) regenerationNodeId else resumeNodeId?.let { id ->
+                val index = conversation.messageNodes.indexOfFirst { it.id == id }
+                check(index >= 0) { "Resume target removed" }
+                conversation.messageNodes.getOrNull(index + 1)?.id
+            }
             fun requestMessages(current: Conversation): List<UIMessage> {
-                val end = if (regenerationNodeId == null) current.messageNodes.size else
-                    current.messageNodes.indexOfFirst { it.id == regenerationNodeId }.also { check(it >= 0) { "Regeneration target removed" } }
+                val end = if (requestEndNodeId == null) current.messageNodes.size else
+                    current.messageNodes.indexOfFirst { it.id == requestEndNodeId }.also { check(it >= 0) { "Regeneration target removed" } }
                 return AutoContextCompression.activeMessages(current.currentMessages.take(end))
             }
 
@@ -1176,7 +1204,7 @@ class ChatService(
                                 sourceEndMessageId = plan.sourceEndMessageId,
                                 permitGenerating = { generationOwner?.isActive == true },
                                 automaticThreshold = assistant.autoCompressionTokenThreshold,
-                                requestEndNodeId = regenerationNodeId,
+                                requestEndNodeId = requestEndNodeId,
                             )
                             currentCoroutineContext().ensureActive()
                             result.exceptionOrNull()?.let { if (it is CancellationException) throw it }
@@ -1289,21 +1317,20 @@ class ChatService(
 
     private suspend fun finishInterruptedPendingTools(conversationId: Uuid) {
         val currentConversation = getConversationFlow(conversationId).value
-        val lastNode = currentConversation.messageNodes.lastOrNull() ?: return
-        val lastMessage = lastNode.currentMessage
-        val updatedMessage = lastMessage.finishPendingTools(::cancelToolByUser)
-        if (updatedMessage == lastMessage) {
+        // A regenerated earlier reply can hold unfinished tools too; close them in every node of the
+        // current path, otherwise a pending card there keeps blocking the queue.
+        val updatedNodes = currentConversation.messageNodes.map { node ->
+            val message = node.currentMessage
+            val updatedMessage = message.finishPendingTools(::cancelToolByUser)
+            if (updatedMessage == message) node else node.copy(
+                messages = node.messages.map { if (it.id == message.id) updatedMessage else it }
+            )
+        }
+        if (updatedNodes == currentConversation.messageNodes) {
             return
         }
 
-        val updatedConversation = currentConversation.copy(
-            messageNodes = currentConversation.messageNodes.dropLast(1) + lastNode.copy(
-                messages = lastNode.messages.map { message ->
-                    if (message.id == lastMessage.id) updatedMessage else message
-                }
-            )
-        )
-        saveConversation(conversationId, updatedConversation)
+        saveConversation(conversationId, currentConversation.copy(messageNodes = updatedNodes))
     }
 
     // ---- 生成标题 ----
@@ -1808,12 +1835,27 @@ class ChatService(
 
     suspend fun saveConversation(conversationId: Uuid, conversation: Conversation) {
         require(conversation.id == conversationId)
+        saveConversationAtomically(conversationId, snapshot = conversation) { conversation }
+    }
+
+    /**
+     * Derive the saved history from the live state under the persistence lock, so an id-based
+     * change cannot overwrite stream chunks committed after the caller read the conversation.
+     * [transform] returns null when there is nothing to save.
+     */
+    private suspend fun saveConversationAtomically(
+        conversationId: Uuid,
+        snapshot: Conversation? = null,
+        transform: (Conversation) -> Conversation?,
+    ) {
         val saved = sessionManager.withSession(conversationId) { session ->
             // Safety loading must validate stored history without taking ownership of caller metadata.
             val hadMetadataOwnership = session.isInitialized
             ensureInitialized(session)
-            requireWritableSession(session, conversation)
+            requireWritableSession(session, snapshot)
             session.withPersistenceLock {
+                val conversation = transform(requireWritableSession(session)) ?: return@withPersistenceLock false
+                require(conversation.id == conversationId)
                 requireWritableSession(session, conversation)
                 val exists = conversationRepo.existsConversationById(conversation.id)
                 if (!exists && conversation.title.isBlank() && conversation.messageNodes.isEmpty()) {
@@ -1954,40 +1996,34 @@ class ChatService(
         val assistant = settings.getAssistantById(currentConversation.assistantId)
             ?: settings.getCurrentAssistant()
         val processedParts = preprocessUserInputParts(parts, assistant)
-        var edited = false
 
-        val updatedNodes = currentConversation.messageNodes.map { node ->
-            if (!node.messages.any { it.id == messageId }) {
-                return@map node
-            }
-            edited = true
+        // Apply the edit to the live history by id: a stream may commit chunks meanwhile.
+        saveConversationAtomically(conversationId) { latest ->
+            if (latest.messageNodes.none { node -> node.messages.any { it.id == messageId } }) return@saveConversationAtomically null
+            val updatedNodes = latest.messageNodes.map { node ->
+                val original = node.messages.firstOrNull { it.id == messageId } ?: return@map node
+                if (original.isContextCheckpoint) {
+                    // 摘要原地改写：新建分支会丢掉检查点标记，删除摘要时还会露出旧版本。
+                    return@map node.copy(
+                        messages = node.messages.map { message ->
+                            if (message.id == messageId) message.copy(parts = processedParts) else message
+                        }
+                    )
+                }
 
-            val original = node.messages.first { it.id == messageId }
-            if (original.isContextCheckpoint) {
-                // 摘要原地改写：新建分支会丢掉检查点标记，删除摘要时还会露出旧版本。
-                return@map node.copy(
-                    messages = node.messages.map { message ->
-                        if (message.id == messageId) message.copy(parts = processedParts) else message
-                    }
+                node.copy(
+                    messages = node.messages + UIMessage(
+                        role = node.role,
+                        parts = processedParts,
+                        // 编辑的是原消息的内容，来源仍是生成它的模型
+                        modelId = original.modelId,
+                        modelSnapshot = original.modelSnapshot,
+                    ),
+                    selectIndex = node.messages.size
                 )
             }
-
-            node.copy(
-                messages = node.messages + UIMessage(
-                    role = node.role,
-                    parts = processedParts,
-                    // 编辑的是原消息的内容，来源仍是生成它的模型
-                    modelId = original.modelId,
-                    modelSnapshot = original.modelSnapshot,
-                ),
-                selectIndex = node.messages.size
-            )
+            latest.copy(messageNodes = AutoContextCompression.retainCheckpoints(latest.messageNodes, updatedNodes))
         }
-
-        if (!edited) return
-
-        saveConversation(conversationId, currentConversation.copy(messageNodes =
-            AutoContextCompression.retainCheckpoints(currentConversation.messageNodes, updatedNodes)))
     }
 
     suspend fun forkConversationAtMessage(
@@ -2043,28 +2079,30 @@ class ChatService(
         nodeId: Uuid,
         selectIndex: Int
     ) {
-        val currentConversation = requireWritableConversation(conversationId)
-        val targetNode = currentConversation.messageNodes.firstOrNull { it.id == nodeId }
-            ?: throw NotFoundException("Message node not found")
+        requireWritableConversation(conversationId)
+        // Change only the selection on the live history; a stale UI copy must not overwrite it.
+        saveConversationAtomically(conversationId) { latest ->
+            val targetNode = latest.messageNodes.firstOrNull { it.id == nodeId }
+                ?: throw NotFoundException("Message node not found")
 
-        if (selectIndex !in targetNode.messages.indices) {
-            throw BadRequestException("Invalid selectIndex")
-        }
-
-        if (targetNode.selectIndex == selectIndex) {
-            return
-        }
-
-        val updatedNodes = currentConversation.messageNodes.map { node ->
-            if (node.id == nodeId) {
-                node.copy(selectIndex = selectIndex)
-            } else {
-                node
+            if (selectIndex !in targetNode.messages.indices) {
+                throw BadRequestException("Invalid selectIndex")
             }
-        }
 
-        saveConversation(conversationId, currentConversation.copy(messageNodes =
-            AutoContextCompression.retainCheckpoints(currentConversation.messageNodes, updatedNodes)))
+            if (targetNode.selectIndex == selectIndex) {
+                return@saveConversationAtomically null
+            }
+
+            val updatedNodes = latest.messageNodes.map { node ->
+                if (node.id == nodeId) {
+                    node.copy(selectIndex = selectIndex)
+                } else {
+                    node
+                }
+            }
+
+            latest.copy(messageNodes = AutoContextCompression.retainCheckpoints(latest.messageNodes, updatedNodes))
+        }
     }
 
     suspend fun deleteMessage(

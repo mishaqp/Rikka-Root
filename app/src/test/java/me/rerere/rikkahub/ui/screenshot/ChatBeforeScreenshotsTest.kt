@@ -675,8 +675,13 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         val first = stage2Message(30, MessageRole.USER, "Первая версия сообщения.")
         val second = stage2Message(31, MessageRole.USER, "Вторая версия сообщения.").currentMessage
         val branches = first.copy(messages = listOf(first.currentMessage, second))
-        every { fixture.vm.updateConversation(any()) } answers {
-            fixture.conversationFlow.value = firstArg<Conversation>()
+        // Branch arrows go through the view model's id-based selection, not a whole-conversation snapshot.
+        every { fixture.vm.selectMessageNode(any(), any()) } answers {
+            val nodeId = firstArg<kotlin.uuid.Uuid>()
+            val index = secondArg<Int>()
+            fixture.conversationFlow.value = fixture.conversationFlow.value.let { current ->
+                current.copy(messageNodes = current.messageNodes.map { if (it.id == nodeId) it.copy(selectIndex = index) else it })
+            }
         }
         mountStage2(settings, job, listOf(branches))
         val context = RuntimeEnvironment.getApplication()
@@ -692,8 +697,9 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
             compose.onNodeWithText("Вторая версия сообщения.").isDisplayed()
         }
         compose.onNodeWithText("Вторая версия сообщения.").assertIsDisplayed()
-        verify(exactly = 1) { fixture.vm.updateConversation(any()) }
-        verify(exactly = 1) { fixture.vm.saveConversationAsync() }
+        verify(exactly = 1) { fixture.vm.selectMessageNode(branches.id, 1) }
+        verify(exactly = 0) { fixture.vm.updateConversation(any()) }
+        verify(exactly = 0) { fixture.vm.saveConversationAsync() }
 
         showStage2(settings, DisplaySetting(showUserMessageActions = true), fixture.conversationFlow.value.messageNodes)
         compose.onNodeWithContentDescription(context.getString(R.string.copy)).assertIsDisplayed()
@@ -716,7 +722,7 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         assertNull("Read-only user text can expand without entering edit mode", fixture.vm.inputState.editingMessage)
         assertEquals("Read-only expansion preserves its selected alternative", 1,
             fixture.conversationFlow.value.messageNodes.single().selectIndex)
-        verify(exactly = 1) { fixture.vm.updateConversation(any()) }
+        verify(exactly = 1) { fixture.vm.selectMessageNode(any(), any()) }
 
         compose.mainClock.autoAdvance = false
         compose.runOnIdle {

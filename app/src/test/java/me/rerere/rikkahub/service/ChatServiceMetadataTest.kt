@@ -873,6 +873,67 @@ class ChatServiceMetadataTest {
         }
     }
 
+    @Test(timeout = 30_000)
+    fun `edit waiting for persistence keeps a stream chunk published meanwhile`() = runBlocking {
+        val source = seed(title = "Сохранённый чат")
+        val question = source.messageNodes[0].currentMessage
+        val gate = FullWriteGate()
+        dao.fullWriteGate = gate
+        try {
+            // A metadata write holds the persistence lock without touching message history.
+            val holder = launch(start = CoroutineStart.UNDISPATCHED) {
+                service.renameConversation(source.id, "Удерживает запись", normalize = false)
+            }
+            gate.entered.await()
+            val editing = launch(start = CoroutineStart.UNDISPATCHED) {
+                service.editMessage(source.id, question.id, listOf(UIMessagePart.Text("Изменённый вопрос")))
+            }
+            val streaming = appendPartial(source)
+            gate.release.complete(Unit)
+            holder.join()
+            editing.join()
+            val live = service.getConversationFlow(source.id).value
+            assertEquals("The edit must not drop a chunk committed after it read the history",
+                streaming.messageNodes.last(), live.messageNodes.last())
+            assertEquals(listOf(question.toText(), "Изменённый вопрос"), live.messageNodes[0].messages.map { it.toText() })
+            assertEquals(1, live.messageNodes[0].selectIndex)
+            assertEquals(live.messageNodes, repository.getConversationById(source.id)!!.messageNodes)
+        } finally { gate.release.complete(Unit) }
+    }
+
+    @Test(timeout = 30_000)
+    fun `branch switch waiting for persistence changes only selection of live history`() = runBlocking {
+        val source = seed(title = "Сохранённый чат")
+        val question = source.messageNodes[0].currentMessage
+        service.editMessage(source.id, question.id, listOf(UIMessagePart.Text("Изменённый вопрос")))
+        val node = service.getConversationFlow(source.id).value.messageNodes[0]
+        val gate = FullWriteGate()
+        dao.fullWriteGate = gate
+        val vm = viewModel(source.id)
+        try {
+            val holder = launch(start = CoroutineStart.UNDISPATCHED) {
+                service.renameConversation(source.id, "Удерживает запись", normalize = false)
+            }
+            gate.entered.await()
+            val scopeJob = vm.viewModelScope.coroutineContext[Job]!!
+            val existing = scopeJob.children.toSet()
+            vm.selectMessageNode(node.id, 0)
+            val streaming = appendPartial(service.getConversationFlow(source.id).value)
+            gate.release.complete(Unit)
+            holder.join()
+            scopeJob.children.filter { it !in existing }.toList().forEach { it.join() }
+            val live = service.getConversationFlow(source.id).value
+            assertEquals(0, live.messageNodes[0].selectIndex)
+            assertEquals(node.messages, live.messageNodes[0].messages)
+            assertEquals("Branch switching must not overwrite a chunk published meanwhile",
+                streaming.messageNodes.last(), live.messageNodes.last())
+            assertEquals(live.messageNodes, repository.getConversationById(source.id)!!.messageNodes)
+        } finally {
+            gate.release.complete(Unit)
+            vm.viewModelScope.cancel()
+        }
+    }
+
     private suspend fun seed(title: String = ""): Conversation {
         val source = Conversation(assistantId = assistant.id, title = title,
             messageNodes = listOf(UIMessage.user("First request").toMessageNode(), UIMessage.assistant("First answer").toMessageNode()),

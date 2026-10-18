@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
@@ -63,6 +64,7 @@ class ChatDurableQueueIntegrationTest {
     private lateinit var application: android.app.Application
     private lateinit var files: FilesManager
     private lateinit var settingsStore: SettingsStore
+    private lateinit var dao: GatedConversationDao
     private val cipher = me.rerere.rikkahub.data.repository.AesGcmCronPayloadCipher {
         javax.crypto.spec.SecretKeySpec(ByteArray(32) { (it + 1).toByte() }, "AES")
     }
@@ -76,7 +78,8 @@ class ChatDurableQueueIntegrationTest {
         every { files.deleteChatFiles(any()) } answers {
             firstArg<List<android.net.Uri>>().forEach { uri -> uri.path?.let { java.io.File(it).delete() } }
         }
-        repository = ConversationRepository(database.conversationDao(), database.messageNodeDao(), database.favoriteDao(),
+        dao = GatedConversationDao(database.conversationDao())
+        repository = ConversationRepository(dao, database.messageNodeDao(), database.favoriteDao(),
             database, files, mockk<MessageFtsManager>(relaxed = true))
         settings = MutableStateFlow(Settings(init = false, enableSuggestion = false, assistants = listOf(assistant), assistantId = assistant.id,
             providers = listOf(ProviderSetting.OpenAI(models = listOf(model)))))
@@ -190,5 +193,42 @@ class ChatDurableQueueIntegrationTest {
         assertEquals(0, generationCalls)
         image.delete()
         Unit
+    }
+
+    @Test(timeout = 30_000) fun stopAfterHistoryCommitRemovesSubmittedInputFromDurableQueue() = runBlocking {
+        val source = Conversation(assistantId = assistant.id, title = "Чат с очередью",
+            config = ConversationConfig(chatModelId = model.id), messageNodes = listOf(
+                UIMessage.user("Первый вопрос").toMessageNode(), UIMessage.assistant("Первый ответ").toMessageNode()))
+        repository.insertConversation(source)
+        service.initializeConversation(source.id)
+        service.addConversationReference(source.id)
+        val entered = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        dao.updateGate = entered to release
+        try {
+            service.sendMessage(source.id, listOf(me.rerere.ai.ui.UIMessagePart.Text("Вопрос перед остановкой")), answer = false)
+            kotlinx.coroutines.withTimeout(5_000) { entered.await() }
+            // Stop lands while the row write runs: the write commits, then the job sees the cancellation.
+            val stopping = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { service.stopGeneration(source.id) }
+            release.complete(Unit)
+            stopping.join()
+            val saved = repository.getConversationById(source.id)!!.currentMessages.single { it.toText() == "Вопрос перед остановкой" }
+            assertTrue("A question saved in history must leave the durable queue, or it returns after restart",
+                MessageQueueStore(queueDirectory, cipher).read(source.id).none { it.id == saved.id })
+            assertTrue(service.getMessageQueueFlow(source.id).value.messages.isEmpty())
+            assertEquals(0, generationCalls)
+        } finally { release.complete(Unit) }
+    }
+
+    private class GatedConversationDao(private val delegate: me.rerere.rikkahub.data.db.dao.ConversationDAO) :
+        me.rerere.rikkahub.data.db.dao.ConversationDAO by delegate {
+        var updateGate: Pair<kotlinx.coroutines.CompletableDeferred<Unit>, kotlinx.coroutines.CompletableDeferred<Unit>>? = null
+        override suspend fun update(conversation: me.rerere.rikkahub.data.db.entity.ConversationEntity) {
+            updateGate?.also { updateGate = null }?.let { (entered, release) ->
+                entered.complete(Unit)
+                release.await()
+            }
+            delegate.update(conversation)
+        }
     }
 }
