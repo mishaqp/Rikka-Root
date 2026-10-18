@@ -7,8 +7,6 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
@@ -27,24 +25,7 @@ fun buildMemoryTools(
 ): List<Tool> = listOf(
     Tool(
         name = "memory_tool",
-        description = """
-            The memory tool stores long-term information across conversations.
-            Use `action` to control the operation: `create` (add), `edit` (update), `delete` (remove).
-            - No relevant record: `create` + `content`
-            - Existing relevant record: `edit` + `id` + `content`
-            - Outdated/irrelevant record: `delete` + `id`
-            Memories will automatically appear in the <memories> tag in later conversations.
-            Do not store sensitive information (e.g., ethnicity, religion, sexual orientation, political views, sex life, criminal records).
-            You may store: preferred name, preferences, plans, work-related notes, chat style preferences, first chat time, etc.
-            Do not show memory content directly in the conversation unless the user explicitly asks.
-            Today is ${LocalDate.now().toLocalString(true)}.
-            Similar memories should be merged; prefer updating existing records.
-
-            Examples:
-            {"action":"create","content":"User prefers brief replies and is more active on weekends."}
-            {"action":"edit","id":12,"content":"User’s preferred name updated to “A-Xing”, prefers Chinese replies."}
-            {"action":"delete","id":7}
-        """.trimIndent(),
+        description = "Память хранит сведения между чатами текущего ассистента; при включённой общей памяти используется общая область. create добавляет content; edit меняет content записи по id; delete удаляет запись по id. Объединяйте похожие записи, предпочитая edit. Записи появятся в следующих чатах в memories. Сохраняйте предпочтения, планы и рабочие заметки; не сохраняйте чувствительные сведения и не раскрывайте память без просьбы пользователя. Сегодня ${LocalDate.now().toLocalString(true)}.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -58,38 +39,38 @@ fun buildMemoryTools(
                                 add("delete")
                             }
                         )
-                        put("description", "Operation to perform: create, edit, or delete")
+                        put("description", "Операция: create — создать, edit — изменить, delete — удалить.")
                     })
                     put("id", buildJsonObject {
                         put("type", "integer")
-                        put("description", "The id of the memory record (required for edit/delete)")
+                        put("description", "Целочисленный id существующей записи из памяти; обязателен для edit и delete, без кавычек.")
                     })
                     put("content", buildJsonObject {
                         put("type", "string")
-                        put("description", "The content of the memory record (required for create/edit)")
+                        put("description", "Текст записи памяти; обязателен для create и edit.")
                     })
                 },
                 required = listOf("action")
             )
         },
         execute = { deviceToolParts {
-            val params = it.jsonObject
-            val action = params["action"]?.jsonPrimitive?.contentOrNull ?: error("Укажите action: create, edit или delete для работы с памятью.")
+            val params = it as? kotlinx.serialization.json.JsonObject ?: error("Укажите параметры памяти как JSON-объект.")
+            val action = (params["action"] as? JsonPrimitive)?.takeIf { value -> value.isString }?.contentOrNull ?: error("Укажите action: create, edit или delete для работы с памятью.")
             val payload = try {
                 when (action) {
                     "create" -> {
-                        val content = params["content"]?.jsonPrimitive?.contentOrNull ?: error("Укажите content — текст записи памяти.")
+                        val content = (params["content"] as? JsonPrimitive)?.takeIf { value -> value.isString }?.contentOrNull ?: error("Укажите content — текст записи памяти.")
                         json.encodeToJsonElement(AssistantMemory.serializer(), onCreation(content))
                     }
 
                     "edit" -> {
-                        val id = params["id"]?.jsonPrimitive?.intOrNull ?: error("Укажите id существующей записи памяти.")
-                        val content = params["content"]?.jsonPrimitive?.contentOrNull ?: error("Укажите content — текст записи памяти.")
+                        val id = (params["id"] as? JsonPrimitive)?.takeUnless { value -> value.isString }?.intOrNull ?: error("Укажите id существующей записи памяти как целое число без кавычек.")
+                        val content = (params["content"] as? JsonPrimitive)?.takeIf { value -> value.isString }?.contentOrNull ?: error("Укажите content — текст записи памяти.")
                         json.encodeToJsonElement(AssistantMemory.serializer(), onUpdate(id, content))
                     }
 
                     "delete" -> {
-                        val id = params["id"]?.jsonPrimitive?.intOrNull ?: error("Укажите id существующей записи памяти.")
+                        val id = (params["id"] as? JsonPrimitive)?.takeUnless { value -> value.isString }?.intOrNull ?: error("Укажите id существующей записи памяти как целое число без кавычек.")
                         onDelete(id)
                         buildJsonObject {
                             put("success", true)

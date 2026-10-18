@@ -560,7 +560,8 @@ class ConversationRepository(
         keyword: String,
         sort: MessageSearchSort = MessageSearchSort.RELEVANCE,
         assistantId: Uuid? = null,
-    ) = messageFtsManager.search(keyword, sort, assistantId?.toString())
+        limit: Int = 50,
+    ) = messageFtsManager.search(keyword, sort, assistantId?.toString(), limit)
 
     suspend fun rebuildAllIndexes(onProgress: (current: Int, total: Int) -> Unit = { _, _ -> }) {
         // Validate every snapshot before clearing the old complete search index.

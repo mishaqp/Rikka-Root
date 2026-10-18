@@ -57,6 +57,9 @@ class ScheduledJobRunRepository(private val db: AppDatabase) {
     suspend fun queuedForJob(jobId: String) = runs.queuedForJob(jobId)
     suspend fun getById(id: String) = runs.getById(id)
     suspend fun recent(jobId: String, limit: Int) = runs.recent(jobId, limit.coerceIn(1, 100))
+    /** One extra stored row lets the tool report truncation without changing the public history cap. */
+    internal suspend fun recentWithLookahead(jobId: String, limit: Int) =
+        runs.recent(jobId, limit.coerceIn(1, 100) + 1)
     suspend fun finish(id: String, token: String, status: String, code: String?, now: Long) = db.withTransaction {
         require(status in CronRunPolicy.terminal)
         val run = runs.getById(id) ?: return@withTransaction false

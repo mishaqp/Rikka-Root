@@ -370,7 +370,7 @@ object RecentChatsToolUI : ToolUIRenderer {
         stringResource(R.string.chat_message_tool_recent_chats)
 
     private fun chats(context: ToolUIContext): List<JsonElement> =
-        (context.content as? JsonArray) ?: emptyList()
+        (context.content as? JsonArray) ?: (context.content as? JsonObject)?.get("items") as? JsonArray ?: emptyList()
 
     override fun hasSummary(context: ToolUIContext): Boolean = chats(context).isNotEmpty()
 
@@ -404,7 +404,7 @@ object ConversationSearchToolUI : ToolUIRenderer {
     )
 
     private fun results(context: ToolUIContext): List<JsonElement> =
-        (context.content as? JsonArray) ?: emptyList()
+        (context.content as? JsonArray) ?: (context.content as? JsonObject)?.get("items") as? JsonArray ?: emptyList()
 
     override fun hasSummary(context: ToolUIContext): Boolean = results(context).isNotEmpty()
 

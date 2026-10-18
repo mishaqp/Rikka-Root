@@ -20,7 +20,7 @@ internal fun manageAppSettingsTool(engine: AppSettingsEngine): Tool = Tool(
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                put("action", buildJsonObject { put("type", "string"); put("enum", buildJsonArray { add("list_sections"); add("get"); add("set") }) })
+                put("action", buildJsonObject { put("description", "list_sections — разделы; get — сведения по section или key; set — изменение key с value после подтверждения."); put("type", "string"); put("enum", buildJsonArray { add("list_sections"); add("get"); add("set") }) })
                 put("section", buildJsonObject { put("type", "string"); put("description", "ID раздела из list_sections; только для get, вместо key") })
                 put("key", buildJsonObject { put("type", "string"); put("description", "Точный ключ из get или list_sections; обязателен для set") })
                 put("value", buildJsonObject {
@@ -41,6 +41,7 @@ internal fun manageAppSettingsTool(engine: AppSettingsEngine): Tool = Tool(
         val section = (args?.get("section") as? JsonPrimitive)?.takeIf { it.isString }?.content
         val result = when {
             args == null -> error("Укажите action: list_sections, get или set.")
+            listOf("action", "key", "section").any { it in args && (args[it] as? JsonPrimitive)?.isString != true } -> error("Поля action, key и section должны быть строками. Выберите ключ или раздел из list_sections.")
             args.keys.any { it !in setOf("action", "section", "key", "value", "_expected_before", "_approval_preview") } -> error(APP_SETTINGS_MANUAL_ONLY, "manual_only")
             action == "list_sections" && args.keys == setOf("action") -> engine.listSections()
             action == "get" && args.keys.all { it in setOf("action", "section", "key") } -> engine.get(section, key)

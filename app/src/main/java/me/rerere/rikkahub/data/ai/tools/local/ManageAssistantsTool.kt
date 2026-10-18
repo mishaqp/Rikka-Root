@@ -129,9 +129,9 @@ fun manageAssistantsTool(
         name = "manage_assistants",
         description = "Управляет ассистентами приложения: list — краткий список, get — все настройки, list_options — реальные идентификаторы и схемы полей, create/update/duplicate/switch/delete — изменения с обязательным одобрением пользователя. Перед настройкой вызовите list_options и get. Изменения ассистента применяются к следующим сообщениям с учётом закреплённой ConversationConfig текущего чата. switch выбирает ассистента для следующих чатов и сохраняет текущий чат. Нельзя удалять владельца текущего чата, последнего ассистента или ассистента с чатами, памятью, неудалёнными заданиями либо ссылками из сценариев. Сначала перенесите или удалите связанные данные; история уже удалённых заданий очищается вместе с ассистентом. Секреты и правила безопасности доступны только вручную в настройках.",
         parameters = { InputSchema.Obj(properties = buildJsonObject {
-            put("action", buildJsonObject { put("type", "string"); put("enum", buildJsonArray { assistantManagerActions.forEach { add(it) } }) })
+            put("action", buildJsonObject { put("description", "Действие с ассистентами: list/get/list_options читают данные; create/update/duplicate/switch/delete требуют подтверждения."); put("type", "string"); put("enum", buildJsonArray { assistantManagerActions.forEach { add(it) } }) })
             put("assistant_id", buildJsonObject { put("type", "string"); put("description", "UUID из list; обязателен для get/update/duplicate/switch/delete.") })
-            put("settings", buildJsonObject { put("type", "object"); put("additionalProperties", false); put("properties", assistantSettingsSchema()) })
+            put("settings", buildJsonObject { put("description", "Поля для create, update или duplicate. Перед изменением вызовите get и list_options; остальные настройки сохраняются."); put("type", "object"); put("additionalProperties", false); put("properties", assistantSettingsSchema()) })
             put("clear", buildJsonObject { put("type", "array"); put("description", "Сброс перечисленных необязательных полей в null.")
                 put("items", buildJsonObject { put("type", "string"); put("enum", buildJsonArray { clearableAssistantFields.forEach { add(it) } }) }) })
         }, required = listOf("action")) },

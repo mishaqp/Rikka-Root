@@ -24,15 +24,15 @@ internal fun assistantSettingsSchema(): JsonObject = buildJsonObject {
         put("title", "Аватар"); put("description", "dummy — стандартный; emoji — content; image — url (URI или URL изображения).")
         put("type", "object"); put("additionalProperties", false)
         put("properties", buildJsonObject {
-            put("type", buildJsonObject { put("type", "string"); put("enum", buildJsonArray { add("dummy"); add("emoji"); add("image") }) })
-            put("content", buildJsonObject { put("type", "string") }); put("url", buildJsonObject { put("type", "string") })
+            put("type", buildJsonObject { put("description", "Тип аватара: dummy, emoji или image."); put("type", "string"); put("enum", buildJsonArray { add("dummy"); add("emoji"); add("image") }) })
+            put("content", buildJsonObject { put("description", "Эмодзи для типа emoji."); put("type", "string") }); put("url", buildJsonObject { put("description", "URI или URL изображения для типа image."); put("type", "string") })
         }); put("required", buildJsonArray { add("type") })
     })
     field("useAssistantAvatar", "Показывать аватар ассистента", "boolean")
     array("tags", "Теги")
     field("systemPrompt", "Системный промпт", "string")
     field("temperature", "Температура", "number", nullable = true, minimum = 0, maximum = 2)
-    field("topP", "Top P", "number", nullable = true, minimum = 0, maximum = 1)
+    field("topP", "Top P", "number", "Порог вероятности выборки токенов Top P; null — значение провайдера.", nullable = true, minimum = 0, maximum = 1)
     field("contextMessageLimit", "Лимит сообщений контекста", "integer", "0 — без ограничения; положительное число — последние сообщения.", minimum = 0)
     field("autoCompressContext", "Автоматическое сжатие контекста", "boolean")
     field("autoCompressionTokenThreshold", "Порог сжатия в токенах", "integer", minimum = 2048, maximum = 2000000)
@@ -46,8 +46,8 @@ internal fun assistantSettingsSchema(): JsonObject = buildJsonObject {
         put("type", "array"); put("items", buildJsonObject {
             put("type", "object"); put("additionalProperties", false); put("properties", buildJsonObject {
                 put("id", buildJsonObject { put("type", "string"); put("description", "UUID, при отсутствии создаётся автоматически.") })
-                put("role", buildJsonObject { put("type", "string"); put("enum", buildJsonArray { add("USER"); add("ASSISTANT") }) })
-                put("content", buildJsonObject { put("type", "string") })
+                put("role", buildJsonObject { put("description", "Роль начальной реплики: USER или ASSISTANT."); put("type", "string"); put("enum", buildJsonArray { add("USER"); add("ASSISTANT") }) })
+                put("content", buildJsonObject { put("description", "Текст начальной реплики."); put("type", "string") })
             }); put("required", buildJsonArray { add("role"); add("content") })
         })
     })
@@ -56,9 +56,9 @@ internal fun assistantSettingsSchema(): JsonObject = buildJsonObject {
         put("title", "Правила замены регулярными выражениями"); put("description", "Преобразования текста пользователя или ассистента; visualOnly меняет только отображение.")
         put("type", "array"); put("items", buildJsonObject {
             put("type", "object"); put("additionalProperties", false); put("properties", buildJsonObject {
-                for (key in listOf("id", "name", "findRegex", "replaceString")) put(key, buildJsonObject { put("type", "string") })
-                for (key in listOf("enabled", "visualOnly")) put(key, buildJsonObject { put("type", "boolean") })
-                put("affectingScope", buildJsonObject { put("type", "array"); put("items", buildJsonObject { put("type", "string"); put("enum", buildJsonArray { add("USER"); add("ASSISTANT") }) }) })
+                for ((key, description) in mapOf("id" to "UUID правила; при отсутствии создаётся автоматически.", "name" to "Отображаемое название правила.", "findRegex" to "Регулярное выражение для поиска.", "replaceString" to "Текст замены найденного фрагмента.")) put(key, buildJsonObject { put("description", description); put("type", "string") })
+                for ((key, description) in mapOf("enabled" to "Включено ли правило.", "visualOnly" to "Менять только отображение, сохраняя исходный текст для модели.")) put(key, buildJsonObject { put("description", description); put("type", "boolean") })
+                put("affectingScope", buildJsonObject { put("description", "Роли сообщений, к которым применяется правило: USER и/или ASSISTANT."); put("type", "array"); put("items", buildJsonObject { put("type", "string"); put("enum", buildJsonArray { add("USER"); add("ASSISTANT") }) }) })
             })
         })
     })
@@ -75,8 +75,15 @@ internal fun assistantSettingsSchema(): JsonObject = buildJsonObject {
             put("title", title); put("description", "Несекретные параметры запроса. Секреты скрыты как ••••; их изменение доступно только вручную в настройках.")
             put("type", "array"); put("items", buildJsonObject {
                 put("type", "object"); put("additionalProperties", false); put("properties", buildJsonObject {
-                    put(itemKey, buildJsonObject { put("type", "string") })
-                    put("value", if (key == "customHeaders") buildJsonObject { put("type", "string") } else buildJsonObject { put("description", "Любое значение JSON.") })
+                    put(itemKey, buildJsonObject { put("description", "Имя несекретного параметра запроса."); put("type", "string") })
+                    put("value", if (key == "customHeaders") buildJsonObject { put("description", "Несекретное строковое значение заголовка."); put("type", "string") } else buildJsonObject {
+                        put("description", "Любое значение JSON: строка, число (включая целое), boolean, null, массив или объект с произвольными полями. Типы сохраняются; секреты изменяйте только вручную.")
+                        put("anyOf", buildJsonArray {
+                            for (type in listOf("string", "number", "boolean", "null")) add(buildJsonObject { put("type", type) })
+                            add(buildJsonObject { put("type", "array"); put("items", buildJsonObject {}) })
+                            add(buildJsonObject { put("type", "object"); put("additionalProperties", true) })
+                        })
+                    })
                 }); put("required", buildJsonArray { add(itemKey); add("value") })
             })
         })

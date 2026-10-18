@@ -135,7 +135,7 @@ class AutomationToolErrorMessagesTest {
         val repo = mockk<me.rerere.rikkahub.data.repository.ScheduledJobRepository>()
         val runs = mockk<me.rerere.rikkahub.data.repository.ScheduledJobRunRepository>()
         coEvery { repo.getOwned(any(), any()) } returns mockk()
-        coEvery { runs.recent(any(), any()) } returns listOf(
+        coEvery { runs.recentWithLookahead(any(), any()) } returns listOf(
             me.rerere.rikkahub.data.db.entity.ScheduledJobRunEntity("run", "job", 1, "manual", 0,
                 status = "blocked", outcomeCode = "android_permission_required"),
         )

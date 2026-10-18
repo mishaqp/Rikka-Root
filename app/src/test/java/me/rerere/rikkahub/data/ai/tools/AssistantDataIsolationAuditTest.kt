@@ -109,13 +109,13 @@ class AssistantDataIsolationAuditTest {
         val foreign = searchResult("foreign-chat", "Чужой секрет")
         val fts = mockk<MessageFtsManager> {
             coEvery { search("планы", MessageSearchSort.RELEVANCE, null) } returns listOf(foreign, own)
-            coEvery { search("планы", MessageSearchSort.RELEVANCE, owner.id.toString()) } returns listOf(own)
+            coEvery { search("планы", MessageSearchSort.RELEVANCE, owner.id.toString(), any()) } returns listOf(own)
         }
         val repository = ConversationRepository(database.conversationDao(), database.messageNodeDao(), database.favoriteDao(),
             database, mockk(relaxed = true), fts)
         val search = createConversationTools(repository, owner.id).first { it.name == "conversation_search" }
         val parts = search.execute(buildJsonObject { put("query", "планы"); put("limit", 1) })
-        val output = Json.parseToJsonElement((parts.single() as UIMessagePart.Text).text).jsonArray
+        val output = Json.parseToJsonElement((parts.single() as UIMessagePart.Text).text).jsonObject.getValue("items").jsonArray
         assertEquals(listOf("own-chat"), output.map { it.jsonObject["conversation_id"]!!.jsonPrimitive.content })
         assertFalse(output.toString().contains("Чужой секрет"))
     }

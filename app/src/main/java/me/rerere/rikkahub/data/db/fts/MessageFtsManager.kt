@@ -70,6 +70,7 @@ class MessageFtsManager(private val database: AppDatabase) {
         keyword: String,
         sort: MessageSearchSort = MessageSearchSort.RELEVANCE,
         assistantId: String? = null,
+        limit: Int = 50,
     ): List<MessageSearchResult> = withContext(Dispatchers.IO) {
         val results = mutableListOf<MessageSearchResult>()
         val assistantFilter = if (assistantId != null) {
@@ -91,7 +92,7 @@ class MessageFtsManager(private val database: AppDatabase) {
             WHERE text MATCH jieba_query(?)
             $assistantFilter
             ORDER BY ${sort.orderBy}
-            LIMIT 50
+            LIMIT ${limit.coerceIn(1, 51)}
             """.trimIndent(),
             if (assistantId != null) arrayOf(keyword, assistantId) else arrayOf(keyword)
         )

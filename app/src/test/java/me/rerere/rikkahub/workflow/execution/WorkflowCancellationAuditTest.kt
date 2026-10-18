@@ -201,4 +201,102 @@ class WorkflowCancellationAuditTest {
         assertEquals(WorkflowRunStatus.SKIPPED_DAILY_CAP, engine.fire(definition.id).status)
         assertEquals("A following trigger must not repeat the completed effect", 1, effects)
     }
+
+    @Test fun `long failed workflow retains indeterminate warning and reports clipped summary`() = runBlocking {
+        val definition = WorkflowDefinition(
+            "summary-failed", "Summary fixture", trigger = TriggerSpec.Manual,
+            authoringAssistantId = owner.id.toString(),
+            actions = List(12) { WorkflowAction("get_time_info", buildJsonObject {}) },
+        )
+        repository.upsert(definition)
+        // Real stored history exercises get's N+1 read without fabricating a FireOutcome.
+        repeat(10) { index -> repository.recordFire(definition.id, index.toLong(), WorkflowRunStatus.SUCCESS, 1, null) }
+        var dispatched = 0
+        val engine = WorkflowEngine(repository, settings, ContextProvider(context), WorkflowActionRunner { _, _, _ ->
+            dispatched++
+            if (dispatched == 12) HeadlessTaskResult(HeadlessTaskStatus.FAILED, errorCode = "root_cleanup_unconfirmed")
+            else HeadlessTaskResult(HeadlessTaskStatus.SUCCEEDED, output = "x".repeat(200))
+        })
+        val args = buildJsonObject { put("id", definition.id) }
+        val result = Json.parseToJsonElement((me.rerere.rikkahub.workflow.tools.workflowRunTool(engine, repository,
+            owner.id.toString()).execute(args).single() as UIMessagePart.Text).text).jsonObject
+        assertEquals(12, dispatched)
+        assertEquals("FAILED", result["status"]!!.jsonPrimitive.content)
+        assertEquals("action 11: root_cleanup_unconfirmed", result["error"]!!.jsonPrimitive.content)
+        assertEquals(2000, result["output_summary"]!!.jsonPrimitive.content.length)
+        assertEquals(kotlinx.serialization.json.JsonPrimitive(true), result["truncated"])
+        val history = Json.parseToJsonElement((workflowGetTool(repository).execute(args).single() as UIMessagePart.Text).text).jsonObject
+        assertEquals(kotlinx.serialization.json.JsonPrimitive(10), history["history_count"])
+        assertEquals(kotlinx.serialization.json.JsonPrimitive(true), history["history_truncated"])
+        assertEquals(kotlinx.serialization.json.JsonNull, history["history_total"])
+        assertEquals("action 11: root_cleanup_unconfirmed", history["last_run_error"]!!.jsonPrimitive.content)
+        val warning = history["last_run_message"]!!.jsonPrimitive.content
+        assertTrue(warning, warning.contains("автоматически не повторяйте"))
+        assertTrue("Truncation must preserve the original indeterminate warning: $result",
+            result["message"]!!.jsonPrimitive.content.contains(warning))
+    }
+
+    @Test fun `real successful workflow discloses summary truncation done inside runner`() = runBlocking {
+        val definition = WorkflowDefinition(
+            "summary-success", "Summary fixture", trigger = TriggerSpec.Manual,
+            authoringAssistantId = owner.id.toString(),
+            actions = List(12) { WorkflowAction("get_time_info", buildJsonObject {}) },
+        )
+        repository.upsert(definition)
+        var dispatched = 0
+        val engine = WorkflowEngine(repository, settings, ContextProvider(context), WorkflowActionRunner { _, _, _ ->
+            dispatched++
+            HeadlessTaskResult(HeadlessTaskStatus.SUCCEEDED, output = "x".repeat(200))
+        })
+        val result = Json.parseToJsonElement((me.rerere.rikkahub.workflow.tools.workflowRunTool(engine, repository,
+            owner.id.toString()).execute(buildJsonObject { put("id", definition.id) }).single() as UIMessagePart.Text).text).jsonObject
+        assertEquals(12, dispatched)
+        assertEquals("SUCCESS", result["status"]!!.jsonPrimitive.content)
+        assertEquals(2000, result["output_summary"]!!.jsonPrimitive.content.length)
+        assertEquals(1, repository.lastRuns(definition.id).size)
+        assertEquals("Actual runner clipping must survive FireOutcome projection", kotlinx.serialization.json.JsonPrimitive(true), result["truncated"])
+        assertTrue(result.toString(), result["message"]?.jsonPrimitive?.content?.contains("workflow_get") == true)
+    }
+
+    @Test fun `short real workflow summary is unchanged and not marked truncated`() = runBlocking {
+        val definition = WorkflowDefinition(
+            "summary-short", "Summary fixture", trigger = TriggerSpec.Manual,
+            authoringAssistantId = owner.id.toString(),
+            actions = listOf(WorkflowAction("get_time_info", buildJsonObject {})),
+        )
+        repository.upsert(definition)
+        val engine = WorkflowEngine(repository, settings, ContextProvider(context), WorkflowActionRunner { _, _, _ ->
+            HeadlessTaskResult(HeadlessTaskStatus.SUCCEEDED, output = "external output [truncated]")
+        })
+        val result = Json.parseToJsonElement((me.rerere.rikkahub.workflow.tools.workflowRunTool(engine, repository,
+            owner.id.toString()).execute(buildJsonObject { put("id", definition.id) }).single() as UIMessagePart.Text).text).jsonObject
+        assertEquals("SUCCESS", result["status"]!!.jsonPrimitive.content)
+        assertEquals("[0] get_time_info: external output [truncated]", result["output_summary"]!!.jsonPrimitive.content)
+        assertEquals(kotlinx.serialization.json.JsonPrimitive(false), result["truncated"])
+    }
+
+
+    @Test fun `single action summary reports clipping and never splits a supplementary character`() = runBlocking {
+        val definition = WorkflowDefinition(
+            "summary-single-long", "Summary fixture", trigger = TriggerSpec.Manual,
+            authoringAssistantId = owner.id.toString(),
+            actions = listOf(WorkflowAction("get_time_info", buildJsonObject {})),
+        )
+        repository.upsert(definition)
+        val original = "a".repeat(199) + "\uD83D\uDE00" + "tail"
+        val engine = WorkflowEngine(repository, settings, ContextProvider(context), WorkflowActionRunner { _, _, _ ->
+            HeadlessTaskResult(HeadlessTaskStatus.SUCCEEDED, output = original)
+        })
+        val result = Json.parseToJsonElement((me.rerere.rikkahub.workflow.tools.workflowRunTool(engine, repository,
+            owner.id.toString()).execute(buildJsonObject { put("id", definition.id) }).single() as UIMessagePart.Text).text).jsonObject
+        assertEquals("SUCCESS", result["status"]!!.jsonPrimitive.content)
+        val summary = result["output_summary"]!!.jsonPrimitive.content
+        val prefix = "[0] get_time_info: "
+        assertTrue(summary, summary.startsWith(prefix))
+        assertTrue(summary, summary.length <= prefix.length + 200)
+        assertEquals("A per-action cut must not emit half of a supplementary character", prefix + "a".repeat(199), summary)
+        assertEquals("Per-action clipping must survive the engine even below the overall cap", kotlinx.serialization.json.JsonPrimitive(true), result["truncated"])
+        assertTrue(result.toString(), result["message"]?.jsonPrimitive?.content?.contains("workflow_get") == true)
+    }
+
 }

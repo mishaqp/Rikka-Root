@@ -4,9 +4,10 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
@@ -74,10 +75,10 @@ suspend fun createWorkspaceTools(
 private fun createBackgroundTools(id: String, repository: WorkspaceRepository, defaultCwd: String?): List<Tool> = listOf(
     Tool(
         name = "workspace_background_start",
-        description = "Start a managed workspace background command. Returns a process id. At most five run at once. Processes stop when the app exits or workspace is deleted. Use output/list/stop tools to manage them.",
+        description = "Запустить фоновую команду в рабочей папке и получить id процесса. Одновременно работают не более пяти процессов; при выходе приложения или удалении папки они останавливаются. Проверяйте состояние через workspace_background_list, вывод через workspace_background_output, остановку через workspace_background_stop.",
         parameters = { InputSchema.Obj(buildJsonObject {
-            put("command", buildJsonObject { put("type", "string") })
-            put("cwd", buildJsonObject { put("type", "string"); put("description", "Relative workspace directory") })
+            put("command", buildJsonObject { put("type", "string"); put("description", "Команда оболочки для фонового выполнения.") })
+            put("cwd", buildJsonObject { put("type", "string"); put("description", "Рабочий каталог относительно корня /workspace; по умолчанию каталог текущего чата, затем корень рабочей папки.") })
         }, listOf("command")) },
         needsApproval = { true },
         execute = { args ->
@@ -87,19 +88,19 @@ private fun createBackgroundTools(id: String, repository: WorkspaceRepository, d
         },
     ),
     Tool(
-        name = "workspace_background_list", description = "List managed background processes in this workspace, including exit status.",
+        name = "workspace_background_list", description = "Список фоновых процессов текущей рабочей папки, включая состояние и код завершения.",
         execute = { listOf(UIMessagePart.Text(buildJsonArray {
             repository.backgroundProcesses(id).forEach { add(it.toBackgroundJson(false)) }
         }.toString())) },
     ),
     Tool(
-        name = "workspace_background_output", description = "Read bounded stdout/stderr tails and exit code of a managed process in this workspace.",
+        name = "workspace_background_output", description = "Прочитать последние сохранённые части stdout/stderr и код завершения процесса текущей рабочей папки. droppedStdout/droppedStderr показывают потерянные символы; при truncated полный старый вывод недоступен.",
         parameters = { backgroundIdSchema() },
         execute = { args -> listOf(UIMessagePart.Text(repository.backgroundOutput(id,
             args.jsonObject.string("process_id") ?: error("Укажите process_id из списка фоновых процессов.")).toBackgroundJson(true).toString())) },
     ),
     Tool(
-        name = "workspace_background_stop", description = "Stop a managed process and its child processes in this workspace; retain its output record.",
+        name = "workspace_background_stop", description = "Остановить процесс и его дочерние процессы в текущей рабочей папке; сохранить запись и оставшийся вывод.",
         parameters = { backgroundIdSchema() }, needsApproval = { true },
         execute = { args ->
             val processId = args.jsonObject.string("process_id") ?: error("Укажите process_id из списка фоновых процессов.")
@@ -110,7 +111,7 @@ private fun createBackgroundTools(id: String, repository: WorkspaceRepository, d
 )
 
 private fun backgroundIdSchema() = InputSchema.Obj(buildJsonObject {
-    put("process_id", buildJsonObject { put("type", "string") })
+    put("process_id", buildJsonObject { put("type", "string"); put("description", "id процесса из workspace_background_start или workspace_background_list; область — текущая рабочая папка.") })
 }, listOf("process_id"))
 
 private fun BackgroundStatus.toBackgroundJson(includeOutput: Boolean) = buildJsonObject {
@@ -121,6 +122,9 @@ private fun BackgroundStatus.toBackgroundJson(includeOutput: Boolean) = buildJso
     if (includeOutput) {
         put("stdout", stdout); put("stderr", stderr)
         put("droppedStdout", droppedStdout); put("droppedStderr", droppedStderr)
+        val truncated = droppedStdout > 0 || droppedStderr > 0
+        put("truncated", truncated)
+        if (truncated) put("message", "Сохранён только конец вывода; прежние символы потеряны. Для полного журнала настройте перенаправление в файл и прочитайте его через workspace_read_file или workspace_shell. Не повторяйте изменяющую данные команду только ради журнала.")
     }
 }
 
@@ -138,9 +142,9 @@ private fun createReadFileTool(
 ) = Tool(
     name = "workspace_read_file",
     description = """
-        Read a file using the assistant's bound workspace Rootfs. Paths must be absolute inside Rootfs.
-        Use /workspace for the workspace files area.
-        Supports UTF-8 text files and image files (png, jpg, jpeg, gif, webp, bmp, svg, heic, heif, avif, ico).
+        Прочитать файл в Rootfs рабочей папки текущего ассистента. Укажите абсолютный путь внутри Rootfs.
+        Файлы рабочей папки доступны в /workspace.
+        Поддерживаются текст UTF-8 и изображения png/jpg/jpeg/gif/webp/bmp/svg/heic/heif/avif/ico. Максимум 8 МБ; большие текстовые файлы читайте частями через workspace_shell (head, tail, grep).
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
@@ -176,8 +180,8 @@ private fun createWriteFileTool(
 ) = Tool(
     name = "workspace_write_file",
     description = """
-        Write a UTF-8 text file using the assistant's bound workspace Rootfs. Paths must be absolute inside Rootfs.
-        Use /workspace for the workspace files area.
+        Записать текст UTF-8 в файл Rootfs рабочей папки текущего ассистента. Укажите абсолютный путь внутри Rootfs.
+        Файлы рабочей папки доступны в /workspace.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
@@ -185,11 +189,11 @@ private fun createWriteFileTool(
                 putPathProperty(required = true)
                 put("text", buildJsonObject {
                     put("type", "string")
-                    put("description", "UTF-8 text content to write")
+                    put("description", "Текст UTF-8 для записи; обязательная строка.")
                 })
                 put("overwrite", buildJsonObject {
-                    put("type", "boolean")
-                    put("description", "Whether to overwrite an existing file. Defaults to true.")
+                    put("type", "boolean"); put("default", true)
+                    put("description", "Перезаписывать существующий файл: true или false без кавычек. По умолчанию true.")
                 })
             },
             required = listOf("path", "text"),
@@ -200,7 +204,7 @@ private fun createWriteFileTool(
         val params = it.jsonObject
         val path = params.absolutePath("path")
         val text = params.string("text") ?: error("Укажите текст в text.")
-        val overwrite = params["overwrite"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true
+        val overwrite = params.workspaceBoolean("overwrite", true)
         val entry = workspaceRepository.writeTextInRootfs(workspaceId, path, text, overwrite)
         listOf(UIMessagePart.Text(entry.toJson().toString()))
     },
@@ -213,10 +217,10 @@ private fun createEditFileTool(
 ) = Tool(
     name = "workspace_edit_file",
     description = """
-        Edit a UTF-8 text file using the assistant's bound workspace Rootfs. Paths must be absolute inside Rootfs.
-        Use /workspace for the workspace files area.
-        Provide old_text and new_text. By default old_text must occur exactly once; set replace_all=true to replace every occurrence.
-        If no exact match is found, whitespace-tolerant line matching is attempted automatically.
+        Изменить текст UTF-8 в файле Rootfs рабочей папки текущего ассистента. Укажите абсолютный путь внутри Rootfs.
+        Файлы рабочей папки доступны в /workspace.
+        Укажите old_text и new_text. Обычно old_text должен встречаться ровно один раз; replace_all=true заменяет все совпадения.
+        Если точное совпадение отсутствует, применяется сопоставление строк с учётом различий пробелов.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
@@ -224,15 +228,15 @@ private fun createEditFileTool(
                 putPathProperty(required = true)
                 put("old_text", buildJsonObject {
                     put("type", "string")
-                    put("description", "Exact text to replace")
+                    put("description", "Непустой исходный фрагмент для замены.")
                 })
                 put("new_text", buildJsonObject {
                     put("type", "string")
-                    put("description", "Replacement text")
+                    put("description", "Новый текст; пустая строка удаляет найденный фрагмент.")
                 })
                 put("replace_all", buildJsonObject {
-                    put("type", "boolean")
-                    put("description", "Whether to replace every occurrence. Defaults to false.")
+                    put("type", "boolean"); put("default", false)
+                    put("description", "Заменять все совпадения: true или false без кавычек. По умолчанию false.")
                 })
             },
             required = listOf("path", "old_text", "new_text"),
@@ -244,7 +248,7 @@ private fun createEditFileTool(
         val path = params.absolutePath("path")
         val oldText = params.string("old_text") ?: error("Укажите исходный фрагмент в old_text.")
         val newText = params.string("new_text") ?: error("Укажите новый фрагмент в new_text.")
-        val replaceAll = params["replace_all"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+        val replaceAll = params.workspaceBoolean("replace_all", false)
         require(oldText.isNotEmpty()) { "old_text не должен быть пустым. Укажите текст для замены." }
 
         val original = workspaceRepository.readTextInRootfs(workspaceId, path)
@@ -276,36 +280,36 @@ private fun createShellTool(
 ) = Tool(
     name = "workspace_shell",
     description = buildString {
-        append("Run a shell command in the assistant's bound workspace Rootfs. The workspace files area is mounted at /workspace. ")
-        append("Use cwd for a path relative to the workspace files root. ")
+        append("Выполнить команду оболочки в Rootfs рабочей папки текущего ассистента. Файлы доступны в /workspace. ")
+        append("cwd задаёт каталог относительно рабочей папки либо путь внутри /workspace. ")
         if (!defaultCwd.isNullOrBlank()) {
-            append("Defaults to '$defaultCwd'. ")
+            append("По умолчанию '$defaultCwd'. ")
         }
-        append("Requires Rootfs to be installed and ready.")
+        append("Требуется установленный и готовый Rootfs. stdout/stderr могут быть ограничены; truncated и warning объясняют неполноту вывода.")
     },
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("command", buildJsonObject {
                     put("type", "string")
-                    put("description", "Shell command to run")
+                    put("description", "Команда оболочки для выполнения; обязательная строка.")
                 })
                 put("cwd", buildJsonObject {
                     put("type", "string")
                     put(
                         "description",
                         if (!defaultCwd.isNullOrBlank()) {
-                            "Working directory relative to the workspace files root. Defaults to '$defaultCwd'."
+                            "Каталог относительно рабочей папки или внутри /workspace. По умолчанию '$defaultCwd'."
                         } else {
-                            "Working directory relative to the workspace files root. Defaults to root."
+                            "Каталог относительно рабочей папки или внутри /workspace. По умолчанию корень рабочей папки."
                         }
                     )
                 })
                 put("timeout", buildJsonObject {
-                    put("type", "integer")
+                    put("type", "integer"); put("default", 30)
                     put(
                         "description",
-                        "Command timeout in seconds. Defaults to 30, max $SHELL_TIMEOUT_MAX_SECONDS."
+                        "Время команды в секундах, целое число без кавычек. По умолчанию 30; значение ограничивается диапазоном 1–$SHELL_TIMEOUT_MAX_SECONDS."
                     )
                 })
             },
@@ -317,10 +321,11 @@ private fun createShellTool(
         val params = it.jsonObject
         val command = params.string("command") ?: error("Укажите команду в command.")
         val cwd = (params.string("cwd") ?: defaultCwd.orEmpty()).workspaceRelativeCwd()
-        val timeoutMillis = params.string("timeout")?.toLongOrNull()
-            ?.coerceIn(1L, SHELL_TIMEOUT_MAX_SECONDS)
-            ?.times(1_000L)
-            ?: WorkspaceManager.DEFAULT_COMMAND_TIMEOUT_MS
+        val timeoutMillis = if ("timeout" !in params) WorkspaceManager.DEFAULT_COMMAND_TIMEOUT_MS else {
+            val seconds = (params["timeout"] as? JsonPrimitive)?.takeUnless { value -> value.isString }?.longOrNull
+                ?: error("Укажите timeout как целое число секунд без кавычек.")
+            seconds.coerceIn(1L, SHELL_TIMEOUT_MAX_SECONDS) * 1_000L
+        }
         val result = workspaceRepository.executeCommand(workspaceId, command, cwd, timeoutMillis)
         listOf(
             UIMessagePart.Text(
@@ -341,8 +346,17 @@ private fun createShellTool(
     },
 )
 
-private fun kotlinx.serialization.json.JsonObject.string(name: String): String? =
-    this[name]?.jsonPrimitive?.contentOrNull
+private fun kotlinx.serialization.json.JsonObject.string(name: String): String? {
+    if (name !in this) return null
+    return (this[name] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+        ?: error("Укажите $name как строку.")
+}
+
+private fun kotlinx.serialization.json.JsonObject.workspaceBoolean(name: String, default: Boolean): Boolean {
+    if (name !in this) return default
+    return (this[name] as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull
+        ?: error("Укажите $name: true или false без кавычек.")
+}
 
 private suspend fun WorkspaceRepository.readTextInRootfs(
     workspaceId: String,
@@ -377,7 +391,7 @@ private suspend fun WorkspaceRepository.readImageInRootfs(
         UIMessagePart.Text(
             buildJsonObject {
                 put("path", path)
-                put("description", "Image file read successfully")
+                put("description", "Изображение прочитано.")
             }.toString()
         ),
     )
@@ -528,9 +542,9 @@ private fun JsonObjectBuilder.putPathProperty(required: Boolean) {
         put(
             "description",
             if (required) {
-                "Absolute path inside Rootfs. Use /workspace for the workspace files area."
+                "Абсолютный путь внутри Rootfs. Файлы рабочей папки доступны в /workspace."
             } else {
-                "Optional absolute path inside Rootfs. Use /workspace for the workspace files area."
+                "Необязательный абсолютный путь внутри Rootfs. Файлы рабочей папки доступны в /workspace."
             }
         )
     })

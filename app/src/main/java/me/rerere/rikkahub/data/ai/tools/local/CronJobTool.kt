@@ -111,7 +111,7 @@ fun createCronJobTools(
         cause?.let { put("detail", deviceToolFailureReason(it)) }
     })
     fun schema(vararg names: String, required: List<String> = emptyList()) = InputSchema.Obj(
-        properties = buildJsonObject { names.forEach { name -> put(name, buildJsonObject { put("type", if (name in setOf("at_unix_ms", "start_at_unix_ms", "end_at_unix_ms", "max_runs", "limit")) "integer" else if (name == "actions") "array" else "string"); if (name == "actions") put("items", buildJsonObject { put("type", "object"); put("properties", buildJsonObject { put("tool", buildJsonObject { put("type", "string") }); put("args", buildJsonObject { put("type", "object") }) }); put("required", buildJsonArray { add("tool"); add("args") }) }) }) } }, required = required)
+        properties = buildJsonObject { names.forEach { name -> put(name, cronParameterSchema(name)) } }, required = required)
     fun summary(job: ScheduledJobEntity) = buildJsonObject {
         put("id", job.id)
         val payload = runCatching { repo.payload(job) }.getOrNull()
@@ -125,7 +125,7 @@ fun createCronJobTools(
     }
     val schedule = Tool(
         name = "schedule_job", needsApproval = { true },
-        description = "Создать задание текущего помощника: mode llm с prompt или direct с actions [{tool,args}]. schedule_type once с at_unix_ms либо cron с cron_expression (пять полей, @daily, @every 30m). timezone — IANA. catchup skip/fire_once/fire_all (не более 20). max_runs ограничивает число попыток независимо от истории. Время запуска задаёт точный будильник Android с пробуждением в Doze; WorkManager выполняет задание и служит запасным путём, если точные будильники недоступны. Система может задержать исполнение при исчерпании квоты фоновой работы. Фоновые действия требуют действующих разрешений и могут быть заблокированы. Не передавайте пароли или ключи: используйте ссылки на AndroidKeyStore.",
+        description = "Создать задание текущего помощника: mode llm с prompt или direct с actions [{tool,args}]. schedule_type once с at_unix_ms либо cron с cron_expression (пять полей, @daily, @every 30m). timezone — IANA. catchup skip/fire_once/fire_all (не более 20). max_runs ограничивает число попыток независимо от истории. Время запуска задаёт точный будильник Android с пробуждением в Doze; WorkManager выполняет задание и служит запасным путём, если точные будильники недоступны. Система может задержать исполнение при исчерпании квоты фоновой работы. Фоновые действия требуют действующих разрешений и могут быть заблокированы. Не передавайте пароли или ключи: используйте ссылки на AndroidKeyStore. Размер JSON задания — не более 60000 байт UTF-8.",
         parameters = { schema("name", "mode", "prompt", "actions", "schedule_type", "at_unix_ms", "cron_expression", "timezone", "start_at_unix_ms", "end_at_unix_ms", "max_runs", "catchup", required = listOf("name", "mode", "schedule_type")) },
         execute = { input ->
             val obj = input as? JsonObject ?: return@Tool error("invalid_arguments")
@@ -154,23 +154,40 @@ fun createCronJobTools(
             catch (cause: Exception) { error("schedule_failed", cause) }
         },
     )
-    val list = Tool(name = "list_jobs", needsApproval = { true }, description = "Список заданий текущего помощника без промптов, аргументов и результатов действий.", parameters = { schema() }, execute = {
-        result(buildJsonObject { put("jobs", buildJsonArray { repo.listOwned(owner).forEach { add(summary(it)) } }) })
+    val list = Tool(name = "list_jobs", needsApproval = { true }, description = "Список до 100 неудалённых заданий текущего ассистента, от новых к старым, без промптов и аргументов. count — выданные строки, total — число заданий, truncated — есть ещё. Продолжение списка через этот инструмент недоступно; активные задания доступны в настройках, повтор вызова возвращает первую часть.", parameters = { schema() }, execute = {
+        val jobs = repo.listOwned(owner)
+        val total = repo.countOfAssistant(owner)
+        result(buildJsonObject {
+            put("jobs", buildJsonArray { jobs.forEach { add(summary(it)) } })
+            put("count", jobs.size); put("total", if (total >= jobs.size) JsonPrimitive(total) else JsonNull)
+            put("truncated", total > jobs.size)
+            if (total > jobs.size) put("message", "Показаны первые 100 заданий; продолжение списка через list_jobs недоступно. Активные задания проверьте в настройках расписаний. Для известного id используйте get_job_history; повторный list_jobs возвращает ту же первую часть.")
+        })
     })
-    val history = Tool(name = "get_job_history", needsApproval = { true }, description = "История задания текущего помощника: queued/running/succeeded/failed/blocked/cancelled/indeterminate, время и безопасные коды. Не содержит ответов или секретов.", parameters = { schema("id", "limit", required = listOf("id")) }, execute = { input ->
+    val history = Tool(name = "get_job_history", needsApproval = { true }, description = "История задания текущего помощника: queued/running/succeeded/failed/blocked/cancelled/indeterminate, время и безопасные коды. Не содержит ответов или секретов. count — число выданных записей, truncated — есть более старые, total — точное число сохранённых записей либо null. При truncated можно увеличить limit до 100; продолжение за пределами 100 недоступно.", parameters = { schema("id", "limit", required = listOf("id")) }, execute = { input ->
         val obj = input as? JsonObject ?: return@Tool error("invalid_arguments")
-        val id = (obj["id"] as? JsonPrimitive)?.contentOrNull ?: return@Tool error("missing_id")
+        val id = (obj["id"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull ?: return@Tool error("missing_id")
         repo.getOwned(id, owner) ?: return@Tool error("not_found")
-        val limit = (obj["limit"] as? JsonPrimitive)?.intOrNull ?: 20
+        val limit = if ("limit" !in obj) 20 else (obj["limit"] as? JsonPrimitive)?.takeUnless { it.isString }?.intOrNull ?: return@Tool error("invalid_limit")
         if (limit !in 1..100) return@Tool error("invalid_limit")
-        result(buildJsonObject { put("runs", buildJsonArray { runRepo.recent(id, limit).forEach { run -> add(buildJsonObject {
-            put("occurrence_id", run.occurrenceId); put("status", run.status); put("scheduled_at_ms", run.scheduledAtMs)
-            run.startedAtMs?.let { put("started_at_ms", it) }; run.finishedAtMs?.let { put("finished_at_ms", it) }; run.outcomeCode?.let { put("code", it); put("message", scheduleJobMessage(it)) }
-        }) } }) })
+        val fetchedRuns = runRepo.recentWithLookahead(id, limit)
+        val runs = fetchedRuns.take(limit)
+        val truncated = fetchedRuns.size > limit
+        result(buildJsonObject {
+            put("runs", buildJsonArray { runs.forEach { run -> add(buildJsonObject {
+                put("occurrence_id", run.occurrenceId); put("status", run.status); put("scheduled_at_ms", run.scheduledAtMs)
+                run.startedAtMs?.let { put("started_at_ms", it) }; run.finishedAtMs?.let { put("finished_at_ms", it) }; run.outcomeCode?.let { put("code", it); put("message", scheduleJobMessage(it)) }
+            }) } })
+            put("count", runs.size); put("truncated", truncated)
+            put("total", if (truncated) JsonNull else JsonPrimitive(runs.size))
+            if (truncated) put("message", if (limit < 100)
+                "Есть более старые записи. Повторите get_job_history с тем же id и увеличьте limit до 100; инструмент не поддерживает продолжение за пределами 100 записей."
+            else "Показаны 100 последних записей. Достигнут максимальный limit; продолжение более старой истории недоступно, повтор возвращает ту же первую часть.")
+        })
     })
     fun mutation(name: String, description: String, action: suspend (String) -> List<UIMessagePart>): Tool = Tool(
         name = name, needsApproval = { true }, description = description, parameters = { schema("id", required = listOf("id")) }, execute = { input ->
-            val id = ((input as? JsonObject)?.get("id") as? JsonPrimitive)?.contentOrNull ?: return@Tool error("missing_id")
+            val id = ((input as? JsonObject)?.get("id") as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull ?: return@Tool error("missing_id")
             repo.getOwned(id, owner) ?: return@Tool error("not_found")
             try { action(id) } catch (cancel: CancellationException) { throw cancel } catch (cause: Exception) { error("mutation_failed", cause) }
         })
@@ -189,4 +206,49 @@ fun createCronJobTools(
         if (run == null) error("job_unavailable") else result(buildJsonObject { put("status", run.status); put("occurrence_id", run.occurrenceId); put("scheduled_at_ms", run.scheduledAtMs) })
     }
     return listOf(schedule, list, history, delete, pause, resume, trigger)
+}
+
+/** Public argument contract mirrors ScheduleJobValidator; arbitrary action args stay free-form. */
+private fun cronParameterSchema(name: String): JsonObject = buildJsonObject {
+    val integers = setOf("at_unix_ms", "start_at_unix_ms", "end_at_unix_ms", "max_runs", "limit")
+    put("type", when { name in integers -> "integer"; name == "actions" -> "array"; else -> "string" })
+    put("description", when (name) {
+        "name" -> "Название задания, от 1 до 80 символов."
+        "mode" -> "Режим: llm с prompt либо direct с actions."
+        "prompt" -> "Непустой текст задачи для llm, до 4000 символов; не передавайте одновременно actions."
+        "actions" -> "От 1 до 12 действий для direct; не передавайте одновременно prompt."
+        "schedule_type" -> "once — один запуск по at_unix_ms; cron — повторяющееся расписание cron_expression."
+        "at_unix_ms" -> "Будущий момент однократного запуска: целое время Unix в миллисекундах, в пределах 10 лет."
+        "cron_expression" -> "Повторяющееся расписание из пяти полей либо @daily, @every 30m; только для cron."
+        "timezone" -> "Часовой пояс IANA, например Europe/Moscow; по умолчанию часовой пояс устройства."
+        "start_at_unix_ms" -> "Начальная граница расписания: целое время Unix в миллисекундах от 0 до текущего времени плюс 10 лет; по умолчанию без отдельной границы."
+        "end_at_unix_ms" -> "Конечная граница: будущее целое время Unix в миллисекундах, позже начала и в пределах 10 лет; по умолчанию без границы."
+        "max_runs" -> "Максимальное число попыток от 1 до 100000; отсутствие — без ограничения."
+        "catchup" -> "Пропущенные запуски: skip — пропустить, fire_once — один, fire_all — до 20; по умолчанию fire_once."
+        "id" -> "Строковый id задания текущего ассистента из list_jobs."
+        "limit" -> "Число записей истории от 1 до 100, по умолчанию 20; целое число без кавычек."
+        else -> error("Unknown cron parameter")
+    })
+    val choices = when (name) {
+        "mode" -> listOf("llm", "direct")
+        "schedule_type" -> listOf("once", "cron")
+        "catchup" -> listOf("skip", "fire_once", "fire_all")
+        else -> emptyList()
+    }
+    if (choices.isNotEmpty()) put("enum", JsonArray(choices.map(::JsonPrimitive)))
+    if (name == "catchup") put("default", "fire_once")
+    if (name == "name") { put("minLength", 1); put("maxLength", 80) }
+    if (name == "prompt") { put("minLength", 1); put("maxLength", 4000) }
+    if (name == "start_at_unix_ms") put("minimum", 0)
+    if (name == "max_runs") { put("minimum", 1); put("maximum", 100000) }
+    if (name == "limit") { put("minimum", 1); put("maximum", 100); put("default", 20) }
+    if (name == "actions") {
+        put("minItems", 1); put("maxItems", 12)
+        put("items", buildJsonObject {
+            put("type", "object"); put("properties", buildJsonObject {
+                put("tool", buildJsonObject { put("type", "string"); put("description", "Имя доступного фонового инструмента; вложенный cron и dispatch субагентов запрещены.") })
+                put("args", buildJsonObject { put("type", "object"); put("additionalProperties", true); put("description", "Аргументы выбранного инструмента по его схеме; секреты передавайте только ссылками на хранилище.") })
+            }); put("required", buildJsonArray { add("tool"); add("args") })
+        })
+    }
 }

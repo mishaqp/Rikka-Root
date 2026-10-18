@@ -177,7 +177,7 @@ class WorkflowEngine(
             throw cancelled
         }
         val status = if (result.success) WorkflowRunStatus.SUCCESS else WorkflowRunStatus.FAILED
-        return persistAndReturn(workflowId, firedAtMs, started, status, result.error, result.summary, startedRunId)
+        return persistAndReturn(workflowId, firedAtMs, started, status, result.error, result.summary, startedRunId, result.summaryTruncated)
     }
 
     /**
@@ -200,6 +200,7 @@ class WorkflowEngine(
         error: String?,
         summary: String,
         startedRunId: Long? = null,
+        summaryTruncated: Boolean? = null,
     ): FireOutcome {
         val durationMs = (System.nanoTime() - startedNanos) / 1_000_000L
         // Once actions have returned, cancellation must not split history insertion
@@ -217,7 +218,7 @@ class WorkflowEngine(
             }.onFailure { Log.w(TAG, "recordFire failed for $workflowId", it) }
         }
         currentCoroutineContext().ensureActive()
-        return FireOutcome(status, error, summary)
+        return FireOutcome(status, error, summary, summaryTruncated)
     }
 
     companion object { private const val TAG = "WorkflowEngine" }
@@ -226,6 +227,7 @@ class WorkflowEngine(
         val status: WorkflowRunStatus,
         val error: String?,
         val summary: String,
+        val summaryTruncated: Boolean? = null,
     )
 }
 
@@ -254,7 +256,7 @@ class WorkflowActionRunner(
     private val runAction: suspend (WorkflowDefinition, WorkflowAction, RunWebTaint) -> HeadlessTaskResult,
 ) {
 
-    data class RunResult(val success: Boolean, val error: String?, val summary: String)
+    data class RunResult(val success: Boolean, val error: String?, val summary: String, val summaryTruncated: Boolean = false)
 
     suspend fun run(definition: WorkflowDefinition): RunResult {
         val actions = definition.actions
@@ -262,13 +264,14 @@ class WorkflowActionRunner(
         // approval boundary between their separate headless action contexts in this fire.
         val webTaint = RunWebTaint()
         val outputs = mutableListOf<String>()
+        var outputTruncated = false
         for ((idx, action) in actions.withIndex()) {
             val hardlineReason = HeadlessToolPolicy.blockReason(action.tool, action.args)
             if (hardlineReason != null) {
                 logSafe("workflow hardline-blocked action $idx tool=${action.tool}: $hardlineReason")
                 return RunResult(success = false,
                     error = "action $idx: hardline:$hardlineReason",
-                    summary = outputs.joinToString("\n"))
+                    summary = outputs.joinToString("\n"), summaryTruncated = outputTruncated)
             }
             val out = try {
                 withTimeoutOrNull(action.timeoutSeconds * 1000L) { runAction(definition, action, webTaint) }
@@ -281,21 +284,23 @@ class WorkflowActionRunner(
                 logSafe("workflow action $idx tool=${action.tool} threw: ${t::class.simpleName}")
                 return RunResult(false,
                     "action $idx: ${t::class.simpleName}",
-                    outputs.joinToString("\n"))
+                    outputs.joinToString("\n"), summaryTruncated = outputTruncated)
             }
             if (out == null) {
                 return RunResult(false,
                     "action $idx: ${action.tool} exceeded ${action.timeoutSeconds}s",
-                    outputs.joinToString("\n"))
+                    outputs.joinToString("\n"), summaryTruncated = outputTruncated)
             }
             if (out.status != HeadlessTaskStatus.SUCCEEDED) {
-                return RunResult(false, "action $idx: ${out.errorCode ?: out.status.name}", outputs.joinToString("\n"))
+                return RunResult(false, "action $idx: ${out.errorCode ?: out.status.name}", outputs.joinToString("\n"), summaryTruncated = outputTruncated)
             }
             // The normal headless runner applies fresh permissions, private side-context and HARDLINE.
             val text = out.output.orEmpty()
-            outputs += "[$idx] ${action.tool}: ${text.take(200)}"
+            outputTruncated = outputTruncated || text.length > 200
+            outputs += "[$idx] ${action.tool}: ${workflowSummaryPrefix(text, 200)}"
         }
-        return RunResult(true, null, outputs.joinToString("\n").take(2000))
+        val summary = outputs.joinToString("\n")
+        return RunResult(true, null, workflowSummaryPrefix(summary, 2000), outputTruncated || summary.length > 2000)
     }
 
     /**
@@ -307,4 +312,12 @@ class WorkflowActionRunner(
     }
 
     companion object { private const val TAG = "WorkflowActionRunner" }
+}
+
+/** Keep the existing UTF-16 budget without cutting a valid surrogate pair in half. */
+internal fun workflowSummaryPrefix(text: String, maxChars: Int): String {
+    require(maxChars >= 0)
+    val end = minOf(text.length, maxChars)
+    val safeEnd = if (end > 0 && end < text.length && text[end - 1].isHighSurrogate() && text[end].isLowSurrogate()) end - 1 else end
+    return text.substring(0, safeEnd)
 }
