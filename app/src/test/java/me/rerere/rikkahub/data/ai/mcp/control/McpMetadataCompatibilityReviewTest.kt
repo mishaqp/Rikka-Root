@@ -223,6 +223,86 @@ class McpMetadataCompatibilityReviewTest {
         }
     }
 
+    @Test fun transportCredentialHeadersAreHiddenInActualGetListAndTestDiagnostics() = runBlocking {
+        for ((header, secret) in listOf(
+            "Authorization: Basic short-basic-canary" to "short-basic-canary",
+            "Authorization: Bearer brief-canary" to "brief-canary",
+            "X-Api-Key: tiny-key-canary" to "tiny-key-canary",
+        )) assertTransportDiagnostics("Transport failed\n$header", listOf(secret))
+    }
+
+    @Test fun opaqueTransportPayloadIsHiddenWithoutBroadMaskingOfOrdinaryMetadata() = runBlocking {
+        val opaque = "VHJhbnNwb3J0Q3JlZGVudGlhbENhbmFyeTEyMzQ1Njc4OTA="
+        assertTransportDiagnostics("Transport rejected the response payload: $opaque", listOf(opaque))
+    }
+
+    @Test fun addRollbackHidesTransportDiagnosticsButPreservesTheReturnedOrdinaryName() = runBlocking {
+        val opaque = "VHJhbnNwb3J0Q3JlZGVudGlhbENhbmFyeTEyMzQ1Njc4OTA="
+        val shortSecret = "short-basic-canary"
+        val raw = "Ошибка транспорта. Проверьте ответ сервера.\nAuthorization: Basic $shortSecret\nPayload: $opaque"
+        val status = McpStatus.Error.from(java.io.IOException(raw))
+        assertTrue(status.message.contains(shortSecret))
+        assertTrue(status.detail!!.contains(opaque))
+        val fixture = Fixture(emptyList())
+        val statuses = MutableStateFlow(emptyMap<Uuid, McpStatus>())
+        every { fixture.manager.syncingStatus } returns statuses
+        var added: McpServerConfig? = null
+        coEvery { fixture.manager.addClient(any()) } coAnswers {
+            val config = firstArg<McpServerConfig>()
+            added = config
+            statuses.value = mapOf(config.id to status)
+            Unit
+        }
+        val args = buildJsonObject {
+            put("transport", "streamable_http"); put("name", CAMEL); put("url", OLD_URL)
+            put("enabled", true); put("connect_timeout_seconds", 1)
+        }
+        val result = payload(mcpAddTool(fixture.store, fixture.manager, fixture.caller, vault()).execute(args))
+        assertTrue(result.toString(), result.containsKey("error"))
+        assertTrue("The actual transport error field must remain present", result.containsKey("raw_error"))
+        assertEquals("Diagnostic redaction must not mask the ordinary result name", CAMEL, result["name"]!!.jsonPrimitive.content)
+        assertEquals(OLD_URL, result["url"]!!.jsonPrimitive.content)
+        for (secret in listOf(shortSecret, opaque)) assertFalse("Rollback diagnostic leaked a secret", result.toString().contains(secret))
+        assertTrue(result["detail"]!!.jsonPrimitive.content.contains("Конфигурация удалена"))
+        assertTrue(fixture.state.value.mcpServers.isEmpty())
+        assertEquals(2, fixture.writes)
+        assertNotNull(added)
+        coVerify(exactly = 1) { fixture.manager.removeClient(added!!) }
+    }
+
+    private suspend fun assertTransportDiagnostics(raw: String, secrets: List<String>) {
+        val metadataDescription = "tp-link $CAMEL"
+        val original = server(CAMEL, listOf(McpTool(name = "tp-link", description = metadataDescription)))
+        val config = original.copy(commonOptions = original.commonOptions.copy(enable = true, publicAddressOnly = true))
+        val fixture = Fixture(listOf(config))
+        val status = McpStatus.Error.from(java.io.IOException(raw, java.io.IOException("Underlying cause: $raw")))
+        for (secret in secrets) {
+            assertTrue("The real status source is intentionally unredacted", status.message.contains(secret))
+            assertTrue(status.detail!!.contains(secret))
+        }
+        every { fixture.manager.syncingStatus } returns MutableStateFlow(mapOf(ID to status))
+        coEvery { fixture.manager.forceResync(ID) } returns Unit
+        val before = fixture.state.value
+        val idArgs = buildJsonObject { put("id", ID.toString()); put("wait_seconds", 1) }
+        val got = payload(mcpGetTool(fixture.store, fixture.manager, fixture.caller).execute(buildJsonObject { put("id", ID.toString()) }))
+        val listResult = payload(mcpListTool(fixture.store, fixture.manager, fixture.caller).execute(JsonObject(emptyMap())))
+        val listed = listResult["servers"]!!.jsonArray.single().jsonObject
+        val tested = payload(mcpTestTool(fixture.store, fixture.manager, vault()).execute(idArgs))
+        for (envelope in listOf(got, listed, tested)) {
+            assertEquals("ERROR", envelope["status"]!!.jsonPrimitive.content)
+            assertEquals(CAMEL, envelope["name"]!!.jsonPrimitive.content)
+            assertTrue(envelope["raw_error"]!!.jsonPrimitive.content.isNotBlank())
+            assertTrue(envelope["error_detail"]!!.jsonPrimitive.content.contains("IOException"))
+            for (secret in secrets) assertFalse("Diagnostic field leaked transport data", envelope.toString().contains(secret))
+        }
+        val tool = got["tools"]!!.jsonArray.single().jsonObject
+        assertEquals("tp-link", tool["name"]!!.jsonPrimitive.content)
+        assertEquals(metadataDescription, tool["description"]!!.jsonPrimitive.content)
+        assertEquals(before, fixture.state.value)
+        assertEquals(0, fixture.writes)
+        coVerify(exactly = 1) { fixture.manager.forceResync(ID) }
+    }
+
     private fun server(name: String, tools: List<McpTool> = emptyList()) = McpServerConfig.StreamableHTTPServer(
         id = ID, url = OLD_URL, commonOptions = McpCommonOptions(name = name, enable = false, tools = tools))
 

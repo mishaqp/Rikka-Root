@@ -86,7 +86,10 @@ private fun errEnv(error: String, detail: String, extra: Map<String, JsonElement
     val obj = buildJsonObject {
         put("error", error)
         put("detail", redactedMcpText(detail))
-        for ((k, v) in extra) put(k, if (v is kotlinx.serialization.json.JsonPrimitive && v.isString) kotlinx.serialization.json.JsonPrimitive(redactedMcpText(v.content)) else v)
+        for ((k, v) in extra) put(k, if (v is kotlinx.serialization.json.JsonPrimitive && v.isString) {
+            val publicText = if (k == "raw_error" || k == "error_detail") redactedMcpDiagnosticText(v.content) else redactedMcpText(v.content)
+            kotlinx.serialization.json.JsonPrimitive(publicText)
+        } else v)
     }
     return listOf(UIMessagePart.Text(obj.toString()))
 }
@@ -114,10 +117,10 @@ private fun serverViewEnvelope(
     val (statusLabel, errorMessage) = renderStatus(config.commonOptions.enable, status)
     put("status", statusLabel)
     put("tool_count", config.commonOptions.tools.size)
-    if (errorMessage != null) put("error", redactedMcpText(errorMessage))
+    if (errorMessage != null) put("error", redactedMcpDiagnosticText(errorMessage))
     if (errorMessage != null && status is McpStatus.Error) {
-        put("raw_error", redactedMcpText(status.message))
-        status.detail?.let { put("error_detail", redactedMcpText(it)) }
+        put("raw_error", redactedMcpDiagnosticText(status.message))
+        status.detail?.let { put("error_detail", redactedMcpDiagnosticText(it)) }
     }
     putJsonArray("headers") {
         McpHeaderRedactor.redactHeaders(config.commonOptions.headers).forEach { (n, v) ->
@@ -534,7 +537,7 @@ fun mcpAddTool(settingsStore: SettingsStore, manager: McpManager, caller: McpCon
             val (kind, hint) = classifyMcpError(finalStatus.message)
             return@Tool errEnv(
                 kind,
-                "Не удалось добавить MCP. $hint Конфигурация удалена, можно повторить с тем же именем.",
+                "Не удалось добавить MCP. ${redactedMcpDiagnosticText(hint)} Конфигурация удалена, можно повторить с тем же именем.",
                 extra = mapOf(
                     "raw_error" to kotlinx.serialization.json.JsonPrimitive(finalStatus.message),
                     "name" to kotlinx.serialization.json.JsonPrimitive(name),
