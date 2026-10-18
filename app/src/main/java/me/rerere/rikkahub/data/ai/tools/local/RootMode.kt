@@ -26,6 +26,7 @@ object RootMode {
         LocalToolOption.Notification,
         LocalToolOption.Brightness,
         LocalToolOption.Volume,
+        LocalToolOption.Vibrate,
         LocalToolOption.ScreenAutomation,
         LocalToolOption.Contacts,
         LocalToolOption.CallLog,
@@ -50,7 +51,7 @@ object RootMode {
     )
 
     val GUIDE: String = """
-Режим «Всё через root»: отдельные инструменты телефона отключены. Время, будильники, приложения, файлы, экран, звук, сеть, уведомления, контакты, SMS и звонки делай через root_exec (Android shell под su). Шпаргалка:
+Режим «Всё через root»: отдельные инструменты телефона отключены. Время, будильники, приложения, файлы, экран, звук, вибрацию, сеть, уведомления, контакты, SMS и звонки делай через root_exec (Android shell под su). Шпаргалка:
 - Время: date '+%Y-%m-%d %H:%M:%S %Z'
 - Будильник: am start -a android.intent.action.SET_ALARM --ei android.intent.extra.alarm.HOUR 7 --ei android.intent.extra.alarm.MINUTES 30 --es android.intent.extra.alarm.MESSAGE 'Подпись' --ez android.intent.extra.alarm.SKIP_UI true
 - Таймер (секунды, до 86400): am start -a android.intent.action.SET_TIMER --ei android.intent.extra.alarm.LENGTH 90 --es android.intent.extra.alarm.MESSAGE 'Подпись' --ez android.intent.extra.alarm.SKIP_UI true
@@ -64,6 +65,14 @@ object RootMode {
 - Батарея: dumpsys battery. Память: df -h /data /sdcard. Модель и Android: getprop ro.product.model; getprop ro.build.version.release
 - Wi-Fi: cmd wifi status; svc wifi enable|disable. Мобильные данные: svc data enable|disable. Bluetooth: cmd bluetooth_manager enable|disable
 - Громкость (поток 3 — музыка, 2 — звонок, 4 — будильник, 5 — уведомления): cmd media_session volume --stream 3 --get; --set 8. На старых Android: media volume --stream 3 --set 8
+- Не беспокоить: cmd notification set_dnd on | priority | alarms | off
+- Режим полёта: cmd connectivity airplane-mode enable|disable (узнать: settings get global airplane_mode_on)
+- Поворот экрана: автоповорот settings put system accelerometer_rotation 1|0; при выключенном — settings put system user_rotation 0|1|2|3
+- Вибрация (мс): cmd vibrator_manager synced oneshot 500; на старых Android: cmd vibrator vibrate 500
+- Музыка в любом плеере: cmd media_session dispatch play-pause | next | previous | pause; что играет: dumpsys media_session | grep -m5 -i 'description\|state='. Открыть файл в плеере: am start -a android.intent.action.VIEW -d 'file:///sdcard/Music/файл.mp3' -t audio/*
+- Календарь (только чтение; создавать событие — инструментом календаря, если он есть): content query --uri content://com.android.calendar/events --projection title:dtstart:dtend --where "dtstart>$(date +%s)000" --sort 'dtstart ASC' | head -n 20
+- Где телефон (последние координаты): dumpsys location | grep -m3 -i 'last location'
+- Экран включён или нет: dumpsys power | grep -m1 mWakefulness. Открыть настройки приложения: am start -a android.settings.APPLICATION_DETAILS_SETTINGS -d package:ПАКЕТ
 - Яркость: settings put system screen_brightness_mode 0; settings put system screen_brightness 128 (0–255)
 - Экран: input tap X Y; input swipe X1 Y1 X2 Y2 300; input text 'abc' (пробел — %s); input keyevent KEYCODE_HOME | KEYCODE_BACK | KEYCODE_ENTER | KEYCODE_WAKEUP. Разметка с координатами: uiautomator dump /sdcard/window.xml >/dev/null && cat /sdcard/window.xml. Скриншот: screencap -p /sdcard/Pictures/screen.png
 - Контакты: content query --uri content://com.android.contacts/data/phones --projection display_name:data1 (последние добавленные: --sort '_id DESC')
