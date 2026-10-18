@@ -79,9 +79,18 @@ class SubAgentEngine(
             try {
                 val result = runner.run(HeadlessTaskRequest.Prompt(request.task.trim(),
                     request.systemPrompt ?: "Выполни указанную задачу в отдельном контексте и верни краткий итог. Не запрашивай интерактивный ввод."), context)
+                // Do not retain body-derived metadata when the caller suppresses the result.
+                val output = result.output.takeUnless { request.noResult }
+                val storedOutput = output?.let { text ->
+                    var end = minOf(text.length, 65_536)
+                    if (end < text.length && end > 0 && text[end - 1].isHighSurrogate() && text[end].isLowSurrogate()) end--
+                    text.substring(0, end)
+                }
                 registry.finish(caller.owner, run.id) { it.copy(
                     status = SubAgentStatus.valueOf(result.status.name),
-                    result = result.output?.take(65_536).takeUnless { request.noResult }, errorCode = result.errorCode,
+                    result = storedOutput, errorCode = result.errorCode,
+                    resultTruncated = output?.let { text -> storedOutput!!.length < text.length },
+                    resultTotalChars = output?.length,
                     tokensIn = result.tokensIn, tokensOut = result.tokensOut, tripCount = result.steps,
                 ) }
             } catch (cancelled: CancellationException) {

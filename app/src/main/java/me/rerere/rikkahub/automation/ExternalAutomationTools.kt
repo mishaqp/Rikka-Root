@@ -105,7 +105,7 @@ fun externalAutomationSetEnabledTool(config: ExternalAutomationConfig): Tool = T
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                put("enabled", buildJsonObject { put("type", "boolean") })
+                put("enabled", buildJsonObject { put("type", "boolean"); put("description", "Включить или выключить внешние Intent-запросы к ассистенту: true или false.") })
             },
             required = listOf("enabled"),
         )
@@ -136,7 +136,7 @@ fun externalAutomationAddTrustedPackageTool(config: ExternalAutomationConfig): T
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                put("package_name", buildJsonObject { put("type", "string") })
+                put("package_name", buildJsonObject { put("type", "string"); put("description", "Точное имя пакета вызывающего Android-приложения, например net.dinglisch.android.taskerm.") })
             },
             required = listOf("package_name"),
         )
@@ -174,7 +174,7 @@ fun externalAutomationRemoveTrustedPackageTool(config: ExternalAutomationConfig)
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                put("package_name", buildJsonObject { put("type", "string") })
+                put("package_name", buildJsonObject { put("type", "string"); put("description", "Точное имя пакета вызывающего Android-приложения, например net.dinglisch.android.taskerm.") })
             },
             required = listOf("package_name"),
         )

@@ -16,6 +16,8 @@ data class SubAgentRun(
     val errorCode: String? = null, val noResult: Boolean = false,
     val startedAtMs: Long = System.currentTimeMillis(), val finishedAtMs: Long? = null,
     val tokensIn: Long = 0, val tokensOut: Long = 0, val tripCount: Int = 0,
+    // Null means unknown for legacy receipts; never infer truncation from stored length.
+    val resultTruncated: Boolean? = null, val resultTotalChars: Int? = null,
 )
 data class SubAgentRequest(
     val task: String, val modelId: String? = null, val systemPrompt: String? = null,

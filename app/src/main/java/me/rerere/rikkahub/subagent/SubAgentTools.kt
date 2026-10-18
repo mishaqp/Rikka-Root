@@ -35,12 +35,22 @@ internal fun encodeRun(run: SubAgentRun): JsonObject = buildJsonObject {
     put("id", run.id); put("label", run.label); put("status", run.status.name)
     put("model_id", run.modelId); put("started_at_ms", run.startedAtMs)
     run.finishedAtMs?.let { put("finished_at_ms", it) }
-    if (run.noResult) put("result_suppressed", true) else run.result?.let { put("result", it) }
+    if (run.noResult) put("result_suppressed", true) else {
+        run.result?.let { put("result", it) }
+        run.resultTruncated?.let { put("result_truncated", it) }
+        run.resultTotalChars?.let { put("result_total_chars", it) }
+        if (run.resultTruncated == true) {
+            val hint = "Результат усечён до 65536 единиц UTF-16 без разрыва пары символов. subagent_get не может вернуть пропущенную часть. Не запускайте задачу с побочными действиями заново вслепую; при необходимости создайте узкую задачу чтения или задачу с сохранением полного вывода в файл."
+            put("truncation_message", hint)
+            if (run.errorCode == null) put("message", hint)
+        }
+    }
     run.errorCode?.let { put("error", it); put("message", subagentErrorMessage(it)) }
     put("tokens_in", run.tokensIn); put("tokens_out", run.tokensOut); put("trip_count", run.tripCount)
 }
-private fun property(type: String, description: String? = null) = buildJsonObject {
+private fun property(type: String, description: String? = null, extra: JsonObject? = null) = buildJsonObject {
     put("type", type); description?.let { put("description", it) }
+    extra?.forEach { (name, value) -> put(name, value) }
 }
 private fun JsonObject.string(name: String): String? {
     val value = get(name) ?: return null
@@ -61,11 +71,11 @@ fun subagentDispatchTool(engine: SubAgentEngine, caller: SubAgentCaller): Tool =
     name = "subagent_dispatch",
     description = "Запустить субагента с отдельным контекстом для самостоятельной задачи. Укажите model_id (UUID, точный идентификатор модели или однозначное название), либо наследуется модель текущего диалога. Субагент не видит историю диалога; укажите весь контекст в task. run_in_background возвращает ID для опроса. Фоновые субагенты работают только пока жив процесс приложения. Интерактивные инструменты недоступны; разрешения проверяются заново. Лимит 1–480 секунд и 1–32 шага.",
     parameters = { InputSchema.Obj(properties = buildJsonObject {
-        put("task", property("string")); put("label", property("string"))
-        put("model_id", property("string")); put("system_prompt", property("string"))
-        put("tools", buildJsonObject { put("type", "array"); put("items", property("string")) })
-        put("run_in_background", property("boolean")); put("no_result", property("boolean"))
-        put("timeout_seconds", property("integer")); put("max_trips", property("integer"))
+        put("task", property("string", "Задача субагента со всем необходимым контекстом: 1–100000 символов.", buildJsonObject { put("minLength", 1); put("maxLength", 100000) })); put("label", property("string", "Необязательная краткая метка запуска: до 60 символов.", buildJsonObject { put("maxLength", 60) }))
+        put("model_id", property("string", "Необязательный непустой UUID, точный идентификатор или однозначное название модели; без него наследуется модель текущего диалога.", buildJsonObject { put("minLength", 1) })); put("system_prompt", property("string", "Необязательный системный промпт субагента: до 32000 символов.", buildJsonObject { put("maxLength", 32000) }))
+        put("tools", buildJsonObject { put("type", "array"); put("description", "Необязательный список доступных субагенту инструментов: не более 256 точных имён из разрешённого набора текущего запуска."); put("maxItems", 256); put("items", property("string", "Точное непустое имя разрешённого инструмента текущего запуска.", buildJsonObject { put("minLength", 1) })) })
+        put("run_in_background", property("boolean", "Запустить в фоне и сразу вернуть ID для проверки состояния; по умолчанию false.", buildJsonObject { put("default", false) })); put("no_result", property("boolean", "Не возвращать итоговый текст субагента; по умолчанию false.", buildJsonObject { put("default", false) }))
+        put("timeout_seconds", property("integer", "Лимит выполнения в секундах: 1–480, по умолчанию 300.", buildJsonObject { put("minimum", 1); put("maximum", 480); put("default", 300) })); put("max_trips", property("integer", "Лимит шагов генерации: 1–32, по умолчанию 12.", buildJsonObject { put("minimum", 1); put("maximum", 32); put("default", 12) }))
     }, required = listOf("task")) },
     needsApproval = { true },
     execute = { args ->
@@ -89,7 +99,7 @@ fun subagentDispatchTool(engine: SubAgentEngine, caller: SubAgentCaller): Tool =
 )
 fun subagentListTool(registry: SubAgentRegistry, owner: SubAgentOwner): Tool = Tool(
     name = "subagent_list", description = "Список субагентов только текущего ассистента и диалога.",
-    parameters = { InputSchema.Obj(buildJsonObject { put("active_only", property("boolean")) }) },
+    parameters = { InputSchema.Obj(buildJsonObject { put("active_only", property("boolean", "Показать только активные запуски; по умолчанию false.", buildJsonObject { put("default", false) })) }) },
     execute = { args -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         val active = runCatching { args.jsonObject.boolean("active_only", false) }.getOrNull()
         if (active == null) error("invalid_arguments") else response(buildJsonObject {
@@ -99,7 +109,7 @@ fun subagentListTool(registry: SubAgentRegistry, owner: SubAgentOwner): Tool = T
 )
 fun subagentGetTool(registry: SubAgentRegistry, owner: SubAgentOwner): Tool = Tool(
     name = "subagent_get", description = "Статус и итог собственного субагента по ID.",
-    parameters = { InputSchema.Obj(buildJsonObject { put("id", property("string")) }, required = listOf("id")) },
+    parameters = { InputSchema.Obj(buildJsonObject { put("id", property("string", "Точный ID собственного запуска из subagent_dispatch или subagent_list.")) }, required = listOf("id")) },
     execute = { args -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         val id = runCatching { args.jsonObject.string("id") }.getOrNull()
         val run = id?.let { registry.get(owner, it) }
@@ -108,7 +118,7 @@ fun subagentGetTool(registry: SubAgentRegistry, owner: SubAgentOwner): Tool = To
 )
 fun subagentCancelTool(registry: SubAgentRegistry, owner: SubAgentOwner): Tool = Tool(
     name = "subagent_cancel", description = "Остановить генерацию собственного субагента. Уже выполненные действия не отменяются.",
-    parameters = { InputSchema.Obj(buildJsonObject { put("id", property("string")) }, required = listOf("id")) },
+    parameters = { InputSchema.Obj(buildJsonObject { put("id", property("string", "Точный ID собственного запуска из subagent_dispatch или subagent_list.")) }, required = listOf("id")) },
     needsApproval = { true },
     execute = { args -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         val id = runCatching { args.jsonObject.string("id") }.getOrNull()

@@ -379,7 +379,7 @@ fun setTextTool(
                 if (editable == null) {
                     return@withActionEnvelope buildJsonObject {
                         put("error", "node_not_editable")
-                        put("recovery", "The matched node is not an editable input. Terminals (Termux) render natively and do not expose editable nodes; if the termux_run_command tool is enabled use it instead, otherwise report that terminals cannot be typed into.")
+                        put("recovery", "Найденный элемент и его родители не являются редактируемым полем. Терминал Termux не предоставляет такие поля: используйте termux_run_command, если инструмент включён, иначе объясните, что ввод через set_text в этот терминал недоступен.")
                     }
                 }
                 val args = android.os.Bundle().apply {

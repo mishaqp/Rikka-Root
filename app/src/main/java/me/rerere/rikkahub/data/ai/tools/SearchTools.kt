@@ -6,6 +6,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.datastore.Settings
@@ -22,47 +23,46 @@ fun createSearchTools(settings: Settings): Set<Tool> {
     val selectedOptions = settings.searchServices.getOrElse(
         index = settings.searchServiceSelected, defaultValue = { SearchServiceOptions.DEFAULT })
     val canScrape = SearchService.getService(selectedOptions).scrapingParameters(selectedOptions) != null
-    val verifyTool = if (canScrape) "scrape_web" else "browser_open + browser_get_text (if available)"
+    val verifyTool = if (canScrape) "scrape_web" else "browser_open + browser_get_text (если доступны)"
     return buildSet {
         add(
             Tool(
                 name = "search_web",
                 description = """
-                    Search the web for up-to-date or specific information.
-                    Use this when the user asks for the latest news, current facts, or needs verification.
-                    Do not treat result order as proof of freshness. Prefer primary sources and inspect
-                    each result's title, URL, publication date, and content before making a current claim.
-                    Use the optional publication-date and domain filters only when they match the question.
-                    If a date or primary source is missing, or sources conflict, run another focused search
-                    or use $verifyTool to verify the most relevant source before answering.
-                    Generate focused keywords and run multiple searches if needed.
-                    Today is ${LocalDate.now().toLocalString(true)}.
+                    Найти в интернете актуальную или узкоспециальную информацию.
+                    Используйте для последних новостей, текущих фактов и проверки утверждений.
+                    Порядок результатов не доказывает их свежесть. Предпочитайте первоисточники и
+                    проверяйте заголовок, URL, дату публикации и содержимое каждого результата.
+                    Необязательные фильтры даты публикации и домена используйте только по смыслу вопроса.
+                    Если дата или первоисточник отсутствуют либо источники противоречат друг другу,
+                    уточните поисковый запрос или проверьте нужную страницу через $verifyTool.
+                    Формулируйте точные ключевые слова; при необходимости выполните несколько поисков.
+                    Сегодня ${LocalDate.now().toLocalString(true)}.
 
-                    Response format:
-                    - retrievedAt is the local retrieval time, never a publication date
-                    - items[].id (short id), index, title, url, publishedDate (if supplied), highlights (if supplied), text
-                    - images[]: image urls related to the query (may be empty)
+                    Формат ответа:
+                    - retrievedAt — местное время получения, а не дата публикации
+                    - items[].id — короткий ID; index, title, url, publishedDate (если есть), highlights (если есть), text
+                    - images[] — URL изображений по запросу; массив может быть пустым
 
-                    Citations:
-                    - After using results, add `[citation,domain](id)` after the sentence.
-                    - Multiple citations are allowed.
-                    - If no results are cited, omit citations.
+                    Ссылки на источники:
+                    - После утверждения из результатов добавляйте `[citation,domain](id)`.
+                    - Допускаются несколько ссылок; если результаты не цитируются, ссылки не нужны.
 
-                    Images:
-                    - When images help the user understand the answer, embed relevant ones using Markdown: `![](url)`.
-                    - Embed 2 to 4 images, and only use urls from `images[]` (never fabricate or alter urls).
-                    - Usually place the images at the very beginning of your reply; skip them entirely if none are relevant.
+                    Изображения:
+                    - Когда они помогают ответу, вставляйте Markdown `![](url)`.
+                    - Добавляйте от 2 до 4 изображений только из images[]; не придумывайте и не меняйте URL.
+                    - Обычно помещайте их в начале ответа; если подходящих изображений нет, не добавляйте их.
 
-                    Example:
-                    The capital of France is Paris. [citation,example.com](abc123)
-                    The population is about 2.1 million. [citation,example.com](abc123) [citation,example2.com](def456)
+                    Пример:
+                    Столица Франции — Париж. [citation,example.com](abc123)
+                    Население — около 2,1 млн человек. [citation,example.com](abc123) [citation,example2.com](def456)
                     """.trimIndent(),
                 parameters = {
                     val options = settings.searchServices.getOrElse(
                         index = settings.searchServiceSelected,
                         defaultValue = { SearchServiceOptions.DEFAULT })
                     val service = SearchService.getService(options)
-                    service.parameters(options)
+                    localizedSearchParameters(service.parameters(options), options)
                 },
                 execute = {
                     val options = settings.searchServices.getOrElse(
@@ -100,17 +100,17 @@ fun createSearchTools(settings: Settings): Set<Tool> {
                 Tool(
                     name = "scrape_web",
                     description = """
-                        Scrape a URL for detailed page content.
-                        Use this when the user requests content from a specific page, when search snippets are insufficient,
-                        or when a current claim needs verification against a specific source.
-                        Avoid using it for common questions unless the user asks.
+                        Прочитать подробное содержимое страницы по URL.
+                        Используйте, когда пользователь просит прочитать определённую страницу,
+                        поисковой выдержки недостаточно или текущее утверждение нужно проверить по первоисточнику.
+                        Для общих вопросов без такой просьбы чтение страницы обычно не требуется.
                         """.trimIndent(),
                     parameters = {
                         val options = settings.searchServices.getOrElse(
                             index = settings.searchServiceSelected,
                             defaultValue = { SearchServiceOptions.DEFAULT })
                         val service = SearchService.getService(options)
-                        service.scrapingParameters(options)
+                        localizedSearchParameters(service.scrapingParameters(options), options)
                     },
                     execute = {
                         val options = settings.searchServices.getOrElse(
@@ -128,4 +128,33 @@ fun createSearchTools(settings: Settings): Set<Tool> {
                 ))
         }
     }
+}
+
+/** Translate only model-facing descriptions; SDK field names, constraints and execution stay intact. */
+private fun localizedSearchParameters(schema: InputSchema?, options: SearchServiceOptions): InputSchema? = when (schema) {
+    null -> null
+    is InputSchema.Obj -> schema.copy(properties = JsonObject(schema.properties.mapValues { (name, value) ->
+        val description = when (name) {
+            "query" -> if (options is SearchServiceOptions.GrokOptions)
+                "Вопрос для поиска; можно сформулировать на естественном языке."
+                else "Поисковый запрос: ключевые слова для поиска информации."
+            "url" -> if (options is SearchServiceOptions.DuckDuckGoOptions)
+                "Абсолютный URL страницы по HTTP или HTTPS, содержимое которой нужно прочитать."
+                else "URL страницы, содержимое которой нужно прочитать."
+            "urls" -> "Массив URL страниц для чтения пользовательским скриптом поиска."
+            "topic" -> "Тема поиска: general — общая, news — новости, finance — финансы."
+            "type" -> "Режим поиска Exa: fast — быстрый, auto — сбалансированный по умолчанию, deep — обобщённый ответ со ссылками."
+            "startPublishedDate" -> "Необязательная нижняя граница даты публикации в ISO-8601: результаты опубликованы после этой даты."
+            "endPublishedDate" -> "Необязательная верхняя граница даты публикации в ISO-8601: результаты опубликованы до этой даты."
+            "includeDomains" -> "Необязательный массив доменов, которые нужно включить в поиск."
+            "excludeDomains" -> "Необязательный массив доменов, которые нужно исключить из поиска."
+            "maxAgeHours" -> "Необязательный максимальный возраст загруженного содержимого в часах: целое число от -1 до 720. Указывайте, когда важна свежесть содержимого."
+            "sources" -> "Необязательный массив источников Firecrawl: web или news; по умолчанию web."
+            "categories" -> "Необязательный массив категорий Firecrawl: github или research; пустой массив означает отсутствие фильтра и используется по умолчанию."
+            "onlyMainContent" -> "Читать только основное содержимое страницы; по умолчанию true."
+            else -> null
+        }
+        if (description == null || value !is JsonObject) value
+        else JsonObject(value + ("description" to JsonPrimitive(description)))
+    }))
 }

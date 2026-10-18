@@ -123,23 +123,24 @@ fun skillInstallFromUrlTool(
 ): Tool = Tool(
     name = "skill_install_from_url",
     description = """
-        Download and install a skill from a URL. Accepts native (Rikka-Root markdown +
-        frontmatter), openclaw markdown, or Hermes JSON formats. Tool names are best-effort
-        transcoded to Rikka-Root equivalents. The user reviews and approves the URL + final
-        skill name before save. Newly-installed skills are auto-enabled for the calling
-        assistant unless they previously existed and were disabled. Returns
-        { ok, name, format, source_url, auto_enabled, auto_enabled_detail } on success.
+        Загрузить и установить навык по URL. Поддерживаются Markdown Rikka-Root с frontmatter,
+        Markdown OpenClaw и JSON Hermes. Имена инструментов по возможности приводятся
+        к эквивалентам Rikka-Root. Каждый вызов с переданными аргументами требует одобрения.
+        Если name не указан, итоговое имя определяется из содержимого при установке и возвращается в name.
+        Новый навык автоматически включается у вызывающего ассистента, кроме ранее существовавшего
+        и отключённого навыка. Успешный результат:
+        { ok, name, format, source_url, auto_enabled, auto_enabled_detail }.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("url", buildJsonObject {
                     put("type", "string")
-                    put("description", "http(s) URL of the skill markdown or JSON. Loopback / private IPs are rejected.")
+                    put("description", "URL Markdown или JSON навыка по HTTP(S). Loopback и частные IP-адреса отклоняются.")
                 })
                 put("name", buildJsonObject {
                     put("type", "string")
-                    put("description", "Optional override for the skill's saved name (1..40 chars, [a-z0-9-_]). Defaults to whatever the source declares.")
+                    put("description", "Необязательное имя для сохранения навыка: 1–40 символов из [a-z0-9-_]. По умолчанию используется имя из источника.")
                 })
             },
             required = listOf("url"),
@@ -192,28 +193,27 @@ fun skillInstallFromTextTool(
 ): Tool = Tool(
     name = "skill_install_from_text",
     description = """
-        Install a skill from raw text content (markdown or JSON) the LLM already has —
-        useful when the source is behind auth and was fetched via ssh_exec / termux_run_command /
-        an MCP tool. Accepts the same three formats as skill_install_from_url (native /
-        openclaw / Hermes). The user reviews + approves the source label + skill name.
-        Newly-installed skills are auto-enabled for the calling assistant unless they
-        previously existed and were disabled. Returns
-        { ok, name, format, source_label, auto_enabled, auto_enabled_detail } on success.
+        Установить навык из уже полученного текста Markdown или JSON, например прочитанного
+        через ssh_exec, termux_run_command или MCP из источника с авторизацией.
+        Поддерживаются форматы Rikka-Root, OpenClaw и Hermes, как в skill_install_from_url.
+        Каждый вызов с переданными аргументами требует одобрения. Если name не указан, итоговое имя
+        определяется из содержимого при установке и возвращается в name. Новый навык автоматически включается у вызывающего ассистента, кроме ранее существовавшего и отключённого навыка.
+        Успешный результат: { ok, name, format, source_label, auto_enabled, auto_enabled_detail }.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("content", buildJsonObject {
                     put("type", "string")
-                    put("description", "Full skill body — markdown with frontmatter (native / openclaw) or JSON (Hermes). Capped at 256KB.")
+                    put("description", "Полный текст навыка: Markdown с frontmatter Rikka-Root/OpenClaw или JSON Hermes. Не более 262144 единиц UTF-16.")
                 })
                 put("source_label", buildJsonObject {
                     put("type", "string")
-                    put("description", "Where this came from: URL, ssh host label, MCP tool, 'clipboard', etc. Persisted in the skill's frontmatter for audit.")
+                    put("description", "Источник содержимого: URL, метка SSH-хоста, инструмент MCP, буфер обмена и т. п. Сохраняется во frontmatter навыка для проверки происхождения.")
                 })
                 put("name", buildJsonObject {
                     put("type", "string")
-                    put("description", "Optional override for the skill's saved name (1..40 chars, [a-z0-9-_]). Defaults to whatever the source declares.")
+                    put("description", "Необязательное имя для сохранения навыка: 1–40 символов из [a-z0-9-_]. По умолчанию используется имя из источника.")
                 })
             },
             required = listOf("content"),
@@ -250,12 +250,25 @@ private fun err(code: String, detail: String): List<UIMessagePart> =
     listOf(UIMessagePart.Text(buildJsonObject {
         put("ok", false)
         put("error", code)
-        put("detail", detail)
+        put("detail", when (code) {
+            "missing_url" -> "Укажите адрес источника навыка в url."
+            "invalid_url" -> "Укажите полный адрес источника навыка с именем хоста."
+            "unsupported_url_scheme" -> "Для загрузки навыка разрешены только адреса http и https."
+            "loopback_host_rejected" -> "Локальные и недоступные извне адреса запрещены для импорта навыка."
+            "missing_content", "empty_body" -> "Укажите непустой текст навыка в content."
+            "html_response" -> "Источник содержит HTML-страницу вместо файла навыка. Укажите исходный текст SKILL.md или его прямой URL."
+            "body_too_large" -> "Текст навыка превышает допустимые 262144 единиц UTF-16. Сократите его перед установкой."
+            "transcode_failed" -> "Не удалось разобрать формат навыка. Проверьте текст Markdown или JSON."
+            "missing_name" -> "В описании навыка отсутствует имя. Укажите name."
+            "invalid_name" -> "Имя навыка должно содержать 1–40 символов: a-z, 0-9, дефис или подчёркивание."
+            "save_failed" -> "Не удалось записать файлы навыка. Проверьте доступное место."
+            else -> detail
+        })
         put("message", when (code) {
             "missing_url", "invalid_url", "unsupported_url_scheme" -> "Адрес навыка отсутствует или неверен. Укажите полный URL с http или https."
             "loopback_host_rejected" -> "Адрес навыка недоступен для импорта. Используйте разрешённый внешний URL или skill_install_from_text."
             "missing_content", "empty_body" -> "Текст навыка пуст. Укажите полный текст в content."
-            "body_too_large" -> "Текст навыка слишком велик. Сократите его до 256 КБ и повторите установку."
+            "body_too_large" -> "Текст навыка слишком велик. Сократите его до 262144 единиц UTF-16 и повторите установку."
             "missing_name", "invalid_name" -> "Имя навыка отсутствует или неверно. Укажите name длиной 1–40 символов из a-z, 0-9, дефиса и подчёркивания."
             "fetch_failed" -> "Не удалось скачать навык. Проверьте сеть и URL или используйте skill_install_from_text."
             "save_failed" -> "Не удалось сохранить навык. Проверьте свободное место и повторите установку."

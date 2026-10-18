@@ -421,6 +421,18 @@ class ScreenAuditRegressionTest {
         assertFalse(calls.toString(), calls.contains("input keyevent 224"))
     }
 
+    @Test fun noneditableSetTextKeepsStableErrorAndRussianRecoveryWithoutInput() = runBlocking {
+        shadowOf(context.getSystemService(PowerManager::class.java)).setIsInteractive(true)
+        xml = ancestorXml(editable = false)
+        val result = execute(setTextTool(service()), """{"by":"text","value":"Search","text":"USER English replacement"}""")
+        assertEquals(result.toString(), "node_not_editable", result["error"]?.jsonPrimitive?.content)
+        assertTrue(calls.toString(), calls.any { it.startsWith("uiautomator dump ") })
+        assertTrue(calls.toString(), calls.none { it.startsWith("input ") })
+        val recovery = result["recovery"]?.jsonPrimitive?.content.orEmpty()
+        assertTrue(recovery, recovery.contains(Regex("[А-Яа-яЁё]")))
+        assertTrue(recovery, recovery.contains("termux_run_command"))
+    }
+
     companion object {
         private val XML = """<hierarchy rotation="0">
             <node package="org.test" class="android.widget.FrameLayout" bounds="[0,0][1080,2400]" enabled="true">

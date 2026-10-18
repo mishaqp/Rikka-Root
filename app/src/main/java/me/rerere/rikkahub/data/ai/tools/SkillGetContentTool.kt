@@ -37,18 +37,18 @@ fun skillGetContentTool(
 ): Tool = Tool(
     name = "skill_get_content",
     description = """
-        Show a skill's full markdown content, description, and current enabled state without
-        running it. Read-only — use this to display a skill to the user or inspect one before
-        calling use_skill. Works on disabled skills too. Returns
-        { name, description, format, source_label, enabled, content_md, args_schema } on
-        success, or { error: "skill_not_found", available_skills: [...] } if the name is unknown.
+        Показать полное Markdown-содержимое навыка, описание и текущее состояние включения,
+        не выполняя его. Используйте для показа навыка пользователю или проверки перед use_skill.
+        Работает и с отключёнными навыками. При успехе возвращает
+        { name, description, format, source_label, enabled, content_md, args_schema };
+        для неизвестного имени — { error: "skill_not_found", available_skills: [...] }.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("name", buildJsonObject {
                     put("type", "string")
-                    put("description", "The name of the skill to read.")
+                    put("description", "Имя навыка, содержимое которого нужно прочитать.")
                 })
             },
             required = listOf("name"),
@@ -71,7 +71,7 @@ fun skillGetContentTool(
             ?: return@Tool listOf(
                 UIMessagePart.Text(buildJsonObject {
                     put("error", "missing_required_arg")
-                    put("detail", "skill_get_content requires a 'name' argument.")
+                    put("detail", "Для skill_get_content укажите непустое имя навыка в name.")
                     put("message", "Не указано имя навыка. Укажите name из available_skills.")
                     put("available_skills", buildJsonArray {
                         allSkills.forEach { add(JsonPrimitive(it.name)) }

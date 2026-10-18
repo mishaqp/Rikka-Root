@@ -41,31 +41,30 @@ fun runJsTool(
 ): Tool = Tool(
     name = "run_js",
     description = """
-        Run a JavaScript skill installed in the user's skills directory. The skill's
-        index.html (or the named script) defines a global async function
-        `ai_edge_gallery_get_result(data, secret)` that returns a JSON object. Use this
-        for skills that need to compute something with rich logic (calculate-hash,
-        query-wikipedia), render rich UI (interactive-map, qr-code), or use a third-party
-        API (with secret_key).
+        Запустить установленный JavaScript-навык из пользовательской папки навыков.
+        Его index.html или указанный скрипт определяет глобальную async-функцию
+        `ai_edge_gallery_get_result(data, secret)`, которая возвращает JSON-объект.
+        Используйте для вычислений и сложной логики, например хеша или запроса к Википедии,
+        интерактивного интерфейса, например карты или QR-кода, и сторонних API с secret_key.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("skill_name", buildJsonObject {
                     put("type", "string")
-                    put("description", "The name of the installed JS skill (matches the skill's frontmatter `name`).")
+                    put("description", "Имя установленного JS-навыка; совпадает с полем name во frontmatter навыка.")
                 })
                 put("script", buildJsonObject {
                     put("type", "string")
-                    put("description", "Optional script file path within the skill directory. Defaults to `index.html` if omitted. Only paths the SKILL.md explicitly references should be passed.")
+                    put("description", "Необязательный путь к скрипту внутри папки навыка. По умолчанию index.html. Указывайте только пути, явно приведённые в SKILL.md.")
                 })
                 put("data", buildJsonObject {
                     put("type", "string")
-                    put("description", "Optional JSON string passed as the first argument to the JS skill's `ai_edge_gallery_get_result` function. Cap 64KB.")
+                    put("description", "Необязательная JSON-строка для первого аргумента функции ai_edge_gallery_get_result JS-навыка. Не более 65536 единиц UTF-16.")
                 })
                 put("secret_key", buildJsonObject {
                     put("type", "string")
-                    put("description", "Optional name of a stored secret to pass as the JS function's second argument. Use for skills that need an API key. The user manages secrets via Settings.")
+                    put("description", "Необязательное имя сохранённого секрета для второго аргумента JS-функции, например для API-ключа. Пользователь управляет секретами в настройках.")
                 })
             },
             required = listOf("skill_name"),
@@ -75,12 +74,12 @@ fun runJsTool(
     execute = { args ->
         val params = args.jsonObject
         val skillName = params["skill_name"]?.jsonPrimitive?.contentOrNull
-            ?: return@Tool err("missing_skill_name", "skill_name is required")
+            ?: return@Tool err("missing_skill_name", "Укажите имя установленного JS-навыка в skill_name.")
         val scriptName = params["script"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
             ?: "index.html"
         val data = params["data"]?.jsonPrimitive?.contentOrNull.orEmpty()
         if (data.length > JsSkillRunner.MAX_DATA_LENGTH) {
-            return@Tool err("data_too_large", "data exceeds 64KB cap")
+            return@Tool err("data_too_large", "Длина data превышает допустимые ${JsSkillRunner.MAX_DATA_LENGTH} единиц UTF-16.")
         }
         val secretKey = params["secret_key"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
         val secret = try {
@@ -91,16 +90,20 @@ fun runJsTool(
         }
 
         val skillDir = skillManager.getSkillDir(skillName)
-            ?: return@Tool err("skill_not_found", "no installed skill named '$skillName'")
+            ?: return@Tool err("skill_not_found", "Установленный JS-навык '$skillName' не найден.")
         val scriptFile = skillManager.resolveSkillFile(skillName, scriptName)
-            ?: return@Tool err("invalid_script_path", "script path '$scriptName' is outside the skill directory")
+            ?: return@Tool err("invalid_script_path", "Путь скрипта '$scriptName' выходит за папку навыка.")
         if (!scriptFile.exists()) {
-            return@Tool err("script_not_found", "no file at '${scriptName}' inside skill '$skillName'")
+            return@Tool err("script_not_found", "Файл '$scriptName' не найден в навыке '$skillName'.")
         }
 
         val outcome = runner.runScript(scriptFile = scriptFile, skillRootDir = skillDir, data = data, secret = secret)
         when (outcome) {
-            is JsSkillRunner.Result.Err -> err(outcome.code, outcome.detail)
+            is JsSkillRunner.Result.Err -> err(outcome.code, when (outcome.code) {
+                "script_not_found" -> "Файл JS-навыка недоступен. Проверьте script и установку навыка."
+                "script_timeout" -> "Превышено время выполнения JS-навыка. Проверьте скрипт и сетевые запросы."
+                else -> outcome.detail
+            })
             is JsSkillRunner.Result.Ok -> {
                 val parsed = outcome.parsed
                 if (parsed.error != null) {
@@ -142,7 +145,11 @@ fun runJsTool(
                     parts.add(UIMessagePart.Text(t))
                 }
                 if (parts.isEmpty()) {
-                    parts.add(UIMessagePart.Text("Навык не вернул результат. Проверьте входные данные и повторите вызов."))
+                    parts.add(UIMessagePart.Text(buildJsonObject {
+                        put("ok", true)
+                        put("result", kotlinx.serialization.json.JsonNull)
+                        put("message", "Навык не вернул результат. Проверьте входные данные.")
+                    }.toString()))
                 }
                 parts
             }
@@ -157,7 +164,7 @@ private fun err(code: String, detail: String): List<UIMessagePart> =
         put("detail", detail)
         put("message", when (code) {
             "missing_skill_name" -> "Не указано имя JS-навыка. Укажите skill_name установленного навыка."
-            "data_too_large" -> "Входные данные слишком велики. Сократите data до 64 КБ."
+            "data_too_large" -> "Входные данные слишком велики. Сократите data до ${JsSkillRunner.MAX_DATA_LENGTH} единиц UTF-16."
             "secret_unavailable" -> "Секрет навыка недоступен. Проверьте имя secret_key и настройку секрета навыка."
             "skill_not_found" -> "JS-навык не найден. Проверьте skill_name и установку навыка."
             "invalid_script_path" -> "Путь скрипта выходит за папку навыка. Укажите script из ссылок в SKILL.md."

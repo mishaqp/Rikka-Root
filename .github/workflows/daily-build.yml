@@ -115,6 +115,7 @@ jobs:
           path: |
             **/build/reports/lint-results-debug.*
             **/build/reports/tests/**
+            app/build/reports/tool-contracts-inventory.json
             **/build/test-results/test*/TEST-*.xml
             build/audit-baseline/**
           if-no-files-found: warn
