@@ -2,12 +2,13 @@ package me.rerere.rikkahub.service
 
 import android.app.Application
 import androidx.room.Room
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
@@ -269,44 +270,58 @@ class ChatProcessDeathTest {
         repository.insertConversation(source)
         service.initializeConversation(source.id)
         val dispatcher = kotlinx.coroutines.test.StandardTestDispatcher()
+        val durableStart = CompletableDeferred<Unit>()
+        val releaseReturn = CompletableDeferred<Unit>()
+        val recoveryField = ChatService::class.java.getDeclaredField("processRecovery").apply { isAccessible = true }
+        val realRecovery = recoveryField.get(service) as ChatProcessRecovery
+        val gatedRecovery = mockk<ChatProcessRecovery>()
+        // All recovery operations use the same real state, Room and AtomicFile.
+        coEvery { gatedRecovery.recoverInterrupted() } coAnswers { realRecovery.recoverInterrupted() }
+        coEvery { gatedRecovery.begin(any(), any()) } coAnswers {
+            val ticket = realRecovery.begin(firstArg(), secondArg())
+            durableStart.complete(Unit)
+            releaseReturn.await()
+            ticket
+        }
+        coEvery { gatedRecovery.finish(any(), any()) } coAnswers { realRecovery.finish(firstArg(), secondArg()) }
+        recoveryField.set(service, gatedRecovery)
         Dispatchers.setMain(dispatcher)
         try {
-            java.nio.file.FileSystems.getDefault().newWatchService().use { watcher ->
-                recoveryFile.parentFile.toPath().register(watcher,
-                    java.nio.file.StandardWatchEventKinds.ENTRY_CREATE,
-                    java.nio.file.StandardWatchEventKinds.ENTRY_MODIFY)
-                service.sendMessage(source.id, listOf(me.rerere.ai.ui.UIMessagePart.Text("Принятый вопрос")))
-                dispatcher.scheduler.runCurrent()
-                kotlinx.coroutines.withTimeout(5_000) {
-                    kotlinx.coroutines.withContext(Dispatchers.IO) {
-                        while (!recoveryFile.isFile || !recoveryFile.readText().contains(source.id.toString())) {
-                            watcher.poll(100, java.util.concurrent.TimeUnit.MILLISECONDS)?.let { key ->
-                                key.pollEvents()
-                                key.reset()
-                            }
-                            kotlinx.coroutines.currentCoroutineContext().ensureActive()
-                        }
-                    }
+            service.sendMessage(source.id, listOf(me.rerere.ai.ui.UIMessagePart.Text("Принятый вопрос")))
+            kotlinx.coroutines.withTimeout(5_000) {
+                while (!durableStart.isCompleted) {
+                    dispatcher.scheduler.runCurrent()
+                    kotlinx.coroutines.withContext(Dispatchers.IO) { kotlinx.coroutines.yield() }
                 }
-                // The IO write is durable, but the owning Main coroutine has not resumed yet.
-                val job = service.getGenerationJobStateFlow(source.id).first { it != null }!!
-                job.cancel()
-                kotlinx.coroutines.withTimeout(5_000) {
-                    while (!job.isCompleted) {
-                        dispatcher.scheduler.runCurrent()
-                        kotlinx.coroutines.withContext(Dispatchers.IO) { kotlinx.coroutines.yield() }
-                    }
-                }
-
-                assertFalse("Cancellation at the IO return boundary must not orphan an unowned durable receipt",
-                    recoveryFile.readText().contains(source.id.toString()))
-                assertTrue(requestedTexts.isEmpty())
-                assertEquals(source.messageNodes, repository.getConversationById(source.id)!!.messageNodes)
-                val queue = service.getMessageQueueFlow(source.id).value
-                assertTrue(queue.paused)
-                assertEquals("Принятый вопрос", queue.messages.single().parts.filterIsInstance<me.rerere.ai.ui.UIMessagePart.Text>().single().text)
             }
+            // Real begin has completed its durable write; its return remains explicitly gated.
+            assertTrue("The durable receipt must exist before cancellation",
+                recoveryFile.readText().contains(source.id.toString()))
+            assertEquals(source.messageNodes, service.getConversationFlow(source.id).value.messageNodes)
+            assertEquals(source.messageNodes, repository.getConversationById(source.id)!!.messageNodes)
+            val job = service.getGenerationJobStateFlow(source.id).first { it != null }!!
+            job.cancel()
+            assertTrue("Cancellation must retain the receipt until its owner can receive the ticket",
+                recoveryFile.readText().contains(source.id.toString()))
+            releaseReturn.complete(Unit)
+            kotlinx.coroutines.withTimeout(5_000) {
+                while (!job.isCompleted) {
+                    dispatcher.scheduler.runCurrent()
+                    kotlinx.coroutines.withContext(Dispatchers.IO) { kotlinx.coroutines.yield() }
+                }
+            }
+
+            assertFalse("Cancellation at the IO return boundary must not orphan an unowned durable receipt",
+                recoveryFile.readText().contains(source.id.toString()))
+            assertTrue(requestedTexts.isEmpty())
+            assertEquals(source.messageNodes, repository.getConversationById(source.id)!!.messageNodes)
+            val queue = service.getMessageQueueFlow(source.id).value
+            assertTrue(queue.paused)
+            assertEquals("Принятый вопрос", queue.messages.single().parts.filterIsInstance<me.rerere.ai.ui.UIMessagePart.Text>().single().text)
         } finally {
+            releaseReturn.complete(Unit)
+            dispatcher.scheduler.runCurrent()
+            recoveryField.set(service, realRecovery)
             Dispatchers.setMain(UnconfinedTestDispatcher())
         }
     }
