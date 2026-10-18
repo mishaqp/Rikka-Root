@@ -8,10 +8,20 @@ class AssistantOwnershipGuard(private val ownerExists: suspend (String) -> Boole
     private val mutex = Mutex()
 
     suspend fun <T> withOwner(ownerId: String?, block: suspend () -> T): T = mutex.withLock {
-        if (ownerId != null) {
-            check(ownerExists(ownerId)) { "Ассистент недоступен. Откройте чат заново перед изменением его данных." }
-        }
+        if (ownerId != null) requireOwner(ownerId)
         block()
+    }
+
+    /** Holds the same ownership lock while a repository verifies an existing binding in its
+     * database transaction. The supplied validator must be used for any new or changed binding.
+     * It does not reacquire the mutex, so validation inside the transaction cannot self-deadlock.
+     */
+    internal suspend fun <T> withOwnerValidation(
+        block: suspend (requireOwner: suspend (String) -> Unit) -> T,
+    ): T = mutex.withLock { block { ownerId -> requireOwner(ownerId) } }
+
+    private suspend fun requireOwner(ownerId: String) {
+        check(ownerExists(ownerId)) { "Ассистент недоступен. Откройте чат заново перед изменением его данных." }
     }
 
     suspend fun <T> withDeletion(block: suspend () -> T): T = mutex.withLock { block() }

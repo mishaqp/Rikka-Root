@@ -468,20 +468,38 @@ class ConversationRepository(
         }
     }
 
+    /** Preserve a legacy owner only for the exact row already bound to it. The lookup and
+     * write share a transaction: an unguarded conversation deletion cannot race the proof.
+     */
+    private suspend fun <T> withConversationUpdateTransaction(
+        conversation: Conversation,
+        block: suspend () -> T,
+    ): T {
+        val guard = ownershipGuard ?: return database.withTransaction { block() }
+        return guard.withOwnerValidation { requireOwner ->
+            database.withTransaction {
+                val existing = checkNotNull(conversationDAO.getConversationById(conversation.id.toString())) {
+                    "Чат не найден. Откройте список чатов и выберите существующий чат."
+                }
+                val ownerId = conversation.assistantId.toString()
+                if (existing.assistantId != ownerId) requireOwner(ownerId)
+                block()
+            }
+        }
+    }
+
     suspend fun updateConversation(conversation: Conversation) {
         requireWritableHistory(conversation)
         val safeConversation = sanitizeSshConversation(conversation, sshToolSecrets, mcpSecretSanitizer)
         attachmentReferences.withFileReservation(safeConversation.files.map { it.toString() }) {
-            withAssistantOwnership(ownershipGuard, safeConversation.assistantId.toString()) {
-                database.withTransaction {
-                    conversationDAO.update(
-                        conversationToConversationEntity(safeConversation)
-                    )
-                    // 删除旧的节点，插入新的节点
-                    messageNodeDAO.deleteByConversation(conversation.id.toString())
-                    saveMessageNodes(safeConversation.id.toString(), safeConversation.messageNodes)
-                    attachmentReferences.conversationWritten(safeConversation.id)
-                }
+            withConversationUpdateTransaction(safeConversation) {
+                conversationDAO.update(
+                    conversationToConversationEntity(safeConversation)
+                )
+                // 删除旧的节点，插入新的节点
+                messageNodeDAO.deleteByConversation(conversation.id.toString())
+                saveMessageNodes(safeConversation.id.toString(), safeConversation.messageNodes)
+                attachmentReferences.conversationWritten(safeConversation.id)
             }
             messageFtsManager.indexConversation(safeConversation)
         }
@@ -494,23 +512,21 @@ class ConversationRepository(
         val previous = previousNodes.orEmpty().withIndex().associateBy { it.value.id }
         val retainedIds = safe.messageNodes.mapTo(hashSetOf()) { it.id }
         attachmentReferences.withFileReservation(safe.files.map { it.toString() }) {
-            withAssistantOwnership(ownershipGuard, safe.assistantId.toString()) {
-                database.withTransaction {
-                    conversationDAO.update(conversationToConversationEntity(safe))
-                    if (previousNodes == null) {
-                        // The first chunk can include repairs not yet committed to Room. Replace
-                        // those rows transactionally, but defer the derived search index to final save.
-                        messageNodeDAO.deleteByConversation(safe.id.toString())
-                    } else for (removed in previousNodes) if (removed.id !in retainedIds) messageNodeDAO.deleteById(removed.id.toString())
-                    val changed = safe.messageNodes.mapIndexedNotNull { index, node ->
-                        val old = previous[node.id]
-                        if (old?.index == index && old.value == node) null else MessageNodeEntity(
-                            id = node.id.toString(), conversationId = safe.id.toString(), nodeIndex = index,
-                            messages = JsonInstant.encodeToString(node.messages), selectIndex = node.selectIndex)
-                    }
-                    if (changed.isNotEmpty()) messageNodeDAO.insertAll(changed)
-                    attachmentReferences.conversationWritten(safe.id)
+            withConversationUpdateTransaction(safe) {
+                conversationDAO.update(conversationToConversationEntity(safe))
+                if (previousNodes == null) {
+                    // The first chunk can include repairs not yet committed to Room. Replace
+                    // those rows transactionally, but defer the derived search index to final save.
+                    messageNodeDAO.deleteByConversation(safe.id.toString())
+                } else for (removed in previousNodes) if (removed.id !in retainedIds) messageNodeDAO.deleteById(removed.id.toString())
+                val changed = safe.messageNodes.mapIndexedNotNull { index, node ->
+                    val old = previous[node.id]
+                    if (old?.index == index && old.value == node) null else MessageNodeEntity(
+                        id = node.id.toString(), conversationId = safe.id.toString(), nodeIndex = index,
+                        messages = JsonInstant.encodeToString(node.messages), selectIndex = node.selectIndex)
                 }
+                if (changed.isNotEmpty()) messageNodeDAO.insertAll(changed)
+                attachmentReferences.conversationWritten(safe.id)
             }
         }
     }
