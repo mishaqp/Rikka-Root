@@ -8,6 +8,8 @@ import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -35,10 +37,10 @@ internal fun readBoundedImage(input: InputStream, maxBytes: Int = 16_777_216): B
 fun setWallpaperTool(context: Context, sources: LocalImageSources = LocalImageSources(
     File(context.filesDir, "upload"), fileAccess = LocalFileAccess(context))): Tool = Tool(
     name = "set_wallpaper",
-    description = "Set home, lock, or both wallpapers from a local image (at most 16 MiB): file://, content://, a PRoot/workspace path such as /workspace/image.png, or attachment:1 for the first image in the latest user message containing images. Relative paths use this chat's workspace current directory. Large images are sampled safely. Default target: both.",
+    description = "Установить обои home, lock или both (по умолчанию) из локального изображения до 16 МиБ. file_uri принимает file://, разрешённый content://, путь рабочего пространства или attachment:1 из последнего сообщения с изображениями; относительный путь считается от текущей папки чата. Большие изображения уменьшаются при чтении. Для создания QR-изображения используйте qr_generate. Возвращает success, target и wallpaper_id; профиль Android может запрещать смену обоев.",
     parameters = { InputSchema.Obj(buildJsonObject {
-        put("file_uri", buildJsonObject { put("type", "string"); put("description", "Local URI, PRoot/workspace file path, or attachment:1 (1-based image index)") })
-        put("target", buildJsonObject { put("type", "string"); put("description", "home, lock, or both (default both)") })
+        put("file_uri", buildJsonObject { put("type", "string"); put("description", "Путь локального изображения, file://, разрешённый content:// или attachment:1. До 8192 символов; изображение до 16 МиБ."); put("maxLength", 8192) })
+        put("target", buildJsonObject { put("type", "string"); put("description", "Экран обоев: home — главный, lock — блокировка, both — оба (по умолчанию)."); put("enum", JsonArray(listOf(JsonPrimitive("home"), JsonPrimitive("lock"), JsonPrimitive("both")))); put("default", "both") })
     }, required = listOf("file_uri")) },
     needsApproval = { true },
     systemPrompt = { _, _ -> sources.attachmentPrompt() },

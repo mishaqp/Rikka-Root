@@ -103,31 +103,18 @@ fun findNodeTool(
     service: RootScreenService,
 ): Tool = Tool(
     name = "find_node",
-    description = """
-        Find accessibility nodes in the active window matching a selector. by: text |
-        content_description | view_id_resource_name. Returns {matches: [...]} with at most 50
-        node summaries. Use read_window_tree first to see what's available, then this for
-        targeted lookups. Matching runs over the same traversal as read_window_tree, so
-        returned node_ids agree across both tools; truncated=true means more than 50 nodes
-        matched.
-    """.trimIndent().replace("\n", " "),
+    description = "Найти узлы активного окна по точному value: by=text, content_description или view_id_resource_name. Сначала прочитайте read_window_tree; для действия передайте найденный node_id в click_node или set_text. package_name ограничивает приложение. Возвращает не более 50 matches и screen_state; truncated=true означает дополнительные совпадения, отсутствие truncated — отсутствие усечения. Индексы node_id совпадают с read_window_tree.",
     needsApproval = { true },
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("by", buildJsonObject {
                     put("type", "string")
-                    put("enum", buildJsonArray { add("text"); add("content_description"); add("view_id_resource_name") })
-                    put("description", "Selector axis")
-                })
+                    put("enum", buildJsonArray { add("text"); add("content_description"); add("view_id_resource_name") }); put("description", "Ось точного поиска: text, content_description или view_id_resource_name. Передавайте вместе с value, если нет node_id.") })
                 put("value", buildJsonObject {
-                    put("type", "string")
-                    put("description", "Exact value to match")
-                })
+                    put("type", "string"); put("description", "Точное строковое значение выбранной оси поиска; нужно вместе с by.") })
                 put("package_name", buildJsonObject {
-                    put("type", "string")
-                    put("description", "Optional foreground package guard")
-                })
+                    put("type", "string"); put("description", "Необязательное имя ожидаемого активного приложения для защиты от действия в другом окне.") })
             },
             required = listOf("by", "value")
         )
@@ -179,31 +166,20 @@ fun clickNodeTool(
     service: RootScreenService,
 ): Tool = Tool(
     name = "click_node",
-    description = """
-        Click a node. Preferred selector: node_id from read_window_tree / find_node. Alternative:
-        by (text | content_description | view_id_resource_name) + value with optional nth. If the
-        matched node is not clickable, the nearest clickable ancestor is clicked. On stale_node_id
-        the screen changed since your last read: re-run read_window_tree. The result carries an
-        "after" object; check screen_changed to confirm the click did something.
-    """.trimIndent().replace("\n", " "),
+    description = "Нажать узел через root. Предпочитайте node_id из read_window_tree/find_node; альтернатива — by и value с необязательным nth (от 0, по умолчанию 0) и package_name. Если узел не нажимаемый, выбирается ближайший нажимаемый предок. При stale_node_id перечитайте дерево: действие не выполняется по устаревшему узлу. Для координат без узла есть tap. Возвращает success и after; проверьте screen_changed.",
     needsApproval = { true },
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("node_id", buildJsonObject {
-                    put("type", "string")
-                    put("description", "Node handle from read_window_tree/find_node (\"windowId:index:fingerprint\"). Preferred over by/value; on a stale id you get stale_node_id and should re-read the tree.")
-                })
+                    put("type", "string"); put("description", "Дескриптор windowId:index:fingerprint из read_window_tree/find_node. Предпочтительный выбор; stale_node_id требует нового чтения дерева.") })
                 put("by", buildJsonObject {
                     put("type", "string")
-                    put("enum", buildJsonArray { add("text"); add("content_description"); add("view_id_resource_name") })
-                })
-                put("value", buildJsonObject { put("type", "string") })
-                put("package_name", buildJsonObject { put("type", "string") })
+                    put("enum", buildJsonArray { add("text"); add("content_description"); add("view_id_resource_name") }); put("description", "Ось точного поиска: text, content_description или view_id_resource_name. Передавайте вместе с value, если нет node_id.") })
+                put("value", buildJsonObject { put("type", "string"); put("description", "Точное строковое значение выбранной оси поиска; нужно вместе с by.") })
+                put("package_name", buildJsonObject { put("type", "string"); put("description", "Необязательное имя ожидаемого активного приложения для защиты от действия в другом окне.") })
                 put("nth", buildJsonObject {
-                    put("type", "integer")
-                    put("description", "Zero-based index when multiple nodes match (default 0)")
-                })
+                    put("type", "integer"); put("description", "Номер совпадения с нуля, по умолчанию 0. Применяется к поиску by/value."); put("minimum", 0); put("default", 0) })
             },
         )
     },
@@ -302,48 +278,24 @@ fun setTextTool(
     service: RootScreenService,
 ): Tool = Tool(
     name = "set_text",
-    description = """
-        Type or replace text in an editable field, selected by node_id (preferred) or by/value.
-        Type or replace text in an editable input field on screen. Find the field by selector
-        (text / content_description / view_id_resource_name). Works for URL bars, search boxes,
-        form fields. Does NOT work for terminals like Termux that render natively - for Termux
-        use termux_run_command if that tool is enabled, otherwise report that terminals cannot
-        be typed into. Returns {success, set_to, ...} or a structured error. The result carries
-        an "after" object; check screen_changed in the after object to confirm the text landed.
-        Printable ASCII uses root input text (no literal %s). Cyrillic and emoji use a temporary
-        clipboard and root PASTE, restoring the previous clipboard unless the user copied new data.
-        An existing content:// clipboard is preserved and rejected before clearing the field.
-        Replacement needs Android input keycombination (Ctrl+A).
-    """.trimIndent().replace("\n", " "),
+    description = "Ввести или заменить text в редактируемом поле через root: node_id предпочтительнее by/value, nth — от 0, по умолчанию 0. Подходит для поиска, форм и адресной строки; не подходит для терминалов Termux — используйте termux_run_command, если он включён, иначе объясните ограничение. Нужна поддержка Android input keycombination (Ctrl+A). ASCII без буквального %s вводится через input text; кириллица и эмодзи — через временный буфер и PASTE. Прежний буфер восстанавливается, если пользователь не скопировал новые данные; content:// в буфере сохраняется с отказом до очистки поля. При stale_node_id перечитайте дерево. Результат содержит success, set_to и after; проверьте after.screen_changed.",
     needsApproval = { true },
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("node_id", buildJsonObject {
-                    put("type", "string")
-                    put("description", "Node handle from read_window_tree/find_node (\"windowId:index:fingerprint\"). Preferred over by/value; on a stale id you get stale_node_id and should re-read the tree.")
-                })
+                    put("type", "string"); put("description", "Дескриптор windowId:index:fingerprint из read_window_tree/find_node. Предпочтительный выбор; stale_node_id требует нового чтения дерева.") })
                 put("by", buildJsonObject {
                     put("type", "string")
-                    put("enum", buildJsonArray { add("text"); add("content_description"); add("view_id_resource_name") })
-                    put("description", "Selector axis to find the editable node")
-                })
+                    put("enum", buildJsonArray { add("text"); add("content_description"); add("view_id_resource_name") }); put("description", "Ось точного поиска: text, content_description или view_id_resource_name. Передавайте вместе с value, если нет node_id.") })
                 put("value", buildJsonObject {
-                    put("type", "string")
-                    put("description", "Selector value to match against")
-                })
+                    put("type", "string"); put("description", "Точное строковое значение выбранной оси поиска; нужно вместе с by.") })
                 put("text", buildJsonObject {
-                    put("type", "string")
-                    put("description", "The text to set on the matched node")
-                })
+                    put("type", "string"); put("description", "Строка для установки в редактируемое поле. Пустая строка очищает поле; для терминалов используйте командный инструмент.") })
                 put("package_name", buildJsonObject {
-                    put("type", "string")
-                    put("description", "Optional foreground package guard")
-                })
+                    put("type", "string"); put("description", "Необязательное имя ожидаемого активного приложения для защиты от действия в другом окне.") })
                 put("nth", buildJsonObject {
-                    put("type", "integer")
-                    put("description", "Zero-based index when multiple nodes match (default 0)")
-                })
+                    put("type", "integer"); put("description", "Номер совпадения с нуля, по умолчанию 0. Применяется к поиску by/value."); put("minimum", 0); put("default", 0) })
             },
             required = listOf("text")
         )

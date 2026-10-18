@@ -20,25 +20,17 @@ fun swipeTool(
     service: RootScreenService,
 ): Tool = Tool(
     name = "swipe",
-    description = """
-        Swipe between two absolute screen coordinates. Default duration is 300ms; provide
-        duration_ms (>= 50, <= 5000) to override. Returns {success: bool, reason?: string} or
-        the standard service-not-active envelope. The result carries an "after" object
-        (foreground surface, shade_open, screen_changed); check it to verify the swipe did
-        what you intended before acting again.
-    """.trimIndent().replace("\n", " "),
+    description = "Провести жест между абсолютными координатами start_x/start_y и end_x/end_y в пикселях. Все координаты — конечные неотрицательные в пределах дисплея; duration_ms: 50–5000, по умолчанию 300. Для прокрутки конкретного контейнера предпочтительнее scroll. Нужен root; возвращает success, причину отказа при наличии и after. Проверяйте after.screen_changed перед следующим действием.",
     needsApproval = { true },
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
-                put("start_x", buildJsonObject { put("type", "number"); put("description", "Start x px") })
-                put("start_y", buildJsonObject { put("type", "number"); put("description", "Start y px") })
-                put("end_x", buildJsonObject { put("type", "number"); put("description", "End x px") })
-                put("end_y", buildJsonObject { put("type", "number"); put("description", "End y px") })
+                put("start_x", buildJsonObject { put("type", "number"); put("description", "Горизонтальная координата начала жеста в пикселях, внутри экрана."); put("minimum", 0) })
+                put("start_y", buildJsonObject { put("type", "number"); put("description", "Вертикальная координата начала жеста в пикселях, внутри экрана."); put("minimum", 0) })
+                put("end_x", buildJsonObject { put("type", "number"); put("description", "Горизонтальная координата конца жеста в пикселях, внутри экрана."); put("minimum", 0) })
+                put("end_y", buildJsonObject { put("type", "number"); put("description", "Вертикальная координата конца жеста в пикселях, внутри экрана."); put("minimum", 0) })
                 put("duration_ms", buildJsonObject {
-                    put("type", "integer")
-                    put("description", "Swipe duration in milliseconds (default 300, range 50-5000)")
-                })
+                    put("type", "integer"); put("description", "Продолжительность жеста в миллисекундах: 50–5000, по умолчанию 300."); put("minimum", 50); put("maximum", 5000); put("default", 300) })
             },
             required = listOf("start_x", "start_y", "end_x", "end_y")
         )

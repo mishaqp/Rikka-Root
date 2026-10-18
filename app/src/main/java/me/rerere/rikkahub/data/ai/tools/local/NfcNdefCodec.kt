@@ -43,7 +43,7 @@ object NfcNdefCodec {
             require(id.size <= 255)
             when (obj.textArgument("kind")) {
                 "text" -> {
-                    val language = obj.textArgument("language") ?: "ru"
+                    val language = if ("language" in obj) obj.textArgument("language") ?: throw IllegalArgumentException() else "ru"
                     require(language.matches(Regex("[A-Za-z0-9-]{0,63}")))
                     val lang = language.toByteArray(Charsets.US_ASCII)
                     NfcRecordData(1, byteArrayOf(84), id, byteArrayOf(lang.size.toByte()) + lang + value.toByteArray(Charsets.UTF_8))

@@ -59,12 +59,13 @@ private fun clockDays(input: JsonObject): ArrayList<Int>? {
     })
 }
 
-private fun clockField(type: String, description: String) = buildJsonObject {
+private fun clockField(type: String, description: String, minimum: Int? = null, maximum: Int? = null, maxLength: Int? = null) = buildJsonObject {
     put("type", type)
     put("description", description)
+    minimum?.let { put("minimum", it) }; maximum?.let { put("maximum", it) }; maxLength?.let { put("maxLength", it) }
 }
 
-private fun clockMessageField() = clockField("string", "Необязательная подпись до 4096 символов.")
+private fun clockMessageField() = clockField("string", "Необязательная подпись до 4096 символов без нулевого символа.", maxLength = 4096)
 
 private fun clockSkipUiField() = buildJsonObject {
     put("type", "boolean")
@@ -104,8 +105,8 @@ internal fun alarmClockTools(context: Context): List<Tool> = listOf(
         description = "Передать приложению часов запрос на будильник. hour — 0–23, minute — 0–59; days использует нумерацию Android Calendar: воскресенье — 1, понедельник — 2, суббота — 7. Без days или с пустым массивом будильник не повторяется. skip_ui=true по умолчанию. Требуются подтверждение и открытое приложение; результат подтверждает только отправку запроса Android.",
         option = LocalToolOption.AlarmClock,
         schema = InputSchema.Obj(buildJsonObject {
-            put("hour", clockField("integer", "Час в 24-часовом формате: от 0 до 23."))
-            put("minute", clockField("integer", "Минута: от 0 до 59."))
+            put("hour", clockField("integer", "Час в 24-часовом формате: от 0 до 23.", 0, 23))
+            put("minute", clockField("integer", "Минута: от 0 до 59.", 0, 59))
             put("message", clockMessageField())
             put("days", buildJsonObject {
                 put("type", "array")
@@ -134,7 +135,7 @@ internal fun alarmClockTools(context: Context): List<Tool> = listOf(
         description = "Передать приложению часов запрос на таймер. seconds — целое число секунд от 1 до 86400; message — необязательная подпись; skip_ui=true по умолчанию. Требуются подтверждение и открытое приложение; результат подтверждает только отправку запроса Android.",
         option = LocalToolOption.AlarmClock,
         schema = InputSchema.Obj(buildJsonObject {
-            put("seconds", clockField("integer", "Продолжительность в секундах: целое число от 1 до 86400 (24 часа)."))
+            put("seconds", clockField("integer", "Продолжительность в секундах: целое число от 1 до 86400 (24 часа).", 1, 86400))
             put("message", clockMessageField())
             put("skip_ui", clockSkipUiField())
         }, required = listOf("seconds")),

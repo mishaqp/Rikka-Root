@@ -53,13 +53,7 @@ fun scrollTool(
     service: RootScreenService,
 ): Tool = Tool(
     name = "scroll",
-    description = """
-        Scroll the active window (up/down/left/right). With x/y, scrolls the container at that
-        point; otherwise the first scrollable container. Uses real horizontal scroll actions for
-        left/right and falls back to a direction-true swipe. success=true means the scroll was
-        accepted; after.screen_changed is the ground truth, and a note is added when the scroll
-        was accepted but nothing moved (usually end of list).
-    """.trimIndent().replace("\n", " "),
+    description = "Прокрутить активное окно в направлении up/down/left/right через root. Необязательные x/y передаются вместе: конечные неотрицательные координаты контейнера; без них выбирается первый прокручиваемый контейнер. Для произвольного жеста используйте swipe. Горизонтальная прокрутка поддерживается с запасным жестом в нужном направлении. success означает принятие действия, а after.screen_changed отражает изменение; note объясняет достижение края списка.",
     needsApproval = { true },
     parameters = {
         InputSchema.Obj(
@@ -68,10 +62,9 @@ fun scrollTool(
                     put("type", "string")
                     put("enum", buildJsonArray {
                         add("up"); add("down"); add("left"); add("right")
-                    })
-                })
-                put("x", buildJsonObject { put("type", "number"); put("description", "Optional anchor px") })
-                put("y", buildJsonObject { put("type", "number"); put("description", "Optional anchor px") })
+                    }); put("description", "Направление прокрутки: up — вверх, down — вниз, left — влево, right — вправо.") })
+                put("x", buildJsonObject { put("type", "number"); put("description", "Необязательная горизонтальная координата контейнера в пикселях; передавайте вместе с y, внутри экрана."); put("minimum", 0) })
+                put("y", buildJsonObject { put("type", "number"); put("description", "Необязательная вертикальная координата контейнера в пикселях; передавайте вместе с x, внутри экрана."); put("minimum", 0) })
             },
             required = listOf("direction")
         )

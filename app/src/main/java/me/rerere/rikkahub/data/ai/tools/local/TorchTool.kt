@@ -17,9 +17,9 @@ import me.rerere.ai.core.Tool
 
 fun torchTool(context: Context): Tool = Tool(
     name = "set_torch",
-    description = "Turn the camera flashlight on or off. Requires the camera permission enabled in assistant settings.",
+    description = "Включить или выключить вспышку телефона по on. Используйте для освещения; для снимка экрана вызовите take_screenshot. Нужны разрешение камеры и устройство со вспышкой. Возвращает success и фактический запрошенный on; при недоступной камере — ошибку с подсказкой.",
     parameters = { InputSchema.Obj(buildJsonObject {
-        put("on", buildJsonObject { put("type", "boolean") })
+        put("on", buildJsonObject { put("type", "boolean"); put("description", "Включить вспышку: true; выключить: false.") })
     }, required = listOf("on")) },
     needsApproval = { true },
     execute = { input -> deviceToolResult {

@@ -119,23 +119,17 @@ fun readWindowTreeTool(
     service: RootScreenService,
 ): Tool = Tool(
     name = "read_window_tree",
-    description = "Snapshot of the active window's UIAutomator node tree via root. Default filters to visible nodes that are clickable / scrollable / editable / have text or content_description. verbose=true skips the filter (use sparingly). max_nodes caps result (default 500, max 2000). package_name optionally restricts + errors if the foreground app doesn't match. Every node carries a node_id you can pass directly to click_node / set_text (preferred over by/value or coordinates). The result includes screen_state identifying the current surface (package, shade_open, ime_visible, display size).",
+    description = "Прочитать дерево UIAutomator активного окна через root. По умолчанию показаны видимые интерактивные узлы и узлы с текстом/описанием; verbose=true включает остальные. max_nodes: 1–2000, по умолчанию 500; package_name защищает от чтения другого приложения. Возвращает nodes с node_id для click_node/set_text, truncated, total_seen и screen_state. Сначала используйте дерево и find_node; take_screenshot нужен для визуальных деталей или интерфейса без доступных узлов.",
     needsApproval = { true },
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("verbose", buildJsonObject {
-                    put("type", "boolean")
-                    put("description", "If true, return all nodes (default false applies the filter)")
-                })
+                    put("type", "boolean"); put("description", "Включить узлы вне стандартного фильтра видимых/интерактивных: по умолчанию false."); put("default", false) })
                 put("max_nodes", buildJsonObject {
-                    put("type", "integer")
-                    put("description", "Cap on returned nodes (default 500, max 2000)")
-                })
+                    put("type", "integer"); put("description", "Максимум узлов дерева: 1–2000, по умолчанию 500; проверяйте truncated."); put("minimum", 1); put("maximum", 2000); put("default", 500) })
                 put("package_name", buildJsonObject {
-                    put("type", "string")
-                    put("description", "If set, return wrong_foreground_app error if the foreground app does not match")
-                })
+                    put("type", "string"); put("description", "Необязательное имя ожидаемого приложения; при другом активном пакете чтение отклоняется.") })
             }
         )
     },

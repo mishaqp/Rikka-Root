@@ -14,6 +14,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -54,6 +55,54 @@ class HttpRequestToolTest {
 
     private fun args(method: String = "GET", extra: JsonObject = JsonObject(emptyMap())) =
         JsonObject(mapOf("url" to JsonPrimitive("https://example.test/api"), "method" to JsonPrimitive(method)) + extra)
+
+    /** Raw HTTP preserves exact lowercase field names; no new server dependency is needed. */
+    private fun withWireHeaders(headers: List<String>, check: (JsonObject) -> Unit) {
+        ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { server ->
+            val failure = java.util.concurrent.atomic.AtomicReference<Throwable?>()
+            val worker = thread(isDaemon = true) {
+                try {
+                    server.accept().use { socket ->
+                        socket.soTimeout = 5000
+                        val request = socket.getInputStream().bufferedReader()
+                        while (!request.readLine().isNullOrEmpty()) Unit
+                        val response = (listOf("HTTP/1.1 200 OK", "Content-Type: text/plain; charset=utf-8",
+                            "Content-Length: 2", "Connection: close") + headers).joinToString("\r\n") + "\r\n\r\nok"
+                        socket.getOutputStream().write(response.toByteArray(Charsets.UTF_8))
+                        socket.getOutputStream().flush()
+                    }
+                } catch (error: Throwable) { failure.set(error) }
+            }
+            try {
+                val result = invoke(OkHttpClient(), buildJsonObject { put("url", "http://127.0.0.1:${server.localPort}/headers") })
+                assertEquals("200", result["status"]?.jsonPrimitive?.content)
+                assertEquals("ok", result["body"]?.jsonPrimitive?.content)
+                check(result)
+            } finally {
+                server.close()
+                worker.join(2000)
+                assertFalse("The actual HTTP fixture must finish", worker.isAlive)
+                assertNull("HTTP fixture failure", failure.get())
+            }
+        }
+    }
+
+    @Test fun `response headers never invent a description field from tool metadata`() {
+        withWireHeaders(listOf("x-result: actual")) { result ->
+            val headers = result.getValue("headers").jsonObject
+            assertFalse(headers.toString(), headers.keys.any { it.equals("description", true) })
+            assertEquals(JsonArray(listOf(JsonPrimitive("actual"))), headers["x-result"])
+            assertTrue("Every HTTP header value remains an array", headers.values.all { it is JsonArray })
+        }
+    }
+
+    @Test fun `actual lowercase description response header preserves every wire value as a JSON array`() {
+        withWireHeaders(listOf("description: first wire value", "description: second wire value")) { result ->
+            val headers = result.getValue("headers").jsonObject
+            assertEquals(JsonArray(listOf(JsonPrimitive("first wire value"), JsonPrimitive("second wire value"))), headers["description"])
+            assertTrue("Every HTTP header value remains an array", headers.values.all { it is JsonArray })
+        }
+    }
 
     @Test fun `read methods need no approval and all mutating methods need approval`() {
         val tool = httpRequestTool(OkHttpClient())

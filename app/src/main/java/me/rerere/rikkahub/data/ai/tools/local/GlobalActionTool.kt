@@ -26,21 +26,14 @@ fun globalActionTool(
     service: RootScreenService,
 ): Tool = Tool(
     name = "global_action",
-    description = """
-        Perform an Android system action: back / home / recents / notifications / quick_settings /
-        lock_screen / power_dialog. success only means the OS accepted the action; verify the
-        outcome via the returned "after" object (e.g. after home, confirm shade_open is absent
-        and the launcher package is foreground before assuming you are on the home screen).
-    """.trimIndent().replace("\n", " "),
+    description = "Выполнить системное действие Android через root: back, home, recents, notifications, quick_settings, lock_screen или power_dialog. Для нажатия элемента используйте click_node. success означает только принятие действия системой; проверьте after, активное приложение, shade_open и screen_changed перед выводом об успехе.",
     needsApproval = { true },
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("action", buildJsonObject {
                     put("type", "string")
-                    put("enum", buildJsonArray { ACTION_MAP.keys.forEach { add(it) } })
-                    put("description", "Which system action to perform")
-                })
+                    put("enum", buildJsonArray { ACTION_MAP.keys.forEach { add(it) } }); put("description", "Системное действие из перечисления; success подтверждает принятие, результат проверяйте по after.") })
             },
             required = listOf("action")
         )

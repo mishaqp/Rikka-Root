@@ -6,6 +6,7 @@ import android.content.Context
 import android.media.AudioManager
 import android.os.Build
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.add
@@ -24,6 +25,7 @@ private val audioStreams = mapOf(
 
 private fun streamSchema() = buildJsonObject {
     put("type", "string")
+    put("description", "Аудиопоток: media, ring, notification, alarm, voice_call или system.")
     put("enum", buildJsonArray { audioStreams.keys.forEach { add(it) } })
 }
 
@@ -37,8 +39,8 @@ private fun volumePayload(manager: AudioManager, name: String, stream: Int) = bu
 
 fun getVolumeTool(context: Context): Tool = Tool(
     name = "get_volume",
-    description = "Read an audio stream's volume, minimum, maximum and percentage (default stream: media).",
-    parameters = { InputSchema.Obj(buildJsonObject { put("stream", streamSchema()) }) },
+    description = "Прочитать фактическую громкость stream: media по умолчанию, ring, notification, alarm, voice_call или system. Возвращает volume, min, max и percent; диапазон уровней зависит от устройства. Для изменения используйте set_volume.",
+    parameters = { InputSchema.Obj(buildJsonObject { put("stream", JsonObject(streamSchema() + ("default" to JsonPrimitive("media")))) }) },
     needsApproval = { true },
     execute = { input -> deviceToolResult {
         val obj = input as? JsonObject ?: return@deviceToolResult deviceToolError("Параметры должны быть объектом.")
@@ -51,10 +53,10 @@ fun getVolumeTool(context: Context): Tool = Tool(
 
 fun setVolumeTool(context: Context): Tool = Tool(
     name = "set_volume",
-    description = "Set an audio stream's volume, 0-100 percent. ring/notification/system require Do Not Disturb access because system can be aliased to ring. media/alarm/voice_call do not. Reports the actual volume applied by Android.",
+    description = "Установить громкость stream по целому percent от 0 до 100. Для ring, notification и system нужен доступ «Не беспокоить»; media, alarm и voice_call его не требуют. Для чтения используйте get_volume. Возвращает запрошенный requested_percent и фактические volume/min/max/percent; success=false и note объясняют ограничение Android, а не подтверждают применение желаемого уровня.",
     parameters = { InputSchema.Obj(buildJsonObject {
         put("stream", streamSchema())
-        put("percent", buildJsonObject { put("type", "integer"); put("minimum", 0); put("maximum", 100) })
+        put("percent", buildJsonObject { put("type", "integer"); put("minimum", 0); put("maximum", 100); put("description", "Запрошенная громкость от 0 до 100 процентов; результат сообщает реально применённый уровень Android.") })
     }, required = listOf("stream", "percent")) },
     needsApproval = { true },
     execute = { input -> deviceToolResult {

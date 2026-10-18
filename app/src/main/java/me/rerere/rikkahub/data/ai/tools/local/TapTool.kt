@@ -22,25 +22,15 @@ fun tapTool(
     service: RootScreenService,
 ): Tool = Tool(
     name = "tap",
-    description = """
-        Tap at absolute screen coordinates (pixels). Requires verified root access on the device. The result carries an "after" object: foreground package/window, shade_open,
-        ime_visible, display size, and screen_changed telling you whether the tap actually
-        changed the UI. Read it before deciding your next action instead of taking a screenshot.
-        Coordinates outside the display are rejected with the display size. Prefer click_node
-        with a node_id from read_window_tree over raw coordinates when a node exists.
-    """.trimIndent().replace("\n", " "),
+    description = "Нажать по абсолютным координатам x/y в пикселях основного экрана через проверенный root. Координаты должны быть конечными, неотрицательными и находиться в пределах текущего дисплея. Предпочитайте click_node с node_id из read_window_tree, если элемент присутствует в дереве. Возвращает success и after с текущим приложением, клавиатурой и screen_changed; проверяйте after перед следующим действием, вместо лишнего снимка экрана.",
     needsApproval = { true },
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("x", buildJsonObject {
-                    put("type", "number")
-                    put("description", "Absolute x in pixels of the active display")
-                })
+                    put("type", "number"); put("description", "Абсолютная горизонтальная координата в пикселях: конечная, неотрицательная, внутри текущего экрана."); put("minimum", 0) })
                 put("y", buildJsonObject {
-                    put("type", "number")
-                    put("description", "Absolute y in pixels of the active display")
-                })
+                    put("type", "number"); put("description", "Абсолютная вертикальная координата в пикселях: конечная, неотрицательная, внутри текущего экрана."); put("minimum", 0) })
             },
             required = listOf("x", "y")
         )
@@ -87,27 +77,17 @@ fun longPressTool(
     service: RootScreenService,
 ): Tool = Tool(
     name = "long_press",
-    description = """
-        Long-press at absolute screen coordinates (pixels). Default duration 600ms; duration_ms
-        (100-5000) overrides. Same return shape as tap including the "after" state object; check
-        after.screen_changed to verify the press had an effect.
-    """.trimIndent().replace("\n", " "),
+    description = "Удерживать нажатие по абсолютным координатам x/y в пикселях через root. duration_ms: 100–5000, по умолчанию 600; координаты — конечные неотрицательные в пределах дисплея. Для короткого нажатия используйте click_node или tap. Результат содержит success и after; проверьте after.screen_changed, чтобы оценить результат.",
     needsApproval = { true },
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("x", buildJsonObject {
-                    put("type", "number")
-                    put("description", "Absolute x in pixels")
-                })
+                    put("type", "number"); put("description", "Абсолютная горизонтальная координата в пикселях: конечная, неотрицательная, внутри текущего экрана."); put("minimum", 0) })
                 put("y", buildJsonObject {
-                    put("type", "number")
-                    put("description", "Absolute y in pixels")
-                })
+                    put("type", "number"); put("description", "Абсолютная вертикальная координата в пикселях: конечная, неотрицательная, внутри текущего экрана."); put("minimum", 0) })
                 put("duration_ms", buildJsonObject {
-                    put("type", "integer")
-                    put("description", "Hold duration in milliseconds (default 600, range 100-5000)")
-                })
+                    put("type", "integer"); put("description", "Время удержания в миллисекундах: 100–5000, по умолчанию 600."); put("minimum", 100); put("maximum", 5000); put("default", 600) })
             },
             required = listOf("x", "y")
         )

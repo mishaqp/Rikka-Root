@@ -9,6 +9,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -21,7 +22,7 @@ import java.util.UUID
 
 private fun nfcTimeoutSchema() = buildJsonObject {
     put("type", "integer"); put("minimum", 5); put("maximum", 120)
-    put("description", "Foreground session timeout in seconds (default 30)")
+    put("description", "Тайм-аут физического сеанса NFC в секундах: 5–120, по умолчанию 30."); put("default", 30)
 }
 
 internal fun nfcStatusPayload(available: Boolean, enabled: Boolean, foreground: Boolean, busy: Boolean): JsonObject = buildJsonObject {
@@ -41,7 +42,7 @@ internal fun nfcStatusPayload(available: Boolean, enabled: Boolean, foreground: 
 
 fun nfcStatusTool(context: Context): Tool = Tool(
     name = "nfc_status",
-    description = "Check whether NFC hardware is present, enabled and ready to read. Reports foreground and active-session state. Does not scan tags or open a screen.",
+    description = "Проверить наличие и включение NFC, открыто ли приложение и занят ли сеанс. Возвращает available, enabled, app_in_foreground, session_active, ready_to_read и русскую подсказку status. Метки не сканирует и экран не открывает; для чтения вызовите nfc_read_tag.",
     parameters = { InputSchema.Obj(buildJsonObject {}) },
     needsApproval = { true },
     execute = { deviceToolResult { withContext(Dispatchers.Main.immediate) {
@@ -94,7 +95,7 @@ private suspend fun runNfcSession(context: Context, write: Boolean, timeout: Int
 
 fun nfcReadTagTool(context: Context): Tool = Tool(
     name = "nfc_read_tag",
-    description = "Read NDEF records and the UID of a physically tapped NFC tag. Opens a foreground screen with Cancel. Requires the app open; timeout 5-120 seconds, default 30.",
+    description = "Прочитать NDEF-записи и UID физически поднесённой NFC-метки. Открывает экран с отменой только при открытом Rikka-Root. timeout_seconds — 5–120 секунд, по умолчанию 30. Сначала можно проверить nfc_status; для записи есть nfc_write_tag. Возвращает records, tag_id_hex и ndef_supported либо ошибку с дальнейшим действием.",
     parameters = { InputSchema.Obj(buildJsonObject { put("timeout_seconds", nfcTimeoutSchema()) }) },
     needsApproval = { true },
     execute = { input -> deviceToolResult {
@@ -107,22 +108,20 @@ fun nfcReadTagTool(context: Context): Tool = Tool(
 
 fun nfcWriteTagTool(context: Context): Tool = Tool(
     name = "nfc_write_tag",
-    description = "Replace a physically tapped writable NFC tag's NDEF contents with text, URI or raw records (at most 32 records and 64 KiB). Opens a foreground screen with Cancel. Requires the app open; timeout 5-120 seconds, default 30.",
+    description = "Заменить содержимое физически поднесённой доступной для записи NDEF-метки. records: 1–32 записи text, uri или raw, суммарно до 64 КиБ; timeout_seconds: 5–120, по умолчанию 30. Открывает экран с отменой, требует открытого Rikka-Root; отмена после начала записи не доказывает отсутствие изменений. Для проверки содержимого используйте nfc_read_tag. Возвращает success и tag_id_hex либо объяснение ошибки.",
     parameters = { InputSchema.Obj(buildJsonObject {
         put("records", buildJsonObject {
             put("type", "array"); put("minItems", 1); put("maxItems", 32)
             put("items", buildJsonObject {
                 put("type", "object")
                 put("properties", buildJsonObject {
-                    put("kind", buildJsonObject { put("type", "string"); put("description", "text, uri, or raw") })
-                    put("value", buildJsonObject { put("type", "string"); put("description", "Text, absolute URI, or base64 payload for raw") })
-                    put("tnf", buildJsonObject { put("type", "integer"); put("description", "Required for raw, 0-5") })
-                    put("type_b64", buildJsonObject { put("type", "string"); put("description", "Required for raw: base64 type") })
-                    put("id_b64", buildJsonObject { put("type", "string"); put("description", "Optional base64 record ID") })
-                    put("language", buildJsonObject { put("type", "string"); put("description", "Optional text language code, default ru") })
-                })
-            })
-        })
+                    put("kind", buildJsonObject { put("type", "string"); put("description", "Формат записи: text — текст, uri — абсолютная ссылка, raw — содержимое в base64."); put("enum", JsonArray(listOf(JsonPrimitive("text"), JsonPrimitive("uri"), JsonPrimitive("raw")))) })
+                    put("value", buildJsonObject { put("type", "string"); put("description", "Текст, абсолютная URI-ссылка либо base64 данных для raw. Общий размер всех записей — до 64 КиБ."); put("maxLength", 100000) })
+                    put("tnf", buildJsonObject { put("type", "integer"); put("description", "Для raw обязателен целый TNF от 0 до 5; согласуйте его с типом и содержимым записи."); put("minimum", 0); put("maximum", 5) })
+                    put("type_b64", buildJsonObject { put("type", "string"); put("description", "Для raw обязателен тип записи в base64; после декодирования до 255 байт.") })
+                    put("id_b64", buildJsonObject { put("type", "string"); put("description", "Необязательный идентификатор записи в base64, после декодирования до 255 байт.") })
+                    put("language", buildJsonObject { put("type", "string"); put("description", "Языковой код текстовой записи, по умолчанию ru; до 63 латинских букв, цифр и дефисов, пустая строка допустима."); put("default", "ru"); put("maxLength", 63); put("pattern", "^[A-Za-z0-9-]{0,63}$") })
+                }); put("description", "Одна NDEF-запись: kind и value обязательны; для raw дополнительно нужны tnf и type_b64."); put("required", JsonArray(listOf(JsonPrimitive("kind"), JsonPrimitive("value")))) }); put("description", "От 1 до 32 NDEF-записей, суммарно до 64 КиБ. Каждая содержит kind и value; поля raw описаны внутри записи.") })
         put("timeout_seconds", nfcTimeoutSchema())
     }, required = listOf("records")) },
     needsApproval = { true },

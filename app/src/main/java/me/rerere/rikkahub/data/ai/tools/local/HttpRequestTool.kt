@@ -56,19 +56,19 @@ internal fun httpRequestTool(
         "Перенаправления и автоматические повторы изменяющих запросов отключены; при 3xx проверьте Location и вызовите конечный URL отдельно. " +
         "Секретные заголовки скрываются в истории; после перезапуска передайте их заново. " +
         "GET/HEAD не требуют подтверждения; остальные методы используют обычное подтверждение инструмента. " +
-        "Адреса локальной сети и самого телефона (localhost, 192.168.x.x и т. п.) недоступны.",
+        "Адреса локальной сети и самого телефона (localhost, 192.168.x.x и т. п.) недоступны. " +
+        "Используйте для API и загрузки данных; для чтения страницы в авторизованном WebView используйте browser_get_text. HTTP-запрос не управляет вкладкой браузера.",
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {
             put("url", buildJsonObject { put("type", "string"); put("description", "HTTP(S) URL без логина и пароля") })
             put("method", buildJsonObject {
                 put("type", "string"); put("default", "GET")
-                put("enum", JsonArray(HTTP_METHODS.map(::JsonPrimitive)))
-            })
-            put("headers", buildJsonObject { put("type", "object"); put("additionalProperties", buildJsonObject { put("type", "string") }) })
+                put("enum", JsonArray(HTTP_METHODS.map(::JsonPrimitive))); put("description", "Метод запроса из перечисления, по умолчанию GET. GET/HEAD без тела; для остальных сохраняется обычное подтверждение.") })
+            put("headers", buildJsonObject { put("type", "object"); put("additionalProperties", buildJsonObject { put("type", "string") }); put("description", "Объект строковых HTTP-заголовков. Секреты не повторяются в истории; скрытые значения после перезапуска передайте заново.") })
             put("body", buildJsonObject { put("type", "string"); put("description", "Тело запроса; несовместимо с json и GET/HEAD") })
             put("json", buildJsonObject { put("type", "object"); put("description", "JSON-тело запроса; несовместимо с body и GET/HEAD") })
-            put("timeout_seconds", buildJsonObject { put("type", "integer"); put("minimum", 1); put("maximum", 90); put("default", 30) })
-            put("max_bytes", buildJsonObject { put("type", "integer"); put("minimum", 1); put("maximum", HTTP_MAX_BYTES); put("default", HTTP_DEFAULT_BYTES) })
+            put("timeout_seconds", buildJsonObject { put("type", "integer"); put("minimum", 1); put("maximum", 90); put("default", 30); put("description", "Общий тайм-аут запроса в секундах: 1–90, по умолчанию 30.") })
+            put("max_bytes", buildJsonObject { put("type", "integer"); put("minimum", 1); put("maximum", HTTP_MAX_BYTES); put("default", HTTP_DEFAULT_BYTES); put("description", "Максимум байтов ответа: 1–8388608, по умолчанию 1048576. Усечение отмечается truncated=true.") })
         }, required = listOf("url"))
     },
     needsApproval = { input ->

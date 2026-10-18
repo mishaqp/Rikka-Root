@@ -14,13 +14,12 @@ import me.rerere.ai.core.Tool
 
 fun vibrateTool(context: Context): Tool = Tool(
     name = "vibrate",
-    description = "Vibrate once, for at most 5000 ms total. Provide duration_ms (default 500) or an alternating off/on pattern of 2-20 intervals, never both.",
+    description = "Однократно включить вибрацию для тактильного сигнала. Задайте duration_ms (1–5000, по умолчанию 500) либо pattern из 2–20 чередующихся пауз и вибраций, но не оба. Сумма интервалов — до 5000 мс, нужен хотя бы один ненулевой интервал вибрации. Для звукового сигнала используйте set_timer. Возвращает success и total_duration_ms; без вибромотора — понятную ошибку.",
     parameters = { InputSchema.Obj(buildJsonObject {
-        put("duration_ms", buildJsonObject { put("type", "integer"); put("minimum", 1); put("maximum", 5000) })
+        put("duration_ms", buildJsonObject { put("type", "integer"); put("minimum", 1); put("maximum", 5000); put("description", "Длительность одной вибрации в мс, 1–5000; по умолчанию 500. Не передавайте вместе с pattern."); put("default", 500) })
         put("pattern", buildJsonObject {
             put("type", "array"); put("minItems", 2); put("maxItems", 20)
-            put("items", buildJsonObject { put("type", "integer"); put("minimum", 0); put("maximum", 5000) })
-        })
+            put("items", buildJsonObject { put("type", "integer"); put("minimum", 0); put("maximum", 5000) }); put("description", "Чередующиеся пауза/вибрация: 2–20 целых неотрицательных интервалов в мс, сумма до 5000. Нужен ненулевой интервал вибрации; несовместим с duration_ms.") })
     }) },
     needsApproval = { true },
     execute = { input -> deviceToolResult {

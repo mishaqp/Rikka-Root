@@ -39,8 +39,8 @@ internal fun qrCodeTools(
             name = "qr_generate",
             description = "Создать QR-код в PNG для текста от 1 до 2000 символов. size — целое число от 128 до 1024, по умолчанию 512; увеличьте размер, если текст не помещается. Файл сохраняется в /scratch; результат содержит path, file_uri и размеры. Изображение возвращается только модели с поддержкой изображений.",
             parameters = { InputSchema.Obj(buildJsonObject {
-                put("text", buildJsonObject { put("type", "string"); put("minLength", 1); put("maxLength", 2000) })
-                put("size", buildJsonObject { put("type", "integer"); put("minimum", 128); put("maximum", 1024); put("default", 512) })
+                put("text", buildJsonObject { put("type", "string"); put("minLength", 1); put("maxLength", 2000); put("description", "Непустой текст QR-кода длиной до 2000 символов; для чтения готового изображения используйте qr_scan.") })
+                put("size", buildJsonObject { put("type", "integer"); put("minimum", 128); put("maximum", 1024); put("default", 512); put("description", "Сторона PNG в пикселях: 128–1024, по умолчанию 512. Увеличьте размер, если текст не помещается.") })
             }, required = listOf("text")) },
             needsApproval = { true },
             execute = { input -> deviceToolParts { withContext(Dispatchers.IO) {
@@ -75,8 +75,13 @@ internal fun qrCodeTools(
         ),
         Tool(
             name = "qr_scan",
-            description = "Прочитать QR-коды и штрихкоды из локального изображения: путь в /scratch или выбранном рабочем пространстве, разрешённый content:// URI, file_path снимка экрана либо attachment:1 из последнего сообщения пользователя с изображениями. Каждый найденный код возвращается с текстом и форматом; если кодов нет, возвращается пустой массив. Ограничения: 16 МиБ и 8 миллионов пикселей. Исходное изображение сохраняется.",
-            parameters = { fileSchema(listOf("path"), "path" to "string") },
+            description = "Прочитать QR-коды и штрихкоды из локального изображения: путь в /scratch или выбранном рабочем пространстве, разрешённый content:// URI, file_path снимка экрана либо attachment:1 из последнего сообщения пользователя с изображениями. Каждый найденный код возвращается с текстом и форматом; если кодов нет, возвращается пустой массив. Ограничения: 16 МиБ и 8388608 пикселей. Исходное изображение сохраняется.",
+            parameters = { InputSchema.Obj(buildJsonObject {
+                put("path", buildJsonObject {
+                    put("type", "string"); put("minLength", 1); put("maxLength", 8192)
+                    put("description", "Путь локального изображения, разрешённый content:// URI, file_path снимка или attachment:1. До 16 МиБ и 8388608 пикселей; исходный файл сохраняется.")
+                })
+            }, required = listOf("path")) },
             needsApproval = { false },
             execute = { input -> deviceToolResult { withContext(Dispatchers.IO) {
                 val obj = requireNotNull(input as? JsonObject) { "Параметры должны быть объектом." }

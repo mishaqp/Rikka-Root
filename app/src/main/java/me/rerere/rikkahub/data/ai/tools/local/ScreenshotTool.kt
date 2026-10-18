@@ -8,10 +8,12 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -61,31 +63,32 @@ internal suspend fun keepWithChat(
 
 fun takeScreenshotTool(context: Context, service: RootScreenService): Tool = Tool(
     name = "take_screenshot",
-    description = "Capture the current display via root screencap and return it as a vision attachment. PNG is stored privately with the chat by default. Set save_to_gallery=true only when the user requests a public copy in Pictures/RikkaHub/Screenshots/; gallery_path then gives its on-device path. Secure surfaces (banking, DRM, password fields) may be blank under Android capture restrictions. Root capture is bounded by a timeout. The result includes screen_state (foreground package, shade_open, display size). For \"did my action work\" checks prefer the \"after\" object that action tools already return; screenshot only when you need visual detail.",
+    description = "Снять основной экран (display_id=0) через root screencap и вернуть изображение модели. PNG по умолчанию сохраняется приватно с чатом; save_to_gallery=true — только по просьбе пользователя, публичная копия появится в Pictures/RikkaHub/Screenshots, путь — gallery_path. Банковские/DRM/защищённые поверхности могут быть пустыми. Захват ограничен тайм-аутом, результат содержит file_path и screen_state. Для проверки выполненного действия сначала используйте его after; снимок нужен для визуальных деталей.",
     needsApproval = { true },
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("display_id", buildJsonObject {
-                    put("type", "integer")
-                    put("description", "Display id to capture (default 0)")
-                })
+                    put("type", "integer"); put("description", "Поддерживается только основной физический экран: 0, по умолчанию 0. Другие дисплеи не поддерживаются root-захватом."); put("enum", JsonArray(listOf(JsonPrimitive(0)))); put("minimum", 0); put("default", 0) })
                 put("save_to_gallery", buildJsonObject {
-                    put("type", "boolean")
-                    put("description", "Save a public copy to the device gallery only when requested by the user (default false)")
-                    put("default", false)
-                })
+                    put("type", "boolean"); put("description", "Сохранить публичную копию в галерее только по просьбе пользователя; по умолчанию false, файл остаётся приватным."); put("default", false) })
             }
         )
     },
     execute = { input ->
-        val displayId = input.jsonObject["display_id"]?.jsonPrimitive?.intOrNull ?: 0
+        screenArgumentError(input, "display_id" to "integer", "save_to_gallery" to "boolean")
+            ?.let { return@Tool listOf(UIMessagePart.Text(it.toString())) }
+        val displayId = input.jsonObject["display_id"]?.jsonPrimitive?.longOrNull ?: 0L
         val shouldSaveToGallery = input.jsonObject["save_to_gallery"]?.jsonPrimitive?.booleanOrNull ?: false
+        if (displayId != 0L) return@Tool listOf(UIMessagePart.Text(buildJsonObject {
+            put("error", "unsupported_display")
+            put("message", "Для root-захвата поддерживается только основной экран: укажите display_id=0.")
+        }.toString()))
 
         val outcome = service.withService(treeRequired = false) { svc ->
             val cacheDir = File(context.cacheDir, SCREENSHOT_CACHE_DIR).apply { mkdirs() }
             pruneOldCacheScreenshots(cacheDir)
-            val res = svc.captureScreenshot(displayId)
+            val res = svc.captureScreenshot(displayId.toInt())
             when (res) {
                 is RootScreenService.ScreenshotOutcome.Failure -> {
                     buildJsonObject {

@@ -11,7 +11,7 @@ import me.rerere.ai.core.Tool
 
 fun getBrightnessTool(context: Context): Tool = Tool(
     name = "get_brightness",
-    description = "Read the system screen brightness (0-255) and automatic brightness mode.",
+    description = "Прочитать системную яркость экрана value (0–255) и автоматический режим is_auto_mode. Для изменения используйте set_brightness; инструмент только читает настройки.",
     parameters = { InputSchema.Obj(buildJsonObject {}) },
     needsApproval = { true },
     execute = { deviceToolResult {
@@ -25,9 +25,9 @@ fun getBrightnessTool(context: Context): Tool = Tool(
 
 fun setBrightnessTool(context: Context): Tool = Tool(
     name = "set_brightness",
-    description = "Set system screen brightness, clamped to 1-255, and switch to manual brightness. Requires Modify system settings access.",
+    description = "Изменить системную яркость и отключить автоматический режим. Целое value ограничивается диапазоном 1–255, а не отклоняется за его границами. Нужен доступ Android «Изменение системных настроек». Для проверки используйте get_brightness. Результат содержит success, фактическое value и is_auto_mode=false.",
     parameters = { InputSchema.Obj(buildJsonObject {
-        put("value", buildJsonObject { put("type", "integer"); put("description", "Brightness, clamped to 1-255") })
+        put("value", buildJsonObject { put("type", "integer"); put("description", "Целая яркость: будет ограничена диапазоном 1–255. Отключает автоматическую яркость; нужен доступ к системным настройкам.") })
     }, required = listOf("value")) },
     needsApproval = { true },
     execute = { input -> deviceToolResult {

@@ -31,15 +31,13 @@ internal object ScreenWaker {
 
 fun wakeScreenTool(context: Context, service: RootScreenService): Tool = Tool(
     name = "wake_screen",
-    description = "Turn the screen on using root input keyevent WAKEUP; no wake lock is held. Call BEFORE launch_app / screen-automation when the screen is off — otherwise activities launch behind the lock screen and read_window_tree sees nothing. Doesn't bypass secure keyguards. Returns {success, was_off, woke, keyguard_locked, keyguard_secure}.",
+    description = "Включить экран через root input keyevent WAKEUP перед launch_app или автоматизацией выключенного экрана. Защищённую блокировку не обходит: PIN или пароль вводит пользователь. hold_ms — совместимый параметр 500–30000, по умолчанию 3000; команда выполняется сразу и не удерживает wake lock. Возвращает success, was_off, woke, keyguard_locked и keyguard_secure; при блокировке прочитайте warn.",
     needsApproval = { true },
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("hold_ms", buildJsonObject {
-                    put("type", "integer")
-                    put("description", "Compatibility parameter (default 3000, max 30000); root WAKEUP is immediate and holds no wake lock")
-                })
+                    put("type", "integer"); put("description", "Параметр совместимости: 500–30000 мс, по умолчанию 3000. Root WAKEUP выполняется сразу, блокировка бодрствования не удерживается."); put("minimum", 500); put("maximum", 30000); put("default", 3000) })
             }
         )
     },
