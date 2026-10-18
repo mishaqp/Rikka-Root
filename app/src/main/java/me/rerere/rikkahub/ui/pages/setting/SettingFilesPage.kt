@@ -66,6 +66,7 @@ import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.fileSizeToString
 import org.koin.compose.koinInject
+import me.rerere.rikkahub.data.repository.ConversationRepository
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -73,6 +74,7 @@ import java.util.concurrent.TimeUnit
 @Composable
 fun SettingFilesPage(
     filesManager: FilesManager = koinInject(),
+    conversationRepository: ConversationRepository = koinInject(),
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val gridState = rememberLazyStaggeredGridState()
@@ -142,8 +144,9 @@ fun SettingFilesPage(
                             filesManager.deleteOlderThan(
                                 folder = selectedFolder,
                                 cutoffMillis = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(days.toLong()),
+                                isReferenced = conversationRepository::hasFileReference,
                             )
-                        } ?: filesManager.deleteAll(selectedFolder)
+                        } ?: filesManager.deleteAll(selectedFolder, conversationRepository::hasFileReference)
                         toaster.show(if (ok) cleanedToast else cleanFailedToast)
                     }
                 },

@@ -394,7 +394,11 @@ class FilesManager(
         repository.deleteById(id) > 0
     }
 
-    suspend fun deleteAll(folder: String = FileFolders.UPLOAD): Boolean = withContext(Dispatchers.IO) {
+    /** [isReferenced] keeps files a chat still shows; a failing check keeps the file. */
+    suspend fun deleteAll(
+        folder: String = FileFolders.UPLOAD,
+        isReferenced: suspend (String) -> Boolean = { false },
+    ): Boolean = withContext(Dispatchers.IO) {
         val retained = settingsFileReferences() ?: return@withContext false
         val dir = File(context.filesDir, folder)
         val entries = dir.listFiles()
@@ -405,7 +409,7 @@ class FilesManager(
         var allDeletedFromDisk = true
         val protected = entries.orEmpty().filter { entry ->
             val url = entry.toUri().toString()
-            retained.any { it == url || it.startsWith(url.trimEnd('/') + '/') }
+            retained.any { it == url || it.startsWith(url.trimEnd('/') + '/') } || referencedByChat(url, isReferenced)
         }.toSet()
         entries.orEmpty().filterNot { it in protected }.forEach { entry ->
             if (!runCatching { entry.deleteRecursively() }.getOrDefault(false)) {
@@ -429,11 +433,13 @@ class FilesManager(
     suspend fun deleteOlderThan(
         folder: String = FileFolders.UPLOAD,
         cutoffMillis: Long,
+        isReferenced: suspend (String) -> Boolean = { false },
     ): Boolean = withContext(Dispatchers.IO) {
         val retained = settingsFileReferences() ?: return@withContext false
         var allDeleted = true
         repository.listByFolder(folder).first()
             .filter { it.createdAt < cutoffMillis && getFile(it).toUri().toString() !in retained }
+            .filterNot { referencedByChat(getFile(it).toUri().toString(), isReferenced) }
             .forEach { entity ->
                 val file = getFile(entity)
                 val deletedFromDisk = !file.exists() || runCatching {
@@ -449,6 +455,14 @@ class FilesManager(
                 }
             }
         allDeleted
+    }
+
+    private suspend fun referencedByChat(url: String, isReferenced: suspend (String) -> Boolean): Boolean = try {
+        isReferenced(url)
+    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        true
     }
 
     private fun settingsFileReferences(): Set<String>? {

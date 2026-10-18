@@ -120,6 +120,30 @@ class SettingsFileReferencesTest {
         assertFalse("Clearing the path releases the selected image", wallpaper.exists())
     }
 
+    @Test fun `cleaning files keeps images a chat still shows and keeps them when the check fails`() = runBlocking {
+        val filesDir = temporary.newFolder("files")
+        val inChat = write(filesDir, "upload/in-chat.png")
+        val unused = write(filesDir, "upload/unused.png")
+        val state = MutableStateFlow(Settings(assistants = emptyList()))
+        val repository = mockk<FilesRepository>(relaxed = true)
+        every { repository.listByFolder(FileFolders.UPLOAD) } returns flowOf(listOf(entity(inChat, 1), entity(unused, 2)))
+        coEvery { repository.deleteById(any()) } returns 1
+        val files = FilesManager(context(filesDir), repository, AppScope().apply { cancel() }, settingsStore(state))
+        val chatUrl = inChat.toUri().toString()
+
+        assertTrue(files.deleteOlderThan(cutoffMillis = 10, isReferenced = { it == chatUrl }))
+        assertTrue("A file shown in a chat must survive «older than» cleanup", inChat.exists())
+        assertFalse(unused.exists())
+
+        unused.writeText("unused")
+        files.deleteAll(isReferenced = { it == chatUrl })
+        assertTrue("A file shown in a chat must survive «delete all»", inChat.exists())
+        assertFalse(unused.exists())
+
+        files.deleteAll(isReferenced = { error("database unavailable") })
+        assertTrue("An unknown reference state keeps the file", inChat.exists())
+    }
+
     @Test fun `clearing assistant avatar and background retains a shared global wallpaper`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         val filesDir = temporary.newFolder("files")
