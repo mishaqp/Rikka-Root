@@ -12,6 +12,7 @@ internal fun mergeToolUiChanges(current: Assistant, before: Assistant, requested
             requested.tokenBudgetSoftCap else current.tokenBudgetSoftCap,
         tokenBudgetHardCap = if (before.tokenBudgetHardCap != requested.tokenBudgetHardCap)
             requested.tokenBudgetHardCap else current.tokenBudgetHardCap,
+        rootMode = if (before.rootMode != requested.rootMode) requested.rootMode else current.rootMode,
         subAgentConcurrencyLimit = if (before.subAgentConcurrencyLimit != requested.subAgentConcurrencyLimit)
             requested.subAgentConcurrencyLimit else current.subAgentConcurrencyLimit,
     )

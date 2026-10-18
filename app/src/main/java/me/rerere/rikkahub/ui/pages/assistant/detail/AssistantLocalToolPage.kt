@@ -20,6 +20,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -36,9 +37,12 @@ import me.rerere.rikkahub.browser.BrowserToolDefaults
 import me.rerere.rikkahub.data.ai.tools.ToolApprovalDefaults
 import me.rerere.rikkahub.data.ai.tools.ToolPermissionPolicy
 import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
+import me.rerere.rikkahub.data.ai.tools.local.RootMode
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.preferences.ToolApprovalPreferences
+import me.rerere.rikkahub.root.RootShellManager
+import me.rerere.rikkahub.root.RootStatus
 import me.rerere.rikkahub.ui.components.ai.tools.*
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalNavController
@@ -61,7 +65,7 @@ fun AssistantLocalToolPage(id: String) {
     val assistant = pending ?: stored
     LaunchedEffect(stored) {
         val expected = pending
-        if (expected != null && expected.localTools == stored.localTools &&
+        if (expected != null && expected.localTools == stored.localTools && expected.rootMode == stored.rootMode &&
             expected.tokenBudgetSoftCap == stored.tokenBudgetSoftCap &&
             expected.tokenBudgetHardCap == stored.tokenBudgetHardCap &&
             expected.subAgentConcurrencyLimit == stored.subAgentConcurrencyLimit) pending = null
@@ -86,21 +90,27 @@ fun AssistantLocalToolPage(id: String) {
     val model = settings.findModelById(assistant.chatModelId ?: settings.chatModelId)
     val approvalPreferences = koinInject<ToolApprovalPreferences>()
     val yolo by approvalPreferences.globalYoloFlow.collectAsStateWithLifecycle(initialValue = false)
+    val rootShellManager = koinInject<RootShellManager>()
+    val rootStatus by rootShellManager.status.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    val latestAssistant by rememberUpdatedState(assistant)
     val alwaysAllow by approvalPreferences.alwaysAllowFlow.collectAsStateWithLifecycle(initialValue = emptySet())
     var definitions by remember(id) { mutableStateOf<Map<LocalToolOption, List<Tool>>>(emptyMap()) }
     var estimate by remember(id) { mutableStateOf<Long?>(null) }
     var metadataError by remember(id) { mutableStateOf(false) }
-    LaunchedEffect(assistant, model, skills, browserOptions) {
+    LaunchedEffect(assistant, model, skills, browserOptions, rootStatus) {
         if (assistant.id.toString() != id) return@LaunchedEffect
         try {
             val result = withContext(Dispatchers.IO) {
                 val all = metadata.toolsForAssistant(assistant, model)
-                val enabled = assistant.localTools.flatMap { option ->
+                val rootModeActive = RootMode.isActive(assistant.rootMode, rootStatus)
+                val enabled = RootMode.effectiveOptions(assistant.localTools, assistant.rootMode, rootStatus).flatMap { option ->
                     all[option].orEmpty().filter { option != LocalToolOption.Browser || browserOptions[it.name] == true }
                 }
                 val skillTools = skillToolsForAssistant(assistant, skills)
                 val skillPrompt = skillPromptForAssistant(assistant, skills, model ?: Model())
-                all to estimateToolTokens(enabled + skillTools, listOf(skillPrompt))
+                all to estimateToolTokens(enabled + skillTools,
+                    listOf(skillPrompt) + if (rootModeActive) listOf(RootMode.GUIDE) else emptyList())
             }
             definitions = result.first; estimate = result.second; metadataError = false
         } catch (cancelled: CancellationException) { throw cancelled }
@@ -132,6 +142,16 @@ fun AssistantLocalToolPage(id: String) {
         onPresetSelected = { preset = it },
         onToolSelected = { selectedKey = it.option::class.simpleName; sheetGeneration++ },
         onBackToTools = { if (searching) query = "" else categoryId = null },
+        rootStatus = rootStatus,
+        onRootModeChange = { enabled ->
+            if (!enabled) latestAssistant.let { update(it, it.copy(rootMode = false)) }
+            // Turning it on is a user tap, so the root manager may show its consent dialog here.
+            else scope.launch {
+                if (rootShellManager.verifyRoot(force = true) == RootStatus.READY) {
+                    latestAssistant.let { update(it, it.copy(rootMode = true)) }
+                }
+            }
+        },
     )
     preset?.let { candidate ->
         val desired = LocalToolUiRegistry.preset(candidate)
@@ -214,6 +234,8 @@ internal fun AssistantLocalToolPageContent(
     onPresetSelected: (LocalToolPreset) -> Unit,
     onToolSelected: (LocalToolUiEntry) -> Unit,
     onBackToTools: () -> Unit,
+    rootStatus: RootStatus = RootStatus.UNCHECKED,
+    onRootModeChange: ((Boolean) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val searching = query.isNotBlank()
@@ -247,6 +269,9 @@ internal fun AssistantLocalToolPageContent(
             item { OutlinedTextField(value = query, onValueChange = onQueryChange, singleLine = true, modifier = Modifier.fillMaxWidth(),
                 label = { Text("Поиск по названию и описанию") }, leadingIcon = { Icon(HugeIcons.Search01, null) },
                 trailingIcon = if (query.isNotEmpty()) ({ IconButton(onClick = { onQueryChange("") }) { Icon(HugeIcons.Cancel01, "Очистить поиск") } }) else null) }
+            if (category == null && !searching && onRootModeChange != null) item {
+                RootModeCard(assistant, rootStatus, controls.busy, onRootModeChange)
+            }
             if (category == null && !searching) {
                 item { FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     LocalToolPreset.entries.forEach { candidate -> AssistChip(onClick = { onPresetSelected(candidate) }, label = { Text(candidate.title) },
@@ -263,7 +288,7 @@ internal fun AssistantLocalToolPageContent(
                 if (visible.isEmpty()) item { Text("Инструменты не найдены") }
                 items(visible, key = { it.option::class.simpleName.orEmpty() }) { entry ->
                     LocalToolCompactRow(entry, entry.option in assistant.localTools, controls, definitions[entry.option].orEmpty(), accessRevision,
-                        if (searching) LocalToolUiRegistry.category(entry.option).title else null) { onToolSelected(entry) }
+                        if (searching) LocalToolUiRegistry.category(entry.option).title else null, assistant.rootMode) { onToolSelected(entry) }
                 }
             }
         }
@@ -283,7 +308,7 @@ private fun ToolCategoryRow(category: LocalToolUiCategory, enabled: Set<LocalToo
 }
 
 @Composable
-private fun LocalToolCompactRow(entry: LocalToolUiEntry, enabled: Boolean, controls: LocalToolControls, functions: List<Tool>, accessRevision: Int, categoryLabel: String?, onOpen: () -> Unit) {
+private fun LocalToolCompactRow(entry: LocalToolUiEntry, enabled: Boolean, controls: LocalToolControls, functions: List<Tool>, accessRevision: Int, categoryLabel: String?, rootMode: Boolean, onOpen: () -> Unit) {
     val context = LocalContext.current
     val access = remember(context, entry.option, accessRevision, controls.busy) { androidAccessForTool(context, entry.option) }
     Card(onClick = onOpen, enabled = !controls.busy, modifier = Modifier.fillMaxWidth()) {
@@ -293,6 +318,7 @@ private fun LocalToolCompactRow(entry: LocalToolUiEntry, enabled: Boolean, contr
                 categoryLabel?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (entry.requiresRoot) ToolBadge("Root")
+                    if (rootMode && entry.option in RootMode.REPLACED) ToolBadge("Через root")
                     if (access.isNotEmpty()) ToolBadge("Разрешение Android", access.any { !it.granted })
                     if (entry.option in setOf(LocalToolOption.AskUser, LocalToolOption.SkillImport,
                             LocalToolOption.ManageAssistants, LocalToolOption.ManageAppSettings) ||
@@ -301,6 +327,33 @@ private fun LocalToolCompactRow(entry: LocalToolUiEntry, enabled: Boolean, contr
                 }
             }
         }, trailingContent = { Switch(checked = enabled, enabled = !controls.busy, onCheckedChange = { controls.setEnabled(entry.option, it) }) })
+    }
+}
+
+@Composable
+private fun RootModeCard(assistant: Assistant, rootStatus: RootStatus, busy: Boolean, onChange: (Boolean) -> Unit) {
+    val context = LocalContext.current
+    val hidden = assistant.localTools.filter { it in RootMode.REPLACED }.distinct()
+    val missing = rootStatus in setOf(RootStatus.UNAVAILABLE, RootStatus.NOT_ROOT, RootStatus.DENIED_OR_FAILED)
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Всё через root", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Switch(checked = assistant.rootMode, enabled = !busy && rootStatus != RootStatus.CHECKING, onCheckedChange = onChange)
+            }
+            Text("Время, будильники, приложения, файлы, экран, звук, сеть, уведомления, контакты, SMS и звонки ИИ делает " +
+                "командами root, а отдельные инструменты для них не отправляются модели. Каждый запрос становится короче и дешевле. " +
+                "Опасные root-команды по-прежнему требуют подтверждения.", style = MaterialTheme.typography.bodySmall)
+            when {
+                rootStatus == RootStatus.CHECKING -> Text("Проверяю root…", style = MaterialTheme.typography.bodySmall)
+                missing && assistant.rootMode -> Text("Root сейчас недоступен — пока используются обычные инструменты. " +
+                    "Проверьте доступ в root-менеджере.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                missing -> Text("Чтобы включить режим, разрешите приложению root в root-менеджере.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                assistant.rootMode && hidden.isNotEmpty() -> Text("Заменено root: " + hidden.joinToString { LocalToolUiRegistry.entry(it).title(context) },
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
     }
 }
 

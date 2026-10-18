@@ -13,6 +13,7 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.Modality
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
+import me.rerere.rikkahub.data.ai.tools.local.RootMode
 import me.rerere.rikkahub.data.ai.tools.local.wallpaperChatImages
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.files.SkillManager
@@ -22,6 +23,8 @@ import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.workspace.WorkspaceShellStatus
 import me.rerere.rikkahub.root.RootAccessStore
+import me.rerere.rikkahub.root.RootShellManager
+import me.rerere.rikkahub.root.RootStatus
 import me.rerere.rikkahub.data.preferences.ToolApprovalPreferences
 import me.rerere.rikkahub.costguards.TokenBudgetLedger
 import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
@@ -124,7 +127,9 @@ class ChatToolFactory(
                 GlobalContext.get().get<me.rerere.rikkahub.service.ChatService>().updateChatAssistant(id, transform)
             },
         )
-        addAll(localTools.getTools(assistant.localTools, assistant.id.toString(), conversationId,
+        val rootStatus = currentRootStatus()
+        addAll(localTools.getTools(RootMode.effectiveOptions(assistant.localTools, assistant.rootMode, rootStatus),
+            assistant.id.toString(), conversationId,
             workspaceCwd, wallpaperChatImages(messages), workspaceId?.let { id ->
                 { path -> workspaceRepository.resolveRootfsFile(id, path) }
             }, modelCanReadImages = Modality.IMAGE in model.inputModalities,
@@ -226,7 +231,11 @@ class ChatToolFactory(
                 add(subagentCancelTool(subAgentRegistry, owner))
             }
         }
-    }.map { ToolPermissionPolicy.apply(it) }
+    }.map { ToolPermissionPolicy.apply(if (RootMode.isActive(assistant.rootMode, currentRootStatus())) RootMode.withGuide(it) else it) }
+
+    // Koin is absent in some unit tests; an unknown status keeps root mode's optimistic default.
+    private fun currentRootStatus(): RootStatus =
+        runCatching { GlobalContext.get().get<RootShellManager>().status.value }.getOrDefault(RootStatus.UNCHECKED)
 
     suspend fun restoreWebContentGuard(conversationId: String, messages: List<UIMessage>) {
         if (WebContentGuard.hasWebContent(messages)) markWebContent(conversationId)
