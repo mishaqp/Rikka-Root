@@ -31,3 +31,19 @@ internal fun Settings.remapRestoredFileUrls(filesDir: File, restoredPaths: Set<S
         ) },
     )
 }
+
+private val CHAT_UPLOAD_URL = Regex("""file://(/[^"\\\s]*?)/files/(${FileFolders.UPLOAD}/[^"\\/\s]+)""")
+
+/**
+ * Chat messages store absolute file URLs of the device that made the backup. A restore into
+ * another app ID or user profile puts the bytes under this filesDir, so rebase the restored
+ * upload files there; anything not restored from this archive is left untouched.
+ */
+internal fun remapRestoredMessageFileUrls(messagesJson: String, filesDir: File, restoredPaths: Set<String>): String {
+    if (restoredPaths.isEmpty() || "/files/${FileFolders.UPLOAD}/" !in messagesJson) return messagesJson
+    return CHAT_UPLOAD_URL.replace(messagesJson) { match ->
+        val relative = match.groupValues[2]
+        if (relative !in restoredPaths) match.value
+        else PendingRestore.resolveInside(filesDir, relative).toUri().toString()
+    }
+}

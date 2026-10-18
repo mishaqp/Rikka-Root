@@ -139,4 +139,16 @@ class SettingsBackupFilePathsTest {
     private fun add(zip: ZipOutputStream, name: String, text: String) {
         zip.putNextEntry(ZipEntry(name)); zip.write(text.toByteArray()); zip.closeEntry()
     }
+
+    @Test fun `chat attachments from another app id are rebased only when restored`() {
+        val filesDir = temporary.newFolder("files")
+        val json = """[{"parts":[{"type":"image","url":"file:///data/user/0/me.mishaqp.rikkaroot/files/upload/a.png"},""" +
+            """{"type":"document","url":"file:///data/user/10/other.app/files/upload/missing.pdf"},""" +
+            """{"type":"text","text":"см. file:///sdcard/Download/x.png"}]}]"""
+        val remapped = remapRestoredMessageFileUrls(json, filesDir, setOf("upload/a.png"))
+        assertTrue(remapped, remapped.contains(File(filesDir, "upload/a.png").toUri().toString()))
+        assertTrue("A file that was not restored keeps its old URL", remapped.contains("file:///data/user/10/other.app/files/upload/missing.pdf"))
+        assertTrue(remapped.contains("file:///sdcard/Download/x.png"))
+        assertEquals(json, remapRestoredMessageFileUrls(json, filesDir, emptySet()))
+    }
 }

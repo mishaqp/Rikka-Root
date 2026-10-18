@@ -75,9 +75,7 @@ object ChatboxImporter {
                         existing.id != imported.id && providerIdentity(existing) == providerIdentity(imported)
                     }
                 }
-            val allProviders = importedProviders + providers.filterNot { existing ->
-                importedProviders.any { it.id == existing.id }
-            }
+            val allProviders = mergeImportedProviders(providers, importedProviders)
 
             val resourcesByStorageKey = buildMap {
                 parseResources(manifest).forEach { resource ->
@@ -760,3 +758,12 @@ private data class ImportCounters(
     var skippedSessions: Int = 0,
     var hasConversationSystemPrompt: Boolean = false,
 )
+
+/**
+ * A repeated Chatbox import must not undo the user's later edits (key, base URL, added models):
+ * a provider that already exists keeps the user's version; only new ones are added.
+ */
+internal fun mergeImportedProviders(existing: List<ProviderSetting>, imported: List<ProviderSetting>): List<ProviderSetting> {
+    val known = existing.map { it.id }.toSet()
+    return imported.filterNot { it.id in known } + existing
+}

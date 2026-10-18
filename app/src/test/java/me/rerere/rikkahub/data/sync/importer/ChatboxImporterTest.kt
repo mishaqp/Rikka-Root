@@ -134,4 +134,14 @@ class ChatboxImporterTest {
         write(bytes)
         closeEntry()
     }
+
+    @Test
+    fun `repeated import keeps the user's edited provider and adds only new ones`() {
+        val id = Uuid.random()
+        val edited = me.rerere.ai.provider.ProviderSetting.OpenAI(id = id, name = "Мой ключ", apiKey = "user-key")
+        val reimported = me.rerere.ai.provider.ProviderSetting.OpenAI(id = id, name = "Chatbox", apiKey = "old-key")
+        val fresh = me.rerere.ai.provider.ProviderSetting.OpenAI(id = Uuid.random(), name = "Новый")
+        val merged = mergeImportedProviders(listOf(edited), listOf(reimported, fresh))
+        assertEquals(listOf(fresh, edited), merged)
+    }
 }

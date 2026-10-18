@@ -17,6 +17,7 @@ import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.saveUploadFromBytes
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.sync.importer.ChatboxImporter
+import me.rerere.rikkahub.data.sync.importer.mergeImportedProviders
 import me.rerere.rikkahub.data.sync.importer.CherryStudioProviderImporter
 import me.rerere.rikkahub.data.sync.webdav.WebDavBackupItem
 import me.rerere.rikkahub.data.sync.webdav.WebDavSync
@@ -139,9 +140,7 @@ class BackupVM(
         val targetAssistantId = currentSettings.assistantId
         settingsStore.update { latestSettings ->
             latestSettings.copy(
-                providers = result.providers + latestSettings.providers.filterNot { existing ->
-                    result.providers.any { imported -> imported.id == existing.id }
-                },
+                providers = mergeImportedProviders(latestSettings.providers, result.providers),
                 assistants = latestSettings.assistants.map { assistant ->
                     if (result.hasConversationSystemPrompt && assistant.id == targetAssistantId) {
                         assistant.copy(allowConversationSystemPrompt = true)
@@ -160,7 +159,7 @@ class BackupVM(
                 "skip ${result.skippedForkMessages} fork messages and ${result.skippedSessions} sessions"
         )
         ChatboxRestoreResult(
-            importedProviders = result.providers.size,
+            importedProviders = result.providers.count { imported -> currentSettings.providers.none { it.id == imported.id } },
             importedConversations = importedConversations,
             skippedExistingConversations = skippedExistingConversations,
             importedImageParts = result.importedImageParts,

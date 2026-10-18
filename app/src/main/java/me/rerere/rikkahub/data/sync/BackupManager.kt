@@ -148,6 +148,7 @@ class BackupManager(
                         // Reject unsupported schemas before publishing; run supported old migrations on the copy.
                         val room = AppDatabaseFactory.create(context, stagedDatabase.absolutePath)
                         try {
+                            remapStagedMessageFiles(room.openHelper.writableDatabase, File(payload, "files"))
                             DatabaseBackup.checkpoint(room.openHelper.writableDatabase)
                         } finally {
                             room.close()
@@ -181,6 +182,32 @@ class BackupManager(
                 }
             }
         }
+
+    /** Rebase chat attachments restored from this archive onto this install's files directory. */
+    private fun remapStagedMessageFiles(db: androidx.sqlite.db.SupportSQLiteDatabase, stagedFiles: File) {
+        val restoredPaths = stagedFiles.walkTopDown().filter { it.isFile }
+            .map { it.relativeTo(stagedFiles).invariantSeparatorsPath }.toSet()
+        if (restoredPaths.isEmpty()) return
+        val updates = buildList {
+            db.query("SELECT id, messages FROM message_node WHERE instr(messages, '/files/upload/') > 0").use { cursor ->
+                while (cursor.moveToNext()) {
+                    val original = cursor.getString(1)
+                    val remapped = remapRestoredMessageFileUrls(original, context.filesDir, restoredPaths)
+                    if (remapped != original) add(cursor.getString(0) to remapped)
+                }
+            }
+        }
+        if (updates.isEmpty()) return
+        db.beginTransaction()
+        try {
+            updates.forEach { (id, messages) ->
+                db.execSQL("UPDATE message_node SET messages = ? WHERE id = ?", arrayOf<Any>(messages, id))
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
 
     private fun isAttachment(name: String): Boolean {
         val folder = name.substringBefore('/')
