@@ -10,8 +10,8 @@ import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.files.FilesManager
 
 fun micRecorderTool(context: Context, files: FilesManager): Tool = personalJsonTool(context,"record_audio",
-    "Record microphone audio on a visible foreground screen with Cancel. duration_ms 1000-300000 (default 10000). Backgrounding/cancellation stops and removes partial recordings. Returns durable AAC/m4a file_uri and workspace_path in /upload.", LocalToolOption.MicRecorder,
-    InputSchema.Obj(buildJsonObject { put("duration_ms",buildJsonObject { put("type","integer"); put("minimum",1000); put("maximum",300000) }) }), ::recordingDuration,
+    "Записывает микрофон на видимом экране с кнопкой отмены; требуется доступ к микрофону. duration_ms 1000–300000, по умолчанию 10000. Фон или отмена останавливает запись и удаляет неполный файл. Для получения текста речи используйте speech_to_text. Успех JSON возвращает постоянные file_uri, workspace_path в /upload и duration_ms для AAC/m4a до 16 МиБ; не записывает скрытно.", LocalToolOption.MicRecorder,
+    InputSchema.Obj(buildJsonObject { put("duration_ms",buildJsonObject { put("type","integer"); put("minimum",1000); put("maximum",300000); put("description", "Длительность записи в миллисекундах: 1000–300000, по умолчанию 10000."); put("default", 10000) }) }), ::recordingDuration,
     read={ duration ->
         val result=awaitPersonalToolUi(context,PersonalUiRequest.Record(duration),duration+20000L)
         if (result !is PersonalUiResult.Recording) return@personalJsonTool personalUiError(result, "Проверьте разрешение микрофона и завершите другой звонок или запись.")

@@ -26,33 +26,17 @@ import java.time.ZonedDateTime
 
 internal fun buildScreenTimeTool(context: Context, eventBus: AppEventBus): Tool = Tool(
     name = "get_screen_time",
-    description = """
-        Get the user's app screen usage (screen time) over a time range.
-        Specify a custom interval with 'begin'/'end', or use the 'range' preset (today/week).
-        Returns the total foreground time and a per-app breakdown sorted by usage time (descending).
-        The device timezone is '${ZoneId.systemDefault()}' (UTC offset ${OffsetDateTime.now().offset});
-        times without an explicit offset are interpreted in this timezone.
-        Requires the 'Usage access' special permission. If it is missing, an error explains
-        how the user can grant access manually. Future end times are limited to the current time.
-    """.trimIndent().replace("\n", " "),
+    description = "Читает время использования приложений за begin/end либо range=today/week; по умолчанию сегодня до текущего момента. Требуется специальный доступ к статистике использования: при отказе объясняет ручное включение, сам настройки не открывает. Часовой пояс устройства ${ZoneId.systemDefault()} (UTC ${OffsetDateTime.now().offset}) используется для времени без смещения. Будущий end ограничивается текущим временем; top 1–50, по умолчанию 10. JSON содержит total_ms/total_minutes всех найденных приложений, apps по убыванию времени без приложений домашнего экрана и returned/total_apps/truncated/has_more для ограничения top. Это статистика переднего плана, не история содержания экрана; для текущего интерфейса используйте window_tree.",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("begin", buildJsonObject {
                     put("type", "string")
-                    put(
-                        "description",
-                        "Start time (inclusive). Accepts an ISO-8601 date 'yyyy-MM-dd', a local " +
-                            "date-time 'yyyy-MM-ddTHH:mm:ss', an offset date-time, or epoch milliseconds. " +
-                            "When provided, 'range' is ignored."
-                    )
+                    put("description", "Начало включительно: дата ISO-8601, локальные дата/время, время со смещением либо миллисекунды Unix строкой. При наличии range игнорируется.")
                 })
                 put("end", buildJsonObject {
                     put("type", "string")
-                    put(
-                        "description",
-                        "End time (exclusive), same formats as 'begin'. Defaults to now."
-                    )
+                    put("description", "Конец исключительно в формате begin; без параметра текущее время. Будущее время ограничивается текущим.")
                 })
                 put("range", buildJsonObject {
                     put("type", "string")
@@ -63,14 +47,15 @@ internal fun buildScreenTimeTool(context: Context, eventBus: AppEventBus): Tool 
                             add("week")
                         }
                     )
-                    put(
-                        "description",
-                        "Convenience preset, used only when 'begin' is omitted: today or week. Default today."
-                    )
+                    put("description", "Период без begin: today — сегодня, week — неделя от текущего момента назад; по умолчанию today.")
+                    put("default", "today")
                 })
                 put("top", buildJsonObject {
                     put("type", "integer")
-                    put("description", "Maximum number of top apps to return, sorted by usage time. Default 10.")
+                    put("description", "Максимум приложений по убыванию времени: 1–50, по умолчанию 10; значения вне диапазона ограничиваются.")
+                    put("minimum", 1)
+                    put("maximum", 50)
+                    put("default", 10)
                 })
             }
         )
@@ -153,6 +138,11 @@ internal fun buildScreenTimeTool(context: Context, eventBus: AppEventBus): Tool 
             put("end", endTime.withNano(0).toString())
             put("total_ms", totalMs)
             put("total_minutes", totalMs / 60000)
+            put("returned", apps.size)
+            put("total_apps", sorted.size)
+            put("truncated", apps.size < sorted.size)
+            put("has_more", apps.size < sorted.size)
+            if (apps.size < sorted.size) put("continuation", "Показана только часть приложений. Увеличьте top до 50 или сузьте begin/end; автоматического курсора продолжения нет. total_ms включает все найденные приложения.")
             put("apps", buildJsonArray {
                 apps.forEach { entry ->
                     add(buildJsonObject {

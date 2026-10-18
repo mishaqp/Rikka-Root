@@ -27,34 +27,17 @@ import java.time.ZonedDateTime
 
 internal fun buildCalendarQueryTool(context: Context): Tool = Tool(
     name = "calendar_query",
-    description = """
-        Query calendar events on the user's device within a time range.
-        Specify a custom interval with 'begin'/'end', or use the 'range' preset (today/week/month).
-        Returns a list of events with title, description, location, start/end times, and calendar info.
-        The device timezone is '${ZoneId.systemDefault()}' (UTC offset ${OffsetDateTime.now().offset});
-        times without an explicit offset are interpreted in this timezone.
-        With begin but no end, queries one day from begin and ignores range.
-        Requires the 'Calendar' permission; if it is missing, returns an error with manual access guidance.
-    """.trimIndent().replace("\n", " "),
+    description = "Читает события календаря Android в интервале begin/end либо range=today/week/month (по умолчанию today). Для создания используйте calendar_create. Требуется ручное разрешение чтения календаря; инструмент не включает доступ сам. Часы без смещения используют текущий часовой пояс устройства ${ZoneId.systemDefault()} (UTC ${OffsetDateTime.now().offset}). При begin без end берётся один день от begin и range игнорируется. JSON возвращает range_start, range_end, count, events и truncated/has_more для дополнительных событий с названием, описанием, местом, временем и календарём. limit 1–100, по умолчанию 20; query ищет буквальную подстроку заголовка.",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("begin", buildJsonObject {
                     put("type", "string")
-                    put(
-                        "description",
-                        "Start time (inclusive). Accepts an ISO-8601 date 'yyyy-MM-dd', a local " +
-                            "date-time 'yyyy-MM-ddTHH:mm:ss', an offset date-time, or epoch milliseconds. " +
-                            "When provided, 'range' is ignored."
-                    )
+                    put("description", "Начало включительно: дата ISO-8601, локальные дата/время, время со смещением либо миллисекунды Unix строкой. При наличии range игнорируется.")
                 })
                 put("end", buildJsonObject {
                     put("type", "string")
-                    put(
-                        "description",
-                        "End time (exclusive), same formats as 'begin'. With begin, defaults to begin plus one day; " +
-                            "otherwise defaults to the end of the selected today/week/month period."
-                    )
+                    put("description", "Конец исключительно в формате begin; без end берётся один день от begin либо конец выбранного периода.")
                 })
                 put("range", buildJsonObject {
                     put("type", "string")
@@ -66,18 +49,19 @@ internal fun buildCalendarQueryTool(context: Context): Tool = Tool(
                             add("month")
                         }
                     )
-                    put(
-                        "description",
-                        "Convenience preset, used only when 'begin' is omitted: today, week, or month. Default today."
-                    )
+                    put("description", "Период без begin: today — сегодня, week — неделя с понедельника, month — текущий месяц; по умолчанию today.")
+                    put("default", "today")
                 })
                 put("query", buildJsonObject {
                     put("type", "string")
-                    put("description", "Optional keyword to filter events by title (case-insensitive substring match).")
+                    put("description", "Необязательная буквальная подстрока заголовка события; %, _ и обратная косая черта экранируются.")
                 })
                 put("limit", buildJsonObject {
                     put("type", "integer")
-                    put("description", "Maximum number of events to return. Default 20.")
+                    put("description", "Максимум событий 1–100, по умолчанию 20; значения вне диапазона ограничиваются его границами.")
+                    put("minimum", 1)
+                    put("maximum", 100)
+                    put("default", 20)
                 })
             }
         )
@@ -166,6 +150,7 @@ internal fun buildCalendarQueryTool(context: Context): Tool = Tool(
             .appendPath(endMs.toString())
             .build()
 
+        var hasMore = false
         val events = buildJsonArray {
             context.contentResolver.query(
                 uri,
@@ -175,7 +160,7 @@ internal fun buildCalendarQueryTool(context: Context): Tool = Tool(
                 "${CalendarContract.Instances.BEGIN} ASC"
             )?.use { cursor ->
                 var count = 0
-                while (cursor.moveToNext() && count < limit) {
+                while (count < limit && cursor.moveToNext()) {
                     add(buildJsonObject {
                         put("id", cursor.getLong(0))
                         put("title", cursor.getString(1) ?: "")
@@ -210,6 +195,7 @@ internal fun buildCalendarQueryTool(context: Context): Tool = Tool(
                     })
                     count++
                 }
+                hasMore = cursor.moveToNext()
             }
         }
 
@@ -217,6 +203,9 @@ internal fun buildCalendarQueryTool(context: Context): Tool = Tool(
             put("range_start", startTime.withNano(0).toString())
             put("range_end", endTime.withNano(0).toString())
             put("count", events.size)
+            put("truncated", hasMore)
+            put("has_more", hasMore)
+            if (hasMore) put("continuation", "Показана только часть событий. Увеличьте limit до 100 или сузьте begin/end/query; автоматического курсора продолжения нет.")
             put("events", events)
         }
         listOf(UIMessagePart.Text(payload.toString()))
@@ -225,47 +214,38 @@ internal fun buildCalendarQueryTool(context: Context): Tool = Tool(
 
 internal fun buildCalendarCreateTool(context: Context): Tool = Tool(
     name = "calendar_create",
-    description = """
-        Create a new calendar event on the user's device.
-        Requires title and start time at minimum. End time defaults to 1 hour after start.
-        The device timezone is '${ZoneId.systemDefault()}' (UTC offset ${OffsetDateTime.now().offset});
-        times without an explicit offset are interpreted in this timezone.
-        Requires the 'Calendar' permission; if it is missing, returns an error with manual access guidance.
-    """.trimIndent().replace("\n", " "),
+    description = "Создаёт событие в доступном для записи календаре Android после одобрения. Обязательны title и start; end по умолчанию через один час, all_day=false. Для чтения используйте calendar_query. Требуется ручное разрешение записи календаря; без календаря добавьте учётную запись в Android. Часы без смещения используют текущий пояс устройства ${ZoneId.systemDefault()} (UTC ${OffsetDateTime.now().offset}); событие на весь день сохраняется по датам UTC. JSON сообщает об успехе и ID созданного события; не повторяйте создание автоматически при неясном результате.",
     needsApproval = { true },
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("title", buildJsonObject {
                     put("type", "string")
-                    put("description", "Event title.")
+                    put("description", "Обязательный непустой заголовок создаваемого события.")
+                    put("minLength", 1)
                 })
                 put("description", buildJsonObject {
                     put("type", "string")
-                    put("description", "Event description or notes.")
+                    put("description", "Необязательное описание или заметки события; без параметра пустая строка.")
+                    put("default", "")
                 })
                 put("location", buildJsonObject {
                     put("type", "string")
-                    put("description", "Event location.")
+                    put("description", "Необязательное место события; без параметра пустая строка.")
+                    put("default", "")
                 })
                 put("start", buildJsonObject {
                     put("type", "string")
-                    put(
-                        "description",
-                        "Start time. Accepts an ISO-8601 date 'yyyy-MM-dd', a local " +
-                            "date-time 'yyyy-MM-ddTHH:mm:ss', an offset date-time, or epoch milliseconds."
-                    )
+                    put("description", "Обязательное начало: дата ISO-8601, локальные дата/время, время со смещением либо миллисекунды Unix строкой.")
                 })
                 put("end", buildJsonObject {
                     put("type", "string")
-                    put(
-                        "description",
-                        "End time, same formats as 'start'. Defaults to 1 hour after start."
-                    )
+                    put("description", "Конец исключительно в формате start; по умолчанию через один час после start. Для all_day явно укажите дату end позже даты start.")
                 })
                 put("all_day", buildJsonObject {
                     put("type", "boolean")
-                    put("description", "Whether this is an all-day event. Default false.")
+                    put("description", "Создать событие на весь день по датам UTC; по умолчанию false.")
+                    put("default", false)
                 })
             },
             required = listOf("title", "start")

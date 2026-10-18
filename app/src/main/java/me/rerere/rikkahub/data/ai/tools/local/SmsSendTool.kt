@@ -223,11 +223,11 @@ private fun smsCallbackIntent(context: Context, id: String, part: Int, delivered
 }
 
 fun smsSendTool(context: Context): Tool = personalJsonTool(context, "send_sms",
-    "Send one SMS to one phone number (body at most 4096 characters). Long messages split into parts. Requires SEND_SMS; operator charges may apply. Optional subscription_id for SIM choice, otherwise Android default SMS SIM. Waits at most 30 seconds total for separate sent and delivery callbacks. Success confirms network submission; recipient_delivery_confirmed requires delivery reports for every part. Reports Android result codes, modem codes when supplied, native exception types and timeout. Never retry automatically, including partial or unconfirmed sending.", LocalToolOption.SmsSend,
+    "Отправляет одно SMS на один номер после разрешения SEND_SMS; оператор может списать плату. recipient — 3–20 цифр с необязательным +, пробелами, скобками и дефисами (до 48 символов), body — 1–4096 символов. Длинное сообщение делится максимум на 64 части. subscription_id выбирает SIM, иначе используется SIM Android по умолчанию. Для чтения используйте list_sms_inbox. Ожидание отправки и отчётов доставки суммарно до 30 секунд. JSON success подтверждает передачу сети, recipient_delivery_confirmed — отчёты для всех частей; коды Android/модема и timeout описывают сбой. Никогда не повторяйте автоматически, включая частичный или неподтверждённый результат.", LocalToolOption.SmsSend,
     InputSchema.Obj(buildJsonObject {
-        put("recipient", buildJsonObject { put("type", "string"); put("maxLength", 48) })
-        put("body", buildJsonObject { put("type", "string"); put("maxLength", 4096) })
-        put("subscription_id", buildJsonObject { put("type", "integer"); put("minimum", 0) })
+        put("recipient", buildJsonObject { put("type", "string"); put("maxLength", 48); put("description", "Один телефонный номер: 3–20 цифр с необязательным +, пробелами, скобками и дефисами; до 48 символов."); put("minLength", 3) })
+        put("body", buildJsonObject { put("type", "string"); put("maxLength", 4096); put("description", "Непустой текст SMS, 1–4096 символов; длинное сообщение делится на части и может оплачиваться оператором."); put("minLength", 1) })
+        put("subscription_id", buildJsonObject { put("type", "integer"); put("minimum", 0); put("description", "Неотрицательный ID подписки Android для SIM; без параметра используется выбранная в Android SIM для SMS.") })
     }, listOf("recipient", "body")), ::validateSmsArguments, read = { args ->
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED)
             return@personalJsonTool deviceToolError("Разрешение отправки SMS отозвано. Включите его в настройках функции ассистента.", Manifest.permission.SEND_SMS)

@@ -19,7 +19,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 
 fun cameraPhotoTool(context: Context, files: FilesManager): Tool = Tool(
-    name="take_photo", description="After approval, open a visible camera preview and automatically take one photo when ready. If in-app capture fails, open the system camera for the user to take a photo manually. Requires foreground app and CAMERA permission. Saves a durable image attachment to this chat's upload area and returns file_uri, workspace_path (/upload/...), width, height and capture_method. Cancelled/empty photos are removed; no automatic gallery copy.",
+    name="take_photo", description="После одобрения открывает видимое превью камеры и автоматически делает одно фото, когда камера готова. При сбое открывает системную камеру для ручной съёмки пользователем. Требуется открытое приложение и разрешение CAMERA. Для записи звука используйте record_audio, для уже сохранённого изображения — чтение файла. Сохраняет постоянное вложение этого чата в /upload; возвращает изображение и JSON file_uri, workspace_path, width, height, capture_method, диагностику при наличии. Отмена и пустые фото удаляются; в галерею автоматически не копирует. Входной файл до 32 МиБ, сохранённый JPEG до 16 МиБ.",
     parameters={ InputSchema.Obj(buildJsonObject {}) }, needsApproval={ true }, execute={ input -> deviceToolParts {
         if (input !is JsonObject) return@deviceToolParts listOf(UIMessagePart.Text(deviceToolError("Параметры должны быть объектом.").toString()))
         val missing=missingLocalToolPermissions(context,LocalToolOption.CameraPhoto)

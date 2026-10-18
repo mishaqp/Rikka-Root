@@ -33,10 +33,10 @@ private fun locationPayload(location: Location, cached: Boolean, precise: Boolea
 }
 
 fun locationTool(context: Context): Tool = personalJsonTool(context, "get_location",
-    "Get location while Rikka-Root is open. Works without Google Play Services. Approximate permission is supported and reported. accuracy high/balanced/low; timeout_ms 1000-60000 (default 30000). Fresh cache under 2 minutes may be used; an older fallback is explicitly marked cached with age_ms.", LocalToolOption.Location,
+    "Получает местоположение только при открытом Rikka-Root без Google Play Services; поддерживает приблизительное разрешение и явно указывает precision. accuracy high/balanced/low (по умолчанию balanced), timeout_ms 1000–60000 (по умолчанию 30000). Свежий кэш до 2 минут может использоваться сразу, более старый запасной результат помечается cached и age_ms. JSON содержит координаты, время и доступную точность. Не отслеживает в фоне; для истории перемещений не предназначен.", LocalToolOption.Location,
     InputSchema.Obj(buildJsonObject {
-        put("accuracy", buildJsonObject { put("type", "string"); put("description", "high, balanced (default), or low") })
-        put("timeout_ms", buildJsonObject { put("type", "integer"); put("minimum", 1000); put("maximum", 60000) })
+        put("accuracy", buildJsonObject { put("type", "string"); put("description", "Желаемая точность: high предпочитает GPS, balanced и low — сеть; фактическая точность зависит от разрешения и доступных служб."); put("enum", buildJsonArray { add("high"); add("balanced"); add("low") }); put("default", "balanced") })
+        put("timeout_ms", buildJsonObject { put("type", "integer"); put("minimum", 1000); put("maximum", 60000); put("description", "Срок ожидания координат в миллисекундах: 1000–60000, по умолчанию 30000."); put("default", 30000) })
     }), ::locationArguments, read = { args -> withContext(Dispatchers.Main.immediate) {
         val lifecycle = ProcessLifecycleOwner.get().lifecycle
         if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@withContext deviceToolError("Для получения местоположения откройте Rikka-Root. Фоновый доступ не используется.")
