@@ -102,6 +102,16 @@ class AssistantDataIsolationAuditTest {
         assertNull(database.memoryDao().getMemoryById(id))
     }
 
+    @Test fun removedOwnerCannotEditOrDeleteEvenItsOwnRemainingMemory() = runBlocking {
+        val id = seed(owner.id.toString())
+        for (action in listOf("edit", "delete")) {
+            val output = invokeMemory(owner, action, id, ownerPresent = false)
+            assertTrue("Удалённый владелец не получает успешный результат: $output", output.containsKey("error"))
+            assertFalse(output.toString(), output.containsKey("success"))
+            assertEquals("Исходная запись", database.memoryDao().getMemoryById(id)?.content)
+        }
+    }
+
     @Test fun conversationSearchCannotReturnAnotherAssistantsChats() = runBlocking {
         // Native jieba tokenizer is unavailable in JVM tests; replace only the FTS boundary.
         // The real repository forwards the scope and the real tool renders its results.
@@ -123,11 +133,12 @@ class AssistantDataIsolationAuditTest {
     private suspend fun seed(assistantId: String): Int =
         database.memoryDao().insertMemory(MemoryEntity(assistantId = assistantId, content = "Исходная запись")).toInt()
 
-    private suspend fun invokeMemory(assistant: Assistant, action: String, id: Int): JsonObject {
+    private suspend fun invokeMemory(assistant: Assistant, action: String, id: Int, ownerPresent: Boolean = true): JsonObject {
         val factory = ChatToolFactory(Json, memories, mockk(relaxed = true), mockk(relaxed = true),
             mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true),
             mockk(relaxed = true), mockk(relaxed = true), { error("Subagent must not run") }, mockk(relaxed = true))
-        val tool: Tool = factory.createTools(Settings(), assistant, Model()).single { it.name == "memory_tool" }
+        val tool: Tool = factory.createTools(Settings(assistants = if (ownerPresent) listOf(assistant) else emptyList(),
+            assistantId = assistant.id), assistant, Model()).single { it.name == "memory_tool" }
         val parts = tool.execute(buildJsonObject { put("action", action); put("id", id); put("content", "Новая запись") })
         return Json.parseToJsonElement((parts.single() as UIMessagePart.Text).text).jsonObject
     }
