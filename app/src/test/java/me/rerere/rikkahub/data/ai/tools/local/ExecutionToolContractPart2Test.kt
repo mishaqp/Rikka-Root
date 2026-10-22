@@ -8,6 +8,7 @@ import me.rerere.ai.core.Tool
 import me.rerere.rikkahub.data.ai.mcp.McpManager
 import me.rerere.rikkahub.data.ai.mcp.control.*
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.preferences.TermuxRuntime
 import me.rerere.rikkahub.data.repository.SshHostRepository
 import me.rerere.rikkahub.data.ssh.SshToolSecretSanitizer
 import me.rerere.rikkahub.root.RootShellManager
@@ -46,9 +47,21 @@ class ExecutionToolContractPart2Test {
     @Test fun browserContractsExplainTheOperationAndEveryParameterInRussian() = russianContract(browser())
     @Test fun mcpContractsDescribeNestedHeaderFieldsAndEveryParameterInRussian() = russianContract(mcp())
 
-    @Test fun rootSchemaPublishesTheExistingTimeoutClamp() {
-        bounds(root(), "timeout_ms", 1_000, 300_000, 30_000)
-        assertEquals(listOf("command"), schema(root()).required)
+    @Test fun rootSchemaPublishesUserTimeoutWithinTheExistingClamp() {
+        val savedTimeout = TermuxRuntime.commandTimeoutMs
+        try {
+            TermuxRuntime.commandTimeoutMs = 120_000
+            val tool = root()
+            bounds(tool, "timeout_ms", 1_000, 300_000, 120_000)
+            // Reusing a registered tool must still publish the current preference.
+            TermuxRuntime.commandTimeoutMs = 180_000
+            bounds(tool, "timeout_ms", 1_000, 300_000, 180_000)
+            TermuxRuntime.commandTimeoutMs = 600_000
+            bounds(tool, "timeout_ms", 1_000, 300_000, 300_000)
+            assertEquals(listOf("command"), schema(tool).required)
+        } finally {
+            TermuxRuntime.commandTimeoutMs = savedTimeout
+        }
     }
 
     @Test fun sshSchemasPublishTimeoutAndPortBoundsWithActualDefaults() {
