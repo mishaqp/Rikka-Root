@@ -33,6 +33,9 @@ internal class RootCommandSession(private val suExecutable: String, directory: F
             wait "${'$'}child"
             exit ${'$'}?
         """.trimIndent()
+        // Keep the su shell waiting for the supervisor. If it already leads a group,
+        // exec setsid can fork and return 0 before the actual command has completed.
+        // A child launched without job control cannot already lead that inherited group.
         return """
             [ -f ${quote(active.path)} ] || exit 125
             if [ "${'$'}(id -u)" != 0 ]; then
@@ -43,7 +46,7 @@ internal class RootCommandSession(private val suExecutable: String, directory: F
                 printf unavailable > ${quote(capability.path)}
                 exit 127
             fi
-        """.trimIndent() + "\nexec setsid sh -c " + quote(supervisor)
+        """.trimIndent() + "\nset +m\nsetsid sh -c " + quote(supervisor) + "\nexit \$?"
     }
 
     fun capabilityUnavailable(): Boolean = capability.readText() == "unavailable"

@@ -112,7 +112,7 @@ internal object TermuxIntegration {
 
     /**
      * Run a tiny `echo` smoke test through the Termux RUN_COMMAND service and wait for the
-     * result bundle. Returns true iff the bundle came back with our marker on stdout, which
+     * result bundle. Returns Ok only for exit code zero and the exact marker line on stdout, which
      * proves the entire chain works (manifest perm + runtime perm + allow-external-apps in
      * termux.properties + Termux is allowed to start a background session).
      */
@@ -128,9 +128,16 @@ internal object TermuxIntegration {
             timeoutMs = timeoutMs,
         )
         return when (result) {
-            is CaptureResult.Success -> if (result.stdout.contains("RIKKAHUB_OK"))
-                VerifyResult.Ok else VerifyResult.UnexpectedOutput(result.stdout)
-            is CaptureResult.Timeout -> VerifyResult.AllowExternalAppsMissing
+            is CaptureResult.Success -> when {
+                result.exitCode != 0 -> VerifyResult.OtherError(
+                    "Проверочная команда Termux завершилась с кодом ${result.exitCode}. Откройте Termux, проверьте оболочку и повторите проверку."
+                )
+                result.stdout.lineSequence().any { it.trimEnd('\r') == "RIKKAHUB_OK" } -> VerifyResult.Ok
+                else -> VerifyResult.UnexpectedOutput(result.stdout)
+            }
+            is CaptureResult.Timeout -> VerifyResult.OtherError(
+                "Termux не вернул результат проверки вовремя. Подключение не подтверждено. Откройте Termux и повторите проверку."
+            )
             is CaptureResult.Denied -> VerifyResult.NoPermission
             is CaptureResult.OtherError -> VerifyResult.OtherError(result.message)
         }
@@ -652,7 +659,7 @@ fun termuxRunCommandTool(context: Context): Tool = Tool(
                 // (boundary-aligned via takeFirstUtf8Bytes) so multibyte output isn't mis-sized
                 // and the "bytes more" count is honest rather than a char-count delta.
                 put("stdout", boundedFailureOutput(res.stdout, maxOut))
-                if (res.stderr.isNotBlank()) put("stderr", boundedFailureOutput(res.stderr, maxErr))
+                if (res.stderr.isNotEmpty()) put("stderr", boundedFailureOutput(res.stderr, maxErr))
                 termuxOutputTruncation(res.stdout, res.stderr, maxOut, maxErr, recoveryKey = "recovery")
                     .forEach { (key, value) -> put(key, value) }
                 commandExitFailureReason(res.exitCode, res.stderr, CommandEnvironment.TERMUX,

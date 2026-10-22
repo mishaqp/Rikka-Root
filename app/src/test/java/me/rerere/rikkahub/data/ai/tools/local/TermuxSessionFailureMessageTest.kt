@@ -75,7 +75,11 @@ class TermuxSessionFailureMessageTest {
     }
 
     @Test fun `failed tmux package install retains shell exit and diagnostics`() = runBlocking {
-        val result = envelope(termuxSessionStartTool(context(err = -1, exitCode = 1, stderr = "E: package download failed")).execute(JsonObject(emptyMap())))
+        val context = callbackContext { arguments, _ ->
+            if (arguments[2].endsWith("/sh")) resultBundle(exitCode = 1)
+            else resultBundle(exitCode = 1, stderr = "E: package download failed")
+        }
+        val result = envelope(termuxSessionStartTool(context).execute(JsonObject(emptyMap())))
         assertEquals("tmux_install_failed", result["error"]?.jsonPrimitive?.content)
         assertTrue(result["recovery"]?.jsonPrimitive?.content.orEmpty().contains("pkg install tmux"))
         assertEquals("1", result["exit_code"]?.jsonPrimitive?.content)

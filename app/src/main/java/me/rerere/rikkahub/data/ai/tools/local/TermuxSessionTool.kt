@@ -174,7 +174,19 @@ private data class TmuxSetupError(val code: String, val result: CaptureResult)
 /** Ensure tmux is installed; auto-install on first use. Returns null on success, an error string otherwise. */
 private suspend fun ensureTmux(context: Context): TmuxSetupError? {
     val check = runCommandCapture(context, "$TERMUX_BIN/sh", arrayOf("-c", "command -v tmux"), TERMUX_HOME, TMUX_OP_TIMEOUT_MS)
-    if (check is CaptureResult.Success && check.stdout.isNotBlank()) return null
+    when (check) {
+        is CaptureResult.Denied -> return TmuxSetupError("termux_permission_denied", check)
+        is CaptureResult.Timeout -> return TmuxSetupError("timeout", check)
+        is CaptureResult.OtherError -> return TmuxSetupError("termux_run_failed", check)
+        is CaptureResult.Success -> {
+            if (check.exitCode == 0 && check.stdout.isNotBlank()) return null
+            // Only an ordinary command-v "not found" result justifies package installation.
+            // Transport failures, killed shells and contradictory output leave presence unknown.
+            if (check.exitCode !in listOf(1, 127) || check.stdout.isNotBlank() || check.stderr.isNotBlank()) {
+                return TmuxSetupError("termux_run_failed", check)
+            }
+        }
+    }
     // The install can run for the full INSTALL_TIMEOUT_MS (~180s). Keep the bound but surface
     // each outcome distinctly instead of silently blocking ~3 min and then reporting a generic
     // failure: a Denied means the permission path, a Timeout means the install is still going
@@ -183,7 +195,7 @@ private suspend fun ensureTmux(context: Context): TmuxSetupError? {
     if (install is CaptureResult.Denied) return TmuxSetupError("termux_permission_denied", install)
     if (install is CaptureResult.Timeout) return TmuxSetupError("tmux_installing", install)
     val recheck = runCommandCapture(context, "$TERMUX_BIN/sh", arrayOf("-c", "command -v tmux"), TERMUX_HOME, TMUX_OP_TIMEOUT_MS)
-    return if (recheck is CaptureResult.Success && recheck.stdout.isNotBlank()) null else
+    return if (recheck is CaptureResult.Success && recheck.exitCode == 0 && recheck.stdout.isNotBlank()) null else
         TmuxSetupError("tmux_install_failed", if (install is CaptureResult.OtherError ||
             install is CaptureResult.Success && install.exitCode != 0) install else recheck)
 }
@@ -392,11 +404,18 @@ fun termuxSessionStartTool(context: Context): Tool = Tool(
             val recovery = when (err.code) {
                 "tmux_installing" -> "tmux ещё устанавливается. Подождите и повторите termux_session_start."
                 "termux_permission_denied" -> "Termux не разрешает внешние команды. Проверьте разрешение RUN_COMMAND и allow-external-apps=true в ~/.termux/termux.properties, затем перезапустите Termux."
+                "timeout" -> "Проверка наличия tmux не завершилась вовремя и могла продолжить работу. Проверьте Termux перед повторным вызовом."
+                "termux_run_failed" -> "Не удалось проверить наличие tmux. Откройте Termux, проверьте выполнение обычных команд и повторите запуск сессии."
                 else -> "Не удалось установить tmux. Откройте Termux, выполните 'pkg install tmux' и повторите попытку."
             }
             return@Tool sessionErrorEnvelope(err.code, recovery, err.result)
         }
-        var live = (tmux(context, TmuxOps.listArgv()) as? CaptureResult.Success)?.let { parseSessions(it.stdout) } ?: emptyList()
+        val listed = tmux(context, TmuxOps.listArgv())
+        if (listed !is CaptureResult.Success && !listed.sessionMissing()) {
+            return@Tool sessionErrorEnvelope("session_list_failed",
+                "Не удалось получить список сессий Termux. Проверьте Termux и повторите запуск сессии.", listed)
+        }
+        var live = (listed as? CaptureResult.Success)?.let { parseSessions(it.stdout) } ?: emptyList()
         // Reap idle sessions before enforcing the cap: nothing else kills forgotten sessions,
         // so without this the MAX_SESSIONS budget fills permanently. session_activity is epoch
         // seconds, so compare against wall-clock seconds (not SystemClock.elapsedRealtime).
