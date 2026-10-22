@@ -34,6 +34,9 @@ class WorkflowTimeCronWorker(appContext: Context, params: WorkerParameters) :
             Result.success()
         } catch (cancel: CancellationException) {
             throw cancel
+        } catch (_: TimeCronWorkerHelper.LookupUnavailable) {
+            // Lookup happens before the durable occurrence claim: retry this same ID.
+            Result.retry()
         } catch (error: Exception) {
             Log.w("WorkflowTrigger", "time_cron execution failed (${error.javaClass.simpleName}): ${SecretRedactor.redact(error.message.orEmpty())}")
             Result.failure()
@@ -64,7 +67,15 @@ class WorkflowTimeCronFallbackWorker(appContext: Context, params: WorkerParamete
 
 /** Cold-process workers read the live enabled row; JSON's stale enabled value is ignored. */
 internal object TimeCronWorkerHelper {
-    suspend fun repositoryLookup(workflowId: String): WorkflowRepository.Loaded? = runCatching {
-        KoinJavaComponent.getKoin().get<WorkflowRepository>().getById(workflowId)
-    }.getOrNull()
+    class LookupUnavailable : java.io.IOException("Не удалось прочитать сценарий. Запуск будет повторён без удаления расписания.")
+
+    suspend fun repositoryLookup(workflowId: String): WorkflowRepository.Loaded? = try {
+        KoinJavaComponent.getKoin().get<WorkflowRepository>().getEnabledForScheduledExecution(workflowId)
+    } catch (cancel: CancellationException) {
+        throw cancel
+    } catch (_: Exception) {
+        // null means a missing or disabled row. Never cancel a durable due identity
+        // because Room or DI is temporarily unavailable; do not retain sensitive causes.
+        throw LookupUnavailable()
+    }
 }

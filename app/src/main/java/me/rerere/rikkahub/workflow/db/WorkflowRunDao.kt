@@ -53,11 +53,13 @@ interface WorkflowRunDao {
     suspend fun countCountedFiresSince(workflowId: String, sinceMs: Long): Int
 
     /**
-     * Most-recent firedAtMs of an actual fire (SUCCESS or FAILED) — excludes the SKIPPED_*
+     * Most-recent firedAtMs of an actual or uncertain fire — excludes the SKIPPED_*
      * statuses. Used by the cooldown gate so that a tap during cooldown doesn't push the
      * cooldown window forward (the projected `lastRunAtMs` column on the workflow row is
      * updated for every attempt and is therefore unsuitable for cooldown gating).
      */
-    @Query("SELECT firedAtMs FROM workflow_runs WHERE workflowId = :workflowId AND status IN ('SUCCESS', 'FAILED') ORDER BY firedAtMs DESC LIMIT 1")
+    // A completed effect whose terminal write failed still owns its cooldown.
+    // RUNNING is a durable uncertainty receipt, not permission to execute again.
+    @Query("SELECT firedAtMs FROM workflow_runs WHERE workflowId = :workflowId AND status IN ('RUNNING', 'SUCCESS', 'FAILED') ORDER BY firedAtMs DESC LIMIT 1")
     suspend fun lastActualFireAtMs(workflowId: String): Long?
 }

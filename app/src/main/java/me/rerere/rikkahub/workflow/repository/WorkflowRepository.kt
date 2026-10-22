@@ -100,6 +100,16 @@ class WorkflowRepository(
         parseCached(row)?.let { Loaded(row, it) }
     }
 
+    /** A damaged enabled row is not a deleted schedule. Disabled rows remain cancellable. */
+    internal suspend fun getEnabledForScheduledExecution(id: String): Loaded? {
+        val row = workflowDao.getById(id) ?: return null
+        if (!row.enabled) return null
+        val definition = checkNotNull(parseCached(row)) {
+            "Не удалось прочитать определение сценария. Расписание сохранено; исправьте сценарий и повторите запуск."
+        }
+        return Loaded(row, definition)
+    }
+
     /** Insert or replace a workflow. Updates [definitionJson] from the canonical encoder. */
     suspend fun upsert(rawDefinition: WorkflowDefinition) {
         // Credential-bearing actions store AndroidKeyStore references, never raw Room values.

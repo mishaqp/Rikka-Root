@@ -116,7 +116,7 @@ class WorkflowEngine(
         }
 
         // Cooldown gate. NOTE: must use `lastActualFireAtMs` (most-recent SUCCESS/FAILED
-        // from history) — NOT `entity.lastRunAtMs`, which gets overwritten on every
+        // or uncertain RUNNING receipt from history) — NOT `entity.lastRunAtMs`, which gets overwritten on every
         // attempt INCLUDING skips. Using the projected column would let SKIPPED_COOLDOWN
         // fires push the cooldown window forward indefinitely; the cooldown could never
         // be satisfied by waiting.
@@ -205,7 +205,7 @@ class WorkflowEngine(
         val durationMs = (System.nanoTime() - startedNanos) / 1_000_000L
         // Once actions have returned, cancellation must not split history insertion
         // from quota/cooldown accounting or discard the completed outcome.
-        withContext(NonCancellable) {
+        val persisted = withContext(NonCancellable) {
             runCatching {
                 repository.recordFire(
                     workflowId = workflowId,
@@ -215,9 +215,16 @@ class WorkflowEngine(
                     errorMessage = error,
                     startedRunId = startedRunId,
                 )
-            }.onFailure { Log.w(TAG, "recordFire failed for $workflowId", it) }
+            }.onFailure { Log.w(TAG, "Не удалось сохранить итог сценария $workflowId (${it.javaClass.simpleName})") }.isSuccess
         }
         currentCoroutineContext().ensureActive()
+        if (!persisted) {
+            // The committed RUNNING receipt remains the conservative durable truth.
+            // Never turn a storage fault into a promise of success or replay actions.
+            return FireOutcome(WorkflowRunStatus.FAILED,
+                "Не удалось сохранить итог сценария. Действия могли выполниться. Проверьте результат; не повторяйте их автоматически.",
+                summary, summaryTruncated)
+        }
         return FireOutcome(status, error, summary, summaryTruncated)
     }
 
@@ -233,7 +240,7 @@ class WorkflowEngine(
 
 /**
  * Cooldown decision in isolation so the (load-bearing) gate logic can be unit-tested
- * without spinning up Room + the engine. The rule: use the most-recent SUCCESS/FAILED
+ * without spinning up Room + the engine. The rule: use the most-recent RUNNING/SUCCESS/FAILED
  * fire time, not the workflow row's projected lastRunAtMs (the projected column is
  * bumped on every attempt — including skips — so it can't be the cooldown anchor).
  */
