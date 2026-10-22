@@ -1,9 +1,15 @@
 package me.rerere.rikkahub.ui.pages.backup
 
+import android.content.Context
+import android.net.Uri
 import android.util.Log
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -25,6 +31,10 @@ import me.rerere.rikkahub.data.sync.S3BackupItem
 import me.rerere.rikkahub.data.sync.S3Sync
 import me.rerere.rikkahub.utils.UiState
 import java.io.File
+import java.io.FileInputStream
+import java.io.IOException
+import me.rerere.rikkahub.data.sync.importer.ChatboxPartialImportException
+import me.rerere.rikkahub.data.sync.importer.ChatboxStreamingImportResult
 
 private const val TAG = "BackupVM"
 
@@ -95,11 +105,38 @@ class BackupVM(
         webDavSync.deleteBackupFile(settings.value.webDavConfig, item)
     }
 
+    suspend fun exportToDocument(context: Context, targetUri: Uri) {
+        val exportFile = exportToFile()
+        try {
+            withContext(Dispatchers.IO) {
+                val output = context.contentResolver.openOutputStream(targetUri)
+                    ?: throw IOException("Не удалось открыть выбранный файл для записи.")
+                output.use { outputStream ->
+                    FileInputStream(exportFile).use { inputStream ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        while (true) {
+                            currentCoroutineContext().ensureActive()
+                            val count = inputStream.read(buffer)
+                            if (count < 0) break
+                            outputStream.write(buffer, 0, count)
+                        }
+                    }
+                }
+            }
+            currentCoroutineContext().ensureActive()
+            recordBackupTime()
+            withContext(NonCancellable + Dispatchers.IO) { exportFile.delete() }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            throw IOException("Не удалось завершить экспорт. Временный архив сохранён: ${exportFile.absolutePath}", error)
+        }
+    }
+
     suspend fun exportToFile(): File {
         val file = webDavSync.prepareBackupFile(
             settings.value.webDavConfig.copy(items = localBackupItems.value)
         )
-        recordBackupTime()
         return file
     }
 
@@ -114,7 +151,22 @@ class BackupVM(
         val currentSettings = settings.value
         var importedConversations = 0
         var skippedExistingConversations = 0
-        val result = ChatboxImporter.importStreaming(
+        var savedHasSystemPrompt = false
+        var completed: ChatboxStreamingImportResult? = null
+        suspend fun commitSettings(result: ChatboxStreamingImportResult?) {
+            settingsStore.update { latestSettings ->
+                latestSettings.copy(
+                    providers = if (result != null) mergeImportedProviders(latestSettings.providers, result.providers) else latestSettings.providers,
+                    assistants = latestSettings.assistants.map { assistant ->
+                        if (savedHasSystemPrompt && assistant.id == currentSettings.assistantId) {
+                            assistant.copy(allowConversationSystemPrompt = true)
+                        } else assistant
+                    },
+                )
+            }
+        }
+        val result = try {
+            ChatboxImporter.importStreaming(
             file = file,
             assistantId = currentSettings.assistantId,
             providers = currentSettings.providers,
@@ -134,29 +186,31 @@ class BackupVM(
             onConversation = { conversation ->
                 conversationRepository.insertConversation(conversation)
                 importedConversations++
+                savedHasSystemPrompt = savedHasSystemPrompt || !conversation.customSystemPrompt.isNullOrBlank()
             }
-        )
-
-        val targetAssistantId = currentSettings.assistantId
-        settingsStore.update { latestSettings ->
-            latestSettings.copy(
-                providers = mergeImportedProviders(latestSettings.providers, result.providers),
-                assistants = latestSettings.assistants.map { assistant ->
-                    if (result.hasConversationSystemPrompt && assistant.id == targetAssistantId) {
-                        assistant.copy(allowConversationSystemPrompt = true)
-                    } else {
-                        assistant
-                    }
+            ).also { completed = it; commitSettings(it) }
+        } catch (error: Exception) {
+            val partial = (error as? ChatboxPartialImportException)?.partial ?: completed
+            var settingsFailure: Exception? = null
+            withContext(NonCancellable) {
+                // Retain imported files: a failed/cancelled insert can have committed before returning.
+                if (importedConversations > 0) {
+                    try { commitSettings(partial) } catch (failure: Exception) { settingsFailure = failure; error.addSuppressed(failure) }
                 }
-            )
+            }
+            if (error is CancellationException) throw error
+            if (importedConversations == 0) throw IOException("Не удалось импортировать чаты Chatbox. Существующие данные сохранены.", error)
+            val settingsWarning = if (settingsFailure == null) "Настройки сохранённых чатов применены."
+                else "Связанные настройки сохранить не удалось. Проверьте провайдеров и разрешение системного промпта перед продолжением."
+            throw IOException("Импорт Chatbox выполнен частично: сохранено $importedConversations чатов, пропущено $skippedExistingConversations существующих. $settingsWarning Существующие чаты сохранены.", error)
         }
 
         Log.i(
             TAG,
-            "restoreFromChatBox: import ${result.providers.size} providers, " +
-                "$importedConversations conversations, skip $skippedExistingConversations existing, " +
-                "import ${result.importedImageParts} images, drop ${result.skippedImageParts} images, " +
-                "skip ${result.skippedForkMessages} fork messages and ${result.skippedSessions} sessions"
+            "Импорт Chatbox: провайдеров ${result.providers.size}, " +
+                "чатов $importedConversations, пропущено существующих $skippedExistingConversations, " +
+                "изображений ${result.importedImageParts}, пропущено изображений ${result.skippedImageParts}, " +
+                "пропущено ответвлений ${result.skippedForkMessages} и сессий ${result.skippedSessions}"
         )
         ChatboxRestoreResult(
             importedProviders = result.providers.count { imported -> currentSettings.providers.none { it.id == imported.id } },
@@ -170,18 +224,19 @@ class BackupVM(
         )
     }
 
-    fun restoreFromCherryStudio(file: File) {
-        val importProviders = CherryStudioProviderImporter.importProviders(file)
-
-        if (importProviders.isEmpty()) {
-            throw IllegalArgumentException("No importable providers found in Cherry Studio backup")
+    suspend fun restoreFromCherryStudio(file: File) = withContext(Dispatchers.IO) {
+        try {
+            val importProviders = CherryStudioProviderImporter.importProviders(file)
+            require(importProviders.isNotEmpty()) { "В архиве Cherry Studio нет провайдеров для импорта." }
+            currentCoroutineContext().ensureActive()
+            settingsStore.update { current -> current.copy(providers = importProviders + current.providers) }
+            Log.i(TAG, "Импорт Cherry Studio завершён: провайдеров ${importProviders.size}")
+            Unit
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            throw IOException("Не удалось завершить импорт настроек Cherry Studio. Повторите импорт перед перезапуском.", error)
         }
-
-        Log.i(TAG, "restoreFromCherryStudio: import ${importProviders.size} providers: $importProviders")
-
-        updateSettings { current -> current.copy(
-                providers = importProviders + current.providers,
-            ) }
     }
 
     // S3 Backup methods

@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.sync.importer
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.JsonArray
@@ -113,35 +114,8 @@ object ChatboxImporter {
                 return url
             }
 
-            parseSessionEntries(manifest).forEach { sessionEntry ->
-                val session = zip.readJsonObject(sessionEntry.path, required = true)
-                    ?: error("Invalid Chatbox backup: ${sessionEntry.path} not found")
-                val sessionId = session["id"]?.asString ?: sessionEntry.id
-                if (sessionId.isBlank()) {
-                    counters.skippedSessions++
-                    return@forEach
-                }
 
-                val conversationId = stableUuid("chatbox:session:$sessionId")
-                if (!shouldImportConversation(conversationId)) return@forEach
-
-                val conversation = parseSession(
-                    session = session,
-                    sessionEntry = sessionEntry,
-                    assistantId = assistantId,
-                    providers = allProviders,
-                    resolveImage = ::resolveImage,
-                    counters = counters,
-                )
-                if (conversation == null) {
-                    counters.skippedSessions++
-                } else {
-                    parsedConversations++
-                    onConversation(conversation)
-                }
-            }
-
-            return ChatboxStreamingImportResult(
+            fun partialResult() = ChatboxStreamingImportResult(
                 providers = importedProviders,
                 parsedConversations = parsedConversations,
                 importedImageParts = counters.importedImageParts,
@@ -151,6 +125,37 @@ object ChatboxImporter {
                 skippedSessions = counters.skippedSessions,
                 hasConversationSystemPrompt = counters.hasConversationSystemPrompt,
             )
+            try {
+                parseSessionEntries(manifest).forEach { sessionEntry ->
+                    val session = zip.readJsonObject(sessionEntry.path, required = true)
+                        ?: error("Invalid Chatbox backup: ${sessionEntry.path} not found")
+                    val sessionId = session["id"]?.asString ?: sessionEntry.id
+                    if (sessionId.isBlank()) {
+                        counters.skippedSessions++
+                        return@forEach
+                    }
+
+                    val conversationId = stableUuid("chatbox:session:$sessionId")
+                    if (!shouldImportConversation(conversationId)) return@forEach
+
+                    val conversation = parseSession(
+                        session = session,
+                        sessionEntry = sessionEntry,
+                        assistantId = assistantId,
+                        providers = allProviders,
+                        resolveImage = ::resolveImage,
+                        counters = counters,
+                    )
+                    if (conversation == null) {
+                        counters.skippedSessions++
+                    } else {
+                        parsedConversations++
+                        onConversation(conversation)
+                    }
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { throw ChatboxPartialImportException(partialResult(), error) }
+            return partialResult()
         }
     }
 
@@ -767,3 +772,7 @@ internal fun mergeImportedProviders(existing: List<ProviderSetting>, imported: L
     val known = existing.map { it.id }.toSet()
     return imported.filterNot { it.id in known } + existing
 }
+
+/** Only parsed metadata; BackupVM reports the number of conversations actually committed. */
+internal class ChatboxPartialImportException(val partial: ChatboxStreamingImportResult, cause: Exception) :
+    Exception("Не удалось завершить импорт всех чатов Chatbox.", cause)

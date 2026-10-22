@@ -1,6 +1,12 @@
 package me.rerere.rikkahub.data.sync
 
 import androidx.core.net.toUri
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.model.Avatar
@@ -32,20 +38,47 @@ internal fun Settings.remapRestoredFileUrls(filesDir: File, restoredPaths: Set<S
     )
 }
 
-private val CHAT_UPLOAD_URL = Regex("""file://(/[^"\\\s]*?)/files/(${FileFolders.UPLOAD}/[^"\\/\s]+)""")
+private val CHAT_FILES_PATH = Regex("""^/data/(?:user(?:_de)?/[0-9]+|data)/[^/]+/files/(.+)$""")
 
-/**
- * Chat messages store absolute file URLs of the device that made the backup. A restore into
- * another app ID or user profile puts the bytes under this filesDir, so rebase the restored
- * upload files there; anything not restored from this archive is left untouched.
- */
+/** Rebase only attachment URL fields. User text, tool input and metadata remain unchanged. */
 internal fun remapRestoredMessageFileUrls(messagesJson: String, filesDir: File, restoredPaths: Set<String>): String {
-    if (restoredPaths.isEmpty() || "/files/${FileFolders.UPLOAD}/" !in messagesJson) return messagesJson
-    return CHAT_UPLOAD_URL.replace(messagesJson) { match ->
-        val relative = match.groupValues[2]
-        if (relative !in restoredPaths) match.value
-        else restoredFileUrl(filesDir, relative)
+    if (restoredPaths.isEmpty() || "/files/" !in messagesJson) return messagesJson
+    fun remap(url: String): String {
+        val uri = runCatching { url.toUri() }.getOrNull() ?: return url
+        if (uri.scheme != "file" || !uri.authority.isNullOrEmpty() || uri.query != null || uri.fragment != null) return url
+        val path = uri.path ?: return url
+        if ('\\' in path || path.any(Char::isISOControl) || path.split('/').any { it == "." || it == ".." }) return url
+        val relative = CHAT_FILES_PATH.matchEntire(path)?.groupValues?.get(1) ?: return url
+        if (relative !in restoredPaths || relative.split('/').any { it.isEmpty() }) return url
+        return restoredFileUrl(filesDir, relative)
     }
+    fun remapUrl(part: JsonObject): JsonObject {
+        val original = (part["url"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return part
+        val restored = remap(original)
+        return if (restored == original) part else JsonObject(part + ("url" to JsonPrimitive(restored)))
+    }
+    fun remapPart(element: JsonElement): JsonElement {
+        val part = element as? JsonObject ?: return element
+        return when ((part["type"] as? JsonPrimitive)?.contentOrNull) {
+            "image", "document", "audio", "video" -> remapUrl(part)
+            "tool" -> {
+                val output = part["output"] as? JsonArray ?: return part
+                JsonObject(part + ("output" to JsonArray(output.map(::remapPart))))
+            }
+            else -> part
+        }
+    }
+    val messages = JsonInstant.parseToJsonElement(messagesJson) as? JsonArray
+        ?: error("Не удалось прочитать вложения истории. Восстановление не применено; исходные данные сохранены.")
+    val remapped = JsonArray(messages.map { element ->
+        val message = element as? JsonObject ?: return@map element
+        val parts = message["parts"] as? JsonArray
+        if (parts != null) JsonObject(message + ("parts" to JsonArray(parts.map(::remapPart))))
+        // Preserve the earlier helper's narrow legacy attachment-only representation.
+        else if (message.keys == setOf("url")) remapUrl(message)
+        else message
+    })
+    return if (remapped == messages) messagesJson else JsonInstant.encodeToString(remapped)
 }
 
 /**

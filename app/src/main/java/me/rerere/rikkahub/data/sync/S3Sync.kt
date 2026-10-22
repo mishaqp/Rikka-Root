@@ -3,10 +3,14 @@ package me.rerere.rikkahub.data.sync
 import android.content.Context
 import android.util.Log
 import io.ktor.client.HttpClient
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.sync.s3.S3Client
 import me.rerere.rikkahub.data.sync.s3.S3Config
+import me.rerere.rikkahub.data.sync.s3.S3Object
 import me.rerere.rikkahub.utils.fileSizeToString
 import java.io.File
 import java.time.Instant
@@ -50,12 +54,24 @@ class S3Sync(
 
     suspend fun listBackupFiles(config: S3Config): List<S3BackupItem> = withContext(Dispatchers.IO) {
         val client = getS3Client(config)
-        val result = client.listObjects(
-            prefix = "rikkahub_backups/",
-            maxKeys = 1000
-        ).getOrThrow()
+        val objects = mutableListOf<S3Object>()
+        val tokens = mutableSetOf<String>()
+        var token: String? = null
+        do {
+            currentCoroutineContext().ensureActive()
+            val result = try {
+                client.listObjects(prefix = "rikkahub_backups/", maxKeys = 1000, continuationToken = token).getOrThrow()
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { throw IllegalStateException("Не удалось получить полный список резервных копий S3. Повторите загрузку списка.", error) }
+            objects.addAll(result.objects)
+            token = if (result.isTruncated) {
+                val next = result.nextContinuationToken
+                check(!next.isNullOrEmpty() && tokens.add(next)) { "S3 вернул неполный список без нового токена продолжения. Повторите загрузку списка." }
+                next
+            } else null
+        } while (token != null)
 
-        result.objects
+        objects
             .filter { it.key.startsWith("rikkahub_backups/backup_") && it.key.endsWith(".zip") }
             .map { obj ->
                 S3BackupItem(

@@ -10,6 +10,7 @@ import me.rerere.rikkahub.data.datastore.WebDavConfig
 import me.rerere.rikkahub.utils.fileSizeToString
 import java.io.File
 import java.time.Instant
+import java.net.URI
 
 private const val TAG = "WebDavSync"
 
@@ -60,7 +61,10 @@ class WebDavSync(
         val resources = client.list().getOrThrow()
 
         resources
-            .filter { !it.isCollection && it.displayName.startsWith("backup_") && it.displayName.endsWith(".zip") }
+            .filter { resource ->
+                !resource.isCollection && runCatching { backupHrefPath(config, resource.href).substringAfterLast('/') }
+                    .getOrNull()?.let { it.startsWith("backup_") && it.endsWith(".zip") } == true
+            }
             .map { resource ->
                 WebDavBackupItem(
                     href = resource.href,
@@ -73,13 +77,14 @@ class WebDavSync(
     }
 
     suspend fun restore(config: WebDavConfig, item: WebDavBackupItem) = withContext(Dispatchers.IO) {
+        val path = backupHrefPath(config, item.href)
         val client = getClient(config)
         val backupFile = File.createTempFile("restore-", ".zip", context.cacheDir)
 
         try {
             // Download backup file directly to file to avoid OOM
             Log.i(TAG, "restore: Downloading ${item.displayName}")
-            client.downloadToFile(item.displayName, backupFile).getOrThrow()
+            client.downloadToFile(path, backupFile).getOrThrow()
 
             Log.i(TAG, "restore: Downloaded ${backupFile.length().fileSizeToString()}")
 
@@ -96,7 +101,7 @@ class WebDavSync(
 
     suspend fun deleteBackupFile(config: WebDavConfig, item: WebDavBackupItem) = withContext(Dispatchers.IO) {
         val client = getClient(config)
-        client.delete(item.displayName).getOrThrow()
+        client.delete(backupHrefPath(config, item.href)).getOrThrow()
         Log.i(TAG, "deleteBackupFile: Deleted ${item.displayName}")
     }
 
@@ -123,3 +128,27 @@ data class WebDavBackupItem(
     val size: Long,
     val lastModified: Instant,
 )
+
+/** A DAV label is never an authenticated resource address or a local cache filename. */
+private fun backupHrefPath(config: WebDavConfig, href: String): String {
+    val reason = "Адрес резервной копии WebDAV выходит за настроенную папку или сервер. Обновите список архивов."
+    val rootText = config.url.trimEnd('/') + config.path.takeIf { it.isNotBlank() }?.let { "/${it.trim('/')}" }.orEmpty()
+    val root = try { URI(rootText) } catch (_: Exception) { throw IllegalArgumentException(reason) }
+    require(root.scheme?.lowercase() in setOf("http", "https") && root.host != null && root.rawUserInfo == null &&
+        root.rawQuery == null && root.rawFragment == null) { reason }
+    val collection = URI(root.toString().trimEnd('/') + "/")
+    val selected = try { URI(href) } catch (_: Exception) { throw IllegalArgumentException(reason) }
+    fun safePath(uri: URI): Boolean {
+        val path = uri.path.orEmpty()
+        return '\\' !in path && path.none(Char::isISOControl) && path.split('/').none { it == "." || it == ".." }
+    }
+    require(safePath(selected) && selected.rawQuery == null && selected.rawFragment == null) { reason }
+    val resolved = collection.resolve(selected)
+    fun port(uri: URI) = uri.port.takeIf { it != -1 } ?: if (uri.scheme.equals("https", true)) 443 else 80
+    require(resolved.scheme.equals(root.scheme, true) && resolved.host?.equals(root.host, true) == true &&
+        port(resolved) == port(root) && resolved.rawUserInfo == null && safePath(resolved)) { reason }
+    val prefix = collection.rawPath.orEmpty()
+    val rawPath = resolved.rawPath.orEmpty()
+    require(rawPath.startsWith(prefix) && rawPath.length > prefix.length) { reason }
+    return rawPath.removePrefix(prefix)
+}

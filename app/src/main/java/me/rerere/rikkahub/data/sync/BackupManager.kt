@@ -14,6 +14,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.migration.SettingsJsonMigrator
 import me.rerere.rikkahub.data.datastore.migration.protectLegacyMcpConfigs
 import me.rerere.rikkahub.data.ai.mcp.control.McpControlSecretStore
+import me.rerere.rikkahub.data.db.readSqliteTextChunks
 import me.rerere.rikkahub.data.db.AppDatabaseFactory
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.SQLiteConfiguration
@@ -184,24 +185,28 @@ class BackupManager(
         }
 
     /** Rebase chat attachments restored from this archive onto this install's files directory. */
-    private fun remapStagedMessageFiles(db: androidx.sqlite.db.SupportSQLiteDatabase, stagedFiles: File) {
+    private suspend fun remapStagedMessageFiles(db: androidx.sqlite.db.SupportSQLiteDatabase, stagedFiles: File) {
         val restoredPaths = stagedFiles.walkTopDown().filter { it.isFile }
             .map { it.relativeTo(stagedFiles).invariantSeparatorsPath }.toSet()
         if (restoredPaths.isEmpty()) return
-        val updates = buildList {
-            db.query("SELECT id, messages FROM message_node WHERE instr(messages, '/files/upload/') > 0").use { cursor ->
-                while (cursor.moveToNext()) {
-                    val original = cursor.getString(1)
-                    val remapped = remapRestoredMessageFileUrls(original, context.filesDir, restoredPaths)
-                    if (remapped != original) add(cursor.getString(0) to remapped)
-                }
-            }
-        }
-        if (updates.isEmpty()) return
+        // One snapshot for IDs and all BLOB slices; never place a complete large message in a cursor.
         db.beginTransaction()
         try {
-            updates.forEach { (id, messages) ->
-                db.execSQL("UPDATE message_node SET messages = ? WHERE id = ?", arrayOf<Any>(messages, id))
+            var afterId: String? = null
+            while (true) {
+                currentCoroutineContext().ensureActive()
+                val id = (if (afterId == null) db.query("SELECT id FROM message_node ORDER BY id LIMIT 1")
+                    else db.query("SELECT id FROM message_node WHERE id > ? ORDER BY id LIMIT 1", arrayOf(afterId)))
+                    .use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null } ?: break
+                val original = readSqliteTextChunks { start, size ->
+                    db.query("SELECT substr(CAST(messages AS BLOB), ?, ?) FROM message_node WHERE id = ?", arrayOf<Any>(start, size, id))
+                        .use { cursor -> if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getBlob(0) else null }
+                }
+                val remapped = remapRestoredMessageFileUrls(original, context.filesDir, restoredPaths)
+                if (remapped != original) {
+                    db.execSQL("UPDATE message_node SET messages = ? WHERE id = ?", arrayOf<Any>(remapped, id))
+                }
+                afterId = id
             }
             db.setTransactionSuccessful()
         } finally {

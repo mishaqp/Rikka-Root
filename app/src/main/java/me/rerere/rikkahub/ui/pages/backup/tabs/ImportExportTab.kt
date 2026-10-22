@@ -41,7 +41,6 @@ import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.pages.backup.BackupVM
 import me.rerere.ui.components.StickyHeader
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -71,18 +70,7 @@ fun ImportExportTab(
             scope.launch {
                 isExporting = true
                 runCatching {
-                    // 导出文件
-                    val exportFile = vm.exportToFile()
-
-                    // 复制到用户选择的位置
-                    context.contentResolver.openOutputStream(targetUri)?.use { outputStream ->
-                        FileInputStream(exportFile).use { inputStream ->
-                            inputStream.copyTo(outputStream)
-                        }
-                    }
-
-                    // 清理临时文件
-                    exportFile.delete()
+                    vm.exportToDocument(context, targetUri)
 
                     toaster.show(
                         resources.getString(R.string.backup_page_backup_success),
