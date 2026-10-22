@@ -141,7 +141,7 @@ class TermuxSessionFailureMessageTest {
     private fun callbackContext(response: (Array<String>, String) -> Bundle): Context {
         val context = object : ContextWrapper(RuntimeEnvironment.getApplication()) {
             override fun checkPermission(permission: String, pid: Int, uid: Int) = PackageManager.PERMISSION_GRANTED
-            override fun startService(service: Intent): ComponentName? {
+            override fun startForegroundService(service: Intent): ComponentName? {
                 val callback = service.getParcelableExtra<PendingIntent>("com.termux.RUN_COMMAND_PENDING_INTENT")!!
                 val arguments = service.getStringArrayExtra("com.termux.RUN_COMMAND_ARGUMENTS")!!
                 val marker = Regex("[0-9a-f-]{36}").find(arguments[1])!!.value

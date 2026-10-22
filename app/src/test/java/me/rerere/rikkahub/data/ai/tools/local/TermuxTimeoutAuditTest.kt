@@ -28,7 +28,7 @@ class TermuxTimeoutAuditTest {
     @Test fun `timeout warns about an unconfirmed running command and forbids blind retry`() = runBlocking {
         val context = object : ContextWrapper(RuntimeEnvironment.getApplication()) {
             override fun checkPermission(permission: String, pid: Int, uid: Int) = PackageManager.PERMISSION_GRANTED
-            override fun startService(service: Intent): ComponentName {
+            override fun startForegroundService(service: Intent): ComponentName {
                 val callback = service.getParcelableExtra<PendingIntent>("com.termux.RUN_COMMAND_PENDING_INTENT")!!
                 // A start ACK with partial output is not a terminal callback.
                 callback.send(this, 0, Intent().putExtra("result", Bundle().apply {

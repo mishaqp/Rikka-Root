@@ -29,7 +29,7 @@ class TermuxToolFailureMessageTest {
     @Test fun `nonzero captured exit explains the code without changing command streams`() = runBlocking {
         val context = object : ContextWrapper(RuntimeEnvironment.getApplication()) {
             override fun checkPermission(permission: String, pid: Int, uid: Int) = PackageManager.PERMISSION_GRANTED
-            override fun startService(service: Intent): ComponentName? {
+            override fun startForegroundService(service: Intent): ComponentName? {
                 val callback = service.getParcelableExtra<PendingIntent>("com.termux.RUN_COMMAND_PENDING_INTENT")!!
                 val result = Bundle().apply {
                     putInt("err", -1)
@@ -57,7 +57,7 @@ class TermuxToolFailureMessageTest {
 
     @Test fun `capture startup exception has a Russian action`() = runBlocking {
         val context = object : ContextWrapper(RuntimeEnvironment.getApplication()) {
-            override fun startService(service: Intent): ComponentName? = throw IOException("Broken pipe")
+            override fun startForegroundService(service: Intent): ComponentName? = throw IOException("Broken pipe")
         }
         val result = runCommandCapture(context, "/bin/echo", arrayOf("hi"), "/tmp", 1000)
         assertTrue(result is CaptureResult.OtherError)
@@ -70,7 +70,7 @@ class TermuxToolFailureMessageTest {
     @Test fun `Termux internal error keeps code and command output with Russian explanation`() = runBlocking {
         val context = object : ContextWrapper(RuntimeEnvironment.getApplication()) {
             override fun checkPermission(permission: String, pid: Int, uid: Int) = PackageManager.PERMISSION_GRANTED
-            override fun startService(service: Intent): ComponentName? {
+            override fun startForegroundService(service: Intent): ComponentName? {
                 val callback = service.getParcelableExtra<PendingIntent>("com.termux.RUN_COMMAND_PENDING_INTENT")!!
                 val result = Bundle().apply {
                     putInt("err", 7)
@@ -102,7 +102,7 @@ class TermuxToolFailureMessageTest {
     @Test fun `timeout keeps nonterminal callback output instead of discarding it`() = runBlocking {
         val context = object : ContextWrapper(RuntimeEnvironment.getApplication()) {
             override fun checkPermission(permission: String, pid: Int, uid: Int) = PackageManager.PERMISSION_GRANTED
-            override fun startService(service: Intent): ComponentName? {
+            override fun startForegroundService(service: Intent): ComponentName? {
                 val callback = service.getParcelableExtra<PendingIntent>("com.termux.RUN_COMMAND_PENDING_INTENT")!!
                 val result = Bundle().apply {
                     putInt("err", -1)

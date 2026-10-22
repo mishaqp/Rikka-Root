@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
@@ -394,7 +395,9 @@ internal suspend fun runCommandCapture(
     }
 
     return try {
-        ctx.startService(intent)
+        // RunCommandService promotes itself to foreground on Android 8+. An ordinary
+        // service start is refused when the Termux package is in the background.
+        ContextCompat.startForegroundService(ctx, intent)
         val bundle = withTimeoutOrNull(timeoutMs) { resultDeferred.await() }
         if (bundle == null) {
             CaptureResult.Timeout(partialOutput.get())
@@ -598,7 +601,7 @@ fun termuxRunCommandTool(context: Context): Tool = Tool(
                 putExtra("com.termux.RUN_COMMAND_SESSION_ACTION", "0")
             }
             return@Tool try {
-                context.startService(intent)
+                ContextCompat.startForegroundService(context, intent)
                 listOf(
                     UIMessagePart.Text(
                         buildJsonObject {

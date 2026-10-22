@@ -280,7 +280,7 @@ class TermuxCommandFailureDiagnosisTest {
         var dispatchedArguments = emptyList<String>()
         val context = object : ContextWrapper(RuntimeEnvironment.getApplication()) {
             override fun checkPermission(permission: String, pid: Int, uid: Int) = PackageManager.PERMISSION_GRANTED
-            override fun startService(service: Intent): ComponentName {
+            override fun startForegroundService(service: Intent): ComponentName {
                 dispatchedArguments = service.getStringArrayExtra("com.termux.RUN_COMMAND_ARGUMENTS")!!.toList()
                 val marker = Regex("printf '\\\\n%s' '([^']+)'").find(dispatchedArguments[1])!!.groupValues[1]
                 val callback = service.getParcelableExtra<PendingIntent>("com.termux.RUN_COMMAND_PENDING_INTENT")!!
