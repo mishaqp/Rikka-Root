@@ -104,6 +104,21 @@ class WorkflowRepository(
     internal suspend fun getEnabledForScheduledExecution(id: String): Loaded? {
         val row = workflowDao.getById(id) ?: return null
         if (!row.enabled) return null
+        return requireScheduledDefinition(row)
+    }
+
+    /** A tolerant UI list must not silently complete a boot event containing unreadable live rows. */
+    internal suspend fun listEnabledForBootExecution(): List<Loaded> =
+        workflowDao.listEnabled().map(::requireScheduledDefinition)
+
+    /** Keep disabled-row history behavior while preserving unreadable enabled IDs for retry. */
+    internal suspend fun getForBootExecution(id: String): Loaded? {
+        val row = workflowDao.getById(id) ?: return null
+        return if (row.enabled) requireScheduledDefinition(row)
+        else parseCached(row)?.let { Loaded(row, it) }
+    }
+
+    private fun requireScheduledDefinition(row: WorkflowEntity): Loaded {
         val definition = checkNotNull(parseCached(row)) {
             "Не удалось прочитать определение сценария. Расписание сохранено; исправьте сценарий и повторите запуск."
         }

@@ -22,6 +22,10 @@ class CronBootReceiver : BroadcastReceiver(), KoinComponent {
         val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try { withTimeout(8000) {
+                // Передаём boot Android до независимого восстановления alarm/Room.
+                if (reason == ScheduleRecoveryReason.BOOT || reason == ScheduleRecoveryReason.APP_REPLACED) {
+                    me.rerere.rikkahub.workflow.trigger.WorkflowBootDispatcher.onBoot(context, reason.name)
+                }
                 recoverSchedules(reason,
                     restoreCron = { clockChanged ->
                         if (clockChanged) scheduler.onClockChanged() else scheduler.rearmAll()
@@ -31,7 +35,7 @@ class CronBootReceiver : BroadcastReceiver(), KoinComponent {
                         workflowTriggers.start()
                         workflowTriggers.restoreTimeCronAlarms(resetForClockChange = clockChanged)
                     },
-                    dispatchBoot = { me.rerere.rikkahub.workflow.trigger.WorkflowBootDispatcher.onBoot() },
+                    dispatchBoot = {},
                 )
             } } catch (_: Exception) { /* Next process start also rearms. */ }
             finally { pending.finish() }

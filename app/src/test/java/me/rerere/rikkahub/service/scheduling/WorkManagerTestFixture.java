@@ -4,6 +4,8 @@ import android.content.Context;
 import androidx.work.Configuration;
 import androidx.work.impl.WorkManagerImpl;
 import androidx.work.impl.WorkManagerImplExtKt;
+import androidx.work.impl.StartStopToken;
+import androidx.work.impl.model.WorkGenerationalId;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -22,6 +24,11 @@ public final class WorkManagerTestFixture {
         // Joining that scope alone can close Room while startup reconciliation is still running.
         drainSerialTasks(manager);
         WorkManagerImplExtKt.close(manager);
+    }
+
+    /** Deliver the job Android's JobScheduler would start; Robolectric does not run OS jobs. */
+    public static void startWork(WorkManagerImpl manager, String id, int generation) {
+        manager.getProcessor().startWork(new StartStopToken(new WorkGenerationalId(id, generation)));
     }
 
     private static void drainSerialTasks(WorkManagerImpl manager) {

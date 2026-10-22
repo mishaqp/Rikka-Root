@@ -58,7 +58,7 @@ class TriggerRegistry(
     private val geofence = GeofenceTriggerFamily(context, triggerScope)
     private val appForeground = AppForegroundTriggerFamily(triggerScope)
     private val notification = NotificationTriggerFamily(triggerScope)
-    private val boot = BootTriggerFamily(triggerScope)
+    private val boot = BootTriggerFamily()
     private val manual = ManualTriggerFamily()
 
     private val families: List<WorkflowTriggerFamily> = listOf(
@@ -68,7 +68,6 @@ class TriggerRegistry(
 
     fun setEngineCallback(callback: TriggerFireCallback) {
         engineFire = callback
-        WorkflowBootDispatcher.bind(boot)
     }
 
     /** Start observing workflows. Idempotent — a second call is ignored. */
@@ -78,6 +77,10 @@ class TriggerRegistry(
         if (started) return
         started = true
         appScope.launch(Dispatchers.IO) {
+            // A queued event can survive process death before WorkManager enqueue commits.
+            try { WorkflowBootScheduling(context).restoreQueued() }
+            catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
+            catch (_: Exception) { Log.w(TAG, "Восстановление boot-сценариев отложено до следующего запуска.") }
             workflowRepository.recoverInterrupted()
             workflowRepository.observeAll()
                 .map { loaded -> loaded.filter { it.entity.enabled }.map {
