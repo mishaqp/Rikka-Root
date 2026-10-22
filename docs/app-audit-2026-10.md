@@ -8,46 +8,61 @@
 
 ## Текущий статус обязательных исправлений
 
-Пока для всех пунктов ниже: **открыто; регрессионный RED и исправление ещё не выполнены**. После проверки здесь появятся тест, коммит и результат. Нумерация PERF отделена от provider P.
+Отчёт чтением зафиксирован коммитом `47686dc4` (после rebase — `21236a6e`) до новых тестов и исправлений. После обязательного pull учтены параллельные коммиты до `4d51a35f`; исправления CHAT03/05, BG1 и P01 сохранены и проверены. Отметка «исправлено локально» означает настоящий RED до правки и GREEN после; полный Daily Build публикации проверяется отдельно. Нумерация PERF отделена от provider P.
 
 | ID | Приоритет | Проблема | Статус / коммит |
 |---|---|---|---|
-| SROOM-01 | критично | Миграция 15→16 безвозвратно теряет непривязанные результаты старых инструментов | Открыто; RED ожидается |
-| SROOM-02 | важно | Пропущенная в 11→12 большая история остаётся вне активного представления и не защищена от последующего очищения | Открыто; RED ожидается |
-| SROOM-03 | важно | V3 настроек заменяет непарсимые quickMessages пустым массивом и подтверждает миграцию | Открыто; RED ожидается |
-| SROOM-04 | важно | Сбой резервного сохранения повреждённого DataStore всё равно разрешает уничтожение оригинала | Открыто; RED ожидается |
-| SROOM-05 | важно | Переход 6→7 не применяет известное преобразование старых discriminator имён и блокирует корректную старую историю | Открыто; RED ожидается |
-| CHAT-01 | важно | Осиротевший чат A получает память и scoped tools другого ассистента B | Открыто; RED ожидается |
-| CHAT-02 | важно | History Undo восстанавливает ссылки уже удалённых вложений | Открыто; RED ожидается |
-| CHAT-03 | важно | Две параллельные правки теряют одну принятую версию сообщения | Открыто; RED ожидается |
-| CHAT-04 | важно | Удалённое через Web сообщение возвращается следующим stream chunk | Открыто; RED ожидается |
-| CHAT-05 | важно | Stale user regenerate может очистить всю историю | Открыто; RED ожидается |
-| CHAT-06 | важно | Удалённый целиком генерирующий чат воссоздаётся final save | Открыто; RED ожидается |
-| P-01 | важно | HTTP-ошибка SSE с пустым/не-JSON body превращается в успешное завершение | Открыто; RED ожидается |
-| P-02 | важно | EOF без terminal event считается полным ответом, включая tool call | Открыто; RED ожидается |
-| P-03 | важно | Отмена после HTTP headers не освобождает nonstream body read | Открыто; RED ожидается |
-| P-04 | важно | Claude adaptive thinking отправляется моделям, которые его не поддерживают | Открыто; RED ожидается |
-| P-05 | важно | Claude redacted_thinking теряется и ломает tool-result roundtrip | Открыто; RED ожидается |
-| P-06 | важно | Допустимый отказ модели refusal не отображается | Открыто; RED ожидается |
-| P-07 | важно | Responses built-in image generation без streaming теряет изображение | Открыто; RED ожидается |
-| P-08 | важно | HTTP image URL вставляется в поле raw base64 у Claude и Gemini generateContent | Открыто; RED ожидается |
-| B1 | важно | локальный экспорт сообщает успех без файла; reminder обновляется до сохранения | Открыто; RED ожидается |
-| B2 | важно | после 1000 S3 backups последние резервные копии не видны | Открыто; RED ожидается |
-| B3 | важно | WebDAV GET/DELETE адресует displayName вместо фактического href | Открыто; RED ожидается |
-| B4 | важно | Cherry import объявлен завершённым до сохранения настроек | Открыто; RED ожидается |
-| B5 | важно | native DB restore не переносит абсолютные attachment URLs на другой Android profile | Открыто; RED ожидается |
-| B6 | важно | Cherry import печатает API credentials в logcat | Открыто; RED ожидается |
-| B7 | важно | Chatbox streaming failure оставляет неотмеченный частичный импорт | Открыто; RED ожидается |
-| PERF-1 | важно | Импорт вложений полностью копирует данные на главном потоке | Открыто; RED ожидается |
-| PERF-2 | важно | Декодирование и сохранение изображений генерации выполняются на главном потоке | Открыто; RED ожидается |
-| PERF-3 | важно | Вложения чата обходят существующие ограничения извлечения документов | Открыто; RED ожидается |
-| PERF-4 | важно | Допустимый большой результат хранится в одной Room TEXT-строке; чтение зависит от CursorWindow устройства | Открыто; RED ожидается |
-| PERF-5 | важно | Нормализация base64-изображения декодирует полноразмерный Bitmap | Открыто; RED ожидается |
-| BG-1 | важно | старый RELEASE media FGS останавливает сервис при уже поставленном новом ACQUIRE | Открыто; RED ожидается |
-| BG-2 | важно | ошибка/отмена live lookup удаляет durable workflow occurrence как отсутствующий workflow | Открыто; RED ожидается |
-| BG-3 | важно | ошибка terminal persistence workflow скрывается, оставляя RUNNING и обход cooldown для следующего запуска | Открыто; RED ожидается |
-| BG-4 | важно | recovery ставится completed навсегда после пропуска временно нечитаемого чата | Открыто; RED ожидается |
-| BG-5 | важно | boot workflow после receiver handoff не имеет durable Android execution owner | Открыто; RED ожидается |
+| SROOM-01 | критично | Миграция 15→16 безвозвратно теряет непривязанные результаты старых инструментов | Исправлено локально, 3A — `d8d5bab4` |
+| SROOM-02 | важно | Пропущенная в 11→12 большая история остаётся вне активного представления и не защищена от последующего очищения | Исправлено локально, 3A — `d8d5bab4` |
+| SROOM-03 | важно | V3 настроек заменяет непарсимые quickMessages пустым массивом и подтверждает миграцию | Исправлено локально, 3A — `d8d5bab4` |
+| SROOM-04 | важно | Сбой резервного сохранения повреждённого DataStore всё равно разрешает уничтожение оригинала | Исправлено локально, 3A — `d8d5bab4` |
+| SROOM-05 | важно | Переход 6→7 не применяет известное преобразование старых discriminator имён и блокирует корректную старую историю | Исправлено локально, 3A — `d8d5bab4` |
+| CHAT-01 | важно | Осиротевший чат A получает память и scoped tools другого ассистента B | Исправлено локально, 3A — `d8d5bab4` |
+| CHAT-02 | важно | History Undo восстанавливает ссылки уже удалённых вложений | Исправлено локально, 3A — `d8d5bab4` |
+| CHAT-03 | важно | Две параллельные правки теряют одну принятую версию сообщения | Исправлено параллельно — `fe1a95c6`, регрессии проверены |
+| CHAT-04 | важно | Удалённое через Web сообщение возвращается следующим stream chunk | Исправлено локально, 3A — `d8d5bab4` |
+| CHAT-05 | важно | Stale user regenerate может очистить всю историю | Исправлено параллельно — `fe1a95c6`, регрессии проверены |
+| CHAT-06 | важно | Удалённый целиком генерирующий чат воссоздаётся final save | Исправлено локально, 3A — `d8d5bab4` |
+| P-01 | важно | HTTP-ошибка SSE с пустым/не-JSON body превращается в успешное завершение | Исправлено параллельно — `4cd7b47c`, регрессии проверены |
+| P-02 | важно | EOF без terminal event считается полным ответом, включая tool call | RED подтверждён; исправление 3B ещё не опубликовано |
+| P-03 | важно | Отмена после HTTP headers не освобождает nonstream body read | RED подтверждён; исправление 3B ещё не опубликовано |
+| P-04 | важно | Claude adaptive thinking отправляется моделям, которые его не поддерживают | RED подтверждён; исправление 3B ещё не опубликовано |
+| P-05 | важно | Claude redacted_thinking теряется и ломает tool-result roundtrip | RED подтверждён; исправление 3B ещё не опубликовано |
+| P-06 | важно | Допустимый отказ модели refusal не отображается | RED подтверждён; исправление 3B ещё не опубликовано |
+| P-07 | важно | Responses built-in image generation без streaming теряет изображение | RED подтверждён; исправление 3B ещё не опубликовано |
+| P-08 | важно | HTTP image URL вставляется в поле raw base64 у Claude и Gemini generateContent | RED подтверждён; исправление 3B ещё не опубликовано |
+| B1 | важно | локальный экспорт сообщает успех без файла; reminder обновляется до сохранения | Исправлено локально, 3A — `dc97218b` |
+| B2 | важно | после 1000 S3 backups последние резервные копии не видны | Исправлено локально, 3A — `dc97218b` |
+| B3 | важно | WebDAV GET/DELETE адресует displayName вместо фактического href | Исправлено локально, 3A — `dc97218b` |
+| B4 | важно | Cherry import объявлен завершённым до сохранения настроек | Исправлено локально, 3A — `dc97218b` |
+| B5 | важно | native DB restore не переносит абсолютные attachment URLs на другой Android profile | Исправлено локально, 3A — `dc97218b` |
+| B6 | важно | Cherry import печатает API credentials в logcat | Исправлено локально, 3A — `dc97218b` |
+| B7 | важно | Chatbox streaming failure оставляет неотмеченный частичный импорт | Исправлено локально, 3A — `dc97218b` |
+| PERF-1 | важно | Импорт вложений полностью копирует данные на главном потоке | RED подтверждён; исправление 3B ещё не опубликовано |
+| PERF-2 | важно | Декодирование и сохранение изображений генерации выполняются на главном потоке | RED подтверждён; исправление 3B ещё не опубликовано |
+| PERF-3 | важно | Вложения чата обходят существующие ограничения извлечения документов | RED подтверждён; исправление 3B ещё не опубликовано |
+| PERF-4 | важно | Допустимый большой результат хранится в одной Room TEXT-строке; чтение зависит от CursorWindow устройства | Исправлено локально, 3A — `d8d5bab4` |
+| PERF-5 | важно | Нормализация base64-изображения декодирует полноразмерный Bitmap | RED подтверждён; исправление 3B ещё не опубликовано |
+| BG-1 | важно | старый RELEASE media FGS останавливает сервис при уже поставленном новом ACQUIRE | Исправлено параллельно — `c55559c4`, регрессии проверены |
+| BG-2 | важно | ошибка/отмена live lookup удаляет durable workflow occurrence как отсутствующий workflow | Исправлено локально, 3A — `677f1280` |
+| BG-3 | важно | ошибка terminal persistence workflow скрывается, оставляя RUNNING и обход cooldown для следующего запуска | Исправлено локально, 3A — `677f1280` |
+| BG-4 | важно | recovery ставится completed навсегда после пропуска временно нечитаемого чата | Исправлено локально, 3A — `d8d5bab4` |
+| BG-5 | важно | boot workflow после receiver handoff не имеет durable Android execution owner | RED подтверждён; исправление 3B ещё не опубликовано |
+
+## Проверка пакета 3A
+
+Пакет содержит 53 уникальных пути: сохранность данных/изоляция чатов — 28, резервные копии — 15, расписания и запись результатов — 7, документация — 3. Из исходных 36 обязательных находок исправлены или подтверждены 24; ещё 12 относятся к пакету 3B: P02–08, PERF1/2/3/5 и BG5. Часть 3 целиком пока не завершена.
+
+- До правок реальные миграции/Room/ChatService/сетевые запросы воспроизвели дефекты. Ошибки компиляции фикстур, отсутствующие Android native adapters и неверный фильтр одного запуска не учитываются как RED. Контролируемый отказ чтения перенесён на новый metadata DAO boundary; все прежние assertions сохранены. Workflow fixture использует валидное действие вместо пустого недопустимого списка.
+- Новые тесты 3A: **76/76 GREEN**. Расширенный прогон до финальной проверки воспроизвёл две дополнительные границы: Stop между удалением и стартом Retry; очистку временных ссылок удалённого чата. После правки локального порядка запуска и разрешения очистки без вставки строки добавлена проверка отсутствия воскресшего чата. Итоговый расширенный прогон: **500/500 GREEN**, включая прежние проверки неполной истории, владения, вложений, расписаний, RootMode, hard-link fallback и полного реестра инструментов.
+- BG2 дополнительно проверяет повреждённое определение существующей включённой задачи: его нельзя путать с удалённой записью. Расписание сохраняется до восстановления, повторный запуск выполняет действие один раз; явно выключенная задача по-прежнему отменяется.
+- Параллельные исправления настроек, очистки файлов, повторного импорта Chatbox, HTTP ошибок и native rename сохранены. У режима «Всё через root», обязательных одобрений, защищённых команд и browser-политик изменений нет. Сигнатура GenerationLoop.generateText не менялась.
+
+Полный локальный `./gradlew lint`: **13 отчётов, 0 ошибок**, завершился успешно за 7м23с. CI-порог остаётся 0, новые suppressions/Ignore/Assume не добавлены; 18 проверок CI-скрипта прошли. Полный Daily Build обязателен для публикации и окончательного APK.
+
+**Пределы восстановления.** Неоднозначная старая TOOL-история вызывает полный откат миграции 15→16: исходные байты и ветки остаются, но открытие этой БД потребует совместимой версии или корректной резервной копии. Уже утраченные прежней версией байты восстановить без копии нельзя. Большие SQLite TEXT читаются фрагментами по 16 КиБ без усечения; тест моделирует ограничение одного поля, не заявляет измеренный предел CursorWindow любого телефона. Частичный импорт Chatbox честно сообщает фактически сохранённое количество и сохраняет связанные настройки; при неопределённом результате записи файлы не удаляются.
+
+**На телефоне для 3A.** В тестовом чате отправить фото, удалить чат и нажать «Отменить»: фото должно открываться. Удалить генерирующий чат и дождаться конца: он не должен возвращаться. Через Web попробовать удалить сообщение во время генерации: сначала должен потребоваться Stop. Проверить обычный/root режимы и сохранённые подтверждения. Экспортировать локальный бэкап, импортировать Cherry/Chatbox, восстановить бэкап с вложениями на другой профиль; проверить выбранный WebDAV архив с пробелами в имени и свежие S3 копии при большом списке.
 
 ## Подробности исходного аудита
 
@@ -480,97 +495,95 @@
 
 ---
 
-# Память, изображения и главный поток — исходные технические доказательства
+# Часть 3: производительность и время жизни ресурсов — аудит без изменений
 
-2026-10-18. Baseline reported by root: `d7f6ec1a`, full CI `39113991394`: ordinary tests 5586/0, lint 13 reports/0, APK verified. This audit did not run Git, Gradle, tests, profiling, dependencies or mutations in the repository. Findings below are control-flow/source findings, not newly observed device crashes or measured timings. Only this external report was written. No fixes or tests are authorized by this report.
+18 октября 2026 года. База по подтверждению root: `d7f6ec1a`; полный CI `39113991394` — 5586 обычных тестов без сбоев, 13 lint-отчётов без ошибок, APK проверен. При этом аудите не выполнялись Git, Gradle, тесты, профилирование, установка зависимостей или изменения репозитория. Выводы основаны на реальных цепочках вызовов и коде; это не отчёт о новых измеренных зависаниях или падениях устройства. Создан только внешний отчёт, без исправлений и тестов.
 
-Scope: long chat history/session retention, attachment import, document extraction, generated image persistence and large tool-output persistence. Critical findings: none established. No permanent managed-object leak established. Five important source-level problems and one minor resource-lifetime problem are recorded below; the device-specific CursorWindow consequence of P4 is explicitly conditional.
+Область: длинная история чатов и удержание сессий, импорт вложений, извлечение документов, сохранение сгенерированных изображений и больших результатов инструментов. Critical не установлен. Постоянная утечка управляемых объектов не установлена. Ниже пять проблем уровня Important и одна Minor. Для P4 последствия зависят от размера CursorWindow на устройстве; эта граница доказанности указана отдельно.
 
-## Important P1 — attachment import performs the entire stream copy on Main
+## Important P1 — импорт вложения полностью копирует поток на Main
 
-**Locations:** `app/src/main/java/me/rerere/rikkahub/ui/components/ai/ChatAttachmentPicker.kt:115`, `:119`, `:126`, `:130`, `:149`, `:157`, `:165`, `:171`; `app/src/main/java/me/rerere/rikkahub/ui/pages/chat/ChatPage.kt:164`; `app/src/main/java/me/rerere/rikkahub/data/files/FilesManager.kt:110`, `:125`, `:129`.
+**Код:** `app/src/main/java/me/rerere/rikkahub/ui/components/ai/ChatAttachmentPicker.kt:115`, `:119`, `:126`, `:130`, `:149`, `:157`, `:165`, `:171`; `app/src/main/java/me/rerere/rikkahub/ui/pages/chat/ChatPage.kt:164`; `app/src/main/java/me/rerere/rikkahub/data/files/FilesManager.kt:110`, `:125`, `:129`.
 
-Activity-result callbacks directly call non-suspending `createChatFilesByContents` / `importChatFiles`. The latter queries the provider, opens its stream, and copies until EOF synchronously. The share-entry `LaunchedEffect` also calls this function directly; launching a Compose coroutine does not move its non-suspending work off Main. The one-image crop branch performs its own copy and HEIF decode/compress before launching the crop activity. Asynchronous managed-file bookkeeping after the copy does not move the copy itself.
+Callbacks результатов activity напрямую вызывают обычные, не suspend-функции `createChatFilesByContents` / `importChatFiles`. Импорт запрашивает метаданные провайдера, открывает поток и синхронно копирует его до EOF. При входе через Share тот же вызов выполняется внутри `LaunchedEffect`: запуск Compose-корутины сам по себе не переносит синхронную работу с Main. Ветка обрезки одного изображения отдельно копирует файл и декодирует/сжимает HEIF перед запуском crop activity. Асинхронная регистрация managed-файла после копирования не переносит само копирование.
 
-**Concrete trigger / proof:** select a large video/document, several images, or a document from a slow/cloud SAF provider, or share it into ChatPage. Provider read and destination write occupy the main callback until EOF; UI input/painting cannot proceed during this work. No exotic payload is needed. ANR duration is device/provider-dependent and was not measured. The bounded/sampled HEIF conversion still performs substantial CPU/I/O on Main; this finding does not assert every HEIF decode is unbounded.
+**Сценарий и доказательство:** выбрать большое видео/документ, несколько изображений либо документ медленного облачного SAF-провайдера, или поделиться им в ChatPage. Чтение провайдера и запись назначения занимают Main до EOF; в это время обработка ввода и отрисовка не выполняются. Специально испорченные данные не нужны. Длительность до ANR зависит от устройства и провайдера, здесь не измерялась. HEIF-конвертация использует уменьшение изображения, но всё равно выполняет тяжёлую работу на Main; не утверждается, что всякое HEIF-декодирование неограниченно.
 
-**Existing coverage:** `app/src/test/java/me/rerere/rikkahub/ui/screenshot/ChatPageAttachmentImportTest.kt` uses the real page/provider import and checks MIME, ordering and byte preservation with small fixtures. `service/SharedAttachmentFilesTest.kt` protects ownership/reference cleanup. Neither establishes that import runs off Main.
+**Имеющиеся тесты:** `app/src/test/java/me/rerere/rikkahub/ui/screenshot/ChatPageAttachmentImportTest.kt` проверяет реальный импорт страницы/провайдера, MIME, порядок и сохранение байтов на малых fixtures. `service/SharedAttachmentFilesTest.kt` защищает владение и очистку ссылок. Выполнение импорта вне Main они не устанавливают.
 
-**Proposed regression:** actual picker/share paths with a recording provider, assert the stream-copy thread is not Main; use an explicit read gate and an independently scheduled UI marker rather than a timing threshold. Retain MIME, ordering, partial-import error, original bytes and attachment-reference assertions. Proposed direction only: perform copy/conversion in cancellable IO work; publish draft changes on Main and retain URI permissions for the full job lifetime.
+**Предлагаемая регрессия:** реальные picker/share paths с провайдером, записывающим поток выполнения; чтение должно происходить вне Main. Для проверки отзывчивости — явный gate чтения и независимо запланированный UI marker вместо измерения длительности. Сохранить проверки MIME, порядка, частичных ошибок, байтов и ссылок. Направление исправления: отменяемое копирование/конвертация на IO, публикация черновика на Main, доступ к URI на всё время операции.
 
-## Important P2 — image-generation preview and final base64 persistence runs on Main
+## Important P2 — сохранение base64 preview/final генерации изображений выполняется на Main
 
-**Locations:** `app/src/main/java/me/rerere/rikkahub/ui/pages/imggen/ImgGenVM.kt:151`, `:195`, `:255`, `:258`, `:274`, `:307`, `:324`; `app/src/main/java/me/rerere/rikkahub/data/files/FilesManager.kt:280`, `:287`, `:290`.
+**Код:** `app/src/main/java/me/rerere/rikkahub/ui/pages/imggen/ImgGenVM.kt:151`, `:195`, `:255`, `:258`, `:274`, `:307`, `:324`; `app/src/main/java/me/rerere/rikkahub/data/files/FilesManager.kt:280`, `:287`, `:290`.
 
-`generateImage` and `editImage` start ordinary `viewModelScope.launch` jobs. Their collector synchronously saves every preview and final image. `createImageFileFromBase64` allocates/decodes the full byte arrays and writes the file without `withContext`; `saveImageToStorage` being suspend does not change this: the first repository suspension is after the file write at ImgGenVM:336. An upstream provider `flowOn(IO)` does not change the downstream collector's Main context.
+`generateImage` и `editImage` запускают обычный `viewModelScope.launch`. Collector синхронно сохраняет каждый preview и final. `createImageFileFromBase64` выделяет массивы, декодирует все байты и пишет файл без `withContext`. Объявление `saveImageToStorage` как suspend этого не меняет: первое обращение к suspend-репозиторию происходит уже после записи файла, на ImgGenVM:336. Возможный `flowOn(IO)` у upstream-провайдера не меняет контекст downstream-collector.
 
-**Concrete trigger / proof:** normal image-generation/edit response with large base64 data, especially repeated partial previews. Each emitted preview/final causes base64 conversion and disk writes on Main before UI state is updated. Actual stall duration has not been measured.
+**Сценарий:** штатный ответ генерации/редактирования с большим base64, особенно несколько промежуточных preview. Каждый кадр преобразуется и записывается на Main до обновления UI. Длительность задержки не измерялась.
 
-**Existing coverage:** no dedicated ImgGenVM threading/persistence test located. Small attachment/image-source tests do not exercise this collector.
+**Имеющиеся тесты:** отдельный тест потоков/сохранения ImgGenVM не найден. Малые тесты импорта и выбора источника изображений не вызывают этот collector.
 
-**Proposed regression:** actual VM with a controlled provider flow and a recording persistence boundary; assert preview and final byte processing occurs off Main while emitted UI state/order and final database metadata remain correct. Cover cancellation during a held save without asserting elapsed time. Proposed direction: isolate preview/final filesystem and base64 work on IO; keep Main state updates and existing media data intact.
+**Предлагаемая регрессия:** реальный VM с управляемым provider flow и наблюдаемой границей сохранения; preview/final обрабатываются вне Main, состояния UI и порядок публикаций остаются прежними, финальная запись БД корректна. Отмена проверяется явным gate, без временного порога. Направление: base64 и filesystem на IO, состояния на Main, сохранённые пользовательские media не теряются.
 
-## Important P3 — chat attachment extraction bypasses the bounded document-tool path
+## Important P3 — извлечение вложений чата обходит bounded-путь document tool
 
-**Locations:** `app/src/main/java/me/rerere/rikkahub/service/ChatService.kt:256`, `:261`; `app/src/main/java/me/rerere/rikkahub/data/ai/transformers/DocumentAsPromptTransformer.kt:20`, `:27`, `:46`, `:70`, `:82`; `document/src/main/java/me/rerere/document/DocxParser.kt:22`, `:25`, `:29`, `:52`; `document/src/main/java/me/rerere/document/PptxParser.kt:23`, `:34`, `:48`, `:59`; `document/src/main/java/me/rerere/document/EpubParser.kt:25`, `:27`, `:28`, `:34`; `document/src/main/java/me/rerere/document/PdfParser.kt:54`.
+**Код:** `app/src/main/java/me/rerere/rikkahub/service/ChatService.kt:256`, `:261`; `app/src/main/java/me/rerere/rikkahub/data/ai/transformers/DocumentAsPromptTransformer.kt:20`, `:27`, `:46`, `:70`, `:82`; `document/src/main/java/me/rerere/document/DocxParser.kt:22`, `:25`, `:29`, `:52`; `document/src/main/java/me/rerere/document/PptxParser.kt:23`, `:34`, `:48`, `:59`; `document/src/main/java/me/rerere/document/EpubParser.kt:25`, `:27`, `:28`, `:34`; `document/src/main/java/me/rerere/document/PdfParser.kt:54`.
 
-This transformer correctly executes on IO, but automatically extracts attached documents into complete strings. DOCX's attachment overload streams the archive entry directly into an unbounded text builder. PPTX collects all selected slides/notes then builds another full result. EPUB accumulates all spine items. PDF extracts all pages. Plain text falls through to `File.readText()`. There is no source-size/expanded-byte/extracted-text budget or cooperative cancellation check in these loops. Selected historical document parts are parsed again on each generation that includes them; no extracted-content cache is used here.
+Transformer правильно выполняется на IO, но автоматически извлекает документы целиком в строки. Attachment-overload DOCX читает ZIP entry прямо в неограниченный builder. PPTX сначала собирает все слайды и заметки, затем строит ещё одну полную строку. EPUB собирает всю последовательность spine. PDF извлекает все страницы. Обычный текст читается через `File.readText()`. В этих циклах нет бюджета исходного размера, распаковки, извлечённого текста и кооперативной отмены. Документы из выбранной истории извлекаются заново при каждой генерации, которая их включает; кэш извлечённого текста здесь отсутствует.
 
-**Concrete trigger / proof:** attach an otherwise valid, highly compressible DOCX whose `word/document.xml` expands to a very large repeated text, then send. The compressed import size does not bound the decompressed stream or resulting strings. The transformer finishes full extraction before producing its prompt; a later model/context-output cap cannot protect that allocation. Stop cannot interrupt the non-suspending parser loop promptly. OOM is heap/input-dependent; no destructive/OOM fixture was executed.
+**Сценарий:** прикрепить валидный хорошо сжимаемый DOCX с очень большим повторяющимся текстом в `word/document.xml`, затем отправить сообщение. Размер сжатого импорта не ограничивает распакованный поток и строки. Transformer полностью извлекает содержимое до построения prompt; последующий лимит контекста/провайдерского вывода не защищает эти выделения. Stop не может своевременно прервать несуспендирующий цикл парсера. OOM зависит от входа и heap; опасный OOM-fixture здесь не запускался.
 
-**Control:** this does **not** apply to the separate protected `read_document` tool. `app/src/main/java/me/rerere/rikkahub/data/ai/tools/local/ReadDocumentTool.kt:24` defines source/expanded/entry/PDF-text limits; `:132` uses cancellable `parseRange`; `:149` explicitly limits preflight to this tool. Attachment input never calls that preflight.
+**Контроль:** отдельный защищённый `read_document` имеет ограничения и не относится к этому finding. `app/src/main/java/me/rerere/rikkahub/data/ai/tools/local/ReadDocumentTool.kt:24` задаёт пределы источника/распаковки/entries/PDF-текста; `:132` вызывает отменяемый `parseRange`; `:149` явно ограничивает preflight путём этого инструмента. Attachment-transformer его не вызывает.
 
-**Existing coverage:** `app/src/test/java/me/rerere/rikkahub/data/ai/tools/local/ReadDocumentToolTest.kt:135` verifies ZIP/oversized-source rejection and `:160` cancellation, only for the tool. No equivalent DocumentAsPromptTransformer budget/cancellation regression located.
+**Имеющиеся тесты:** `app/src/test/java/me/rerere/rikkahub/data/ai/tools/local/ReadDocumentToolTest.kt:135` проверяет отказ для ZIP/oversized source, `:160` — отмену, но только инструмента. Аналогичная регрессия DocumentAsPromptTransformer не найдена.
 
-**Proposed regression:** real attachment transformer with valid, safely sized high-expansion DOCX/PPTX/EPUB fixtures and an instrumented parser/read boundary; prove a defined budget stops expansion before allocation grows, and an explicit cancellation gate terminates work. Cover plain text and multipage PDF separately. Preserve the uploaded original, MIME/permissions, and visible partial/refusal status. Reuse existing bounded parser capabilities where suitable, but select attachment product limits explicitly rather than silently inventing limits or truncating user data.
+**Предлагаемая регрессия:** реальный transformer и валидные безопасные по объёму DOCX/PPTX/EPUB с большим коэффициентом сжатия; наблюдаемая граница чтения/парсера подтверждает остановку по согласованному бюджету и отмене. Отдельно plain text и multipage PDF. Исходное вложение, MIME и доступ должны сохраняться; частичный результат или отказ — явные. Переиспользовать существующие bounded-парсеры, но не вводить произвольные лимиты или тихо обрезать пользовательские данные.
 
-## Important P4 — a permitted full tool result is persisted as a single oversized Room TEXT value
+## Important P4 — допустимый полный tool result сохраняется одним большим Room TEXT
 
-**Locations:** `app/src/main/java/me/rerere/rikkahub/data/ai/tools/local/HttpRequestTool.kt:131`, `:132`, `:280`, `:292`; `app/src/main/java/me/rerere/rikkahub/data/ai/GenerationLoop.kt:532`, `:534`, `:900`, `:902`, `:1018`; `app/src/main/java/me/rerere/rikkahub/data/db/entity/MessageNodeEntity.kt:29`; `app/src/main/java/me/rerere/rikkahub/data/repository/ConversationRepository.kt:526`, `:708`, `:711`, `:722`, `:745`; `app/src/main/java/me/rerere/rikkahub/data/db/dao/MessageNodeDAO.kt:22`.
+**Код:** `app/src/main/java/me/rerere/rikkahub/data/ai/tools/local/HttpRequestTool.kt:131`, `:132`, `:280`, `:292`; `app/src/main/java/me/rerere/rikkahub/data/ai/GenerationLoop.kt:532`, `:534`, `:900`, `:902`, `:1018`; `app/src/main/java/me/rerere/rikkahub/data/db/entity/MessageNodeEntity.kt:29`; `app/src/main/java/me/rerere/rikkahub/data/repository/ConversationRepository.kt:526`, `:708`, `:711`, `:722`, `:745`; `app/src/main/java/me/rerere/rikkahub/data/db/dao/MessageNodeDAO.kt:22`.
 
-The full UI tool output remains in `UIMessagePart.Tool.output` without workspace_shell. This configuration is reachable: `app/src/main/java/me/rerere/rikkahub/data/ai/tools/local/LocalTools.kt:233` registers HTTP from its independent option; `app/src/main/java/me/rerere/rikkahub/data/ai/tools/ChatToolFactory.kt:131` adds local tools separately from workspace tools at `:156`. `boundToolOutputsForModel` only shortens the provider-request copy. HTTP permits 8 MiB response bytes; a binary body is encoded to 11,184,812 base64 characters before JSON overhead. Checkpoint/save serializes the complete node message list directly into one `messages: String` Room column. No compression/external payload reference is applied. LIMIT 64 paginates rows, not an individual row value.
+Без workspace_shell полный UI-output остаётся в `UIMessagePart.Tool.output`. Такая конфигурация достижима: `app/src/main/java/me/rerere/rikkahub/data/ai/tools/local/LocalTools.kt:233` регистрирует HTTP по независимой настройке; `app/src/main/java/me/rerere/rikkahub/data/ai/tools/ChatToolFactory.kt:131` добавляет local tools отдельно от workspace tools на `:156`. `boundToolOutputsForModel` сокращает только копию запроса провайдеру. HTTP допускает 8 МиБ response bytes; двоичный ответ превращается в 11 184 812 base64-символов ещё до JSON overhead. Checkpoint/save напрямую сериализует список сообщений узла в одну колонку `messages: String`. Сжатия или ссылки на внешний payload здесь нет. LIMIT 64 делит набор строк, не содержимое одной строки.
 
-**Concrete reproduction to run:** assistant without workspace_shell calls `http_request` with the supported maximum byte count against a controlled public response, returns a large nonsecret body, checkpoints successfully, then the conversation is reopened on Android with a CursorWindow smaller than that row. The row cannot fit the cursor; `loadMessageNodes` catches `SQLiteBlobTooBigException`, marks the history INCOMPLETE, and subsequent repository writes are refused (`ConversationRepository.kt:63`). The SQL data is retained by the existing safety guard. This is an availability/readability problem, **not evidence of data deletion**.
+**Сценарий для реального воспроизведения:** ассистент без workspace_shell вызывает `http_request` с допустимым максимальным размером к контролируемому публичному ответу; большой несекретный результат успешно checkpoint-ится, затем чат открывается заново на Android с CursorWindow меньше этой строки. Строка не помещается; `loadMessageNodes` перехватывает `SQLiteBlobTooBigException`, отмечает историю INCOMPLETE и запрещает последующие записи (`ConversationRepository.kt:63`). Существующая защита сохраняет SQL-данные. Это проблема доступности/чтения, не доказательство удаления данных.
 
-**Evidence boundary:** raw row shape and reachable full-result size are confirmed by source. Actual Android exception for this end-to-end fixture was not run in this read-only audit. The consequence is conditional on the platform/window size; do not state that every device fails at a universal 2 MiB threshold. This was the requested unconfirmed lead: compression does not resolve it, but an instrumented/native Room regression is still needed to confirm the target-device manifestation.
+**Граница доказанности:** структура строки и достижимый размер полного результата подтверждены кодом. End-to-end exception на Android при этом аудите не воспроизводился. Последствие зависит от платформы/размера окна; нельзя объявлять универсальный предел 2 МиБ для всех устройств. Первоначальная гипотеза про сжатие снята: его нет. Для конкретного устройства ещё нужна instrumented/native Room регрессия.
 
-**Existing coverage:** `data/repository/IncompleteHistoryTest.kt:131` injects a cursor exception and proves original rows/title survive; it does not insert a genuinely oversized HTTP result into a real Android cursor. `data/ai/GenerationLoopOutputEnvelopePart2Test.kt` deliberately verifies stored full output and bounded provider copies.
+**Имеющиеся тесты:** `data/repository/IncompleteHistoryTest.kt:131` инъецирует cursor exception и доказывает сохранность строк/заголовка, но не создаёт настоящий oversized HTTP result в Android cursor. `data/ai/GenerationLoopOutputEnvelopePart2Test.kt` намеренно проверяет полный stored output и ограниченную provider-копию.
 
-**Proposed regression:** real Android Room save/reopen with large valid tool output; require complete history, byte-exact retained output and continued writes, while keeping injected-failure no-rewrite controls. Do not weaken INCOMPLETE protection or truncate the stored result. A compatible external-payload/chunked storage design would require separate approval and migration/backup/attachment-reference planning; this audit proposes no schema change.
+**Предлагаемая регрессия:** настоящий Android Room save/reopen большого валидного tool output с COMPLETE history, байт-в-байт сохранённым результатом и работоспособной последующей записью; injected-failure controls сохраняются. Не ослаблять INCOMPLETE guard и не усекать сохранённый результат. External-payload/chunked storage потребовал бы отдельного проектирования совместимости, backup, migration и ссылок; этот аудит не предлагает менять схему.
 
-## Important P5 — chat base64-image normalization expands the entire image to a full-resolution bitmap
+## Important P5 — нормализация base64-картинки чата выделяет полноразмерный bitmap
 
-**Locations:** `app/src/main/java/me/rerere/rikkahub/service/ChatService.kt:266`, `:269`; `app/src/main/java/me/rerere/rikkahub/data/ai/transformers/Base64ImageToLocalFileTransformer.kt:8`, `:14`; `app/src/main/java/me/rerere/rikkahub/data/files/FilesManager.kt:191`, `:198`, `:199`, `:200`; `app/src/main/java/me/rerere/rikkahub/data/files/FileUtils.kt:92`.
+**Код:** `app/src/main/java/me/rerere/rikkahub/service/ChatService.kt:266`, `:269`; `app/src/main/java/me/rerere/rikkahub/data/ai/transformers/Base64ImageToLocalFileTransformer.kt:8`, `:14`; `app/src/main/java/me/rerere/rikkahub/data/files/FilesManager.kt:191`, `:198`, `:199`, `:200`; `app/src/main/java/me/rerere/rikkahub/data/files/FileUtils.kt:92`.
 
-The normal Google response decoder creates these parts from inlineData (`ai/src/main/java/me/rerere/ai/provider/providers/google/GoogleStreamDecoder.kt:137`, `:144`), without a decoded-dimension check. On generation finish, data:image parts are base64-decoded, decoded by BitmapFactory without bounds or sample options, and re-encoded to PNG in a ByteArrayOutputStream (then copied to another byte array). The path runs on IO, not Main. A small compressed image can require a much larger bitmap allocation determined by its pixel dimensions. Original base64/decoded image bytes, bitmap and PNG output can coexist. This normalization has no dimension/pixel guard and does not explicitly recycle its temporary bitmap.
+Штатный Google decoder создаёт такие Image parts из inlineData (`ai/src/main/java/me/rerere/ai/provider/providers/google/GoogleStreamDecoder.kt:137`, `:144`) без проверки decoded dimensions. После генерации data:image декодируется из base64, затем BitmapFactory декодирует весь bitmap без bounds/sample options; результат повторно кодируется в PNG через ByteArrayOutputStream и копируется в другой массив. Это IO, не Main. Небольшое сжатое изображение может потребовать намного больше памяти по своим пиксельным размерам. Одновременно могут существовать исходный base64, decoded bytes, bitmap и PNG output. Здесь нет pixel/dimension guard или явного recycle временного bitmap.
 
-**Concrete trigger / proof:** an accepted provider returns a valid data:image image with very large pixel dimensions and highly compressible pixels. The unconditional `decodeByteArray` expands it before any size-aware presentation code such as Coil can help. Exact allocation/failure depends on format and Android decoder; no huge image was decoded in this audit. This is an unbounded decoded-memory path, not a claimed permanent bitmap leak.
+**Сценарий:** принятый провайдер возвращает валидное data:image с очень большими размерами и хорошо сжимаемыми пикселями. Безусловный `decodeByteArray` выделяет память до того, как size-aware renderer вроде Coil может помочь. Точная аллокация/ошибка зависит от формата и Android decoder; огромное изображение здесь не декодировалось. Это неограниченное выделение decoded memory, а не установленная постоянная утечка bitmap.
 
-**Existing coverage:** `data/ai/tools/local/LocalImageSourcesTest.kt` covers path/source selection; it does not cover this generated data-image transformation. Tool-specific QR/wallpaper image guards are not used here.
+**Имеющиеся тесты:** `data/ai/tools/local/LocalImageSourcesTest.kt` проверяет выбор пути/источника, не эту трансформацию. Защиты QR/wallpaper не участвуют в данном пути.
 
-**Proposed regression:** actual normalization with a controlled bounds/decode boundary, asserting that an image exceeding the approved decoded-pixel budget is not fully decoded, or proving normalization can preserve valid original image bytes without a bitmap round trip. Retain supported formats, original visual data and local attachment registration; do not silently downsample originals merely to make a test pass. A moderate valid image control must round-trip correctly. No specific new pixel limit is asserted by this audit.
+**Предлагаемая регрессия:** реальная нормализация с наблюдаемой границей bounds/decode — сверх согласованного pixel budget не вызывается полный decode; либо доказать сохранение исходных валидных encoded bytes без bitmap round trip. Сохранить форматы, визуальные данные и регистрацию локального вложения; не уменьшать оригинал без объяснения только для прохождения теста. Небольшой валидный контроль должен корректно проходить. Новый произвольный pixel limit аудит не задаёт.
 
-## Minor P6 — attachment PDF parser defers native cleanup to finalizers
+## Minor P6 — attachment PDF parser оставляет native cleanup финализаторам
 
-**Locations:** `document/src/main/java/me/rerere/document/PdfParser.kt:55`, `:59`, `:65`; `document/src/main/java/com/artifex/mupdf/fitz/Document.java:44`, `Page.java:40`, `StructuredText.java:39`.
+**Код:** `document/src/main/java/me/rerere/document/PdfParser.kt:55`, `:59`, `:65`; `document/src/main/java/com/artifex/mupdf/fitz/Document.java:44`, `Page.java:40`, `StructuredText.java:39`.
 
-The legacy attachment parser opens a Document, loads each Page and obtains StructuredText without `destroy` or finally blocks; the Page reference is immediately discarded. These wrappers do have native finalizers, so a permanent leak is **not** established. However, resources survive each parse until finalization, and native allocations are not deterministically released on normal completion or parser failure. Repeated long-PDF extraction from P3 increases this pressure.
+Старый attachment parser открывает Document, загружает Page и получает StructuredText без `destroy` и finally; ссылка на Page сразу теряется. У wrappers есть native finalizers, поэтому постоянная утечка не установлена. Однако ресурсы живут после парсинга до финализации и не освобождаются детерминированно при нормальном завершении или ошибке. Повторное извлечение длинного PDF из P3 усиливает давление на native-память.
 
-**Control:** `PdfParser.parseRange` already releases StructuredText, Page and Document in nested finally blocks (`:39`, `:42`, `:49`). It is the tool path, not the attachment path. Severity stays Minor absent measured native-heap growth; unbounded text work is covered by P3 rather than counted again.
+**Контроль:** `PdfParser.parseRange` уже освобождает StructuredText, Page и Document во вложенных finally (`:39`, `:42`, `:49`), но используется инструментом, а не attachment-путём. Без измерений native heap серьёзность Minor; неограниченный текст уже учтён в P3 и повторно не считается.
 
-**Proposed regression:** track open/destroy counts with a narrow native-parser seam for normal/mid-page failure/cancellation, and validate real-device native heap behavior separately. Preserve attachment text/page semantics if switching parser implementations; do not turn finalizer reliance into an unsubstantiated claim of permanent leakage.
+**Предлагаемая регрессия:** считать open/destroy через узкую границу native parser для нормального окончания, ошибки посреди страницы и отмены; отдельно измерить native heap на устройстве. При смене parser сохранить текстовую/страничную семантику. Зависимость от финализатора не превращать в недоказанное утверждение о постоянной утечке.
 
-## Audited areas without a new finding / limits
+## Проверенные области без нового finding и ограничения
 
-- ConversationSessionManager reference release/idle-session removal and ChatVM.onCleared release: no confirmed activity/session retention leak found in the traced path.
-- Long-history UI already has focused actual Compose coverage: `ui/pages/chat/ChatLongHistoryRuntimeTest.kt:74` (512 mixed messages, navigation/scrolling), `:134` and `:151` (latest assistant usage lookup). Source inspection did not establish a new full-history recomposition scan in those paths. Tests were not rerun here.
-- History JSON loading occurs inside Room's suspend transaction; checkpoints explicitly use IO. GenerationLoop uses `flowOn(Dispatchers.IO)` (`GenerationLoop.kt:618`). These are not reported as Main-thread CPU paths merely because the service/AppScope originates on Main.
-- DocumentAsPromptTransformer and generated chat-image normalization explicitly use IO. Their findings concern work/allocation bounds, not an incorrect dispatcher claim.
-- Protected read_document source/ZIP limits, cancellation, file-access guards and native parseRange cleanup are present. Existing guards must remain intact.
-- Attachment reference coordination, INCOMPLETE history protection, RootMode and symlink/hardlink/archive security controls were treated as preservation requirements; no weakening is suggested.
-- No exhaustive heap profiling, arbitrary document-format fuzzing or device-specific ANR/CursorWindow threshold measurement was performed. The report does not claim whole-app leak freedom or real crash reproduction. Follow-up should first implement genuine regression fixtures and obtain RED before any production change.
-
----
+- Проверены release/idle removal в ConversationSessionManager и release из ChatVM.onCleared. Подтверждённой утечки activity/session в прослеженной цепочке нет.
+- Длинная история имеет actual Compose coverage: `ui/pages/chat/ChatLongHistoryRuntimeTest.kt:74` — 512 смешанных сообщений/navigation/scrolling; `:134`, `:151` — поиск последнего assistant usage. Новое сканирование всей истории при recomposition в этих путях не установлено. Тесты здесь не перезапускались.
+- Загрузка JSON истории происходит внутри suspend Room transaction, checkpoints явно на IO. GenerationLoop использует `flowOn(Dispatchers.IO)` (`GenerationLoop.kt:618`). Происхождение service/AppScope на Main не делает эти пути Main-thread findings.
+- DocumentAsPromptTransformer и нормализация chat images явно используют IO. Их проблемы — объём работы/памяти, не неверный dispatcher.
+- У защищённого read_document присутствуют source/ZIP limits, отмена, file-access guards и native cleanup parseRange. Защиты нужно сохранить.
+- Attachment reference coordination, INCOMPLETE history, RootMode и symlink/hardlink/archive guards считаются обязательными условиями сохранности. Ослабления не предлагаются.
+- Полное heap-профилирование, произвольный document fuzzing и измерение ANR/CursorWindow на устройстве не выполнялись. Отчёт не заявляет отсутствие утечек во всём приложении или реальное воспроизведение crash. Исправлению должны предшествовать настоящие regression fixtures и RED.
 
 # Часть 3 — фоновые задачи, уведомления и восстановление
 
