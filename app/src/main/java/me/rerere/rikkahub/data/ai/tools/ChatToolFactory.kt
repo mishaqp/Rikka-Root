@@ -98,12 +98,17 @@ class ChatToolFactory(
             } else {
                 assistant.id.toString()
             }
+            fun requireMemoryOwner() {
+                check(assistant.useGlobalMemory || settings.assistants.any { it.id == assistant.id }) {
+                    "Ассистент-владелец памяти недоступен. Выберите владельца чата в приложении перед изменением памяти."
+                }
+            }
             addAll(
                 buildMemoryTools(
                     json = json,
-                    onCreation = { content -> memoryRepository.addMemory(memoryAssistantId, content) },
-                    onUpdate = { id, content -> memoryRepository.updateContent(id, content, memoryAssistantId) },
-                    onDelete = { id -> memoryRepository.deleteMemory(id, memoryAssistantId) },
+                    onCreation = { content -> requireMemoryOwner(); memoryRepository.addMemory(memoryAssistantId, content) },
+                    onUpdate = { id, content -> requireMemoryOwner(); memoryRepository.updateContent(id, content, memoryAssistantId) },
+                    onDelete = { id -> requireMemoryOwner(); memoryRepository.deleteMemory(id, memoryAssistantId) },
                 )
             )
         }

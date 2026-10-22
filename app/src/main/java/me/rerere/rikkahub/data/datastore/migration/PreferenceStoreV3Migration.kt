@@ -29,7 +29,12 @@ class PreferenceStoreV3Migration : DataMigration<Preferences> {
         val existingQuickMessages = prefs[SettingsStore.QUICK_MESSAGES]?.let { json ->
             runCatching<JsonArray> {
                 JsonInstant.parseToJsonElement(json).jsonArray
-            }.getOrElse { JsonArray(emptyList()) }
+            }.getOrElse { error ->
+                throw IllegalStateException(
+                    "Не удалось перенести быстрые сообщения: исходный JSON повреждён или имеет неподдерживаемый формат. Настройки сохранены; восстановите корректную копию.",
+                    error,
+                )
+            }
         } ?: JsonArray(emptyList())
 
         val existingIds = existingQuickMessages.mapNotNull {

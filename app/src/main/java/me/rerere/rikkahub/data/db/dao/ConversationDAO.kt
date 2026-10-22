@@ -70,6 +70,25 @@ interface ConversationDAO {
     @Query("SELECT * FROM conversationentity WHERE id = :id")
     suspend fun getConversationById(id: String): ConversationEntity?
 
+    /** Metadata-only projection; legacy history is read separately in the same transaction. */
+    @Query("SELECT " + CONVERSATION_METADATA_COLUMNS + " FROM conversationentity WHERE id = :id")
+    suspend fun getConversationMetadataById(id: String): ConversationEntity?
+
+    @Query("SELECT " + CONVERSATION_METADATA_COLUMNS + " FROM conversationentity WHERE assistant_id = :assistantId ORDER BY is_pinned DESC, update_at DESC LIMIT :limit")
+    suspend fun getRecentConversationMetadata(assistantId: String, limit: Int): List<ConversationEntity>
+
+    @Query("SELECT " + CONVERSATION_METADATA_COLUMNS + " FROM conversationentity WHERE assistant_id = :assistantId ORDER BY is_pinned DESC, update_at DESC")
+    fun getAssistantConversationMetadata(assistantId: String): Flow<List<ConversationEntity>>
+
+    @Query("SELECT " + CONVERSATION_METADATA_COLUMNS + " FROM conversationentity WHERE is_pinned = 1 ORDER BY update_at DESC")
+    fun getPinnedConversationMetadata(): Flow<List<ConversationEntity>>
+
+    @Query("SELECT EXISTS(SELECT 1 FROM conversationentity WHERE id = :id AND trim(nodes) NOT IN ('', '[]'))")
+    suspend fun hasLegacyNodes(id: String): Boolean
+
+    @Query("SELECT substr(CAST(nodes AS BLOB), :start, :size) FROM conversationentity WHERE id = :id")
+    suspend fun getLegacyNodeBytes(id: String, start: Int, size: Int): ByteArray?
+
     @Query("SELECT EXISTS(SELECT 1 FROM conversationentity WHERE id = :id)")
     suspend fun existsById(id: String): Boolean
 
@@ -143,3 +162,5 @@ interface ConversationDAO {
 data class ConversationDayCount(val day: String, val count: Int)
 
 data class AssistantConversationCount(val assistantId: String, val count: Int)
+
+private const val CONVERSATION_METADATA_COLUMNS = "id, assistant_id, title, '' AS nodes, create_at, update_at, suggestions, is_pinned, custom_system_prompt, mode_injection_ids, lorebook_ids, workspace_cwd, folder_id, config"

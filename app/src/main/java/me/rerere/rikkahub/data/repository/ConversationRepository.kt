@@ -21,6 +21,11 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.datastore.ConversationSortOrder
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import me.rerere.rikkahub.data.db.readSqliteTextChunks
+import me.rerere.rikkahub.data.db.migrations.migrateMessagesElement
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
 import me.rerere.rikkahub.data.db.fts.MessageSearchSort
@@ -83,6 +88,11 @@ class ConversationRepository(
     suspend fun hasFileReference(fileUrl: String): Boolean =
         messageNodeDAO.hasFileReference(JsonInstant.encodeToString(fileUrl))
 
+    internal fun reserveUndoFiles(conversation: Conversation): AutoCloseable {
+        requireWritableHistory(conversation)
+        return attachmentReferences.reserveFiles(conversation.files.map { it.toString() })
+    }
+
     /** Global cleanup for UI, assistant, Web and queue callers. Unknown references retain bytes. */
     internal suspend fun cleanupChatFiles(candidates: Collection<Uri>): Set<String> {
         val localFiles = candidates.filter { it.toString().startsWith("file://") }.distinct()
@@ -102,18 +112,18 @@ class ConversationRepository(
     }
 
     suspend fun getRecentConversations(assistantId: Uuid, limit: Int = 10): List<Conversation> {
-        return conversationDAO.getRecentConversationsOfAssistant(
-            assistantId = assistantId.toString(),
-            limit = limit
-        ).map { entity ->
-            val nodes = loadMessageNodes(entity.id)
-            conversationEntityToConversation(entity, nodes.nodes, nodes.state)
+        return database.withTransaction {
+            conversationDAO.getRecentConversationMetadata(assistantId.toString(), limit).map { entity ->
+                recoverLegacyNodes(entity.id)
+                val nodes = loadMessageNodes(entity.id)
+                conversationEntityToConversation(entity, nodes.nodes, nodes.state)
+            }
         }
     }
 
     fun getConversationsOfAssistant(assistantId: Uuid): Flow<List<Conversation>> {
         return conversationDAO
-            .getConversationsOfAssistant(assistantId.toString())
+            .getAssistantConversationMetadata(assistantId.toString())
             .map { flow ->
                 flow.map { entity ->
                     // 列表视图不需要完整的 nodes，使用空列表
@@ -411,9 +421,12 @@ class ConversationRepository(
             }
         }
 
-    suspend fun getConversationById(uuid: Uuid): Conversation? {
-        val entity = conversationDAO.getConversationById(uuid.toString())
-        return if (entity != null) {
+    /** Ordinary reads do not write. A remaining pre-v12 history is repaired transactionally:
+     * validate and insert all original nodes before clearing the legacy column. */
+    suspend fun getConversationById(uuid: Uuid): Conversation? = database.withTransaction {
+        val entity = conversationDAO.getConversationMetadataById(uuid.toString())
+        if (entity != null) {
+            recoverLegacyNodes(entity.id)
             val nodes = loadMessageNodes(entity.id)
             conversationEntityToConversation(entity, nodes.nodes, nodes.state)
         } else null
@@ -475,14 +488,18 @@ class ConversationRepository(
         conversation: Conversation,
         block: suspend () -> T,
     ): T {
-        val guard = ownershipGuard ?: return database.withTransaction { block() }
+        val guard = ownershipGuard ?: return database.withTransaction {
+            requireLegacyHistoryRecovered(conversation.id.toString())
+            block()
+        }
         return guard.withOwnerValidation { requireOwner ->
             database.withTransaction {
-                val existing = checkNotNull(conversationDAO.getConversationById(conversation.id.toString())) {
+                val existing = checkNotNull(conversationDAO.getConversationMetadataById(conversation.id.toString())) {
                     "Чат не найден. Откройте список чатов и выберите существующий чат."
                 }
                 val ownerId = conversation.assistantId.toString()
                 if (existing.assistantId != ownerId) requireOwner(ownerId)
+                requireLegacyHistoryRecovered(conversation.id.toString())
                 block()
             }
         }
@@ -628,7 +645,7 @@ class ConversationRepository(
 
     fun getPinnedConversations(): Flow<List<Conversation>> {
         return conversationDAO
-            .getPinnedConversations()
+            .getPinnedConversationMetadata()
             .map { flow ->
                 flow.map { entity ->
                     conversationEntityToConversation(entity, emptyList())
@@ -688,6 +705,53 @@ class ConversationRepository(
             historyLoadState = HistoryLoadState.NOT_LOADED,
             folderId = entity.folderId.ifEmpty { null }?.let { Uuid.parse(it) },
         )
+    }
+
+    /** A caller-supplied COMPLETE snapshot cannot authorize discarding unread legacy bytes. */
+    private suspend fun requireLegacyHistoryRecovered(conversationId: String) {
+        check(!conversationDAO.hasLegacyNodes(conversationId)) {
+            "В чате осталась старая история. Сначала откройте чат для восстановления; исходные данные не изменены."
+        }
+    }
+
+    /** Must be called inside the metadata/chunk read transaction. No owner is created or rebound. */
+    private suspend fun recoverLegacyNodes(conversationId: String) {
+        if (!conversationDAO.hasLegacyNodes(conversationId)) return
+        val failure = "Не удалось однозначно восстановить старую историю чата. Исходные данные сохранены; восстановите корректную копию или используйте совместимую версию приложения."
+        check(!messageNodeDAO.hasConversationNodes(conversationId)) { failure }
+        val raw = readSqliteTextChunks { start, size -> conversationDAO.getLegacyNodeBytes(conversationId, start, size) }
+        val recovered = try {
+            val root = JsonInstant.parseToJsonElement(raw) as? JsonArray ?: error(failure)
+            val normalized = JsonArray(root.map { element ->
+                val node = element as? JsonObject ?: error(failure)
+                val id = (node["id"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: error(failure)
+                Uuid.parse(id)
+                listOf("conversationId", "conversation_id").forEach { key ->
+                    node[key]?.let { bound ->
+                        check((bound as? JsonPrimitive)?.takeIf { it.isString }?.content == conversationId) { failure }
+                    }
+                }
+                val messages = node["messages"] as? JsonArray ?: error(failure)
+                messages.forEach { message ->
+                    val messageId = ((message as? JsonObject)?.get("id") as? JsonPrimitive)?.takeIf { it.isString }?.content ?: error(failure)
+                    Uuid.parse(messageId)
+                }
+                JsonObject(node + ("messages" to migrateMessagesElement(messages)))
+            })
+            JsonInstant.decodeFromString<List<MessageNode>>(JsonInstant.encodeToString(normalized)).also { nodes ->
+                check(nodes.map { it.id }.distinct().size == nodes.size) { failure }
+                check(nodes.all { it.selectIndex in it.messages.indices }) { failure }
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            throw IllegalStateException(failure, error)
+        }
+        // ABORT (not REPLACE) also rejects a node ID already owned by another conversation.
+        messageNodeDAO.insertRecoveredNodes(recovered.mapIndexed { index, node ->
+            MessageNodeEntity(node.id.toString(), conversationId, index, JsonInstant.encodeToString(node.messages), node.selectIndex)
+        })
+        conversationDAO.resetConversationNodes(conversationId)
     }
 
     private data class LoadedHistory(val nodes: List<MessageNode>, val state: HistoryLoadState)

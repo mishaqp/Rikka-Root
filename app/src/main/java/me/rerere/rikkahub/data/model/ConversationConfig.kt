@@ -139,3 +139,25 @@ fun Conversation.bindConfig(settings: Settings): Conversation {
         lorebookIds = lorebookIds.ifEmpty { assistant.lorebookIds },
     )
 }
+
+/** A display/model fallback cannot transfer another assistant's runtime identity or capabilities. */
+fun Settings.getRuntimeAssistantOf(conversation: Conversation): Assistant {
+    if (getAssistantById(conversation.assistantId) != null) return getAssistantOf(conversation)
+    val fallback = getAssistantOf(conversation)
+    return Assistant(
+        id = conversation.assistantId,
+        name = fallback.name,
+        chatModelId = getChatModelOf(conversation)?.id ?: fallback.chatModelId,
+        temperature = fallback.temperature,
+        topP = fallback.topP,
+        maxTokens = fallback.maxTokens,
+        reasoningLevel = fallback.reasoningLevel,
+        streamOutput = fallback.streamOutput,
+        contextMessageLimit = fallback.contextMessageLimit,
+        enableMemory = fallback.enableMemory,
+        useGlobalMemory = false,
+        enableRecentChatsReference = fallback.enableRecentChatsReference,
+        localTools = emptyList(),
+        systemPrompt = "Ассистент-владелец этого чата больше недоступен. История и память остаются в области исходного владельца. Его рабочая папка, MCP, навыки и разрешения не переносятся от другого ассистента. Для использования этих функций попросите пользователя явно выбрать владельца чата в приложении.",
+    )
+}

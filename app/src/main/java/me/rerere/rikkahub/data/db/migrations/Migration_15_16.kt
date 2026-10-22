@@ -4,6 +4,8 @@ import android.util.Log
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.migrateToolNodes
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.data.db.DatabaseMigrationTracker
@@ -56,6 +58,36 @@ val Migration_15_16 = object : Migration(15, 16) {
                 }
 
                 if (rows.isEmpty()) continue
+
+                // Validate before any rows are deleted. Ambiguous legacy branches cannot be
+                // faithfully flattened by migrateToolNodes; retain the entire transaction instead.
+                fun verifyLosslessToolMerge() {
+                    var availableCalls = emptyList<Pair<String, String>>()
+                    val failure = "Не удалось однозначно перенести результаты инструментов разговора $conversationId. Исходная история сохранена; восстановите корректную копию или используйте совместимую версию приложения."
+                    rows.forEach { row ->
+                        if (row.messages.any { it.role == MessageRole.TOOL }) {
+                            check(row.selectIndex in row.messages.indices) { failure }
+                            check(row.messages.size == 1) { failure }
+                            val message = row.messages.single()
+                            check(message.role == MessageRole.TOOL && message.parts.isNotEmpty()) { failure }
+                            check(message.parts.all { it is UIMessagePart.ToolResult && it.metadata == null }) { failure }
+                            message.parts.filterIsInstance<UIMessagePart.ToolResult>().forEach { result ->
+                                val key = result.toolCallId to result.toolName
+                                check(availableCalls.count { it.first == key.first } == 1 && key in availableCalls) { failure }
+                                availableCalls = availableCalls.filterNot { it == key }
+                            }
+                        } else {
+                            availableCalls = row.messages.filter { it.role == MessageRole.ASSISTANT }.flatMap { message ->
+                                message.parts.mapNotNull { part -> when (part) {
+                                    is UIMessagePart.ToolCall -> part.toolCallId to part.toolName
+                                    is UIMessagePart.Tool -> if (!part.isExecuted) part.toolCallId to part.toolName else null
+                                    else -> null
+                                } }
+                            }
+                        }
+                    }
+                }
+                verifyLosslessToolMerge()
 
                 // Apply migration: merge TOOL role nodes into preceding ASSISTANT nodes,
                 // and convert legacy ToolCall/ToolResult parts to the unified Tool part

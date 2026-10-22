@@ -25,6 +25,13 @@ class AttachmentReferenceCoordinator {
     internal fun conversationDeleted(id: Uuid) = synchronized(lock) { deletedHistories.add(id) }
     internal fun conversationWritten(id: Uuid) = synchronized(lock) { deletedHistories.remove(id) }
 
+    /** A reversible UI operation owns these bytes until it restores or releases its receipt. */
+    internal fun reserveFiles(urls: Collection<String>): AutoCloseable {
+        val token = Any()
+        synchronized(lock) { reservations[token] = urls.toSet() }
+        return AutoCloseable { synchronized(lock) { reservations.remove(token) }; Unit }
+    }
+
     /** Reserve bytes before waiting for Room, including a fork's source while copying. */
     internal suspend fun <T> withFileReservation(urls: Collection<String>, block: suspend () -> T): T =
         withReservation(urls.toSet()) { block() }

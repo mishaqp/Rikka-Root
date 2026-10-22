@@ -49,7 +49,7 @@ val Migration_6_7 = object : Migration(6, 7) {
 
                 try {
                     // 尝试解析旧格式的消息列表 List<UIMessage>
-                    val oldMessages = JsonInstant.decodeFromString<List<UIMessage>>(messagesJson)
+                    val oldMessages = JsonInstant.decodeFromString<List<UIMessage>>(migrateMessagesJson(messagesJson))
 
                     // 转换为新格式 List<MessageNode>
                     val newMessages = oldMessages.map { message ->
@@ -72,7 +72,7 @@ val Migration_6_7 = object : Migration(6, 7) {
                     )
                 } catch (e: Exception) {
                     // 如果解析失败，可能已经是新格式或者数据损坏，跳过
-                    error("Failed to migrate messages for conversation $id: ${e.message}")
+                    throw IllegalStateException("Не удалось перенести сообщения разговора $id: формат истории повреждён или не поддерживается. Исходные данные сохранены; восстановите корректную копию.", e)
                 }
             }
             cursor.close()

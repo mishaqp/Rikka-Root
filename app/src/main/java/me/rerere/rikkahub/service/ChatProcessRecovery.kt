@@ -45,12 +45,13 @@ internal class ChatProcessRecovery(
 ) {
     private val mutex = Mutex()
     private var recovered = false
+    private var retryIds = emptySet<String>()
     private var active = linkedMapOf<String, String>()
     private val backgroundFile = File(file.parentFile, "chat-background-executions.json")
     private var background = linkedMapOf<String, String>()
 
     suspend fun recoverInterrupted() = mutex.withLock {
-        if (recovered) return@withLock
+        if (recovered && retryIds.isEmpty()) return@withLock
         withContext(Dispatchers.IO) {
             active.putAll(read(file))
             background.putAll(read(backgroundFile))
@@ -67,9 +68,10 @@ internal class ChatProcessRecovery(
             }
             val restoredRuns = allRuns.filter { it.status.terminal }
             val legacyIds = repository.findInterruptedBackgroundChats().mapTo(hashSetOf()) { it.toString() }
-            val ids = (legacyIds + active.filterValues { !belongsToCurrentProcess(it) }.keys +
+            val ids = if (recovered) retryIds else (legacyIds + active.filterValues { !belongsToCurrentProcess(it) }.keys +
                 background.filterValues { !belongsToCurrentProcess(it) }.keys +
                 restoredRuns.mapNotNull { run -> runCatching { Uuid.parse(run.owner.conversationId).toString() }.getOrNull() }).toSet()
+            val retry = linkedSetOf<String>()
             for (id in ids) {
                 val hadActive = active[id]?.let { !belongsToCurrentProcess(it) } == true
                 val hadBackground = background[id]?.let { !belongsToCurrentProcess(it) } == true
@@ -77,12 +79,16 @@ internal class ChatProcessRecovery(
                 val conversation = try { repository.getConversationById(Uuid.parse(id)) }
                 catch (error: Exception) {
                     if (error is CancellationException) throw error
-                    // One unreadable history must not prevent recovery of other chats or replace its bytes.
+                    // Keep this ID retryable without blocking independent healthy chats.
+                    retry.add(id)
                     continue
                 }
                 if (conversation != null) {
                     // Damaged history must retain its original bytes and recovery marker.
-                    if (conversation.historyLoadState != HistoryLoadState.COMPLETE) continue
+                    if (conversation.historyLoadState != HistoryLoadState.COMPLETE) {
+                        retry.add(id)
+                        continue
+                    }
                     val finished = if (hadActive) interruptConversation(conversation, baselineMessageId(active[id])) else conversation
                     val restored = refreshBackgroundSnapshots(finished, allRuns, closeWorkspace = hadActive || hadBackground || oldSnapshot)
                     if (restored != conversation) repository.updateConversation(restored)
@@ -98,6 +104,7 @@ internal class ChatProcessRecovery(
                     background = next
                 }
             }
+            retryIds = retry
             recovered = true
         }
     }

@@ -39,6 +39,7 @@ class ConversationSession(
     private val metadataMutex = Mutex()
     @Volatile
     private var initialized = false
+    private var deletingMessage = false
     internal val isInitialized: Boolean get() = initialized
     val messageQueue = MessageQueue(attachmentReferences)
 
@@ -211,6 +212,24 @@ class ConversationSession(
         if (it <= 0) scheduleIdleCheck()
     }
 
+    /** Keep a newly registered lazy job visible to Stop, but start it after deletion commits. */
+    internal fun reserveMessageDeletion(): AutoCloseable = synchronized(this) {
+        check(!deletingMessage && getJob() == null && activeJobs.none { !it.isCompleted }) {
+            "Дождитесь завершения изменения истории или остановите текущую генерацию перед удалением сообщения."
+        }
+        deletingMessage = true
+        var released = false
+        AutoCloseable {
+            synchronized(this) {
+                if (!released) {
+                    released = true
+                    deletingMessage = false
+                    _generationJob.value?.start()
+                }
+            }
+        }
+    }
+
     @Synchronized
     fun setJob(job: Job?, cancelPrevious: Boolean = true) {
         val previous = _generationJob.value
@@ -229,7 +248,7 @@ class ConversationSession(
                 }
             }
         }
-        job?.start()
+        if (!deletingMessage) job?.start()
     }
 
     fun getJob(): Job? = _generationJob.value

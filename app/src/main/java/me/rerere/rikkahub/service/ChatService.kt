@@ -90,7 +90,6 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
-import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.localFileUrls
@@ -103,6 +102,7 @@ import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.bindConfig
 import me.rerere.rikkahub.data.model.fillModelSnapshots
 import me.rerere.rikkahub.data.model.getAssistantOf
+import me.rerere.rikkahub.data.model.getRuntimeAssistantOf
 import me.rerere.rikkahub.data.model.getChatModelOf
 import me.rerere.rikkahub.data.model.getStoredAssistantOf
 import me.rerere.rikkahub.data.model.localFileUrls
@@ -301,6 +301,7 @@ class ChatService(
     private val queueStorageReady = CompletableDeferred<Unit>()
     private val incomingAttachmentReferences = java.util.concurrent.ConcurrentHashMap<Any, List<UIMessagePart>>()
     private val pendingAttachmentCleanup = java.util.concurrent.ConcurrentHashMap<Uuid, Set<String>>()
+    private val persistedConversationIds = java.util.concurrent.ConcurrentHashMap.newKeySet<Uuid>()
 
     private val sessionManager = ConversationSessionManager(
         scope = appScope,
@@ -499,6 +500,7 @@ class ChatService(
     private suspend fun loadConversation(conversationId: Uuid): Conversation? {
         processRecovery.recoverInterrupted()
         val conversation = conversationRepo.getConversationById(conversationId) ?: return null
+        persistedConversationIds += conversationId
         val bound = conversation.bindConfig(loadedSettings())
         if (bound !== conversation && bound.historyLoadState == HistoryLoadState.COMPLETE) {
             conversationRepo.updateConversationConfig(bound)
@@ -610,6 +612,13 @@ class ChatService(
                 Log.w(TAG, "Failed to clean queued attachments", e)
             }
         }
+    }
+
+    /** Undo leases outlive a History screen only until application-scoped cleanup starts. */
+    internal fun releaseHistoryUndoFiles(lease: AutoCloseable, candidates: List<android.net.Uri>) {
+        lease.close()
+        if (candidates.isEmpty()) return
+        appScope.launch(Dispatchers.IO) { conversationRepo.cleanupChatFiles(candidates) }
     }
 
     fun resumeMessageQueue(conversationId: Uuid) {
@@ -726,8 +735,7 @@ class ChatService(
 
                 val currentConversation = session.state.value
                 val settings = settingsStore.settingsFlow.first()
-                val assistant = settings.getAssistantById(currentConversation.assistantId)
-                    ?: settings.getCurrentAssistant()
+                val assistant = settings.getRuntimeAssistantOf(currentConversation)
                 val processedContent = preprocessUserInputParts(content, assistant)
 
                 // 添加消息到列表
@@ -912,7 +920,7 @@ class ChatService(
             "Ожидающий вызов изменился. Обновите чат и проверьте новые параметры перед подтверждением.")
         if (!validateInput) return candidate
         val settings = loadedSettings()
-        val assistant = settings.getAssistantOf(conversation)
+        val assistant = settings.getRuntimeAssistantOf(conversation)
         val model = settings.getChatModelOf(conversation) ?: throw ToolArgumentException(
             "Модель чата недоступна. Выберите модель и запросите новый вызов перед подтверждением.")
         val definition = chatToolFactory.createTools(settings, assistant, model,
@@ -1053,7 +1061,7 @@ class ChatService(
         if (isWorkspaceToolName(toolName)) {
             val conversation = getConversationFlow(conversationId).value
             // ConversationConfig may bind a different workspace from the assistant's current setting.
-            val workspaceId = settingsStore.settingsFlow.first().getAssistantOf(conversation).workspaceId?.toString()
+            val workspaceId = settingsStore.settingsFlow.first().getRuntimeAssistantOf(conversation).workspaceId?.toString()
             val granted = workspaceId != null && workspaceRepository.setToolApproval(workspaceId, toolName, needsApproval = false)
             if (!granted) ToolApprovalAllowList.grantForChat(conversationId, toolName)
         } else {
@@ -1072,7 +1080,7 @@ class ChatService(
         val settings = settingsStore.settingsFlow.first()
         val initialConversation = requireWritableConversation(conversationId)
         // 模型、思考级别、搜索、工具等以会话上固定的配置为准
-        val assistant = settings.getAssistantOf(initialConversation)
+        val assistant = settings.getRuntimeAssistantOf(initialConversation)
         val generationBudget = try {
             tokenBudgetStore.getLedger(assistant, conversationId, initialConversation.currentMessages)
         } catch (error: java.io.IOException) {
@@ -1357,7 +1365,7 @@ class ChatService(
                 val result = generateBackgroundWithBudget(
                     provider = providerHandler,
                     budget = currentCoroutineContext()[TokenBudgetContext]?.ledger
-                        ?: tokenBudgetStore.getLedger(settings.getAssistantOf(conversation), conversationId, conversation.currentMessages),
+                        ?: tokenBudgetStore.getLedger(settings.getRuntimeAssistantOf(conversation), conversationId, conversation.currentMessages),
                     providerSetting = target.provider,
                     messages = listOf(
                         UIMessage.user(
@@ -1419,7 +1427,7 @@ class ChatService(
             val result = generateBackgroundWithBudget(
                 provider = providerHandler,
                 budget = currentCoroutineContext()[TokenBudgetContext]?.ledger
-                    ?: tokenBudgetStore.getLedger(settings.getAssistantOf(conversation), conversationId, conversation.currentMessages),
+                    ?: tokenBudgetStore.getLedger(settings.getRuntimeAssistantOf(conversation), conversationId, conversation.currentMessages),
                 providerSetting = provider,
                 messages = listOf(
                     UIMessage.user(
@@ -1529,7 +1537,7 @@ class ChatService(
             val result = generateBackgroundWithBudget(
                 provider = providerHandler,
                 budget = currentCoroutineContext()[TokenBudgetContext]?.ledger
-                    ?: tokenBudgetStore.getLedger(settings.getAssistantOf(conversation), conversationId, conversation.currentMessages),
+                    ?: tokenBudgetStore.getLedger(settings.getRuntimeAssistantOf(conversation), conversationId, conversation.currentMessages),
                 providerSetting = provider,
                 messages = listOf(UIMessage.user(prompt)),
                 params = backgroundTextGenerationParams(model, conversationId).let {
@@ -1561,7 +1569,7 @@ class ChatService(
             if (automaticThreshold != null) {
                 val requestEnd = requestEndNodeId?.let { id -> updated.messageNodes.indexOfFirst { it.id == id }.also { check(it >= 0) } }
                     ?: updated.messageNodes.size
-                val assistant = settings.getAssistantOf(updated)
+                val assistant = settings.getRuntimeAssistantOf(updated)
                 val protectedPrompt = if (assistant.allowConversationSystemPrompt && !updated.customSystemPrompt.isNullOrBlank()) updated.customSystemPrompt else assistant.systemPrompt
                 check(AutoContextCompression.estimateTokens(AutoContextCompression.activeMessages(updated.currentMessages.take(requestEnd))) + protectedPrompt.length / 2 < automaticThreshold * 60L / 100) {
                     "Compression summary exceeded the configured trigger"
@@ -1727,6 +1735,10 @@ class ChatService(
                 session.withPersistenceLock {
                     requireWritableSession(session)
                     val exists = conversationRepo.existsConversationById(conversationId)
+                    check(exists || conversationId !in persistedConversationIds) {
+                        "Этот чат уже удалён. Создайте новый чат или используйте явную отмену удаления."
+                    }
+                    if (exists) persistedConversationIds += conversationId
                     if (!exists && title.isBlank() && session.state.value.messageNodes.isEmpty()) {
                         return@withPersistenceLock false
                     }
@@ -1741,6 +1753,7 @@ class ChatService(
                         conversationRepo.updateConversationTitle(conversationId, updated.title)
                     } else {
                         conversationRepo.insertConversation(updated)
+                        persistedConversationIds += conversationId
                     }
                     true
                 }
@@ -1858,6 +1871,16 @@ class ChatService(
                 require(conversation.id == conversationId)
                 requireWritableSession(session, conversation)
                 val exists = conversationRepo.existsConversationById(conversation.id)
+                if (!exists && conversationId in persistedConversationIds && conversation.messageNodes.isEmpty() &&
+                    session.state.value.messageNodes.isEmpty()) {
+                    // An empty deleted session may release its last unsaved file references.
+                    // It has no history to persist and must never recreate the database row.
+                    return@withPersistenceLock true
+                }
+                check(exists || conversationId !in persistedConversationIds) {
+                    "Этот чат уже удалён. Его прежний ответ не будет сохраняться повторно. Создайте новый чат или используйте явную отмену удаления."
+                }
+                if (exists) persistedConversationIds += conversationId
                 if (!exists && conversation.title.isBlank() && conversation.messageNodes.isEmpty()) {
                     return@withPersistenceLock false // 新会话且为空时不保存
                 }
@@ -1882,6 +1905,7 @@ class ChatService(
                     }
                     if (!exists) {
                         conversationRepo.insertConversation(updatedConversation)
+                        persistedConversationIds += conversationId
                     } else {
                         conversationRepo.updateConversation(updatedConversation)
                     }
@@ -1927,7 +1951,7 @@ class ChatService(
 
                 val conversation = getConversationFlow(conversationId).value
                 val translationBudget = tokenBudgetStore.getLedger(
-                    settings.getAssistantOf(conversation), conversationId, conversation.currentMessages,
+                    settings.getRuntimeAssistantOf(conversation), conversationId, conversation.currentMessages,
                 )
 
                 // Set loading state for translation
@@ -1993,8 +2017,7 @@ class ChatService(
 
         val currentConversation = requireWritableConversation(conversationId)
         val settings = settingsStore.settingsFlow.first()
-        val assistant = settings.getAssistantById(currentConversation.assistantId)
-            ?: settings.getCurrentAssistant()
+        val assistant = settings.getRuntimeAssistantOf(currentConversation)
         val processedParts = preprocessUserInputParts(parts, assistant)
 
         // Apply the edit to the live history by id: a stream may commit chunks meanwhile.
@@ -2110,17 +2133,20 @@ class ChatService(
         messageId: Uuid,
         failIfMissing: Boolean = true,
     ) {
-        val currentConversation = requireWritableConversation(conversationId)
-        val updatedConversation = buildConversationAfterMessageDelete(currentConversation, messageId)
-
-        if (updatedConversation == null) {
-            if (failIfMissing) {
-                throw NotFoundException("Message not found")
+        requireWritableConversation(conversationId)
+        var deletionLease: AutoCloseable? = null
+        try {
+            saveConversationAtomically(conversationId) { latest ->
+                deletionLease = checkNotNull(sessionManager.get(conversationId)) {
+                    "Чат недоступен. Откройте его заново перед удалением сообщения."
+                }.reserveMessageDeletion()
+                val updated = buildConversationAfterMessageDelete(latest, messageId)
+                if (updated == null && failIfMissing) throw NotFoundException("Сообщение не найдено.")
+                updated
             }
-            return
+        } finally {
+            deletionLease?.close()
         }
-
-        saveConversation(conversationId, updatedConversation)
     }
 
     suspend fun deleteMessage(

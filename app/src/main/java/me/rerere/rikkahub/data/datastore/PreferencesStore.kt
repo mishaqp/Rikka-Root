@@ -94,14 +94,11 @@ private fun createSettingsDataStore(context: Context): DataStore<Preferences> {
         corruptionHandler = ReplaceFileCorruptionHandler { exception ->
             // 文件已损坏无法解析, 先留一份原文件用于排查/抢救, 再重建为空
             Log.e(TAG, "Settings datastore corrupted, resetting", exception)
-            val copy = File(file.parentFile, "${file.name}.corrupt-${System.currentTimeMillis()}")
-            runCatching {
-                file.copyTo(copy)
-            }.onFailure {
-                Log.e(TAG, "Failed to backup corrupted settings file", it)
+            recoverCorruptSettings(file) { original ->
+                val copy = File(original.parentFile, "${original.name}.corrupt-${System.currentTimeMillis()}")
+                original.copyTo(copy)
+                SettingsResetNotice.mark(context, copy.name)
             }
-            SettingsResetNotice.mark(context, copy.name)
-            emptyPreferences()
         },
         migrations = listOf(
             // Run before version migrations populate a fresh, otherwise empty store.
@@ -114,6 +111,23 @@ private fun createSettingsDataStore(context: Context): DataStore<Preferences> {
         ),
         produceFile = { file },
     )
+}
+
+/** Injectable backup boundary; the default preserves the original file-copy operation. */
+internal fun recoverCorruptSettings(
+    file: File,
+    backup: (File) -> Unit = { original ->
+        original.copyTo(File(original.parentFile, "${original.name}.corrupt-${System.currentTimeMillis()}"))
+        Unit
+    },
+): Preferences {
+    try {
+        backup(file)
+    } catch (error: Exception) {
+        if (error is kotlinx.coroutines.CancellationException) throw error
+        throw IOException("Не удалось сохранить повреждённый файл настроек. Исходный файл оставлен без изменений; освободите место и повторите запуск.", error)
+    }
+    return emptyPreferences()
 }
 
 class SettingsStore(

@@ -381,6 +381,7 @@ class SharedAttachmentFilesTest {
         assertTrue("A genuine new unsaved history still owns its attachment references", file.exists())
         rig.service.updateConversationState(source.id) { it.copy(messageNodes = emptyList()) }
         rig.service.saveConversation(source.id, rig.service.getConversationFlow(source.id).value)
+        assertFalse("Clearing unsaved references must not recreate the deleted chat", rig.repo.existsConversationById(source.id))
         assertFalse(file.exists())
     }
 

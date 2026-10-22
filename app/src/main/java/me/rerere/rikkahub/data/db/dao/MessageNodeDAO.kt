@@ -5,7 +5,9 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.RawQuery
+import androidx.room.Transaction
 import androidx.room.Update
+import me.rerere.rikkahub.data.db.readSqliteTextChunks
 import androidx.sqlite.db.SimpleSQLiteQuery
 import androidx.sqlite.db.SupportSQLiteQuery
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
@@ -19,15 +21,28 @@ interface MessageNodeDAO {
     @Query("SELECT * FROM message_node WHERE conversation_id = :conversationId ORDER BY node_index ASC")
     suspend fun getNodesOfConversation(conversationId: String): List<MessageNodeEntity>
 
-    @Query(
-        "SELECT * FROM message_node WHERE conversation_id = :conversationId " +
-            "ORDER BY node_index ASC LIMIT :limit OFFSET :offset"
-    )
+    /** Keep the paged API and its failure boundary, but never put a full large TEXT in a cursor. */
+    @Transaction
     suspend fun getNodesOfConversationPaged(
         conversationId: String,
         limit: Int,
         offset: Int
-    ): List<MessageNodeEntity>
+    ): List<MessageNodeEntity> = getNodeMetadataPaged(conversationId, limit, offset).map { row ->
+        row.copy(messages = readSqliteTextChunks { start, size -> getMessageBytes(row.id, start, size) })
+    }
+
+    @Query("SELECT id, conversation_id, node_index, '' AS messages, select_index FROM message_node WHERE conversation_id = :conversationId ORDER BY node_index ASC LIMIT :limit OFFSET :offset")
+    suspend fun getNodeMetadataPaged(conversationId: String, limit: Int, offset: Int): List<MessageNodeEntity>
+
+    @Query("SELECT substr(CAST(messages AS BLOB), :start, :size) FROM message_node WHERE id = :nodeId")
+    suspend fun getMessageBytes(nodeId: String, start: Int, size: Int): ByteArray?
+
+    @Query("SELECT EXISTS(SELECT 1 FROM message_node WHERE conversation_id = :conversationId)")
+    suspend fun hasConversationNodes(conversationId: String): Boolean
+
+    /** Recovery must never replace another conversation's node with a colliding ID. */
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertRecoveredNodes(nodes: List<MessageNodeEntity>)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(nodes: List<MessageNodeEntity>)
