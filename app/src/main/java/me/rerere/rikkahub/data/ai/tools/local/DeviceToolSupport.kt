@@ -18,20 +18,69 @@ private val missingCommandDiagnostic = Regex(
 )
 private val reversedMissingCommandDiagnostic = Regex("(?:^|:\\s*)command not found:\\s*([A-Za-z0-9_./+-]+)\\s*$")
 private val installableCommandName = Regex("[A-Za-z0-9_][A-Za-z0-9_.+-]{0,79}")
+private val joinedSleepCommand = Regex("sleep([0-9]+)")
+private val joinedChmodCommand = Regex("chmod([0-7]{3,4})")
+private val permissionDeniedDiagnostic = Regex("\\bPermission denied\\b", RegexOption.IGNORE_CASE)
+private val dataAdbPath = Regex("""(?<![A-Za-z0-9_./-])/data/adb(?=/|$|[\s'":;|&()<>])""")
+private const val literalDataAdbPath = "/data/adb(?:/[A-Za-z0-9_.+-]+)*/?"
+private val singleDataAdbRead = Regex(
+    """[ \t]*(?:[A-Za-z0-9_./+-]+/)?(cat|ls|head|tail|stat|wc|du)[ \t]+(?:-[A-Za-z]+[ \t]+)*(?:--[ \t]+)?($literalDataAdbPath|'$literalDataAdbPath'|"$literalDataAdbPath")[ \t]*""",
+)
+
+/** A pathless diagnostic needs one literal read target; ambiguous shell input is not evidence. */
+private fun singleDataAdbReadCommand(command: String?): String? {
+    val read = singleDataAdbRead.matchEntire(command.orEmpty()) ?: return null
+    if (read.groupValues[2].trim('\'', '"').split('/').any { it == ".." }) return null
+    return read.groupValues[1]
+}
+
+private fun missingCommandName(stderr: String): String? =
+    stderr.take(8192).lineSequence().take(40).firstNotNullOfOrNull { line ->
+        (missingCommandDiagnostic.find(line)?.groupValues?.get(1)
+            ?: reversedMissingCommandDiagnostic.find(line)?.groupValues?.get(1))
+            ?.substringAfterLast('/')?.takeIf(installableCommandName::matches)
+    }
+
+/** Only focused diagnostics may replace a historical generic explanation in the UI. */
+internal fun specificCommandFailureHint(
+    exitCode: Int?,
+    stderr: String = "",
+    environment: CommandEnvironment = CommandEnvironment.GENERIC,
+    stdout: String = "",
+    command: String? = null,
+): String? {
+    if (exitCode == null || exitCode == 0) return null
+    if (exitCode == 127) {
+        val name = missingCommandName(stderr)
+        val spaced = joinedSleepCommand.matchEntire(name.orEmpty())?.let { "sleep ${it.groupValues[1]}" }
+            ?: joinedChmodCommand.matchEntire(name.orEmpty())?.let { "chmod ${it.groupValues[1]}" }
+        if (spaced != null) return "Команда $name не найдена (код 127). Возможно, пропущен пробел: $spaced. Проверьте исходную команду и результат перед новым запуском."
+        if (name != null) return null
+    }
+    if (environment != CommandEnvironment.TERMUX) return null
+    // stdout may contain an access diagnostic, but never supplies an installable command name.
+    val deniedLines = sequenceOf(stderr, stdout)
+        .flatMap { it.take(8192).lineSequence().take(40) }
+        .filter(permissionDeniedDiagnostic::containsMatchIn).toList()
+    val readCommand = singleDataAdbReadCommand(command)
+    val deniedDataAdb = deniedLines.any(dataAdbPath::containsMatchIn) ||
+        (readCommand != null && deniedLines.any { it.trim().equals("$readCommand: Permission denied", ignoreCase = true) })
+    if (!deniedDataAdb) return null
+    return "В Termux нет доступа к /data/adb (код $exitCode). Для чтения этого каталога нужны права root; используйте root_exec и проверьте результат."
+}
 
 /** Only a known shell diagnostic supplies a name; a compound input command is never guessed. */
 internal fun commandExitFailureReason(
     exitCode: Int?,
     stderr: String = "",
     environment: CommandEnvironment = CommandEnvironment.GENERIC,
+    stdout: String = "",
+    command: String? = null,
 ): String? {
     if (exitCode == null || exitCode == 0) return null
+    specificCommandFailureHint(exitCode, stderr, environment, stdout, command)?.let { return it }
     if (exitCode != 127) return "Команда завершилась с ошибкой (код $exitCode). Проверьте вывод и результат перед новым запуском."
-    val name = stderr.take(8192).lineSequence().take(40).firstNotNullOfOrNull { line ->
-        (missingCommandDiagnostic.find(line)?.groupValues?.get(1)
-            ?: reversedMissingCommandDiagnostic.find(line)?.groupValues?.get(1))
-            ?.substringAfterLast('/')?.takeIf(installableCommandName::matches)
-    }
+    val name = missingCommandName(stderr)
     val reason = if (name != null) "Программа $name не установлена или недоступна в PATH (код 127)."
         else "Программа не найдена (код 127)."
     val installation = when (environment) {
@@ -42,6 +91,23 @@ internal fun commandExitFailureReason(
         CommandEnvironment.GENERIC -> "Установите нужную программу в окружении команды или проверьте PATH."
     }
     return "$reason $installation"
+}
+
+/** Keep authored warnings while replacing only known app-generated historical hints. */
+internal fun commandFailureSupplement(text: String, exitCode: Int, stderr: String, focusedHint: String): String? {
+    var supplement = text.replace(focusedHint, "")
+    if (exitCode == 127) {
+        missingCommandName(stderr)?.let { name ->
+            val legacyMissingReason = Regex(
+                Regex.escape("Программа $name не установлена или недоступна в PATH (код 127).") +
+                    "(?:\\s+Установите (?:её|версию|нужную программу)[^\\n]*?\\.)?",
+            )
+            supplement = supplement.replace(legacyMissingReason, "")
+        }
+    } else {
+        commandExitFailureReason(exitCode)?.let { supplement = supplement.replace(it, "") }
+    }
+    return supplement.trim().takeIf { it.isNotEmpty() }
 }
 
 internal fun deviceToolError(message: String, permission: String? = null): JsonObject = buildJsonObject {

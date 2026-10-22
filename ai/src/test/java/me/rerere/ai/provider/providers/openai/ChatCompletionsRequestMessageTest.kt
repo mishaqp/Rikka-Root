@@ -1,5 +1,7 @@
 package me.rerere.ai.provider.providers.openai
 
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -17,6 +19,7 @@ import me.rerere.ai.ui.OpenRouterReasoningMetadata
 import me.rerere.ai.ui.metadataAs
 import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.KeyRoulette
+import me.rerere.ai.util.json
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -30,6 +33,38 @@ import org.junit.Test
  * specifically focusing on multi-round reasoning/tool scenarios.
  */
 class ChatCompletionsRequestMessageTest {
+
+    @Test
+    fun `stored shell arguments preserve whitespace quotes escapes and redirects through request replay`() {
+        val commands = listOf(
+            "sleep 40\nchmod 755 '/data/local/tmp/a b.sh'",
+            "status 2>/dev/null\nls /data/adb/ksu 2>/dev/null",
+            "  " + """printf '%s\n' "a  b" 'c d' a\ b >> '/data/local/tmp/log file' 2>&1""" + "  ",
+            "printf 'first\\nsecond'\n\tsleep 40\r\n",
+            "sleep40\nchmod755\nstatus2>/dev/null\nls /data/adb/ksu2>/dev/null",
+        )
+        val message = UIMessage.assistant("").copy(parts = commands.mapIndexed { index, command ->
+            // Formatting outside a JSON string may be normalized; command contents must be exact.
+            val input = "\n " + buildJsonObject { put("command", command) } + " \n"
+            createExecutedTool("call_$index", "root_exec", input, "fixture result")
+        })
+        val restored = json.decodeFromString<UIMessage>(json.encodeToString(message))
+        assertEquals(message, restored)
+
+        val encodedRequest = json.encodeToString(invokeBuildMessages(listOf(UIMessage.user("Replay tool history"), restored)))
+        val request = json.parseToJsonElement(encodedRequest).jsonArray
+        val assistant = request.single { it.jsonObject.containsKey("tool_calls") }.jsonObject
+        val calls = assistant.getValue("tool_calls").jsonArray
+        assertEquals(commands.size, calls.size)
+        for ((index, call) in calls.withIndex()) {
+            assertEquals("call_$index", call.jsonObject.getValue("id").jsonPrimitive.content)
+            val arguments = call.jsonObject.getValue("function").jsonObject.getValue("arguments").jsonPrimitive.content
+            assertEquals(restored.getTools()[index].inputAsJson().toString(), arguments)
+            assertEquals(commands[index], json.parseToJsonElement(arguments).jsonObject.getValue("command").jsonPrimitive.content)
+        }
+        val replayed = invokeParseMessage(assistant)
+        assertEquals(commands, replayed.getTools().map { it.inputAsJson().jsonObject.getValue("command").jsonPrimitive.content })
+    }
 
     @Test
     fun `parallel image results remain consecutive text tool messages with one image message after the batch`() {

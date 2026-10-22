@@ -100,6 +100,11 @@ fun SettingRootPage() {
                         },
                     )
                     item(
+                        onClick = { nav.navigate(Screen.SettingTermux) },
+                        headlineContent = { Text("Общие лимиты агента и команд") },
+                        supportingContent = { Text("Число шагов, время ответа и ожидание команд находятся в разделе Termux и действуют также для Root.") },
+                    )
+                    item(
                         onClick = { nav.navigate(Screen.SettingToolApprovals) },
                         headlineContent = { Text("Разрешения инструментов") },
                         supportingContent = { Text("Одобрения Root-команд и других инструментов") },

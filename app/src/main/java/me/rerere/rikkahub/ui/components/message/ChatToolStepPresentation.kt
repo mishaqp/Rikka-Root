@@ -60,7 +60,9 @@ import me.rerere.hugeicons.stroke.Voice
 import me.rerere.hugeicons.stroke.VolumeHigh
 import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.data.ai.tools.local.commandExitFailureReason
+import me.rerere.rikkahub.data.ai.tools.local.commandFailureSupplement
 import me.rerere.rikkahub.data.ai.tools.local.CommandEnvironment
+import me.rerere.rikkahub.data.ai.tools.local.specificCommandFailureHint
 
 /**
  * Presentation of one timeline step: a one-line title with the essence of the call and a short
@@ -332,14 +334,26 @@ private fun commandPreview(toolName: String, obj: JsonObject, fullScreen: Boolea
     val exit = (obj["exit_code"] ?: obj["exitCode"])?.let { (it as? JsonPrimitive)?.intOrNull }
     val nonZero = exit?.takeIf { it != 0 }
     val reason = nonZero?.let { code ->
-        listOf("message", "reason", "note", "recovery").mapNotNull { obj.string(it)?.readableRussian() }
-            .distinct().joinToString("\n").takeIf { it.isNotBlank() }
-            ?: if (toolName in foregroundExitReasonTools) commandExitFailureReason(code, stderr.orEmpty(), when (toolName) {
-                "workspace_shell" -> CommandEnvironment.WORKSPACE
-                "termux_run_command" -> CommandEnvironment.TERMUX
-                "root_exec" -> CommandEnvironment.ANDROID_ROOT
-                else -> CommandEnvironment.SSH
-            }) else null
+        val environment = when (toolName) {
+            "workspace_shell" -> CommandEnvironment.WORKSPACE
+            "termux_run_command" -> CommandEnvironment.TERMUX
+            "root_exec" -> CommandEnvironment.ANDROID_ROOT
+            else -> CommandEnvironment.SSH
+        }
+        val focusedHint = if (toolName in foregroundExitReasonTools)
+            specificCommandFailureHint(code, stderr.orEmpty(), environment, stdout = stdout.orEmpty()) else null
+        if (focusedHint != null) {
+            val authored = listOf("message", "reason", "note").mapNotNull { key ->
+                obj.string(key)?.readableRussian()?.let { commandFailureSupplement(it, code, stderr.orEmpty(), focusedHint) }
+            }
+            (listOf(focusedHint) + authored + listOfNotNull(obj.string("recovery")?.readableRussian()))
+                .distinct().joinToString("\n")
+        } else {
+            listOf("message", "reason", "note", "recovery").mapNotNull { obj.string(it)?.readableRussian() }
+                .distinct().joinToString("\n").takeIf { it.isNotBlank() }
+                ?: if (toolName in foregroundExitReasonTools)
+                    commandExitFailureReason(code, stderr.orEmpty(), environment, stdout = stdout.orEmpty()) else null
+        }
     }
     if (stdout == null && stderr == null) {
         val pid = (obj["pid"] as? JsonPrimitive)?.longOrNull

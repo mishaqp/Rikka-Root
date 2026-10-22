@@ -7,7 +7,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import me.rerere.rikkahub.data.preferences.TermuxDefaults
 import me.rerere.rikkahub.data.preferences.TermuxPreferences
 import me.rerere.rikkahub.data.preferences.TermuxRuntimeConfig
 
@@ -32,11 +31,13 @@ class SettingTermuxViewModel(
         prefs.maxStderrFlow(),
         prefs.aptWrapEnabledFlow(),
         prefs.maxToolStepsFlow(),
-    ) { partial, maxStderr, aptWrap, maxToolSteps ->
+        prefs.unlimitedToolStepsFlow(),
+    ) { partial, maxStderr, aptWrap, maxToolSteps, unlimitedToolSteps ->
         TermuxRuntimeConfig(
             commandTimeoutMs  = partial.commandTimeoutMs,
             turnBudgetMs      = partial.turnBudgetMs,
             maxToolSteps      = maxToolSteps,
+            unlimitedToolSteps = unlimitedToolSteps,
             verifyTimeoutMs   = partial.verifyTimeoutMs,
             defaultWorkingDir = partial.defaultWorkingDir,
             maxStdoutBytes    = partial.maxStdoutBytes,
@@ -46,16 +47,7 @@ class SettingTermuxViewModel(
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = TermuxRuntimeConfig(
-            commandTimeoutMs  = TermuxDefaults.DEFAULT_COMMAND_TIMEOUT_MS,
-            turnBudgetMs      = TermuxDefaults.DEFAULT_TURN_BUDGET_MS,
-            maxToolSteps      = TermuxDefaults.DEFAULT_MAX_TOOL_STEPS,
-            verifyTimeoutMs   = TermuxDefaults.DEFAULT_VERIFY_TIMEOUT_MS,
-            defaultWorkingDir = TermuxDefaults.DEFAULT_WORKING_DIR,
-            maxStdoutBytes    = TermuxDefaults.DEFAULT_MAX_STDOUT,
-            maxStderrBytes    = TermuxDefaults.DEFAULT_MAX_STDERR,
-            aptWrapEnabled    = TermuxDefaults.DEFAULT_APT_WRAP_ENABLED,
-        ),
+        initialValue = prefs.snapshotBlocking(),
     )
 
     // --- Write helpers. Unit conversion happens here so [TermuxPreferences] always receives ms/bytes. ---
@@ -73,6 +65,10 @@ class SettingTermuxViewModel(
     /** Tool-call iterations allowed in one turn (issue #22). Clamping in [TermuxPreferences]. */
     fun setMaxToolSteps(steps: Long) {
         viewModelScope.launch { prefs.setMaxToolSteps(steps.toInt()) }
+    }
+
+    fun setUnlimitedToolSteps(enabled: Boolean) {
+        viewModelScope.launch { prefs.setUnlimitedToolSteps(enabled) }
     }
 
     /** [seconds] is the UI display unit for verify timeout. */

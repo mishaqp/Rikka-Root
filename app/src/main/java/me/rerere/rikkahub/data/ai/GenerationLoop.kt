@@ -122,7 +122,8 @@ class GenerationLoop(
         assistant: Assistant,
         memories: List<AssistantMemory>? = null,
         tools: List<Tool> = emptyList(),
-        maxSteps: Int = ToolRuntimeLimits.maxToolSteps,
+        // 0 means no caller-specific cap; explicit background/subagent caps still apply.
+        maxSteps: Int = 0,
         processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
         conversationSystemPrompt: String? = null,
         conversationId: Uuid? = null,
@@ -221,7 +222,10 @@ class GenerationLoop(
         var responseFinished = false
         var waitingForApproval = false
         var limitReason: String? = null
-        for (stepIndex in 0 until minOf(maxSteps, ToolRuntimeLimits.maxToolSteps)) {
+        val stepLimit = listOf(maxSteps, ToolRuntimeLimits.maxToolSteps).filter { it > 0 }.minOrNull()
+        var stepIndex = 0L
+        while (stepLimit == null || stepIndex < stepLimit) {
+            currentCoroutineContext().ensureActive()
             if (SystemClock.elapsedRealtime() - turnStartMs >= turnBudgetMs) {
                 limitReason = "time_limit"
                 break
@@ -229,6 +233,7 @@ class GenerationLoop(
             budget?.ensureCanContinue()
             Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
 
+            stepIndex++
             // Also repair malformed calls restored from older versions before any approval check.
             messages.lastOrNull()?.let { last ->
                 val checked = last.copy(parts = last.parts.map { part ->

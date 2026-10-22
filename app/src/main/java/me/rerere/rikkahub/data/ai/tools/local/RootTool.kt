@@ -19,11 +19,12 @@ import me.rerere.rikkahub.root.RootApprovalPolicy
 import me.rerere.rikkahub.root.RootInvocation
 import me.rerere.rikkahub.root.RootShellManager
 import me.rerere.rikkahub.data.ai.tools.RunExecutionContext
+import me.rerere.rikkahub.data.preferences.TermuxRuntime
 
 /** Ordinary mode retains its consent gate; automatic permission is global on this device. */
 fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = null, assistantId: String? = null): Tool = Tool(
     name = "root_exec",
-    description = "Выполнить неинтерактивную команду Android через su после проверки UID 0. Используйте для диагностики и операций, требующих root; для обычной оболочки Termux используйте termux_run_command, для удалённой машины — ssh_exec_saved. Нужны root на устройстве и разрешение root-менеджера; автоматического перехода на Termux или Shizuku нет. Подтверждение требуется, если на этом устройстве не включено глобальное автоодобрение или Always Allow; видимые защищённые операции сохраняют отдельное подтверждение. Возвращает ограниченные stdout/stderr, exit_code и ошибки. Начатые команды автоматически не повторяются. timeout_ms: 1000–300000, по умолчанию 30000. Для проверки обновлений root-модулей сначала прочитайте updateJson из /data/adb/modules/*/module.prop без изменений, затем скачайте JSON через download_file в /scratch и прочитайте read_file. При необходимости используйте https://api.github.com/repos/<владелец>/<репо>/releases/latest вместо HTML GitHub. Проверка обновлений не разрешает установку.",
+    description = "Выполнить неинтерактивную команду Android через su после проверки UID 0. Используйте для диагностики и операций, требующих root; для обычной оболочки Termux используйте termux_run_command, для удалённой машины — ssh_exec_saved. Нужны root на устройстве и разрешение root-менеджера; автоматического перехода на Termux или Shizuku нет. Подтверждение требуется, если на этом устройстве не включено глобальное автоодобрение или Always Allow; видимые защищённые операции сохраняют отдельное подтверждение. Возвращает ограниченные stdout/stderr, exit_code и ошибки. Начатые команды автоматически не повторяются. timeout_ms: 1000–300000; если не указан, используется пользовательская настройка «Время ожидания команды», максимум 300000 мс. Явный timeout_ms имеет приоритет. PID или стартовая строка журнала не подтверждают завершение. После ошибки проверьте результат запрошенной операции, прежде чем сообщать, что всё выполнено. Для проверки обновлений root-модулей сначала прочитайте updateJson из /data/adb/modules/*/module.prop без изменений, затем скачайте JSON через download_file в /scratch и прочитайте read_file. При необходимости используйте https://api.github.com/repos/<владелец>/<репо>/releases/latest вместо HTML GitHub. Проверка обновлений не разрешает установку.",
     needsApproval = { input ->
         val command = ((input as? JsonObject)?.get("command") as? JsonPrimitive)
             ?.takeIf { it.isString }?.contentOrNull
@@ -34,7 +35,7 @@ fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = nul
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("command", buildJsonObject { put("type", "string"); put("description", "Непустая команда оболочки Android с root, например id -u или dumpsys battery.") })
-                put("timeout_ms", buildJsonObject { put("type", "integer"); put("description", "Таймаут команды в миллисекундах: 1000–300000, по умолчанию 30000."); put("minimum", 1000); put("maximum", 300000); put("default", 30000) })
+                put("timeout_ms", buildJsonObject { put("type", "integer"); put("description", "Таймаут команды в миллисекундах: 1000–300000. Если не указан, используется настройка «Время ожидания команды», максимум 300000 мс. Явное значение имеет приоритет."); put("minimum", 1000); put("maximum", 300000); put("default", TermuxRuntime.commandTimeoutMs.coerceIn(1_000L, 300_000L).toInt()) })
             },
             required = listOf("command"),
         )
@@ -44,7 +45,8 @@ fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = nul
         val commandValue = args?.get("command") as? JsonPrimitive
         val command = commandValue?.takeIf { it.isString }?.contentOrNull
         val timeoutValue = args?.get("timeout_ms")
-        val timeout = if (timeoutValue == null) 30_000 else (timeoutValue as? JsonPrimitive)?.takeIf { !it.isString }?.intOrNull
+        val timeout = if (timeoutValue == null) TermuxRuntime.commandTimeoutMs.coerceIn(1_000L, 300_000L).toInt()
+            else (timeoutValue as? JsonPrimitive)?.takeIf { !it.isString }?.intOrNull
         // Trusted invocation provenance survives revocation between journal acknowledgment and entry.
         val invocation = currentCoroutineContext()[RootInvocation]
         val headless = currentCoroutineContext()[RunExecutionContext] != null
@@ -106,7 +108,7 @@ fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = nul
                     executed.exitCode?.let { put("exit_code", it) }
                     executed.error?.let { put("error", it) }
                     val reason = executed.reason ?:
-                        if (executed.error == null) commandExitFailureReason(executed.exitCode, executed.stderr, CommandEnvironment.ANDROID_ROOT) else null
+                        if (executed.error == null) commandExitFailureReason(executed.exitCode, executed.stderr, CommandEnvironment.ANDROID_ROOT, command = command) else null
                     reason?.let { put("reason", it) }
                     if (journalError) {
                         put("journal_error", "root_journal_save_failed")

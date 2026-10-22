@@ -450,7 +450,7 @@ internal suspend fun runCommandCapture(
 fun termuxRunCommandTool(context: Context): Tool = Tool(
     name = "termux_run_command",
     needsApproval = { true },
-    description = "Выполнить команду в Termux и получить stdout, stderr и exit_code. Используйте для неинтерактивной локальной оболочки; для постоянного терминала, запросов пароля и REPL используйте termux_session_start. interactive=true открывает видимую сессию без захвата вывода; background=true отсоединяет процесс и возвращает PID. Укажите либо command, либо executable с arguments. Нужны установленный Termux, разрешение RUN_COMMAND и allow-external-apps=true в ~/.termux/termux.properties. Таймаут захвата: 0 или отсутствие означает настройку пользователя, иначе 1–600 секунд. Вывод ограничен настройками Termux. apt/apt-get в командном режиме получают DEBIAN_FRONTEND=noninteractive и безопасные параметры dpkg; не добавляйте -y без запроса пользователя на автоматическое обновление.",
+    description = "Выполнить команду в Termux и получить stdout, stderr и exit_code. Используйте для неинтерактивной локальной оболочки; для постоянного терминала, запросов пароля и REPL используйте termux_session_start. interactive=true открывает видимую сессию без захвата вывода; background=true отсоединяет процесс и возвращает PID. PID и стартовая строка журнала не подтверждают завершение: проверьте результат выполнения, особенно после ошибки, прежде чем сообщать об успехе. Укажите либо command, либо executable с arguments. Нужны установленный Termux, разрешение RUN_COMMAND и allow-external-apps=true в ~/.termux/termux.properties. Таймаут захвата: 0 или отсутствие означает настройку пользователя, иначе 1–600 секунд. Вывод ограничен настройками Termux. apt/apt-get в командном режиме получают DEBIAN_FRONTEND=noninteractive и безопасные параметры dpkg; не добавляйте -y без запроса пользователя на автоматическое обновление.",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
@@ -652,7 +652,10 @@ fun termuxRunCommandTool(context: Context): Tool = Tool(
                 if (res.stderr.isNotBlank()) put("stderr", boundedFailureOutput(res.stderr, maxErr))
                 termuxOutputTruncation(res.stdout, res.stderr, maxOut, maxErr, recoveryKey = "recovery")
                     .forEach { (key, value) -> put(key, value) }
-                commandExitFailureReason(res.exitCode, res.stderr, CommandEnvironment.TERMUX)?.let { put("note", it) }
+                commandExitFailureReason(res.exitCode, res.stderr, CommandEnvironment.TERMUX,
+                    stdout = res.stdout,
+                    command = rawCommand ?: (listOf(executable.orEmpty()) + argumentsForGuard).joinToString(" "),
+                )?.let { put("note", it) }
             }
             is CaptureResult.Timeout -> buildJsonObject {
                 put("error", "timeout")

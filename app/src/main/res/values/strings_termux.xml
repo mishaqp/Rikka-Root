@@ -38,18 +38,20 @@
     <string translatable="false" name="setting_termux_verify_allow_external_apps">Истекло время ожидания. Проверьте allow-external-apps=true в ~/.termux/termux.properties.</string>
     <string translatable="false" name="setting_termux_verify_unexpected_output">Проверка вернула неожиданный результат.</string>
     <string translatable="false" name="setting_termux_verify_other_error">Ошибка проверки: %s</string>
-    <string translatable="false" name="setting_termux_section_timeouts">Таймауты</string>
+    <string translatable="false" name="setting_termux_section_timeouts">Общие лимиты и таймауты</string>
     <string translatable="false" name="setting_termux_command_timeout">Время ожидания команды</string>
-    <string translatable="false" name="setting_termux_command_timeout_desc">Сколько ждать результат фоновой команды. От 5 до 600 с.</string>
+    <string translatable="false" name="setting_termux_command_timeout_desc">Termux: от 5 до 600 с. Root использует эту же настройку, максимум 300 с на команду; явный timeout_ms имеет приоритет.</string>
     <string translatable="false" name="setting_termux_turn_budget">Время одного ответа (все инструменты)</string>
-    <string translatable="false" name="setting_termux_turn_budget_desc">Предельное время выполнения инструментов для одного сообщения пользователя. От 1 до 60 мин.</string>
+    <string translatable="false" name="setting_termux_turn_budget_desc">Отдельный общий предел времени ответа с инструментами, включая Root и Termux. От 1 до 60 мин. Действует и при включённом «Без лимита шагов».</string>
     <string translatable="false" name="setting_termux_verify_timeout">Время проверки подключения</string>
     <string translatable="false" name="setting_termux_verify_timeout_desc">Таймаут проверки allow-external-apps командой echo. От 3 до 30 с.</string>
     <string translatable="false" name="setting_termux_unit_seconds">с</string>
     <string translatable="false" name="setting_termux_unit_minutes">мин</string>
     <string translatable="false" name="setting_termux_unit_steps">шагов</string>
     <string translatable="false" name="setting_termux_max_tool_steps">Шагов инструментов за ответ</string>
-    <string translatable="false" name="setting_termux_max_tool_steps_desc">Сколько вызовов инструментов разрешено в одном ответе. Для установки или сборки можно увеличить. От 1 до 500; предел времени действует одновременно.</string>
+    <string translatable="false" name="setting_termux_max_tool_steps_desc">Число циклов генерации и выполнения инструментов за ответ. От 1 до 500; один цикл может содержать несколько вызовов. Лимит времени действует отдельно.</string>
+    <string translatable="false" name="setting_termux_unlimited_steps">Без лимита шагов</string>
+    <string translatable="false" name="setting_termux_unlimited_steps_desc">Снимает ограничение числа шагов обычного ответа. Лимит времени ответа и явные ограничения фоновых заданий и субагентов продолжают действовать. Сохранённое число шагов не меняется.</string>
     <string translatable="false" name="setting_termux_unit_bytes">байт</string>
     <string translatable="false" name="setting_termux_section_defaults">Настройки и ограничения</string>
     <string translatable="false" name="setting_termux_working_dir">Рабочая папка по умолчанию</string>

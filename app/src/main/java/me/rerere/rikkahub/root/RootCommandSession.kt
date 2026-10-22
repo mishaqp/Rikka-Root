@@ -20,6 +20,7 @@ internal class RootCommandSession(private val suExecutable: String, directory: F
     }
 
     fun wrap(command: String): String {
+        // Append opaque shell arguments after normalizing the template indentation.
         val supervisor = """
             stat=${'$'}(cat /proc/${'$'}${'$'}/stat) || exit 125
             rest=${'$'}{stat##*) }
@@ -27,7 +28,7 @@ internal class RootCommandSession(private val suExecutable: String, directory: F
             shift 19
             printf '%s %s\n' "${'$'}${'$'}" "${'$'}1" > ${quote(process.path)} || exit 125
             [ -f ${quote(active.path)} ] || exit 125
-            sh -c ${quote(command)} &
+        """.trimIndent() + "\nsh -c " + quote(command) + " &\n" + """
             child=${'$'}!
             wait "${'$'}child"
             exit ${'$'}?
@@ -42,8 +43,7 @@ internal class RootCommandSession(private val suExecutable: String, directory: F
                 printf unavailable > ${quote(capability.path)}
                 exit 127
             fi
-            exec setsid sh -c ${quote(supervisor)}
-        """.trimIndent()
+        """.trimIndent() + "\nexec setsid sh -c " + quote(supervisor)
     }
 
     fun capabilityUnavailable(): Boolean = capability.readText() == "unavailable"

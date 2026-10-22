@@ -16,8 +16,8 @@ object ToolRuntimeLimits {
     @Volatile var turnBudgetMs: Long = TermuxDefaults.DEFAULT_TURN_BUDGET_MS
 
     /**
-     * Tool-call iterations a single turn may run before it is force-ended. Was hardcoded at 32,
-     * which truncated long Termux chains mid-task (issue #22).
+     * Tool-call iterations a single turn may run before it is force-ended. Zero disables this
+     * global step cap. The response deadline and explicit background/subagent caps stay active.
      */
     @Volatile var maxToolSteps: Int = TermuxDefaults.DEFAULT_MAX_TOOL_STEPS
 }

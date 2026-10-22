@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.data.preferences
 
 import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -11,6 +13,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -32,13 +35,19 @@ private val Context.termuxDataStore by preferencesDataStore(name = "termux_prefs
  * All read paths clamp on read; all write paths clamp on write. A value stored from an
  * older build that exceeds a tightened ceiling is silently clamped on the next read.
  */
-class TermuxPreferences(private val context: Context) {
-
-    private val store = context.termuxDataStore
+class TermuxPreferences internal constructor(
+    private val store: DataStore<Preferences>,
+    scope: CoroutineScope,
+) {
+    constructor(context: Context) : this(
+        context.termuxDataStore,
+        CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    )
 
     private val commandTimeoutKey = longPreferencesKey("command_timeout_ms")
     private val turnBudgetKey     = longPreferencesKey("turn_budget_ms")
     private val maxToolStepsKey   = intPreferencesKey("max_tool_steps")
+    private val unlimitedStepsKey = booleanPreferencesKey("unlimited_tool_steps")
     private val verifyTimeoutKey  = longPreferencesKey("verify_timeout_ms")
     private val workingDirKey     = stringPreferencesKey("working_dir")
     private val maxStdoutKey      = intPreferencesKey("max_stdout_bytes")
@@ -63,18 +72,15 @@ class TermuxPreferences(private val context: Context) {
         TermuxRuntime.maxStderrBytes     = initial.maxStderrBytes
         TermuxRuntime.aptWrapEnabled     = initial.aptWrapEnabled
         ToolRuntimeLimits.turnBudgetMs   = initial.turnBudgetMs
-        ToolRuntimeLimits.maxToolSteps   = initial.maxToolSteps
+        ToolRuntimeLimits.maxToolSteps   = if (initial.unlimitedToolSteps) 0 else initial.maxToolSteps
         // Issue #14: restore the "verified/connected" indicator across app restarts. Without
         // this, TermuxIntegration.lastVerifiedOkAtMs starts at 0 every launch and the user
         // has to re-run the verify smoke test even though nothing about the Termux
         // integration actually changed.
         me.rerere.rikkahub.data.ai.tools.local.TermuxIntegration.restoreVerifiedAt(initial.lastVerifiedMs)
 
-        // Async collectors keep the holders live on subsequent user edits. This scope is
-        // intentionally NOT stored as a field — it is process-lived and we want it to stay
-        // alive as long as the singleton itself. SupervisorJob means one failing collector
-        // doesn't kill the others.
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        // Async collectors share the store's lifetime. The public constructor supplies a
+        // process-lived scope; owners of an injected store can cancel both together.
         // Wire the write-back path so every future markVerifiedOk()/clearVerified() persists,
         // instead of only being restorable for the run that already set it.
         me.rerere.rikkahub.data.ai.tools.local.TermuxIntegration.persister = { ms ->
@@ -93,7 +99,9 @@ class TermuxPreferences(private val context: Context) {
                 .collect {}
         }
         scope.launch {
-            maxToolStepsFlow()
+            combine(maxToolStepsFlow(), unlimitedToolStepsFlow()) { steps, unlimited ->
+                if (unlimited) 0 else steps
+            }
                 .distinctUntilChanged()
                 .onEach { ToolRuntimeLimits.maxToolSteps = it }
                 .collect {}
@@ -150,6 +158,10 @@ class TermuxPreferences(private val context: Context) {
         )
     }
 
+    fun unlimitedToolStepsFlow(): Flow<Boolean> = store.data.map { prefs ->
+        prefs[unlimitedStepsKey] ?: false
+    }
+
     fun verifyTimeoutFlow(): Flow<Long> = store.data.map { prefs ->
         TermuxDefaults.clampVerifyTimeoutMs(
             prefs[verifyTimeoutKey] ?: TermuxDefaults.DEFAULT_VERIFY_TIMEOUT_MS
@@ -192,6 +204,11 @@ class TermuxPreferences(private val context: Context) {
         store.edit { it[maxToolStepsKey] = TermuxDefaults.clampMaxToolSteps(steps) }
     }
 
+    suspend fun setUnlimitedToolSteps(enabled: Boolean) {
+        // Preserve the numeric preference so disabling this switch restores the previous cap.
+        store.edit { it[unlimitedStepsKey] = enabled }
+    }
+
     suspend fun setVerifyTimeoutMs(ms: Long) {
         store.edit { it[verifyTimeoutKey] = TermuxDefaults.clampVerifyTimeoutMs(ms) }
     }
@@ -226,6 +243,7 @@ class TermuxPreferences(private val context: Context) {
             commandTimeoutMs   = TermuxDefaults.clampCommandTimeoutMs(prefs[commandTimeoutKey] ?: TermuxDefaults.DEFAULT_COMMAND_TIMEOUT_MS),
             turnBudgetMs       = TermuxDefaults.clampTurnBudgetMs(prefs[turnBudgetKey]         ?: TermuxDefaults.DEFAULT_TURN_BUDGET_MS),
             maxToolSteps       = TermuxDefaults.clampMaxToolSteps(prefs[maxToolStepsKey]        ?: TermuxDefaults.DEFAULT_MAX_TOOL_STEPS),
+            unlimitedToolSteps = prefs[unlimitedStepsKey] ?: false,
             verifyTimeoutMs    = TermuxDefaults.clampVerifyTimeoutMs(prefs[verifyTimeoutKey]    ?: TermuxDefaults.DEFAULT_VERIFY_TIMEOUT_MS),
             defaultWorkingDir  = TermuxDefaults.clampWorkingDir(prefs[workingDirKey]            ?: TermuxDefaults.DEFAULT_WORKING_DIR),
             maxStdoutBytes     = TermuxDefaults.clampMaxStdout(prefs[maxStdoutKey]              ?: TermuxDefaults.DEFAULT_MAX_STDOUT),
@@ -253,4 +271,5 @@ data class TermuxRuntimeConfig(
     val maxStderrBytes: Int,
     val aptWrapEnabled: Boolean,
     val lastVerifiedMs: Long = 0L,
+    val unlimitedToolSteps: Boolean = false,
 )
