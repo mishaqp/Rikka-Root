@@ -60,13 +60,14 @@ import me.rerere.ai.util.configureReferHeaders
 import me.rerere.ai.util.configureSessionHeaders
 import me.rerere.ai.util.encodeBase64
 import me.rerere.ai.util.json
+import me.rerere.ai.util.resolveRemoteImages
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.mergeCustomHeaders
 import me.rerere.ai.util.removeElements
 import me.rerere.ai.util.joinUrl
 import me.rerere.ai.util.streamFailure
 import me.rerere.ai.util.stringSafe
-import me.rerere.common.http.await
+import me.rerere.common.http.awaitBody
 import me.rerere.common.http.jsonPrimitiveOrNull
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -81,6 +82,10 @@ import okhttp3.sse.EventSources
 import org.apache.commons.text.StringEscapeUtils
 import kotlin.time.Clock
 import kotlin.uuid.Uuid
+
+// Inline generateContent requests have a 20 MiB payload budget. This bounds each URL
+// download before encoding; existing aggregate request validation remains server-owned.
+private const val GOOGLE_REMOTE_IMAGE_BASE64_LIMIT = 20L * 1024 * 1024
 
 class GoogleProvider(private val client: OkHttpClient, context: Context? = null) : Provider<ProviderSetting.Google> {
     private val keyRoulette = if (context != null) KeyRoulette.lru(context) else KeyRoulette.default()
@@ -141,10 +146,11 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             )
             val metadata = ProviderLog.Summary(ProviderLog.Provider.GOOGLE, null)
             try {
-                val response = client.newCall(request).await()
-                metadata.response(response.code)
-                if (response.isSuccessful) {
-                    val body = response.body?.string() ?: error("empty body")
+                val (status, body) = client.newCall(request).awaitBody { response ->
+                    response.code to if (response.isSuccessful) response.body.string() else ""
+                }
+                metadata.response(status)
+                if (status in 200..299) {
                     metadata.bodySize(body.toByteArray(Charsets.UTF_8).size.toLong())
                     val bodyObject = json.parseToJsonElement(body).jsonObject
                     val models = bodyObject["models"]?.jsonArray ?: return@withContext emptyList()
@@ -183,7 +189,8 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             return@withContext interactionsAPI.generateText(providerSetting, messages, params)
         }
 
-        val requestBody = buildCompletionRequestBody(messages, params)
+        val requestBody = buildCompletionRequestBody(
+                resolveRemoteImages(messages, client, GOOGLE_REMOTE_IMAGE_BASE64_LIMIT), params)
 
         val url = buildUrl(
             providerSetting = providerSetting,
@@ -209,15 +216,16 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
         val metadata = ProviderLog.Summary(ProviderLog.Provider.GOOGLE, params.model.modelId)
         try {
-            val response = client.newCall(request).await()
-            metadata.response(response.code)
-            if (!response.isSuccessful) {
-                val errorBody = response.body?.string()
-                metadata.bodySize(errorBody?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0)
-                throw Exception("Failed to get response: ${response.code} ${errorBody}")
-            }
+            val bodyStr = client.newCall(request).awaitBody { response ->
+                metadata.response(response.code)
+                if (!response.isSuccessful) {
+                    val errorBody = response.body?.string()
+                    metadata.bodySize(errorBody?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0)
+                    throw Exception("Не удалось получить ответ: ${response.code} ${errorBody}")
+                }
 
-            val bodyStr = response.body?.string() ?: ""
+                response.body?.string() ?: ""
+            }
             metadata.bodySize(bodyStr.toByteArray(Charsets.UTF_8).size.toLong())
             val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
 
@@ -252,7 +260,8 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
     ): Flow<StreamChunk> = callbackFlow {
         val metadata = ProviderLog.Summary(ProviderLog.Provider.GOOGLE, params.model.modelId)
         try {
-            val requestBody = buildCompletionRequestBody(messages, params)
+            val requestBody = buildCompletionRequestBody(
+                resolveRemoteImages(messages, client, GOOGLE_REMOTE_IMAGE_BASE64_LIMIT), params)
 
             val url = buildUrl(
                 providerSetting = providerSetting,
@@ -320,8 +329,12 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 }
 
                 override fun onClosed(eventSource: EventSource) {
-                    sendChunks(decoder.onClosed())
-                    close()
+                    try {
+                        sendChunks(decoder.onClosed())
+                        close()
+                    } catch (error: Throwable) {
+                        close(error)
+                    }
                 }
             }
 

@@ -96,7 +96,10 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
         return DecodeResult(chunks)
     }
 
-    override fun onClosed(): List<StreamChunk> = finish()
+    override fun onClosed(): List<StreamChunk> {
+        if (!finished && finishReason == null) throw java.io.IOException("Поток ответа оборвался до завершения провайдером. Повторите запрос.")
+        return finish()
+    }
 
     /** Событие целиком — один JSON (в том числе многострочный); иначе каждая строка — отдельный JSON. */
     private fun payloads(data: String): List<JsonElement> =
@@ -130,7 +133,8 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
         val role = MessageRole.valueOf(
             payload["role"]?.jsonPrimitive?.contentOrNull?.uppercase() ?: "ASSISTANT"
         )
-        val content = payload["content"]?.jsonPrimitiveOrNull?.contentOrNull ?: ""
+        val content = payload["content"]?.jsonPrimitiveOrNull?.contentOrNull?.takeIf(String::isNotEmpty)
+            ?: payload["refusal"]?.jsonPrimitiveOrNull?.contentOrNull.orEmpty()
         val reasoning = payload["reasoning_content"]?.jsonPrimitiveOrNull?.contentOrNull
             ?: payload["reasoning"]?.jsonPrimitiveOrNull?.contentOrNull
             ?: payload["content"]?.takeIf { it is JsonArray }?.let { array ->

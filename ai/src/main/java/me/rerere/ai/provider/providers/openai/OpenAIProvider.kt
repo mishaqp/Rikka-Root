@@ -34,7 +34,7 @@ import me.rerere.ai.util.joinUrl
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.mergeCustomHeaders
-import me.rerere.common.http.await
+import me.rerere.common.http.awaitBody
 import me.rerere.common.http.getByKey
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MultipartBody
@@ -68,15 +68,16 @@ class OpenAIProvider(
 
             val metadata = ProviderLog.Summary(ProviderLog.Provider.OPENAI, null)
             try {
-                val response = client.newCall(request).await()
-                metadata.response(response.code)
-                if (!response.isSuccessful) {
-                    val errorBody = response.body?.string()
-                    metadata.bodySize(errorBody?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0)
-                    error("Failed to get models: ${response.code} ${errorBody}")
-                }
+                val bodyStr = client.newCall(request).awaitBody { response ->
+                    metadata.response(response.code)
+                    if (!response.isSuccessful) {
+                        val errorBody = response.body?.string()
+                        metadata.bodySize(errorBody?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0)
+                        error("Не удалось загрузить модели: ${response.code} ${errorBody}")
+                    }
 
-                val bodyStr = response.body?.string() ?: ""
+                    response.body?.string() ?: ""
+                }
                 metadata.bodySize(bodyStr.toByteArray(Charsets.UTF_8).size.toLong())
                 val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
                 val data = bodyJson["data"]?.jsonArray ?: return@withContext emptyList()
@@ -108,12 +109,13 @@ class OpenAIProvider(
             .addHeader("Authorization", "Bearer $key")
             .get()
             .build()
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            error("Failed to get balance: ${response.code} ${response.body?.string()}")
-        }
+        val bodyStr = client.newCall(request).awaitBody { response ->
+            if (!response.isSuccessful) {
+                error("Не удалось получить баланс: ${response.code} ${response.body?.string()}")
+            }
 
-        val bodyStr = response.body.string()
+            response.body.string()
+        }
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
         val value = bodyJson.getByKey(providerSetting.balanceOption.resultPath)
         val digitalValue = value.toFloatOrNull()
@@ -189,12 +191,13 @@ class OpenAIProvider(
             .post(requestBody.toRequestBody("application/json".toMediaType()))
             .build()
 
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            error("Failed to generate embedding: ${response.code} ${response.body?.string()}")
-        }
+        val bodyStr = client.newCall(request).awaitBody { response ->
+            if (!response.isSuccessful) {
+                error("Не удалось получить эмбеддинги: ${response.code} ${response.body?.string()}")
+            }
 
-        val bodyStr = response.body?.string() ?: ""
+            response.body?.string() ?: ""
+        }
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
         val data = bodyJson["data"]?.jsonArray ?: error("No data in response")
         val model = bodyJson["model"]?.jsonPrimitive?.contentOrNull ?: params.model.modelId
@@ -251,14 +254,15 @@ class OpenAIProvider(
         val metadata = ProviderLog.Summary(ProviderLog.Provider.OPENAI, params.model.modelId)
         try {
             val items = withContext(Dispatchers.IO) {
-                val response = client.newCall(request).await()
-                metadata.response(response.code)
-                if (!response.isSuccessful) {
-                    val errorBody = response.body?.string()
-                    metadata.bodySize(errorBody?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0)
-                    error("Failed to generate image: ${response.code} ${errorBody}")
+                val bodyStr = client.newCall(request).awaitBody { response ->
+                    metadata.response(response.code)
+                    if (!response.isSuccessful) {
+                        val errorBody = response.body?.string()
+                        metadata.bodySize(errorBody?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0)
+                        error("Не удалось создать изображение: ${response.code} ${errorBody}")
+                    }
+                    response.body.string()
                 }
-                val bodyStr = response.body.string()
                 metadata.bodySize(bodyStr.toByteArray(Charsets.UTF_8).size.toLong())
                 parseImageResponse(bodyStr)
             }
@@ -330,11 +334,13 @@ class OpenAIProvider(
             .build()
 
         val items = withContext(Dispatchers.IO) {
-            val response = client.newCall(request).await()
-            if (!response.isSuccessful) {
-                error("Failed to edit image: ${response.code} ${response.body?.string()}")
+            val bodyStr = client.newCall(request).awaitBody { response ->
+                if (!response.isSuccessful) {
+                    error("Не удалось изменить изображение: ${response.code} ${response.body.string()}")
+                }
+                response.body.string()
             }
-            parseImageResponse(response.body.string())
+            parseImageResponse(bodyStr)
         }
 
         items.forEach { emit(it) }
@@ -384,11 +390,13 @@ class OpenAIProvider(
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            error("Failed to edit image: ${response.code} ${response.body?.string()}")
+        val bodyStr = client.newCall(request).awaitBody { response ->
+            if (!response.isSuccessful) {
+                error("Не удалось изменить изображение: ${response.code} ${response.body.string()}")
+            }
+            response.body.string()
         }
-        parseImageResponse(response.body.string())
+        parseImageResponse(bodyStr)
     }
 
     private suspend fun parseImageResponse(bodyStr: String): List<ImageGenerationItem> {
@@ -419,19 +427,14 @@ class OpenAIProvider(
             .get()
             .build()
 
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            error("Failed to download generated image: ${response.code} ${response.body.string()}")
+        return client.newCall(request).awaitBody { response ->
+            if (!response.isSuccessful) {
+                error("Не удалось загрузить созданное изображение: ${response.code} ${response.body.string()}")
+            }
+            val body = response.body
+            val mimeType = body.contentType()?.toString() ?: "image/png"
+            ImageGenerationItem(data = Base64.encode(body.bytes()), mimeType = mimeType)
         }
-
-        val body = response.body
-        val mimeType = body.contentType()?.toString() ?: "image/png"
-        val base64 = Base64.encode(body.bytes())
-
-        return ImageGenerationItem(
-            data = base64,
-            mimeType = mimeType
-        )
     }
 
     private fun File.imageMediaType(): String = when (extension.lowercase()) {

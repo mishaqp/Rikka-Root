@@ -17,7 +17,7 @@ class StreamDecoderRegressionTest {
             SseEvent(data = """{"id":"r1","choices":[{"index":0,"delta":{"images":[""" +
                 """{"type":"image_url","image_url":{"url":"data:$mime;base64,$data"}}]}}]}""")
         }
-        val images = replay(events.flatMap { decoder.accept(it).chunks } + decoder.onClosed())
+        val images = replay(events.flatMap { decoder.accept(it).chunks } + decoder.accept(SseEvent(data = "[DONE]")).chunks + decoder.onClosed())
             .filterIsInstance<UIMessagePart.Image>()
         assertEquals(listOf("data:image/jpeg;base64,AAAA", "data:image/webp;base64,BBBB"), images.map { it.url })
     }
@@ -29,7 +29,7 @@ class StreamDecoderRegressionTest {
             SseEvent(data = """{"candidates":[{"content":{"role":"model","parts":[""" +
                 """{"inlineData":{"mimeType":"image/png","data":"$data"}}]}}]}""")
         }
-        val images = replay(events.flatMap { decoder.accept(it).chunks } + decoder.onClosed())
+        val images = replay(events.flatMap { decoder.accept(it).chunks } + decoder.accept(SseEvent(data = """{"candidates":[{"finishReason":"STOP"}]}""")).chunks + decoder.onClosed())
             .filterIsInstance<UIMessagePart.Image>()
         assertEquals(listOf("data:image/png;base64,AAAA", "data:image/png;base64,BBBB"), images.map { it.url })
     }
@@ -44,7 +44,7 @@ class StreamDecoderRegressionTest {
             """{"function":{"arguments":"2}"}}""",
         ).flatMap { tool ->
             decoder.accept(SseEvent(data = """{"id":"r1","choices":[{"index":0,"delta":{"tool_calls":[$tool]}}]}""")).chunks
-        } + decoder.onClosed()
+        } + decoder.accept(SseEvent(data = "[DONE]")).chunks + decoder.onClosed()
         val tools = replay(chunks).filterIsInstance<UIMessagePart.Tool>()
         assertEquals(listOf("call_a", "call_b"), tools.map { it.toolCallId })
         assertEquals(listOf("first", "second"), tools.map { it.toolName })

@@ -123,7 +123,7 @@ class ProviderLoggingTest {
     fun `chat completions stream does not log private SSE events`() = runBlocking {
         val data = """{"id":"reply","model":"gpt-4o","choices":[{"index":0,"delta":{"content":"$responseCanary"}}]}"""
         val chunks = withTimeout(5_000) {
-            ChatCompletionsAPI(client(sse(data), sse = true), KeyRoulette.default()).streamText(openAI(), messages, params).toList()
+            ChatCompletionsAPI(client(sse(data) + terminal("openai-chat"), sse = true), KeyRoulette.default()).streamText(openAI(), messages, params).toList()
         }
         assertTrue(chunks.isNotEmpty())
         assertPrivateRequestAndLogs("openai")
@@ -132,7 +132,7 @@ class ProviderLoggingTest {
     @Test
     fun `responses stream does not log private SSE events`() = runBlocking {
         val data = """{"type":"response.output_text.delta","item_id":"item","content_index":0,"delta":"$responseCanary"}"""
-        val chunks = withTimeout(5_000) { ResponseAPI(client("event: response.output_text.delta\n" + sse(data), sse = true)).streamText(openAI(), messages, params).toList() }
+        val chunks = withTimeout(5_000) { ResponseAPI(client("event: response.output_text.delta\n" + sse(data) + terminal("openai-responses"), sse = true)).streamText(openAI(), messages, params).toList() }
         assertTrue(chunks.isNotEmpty())
         assertPrivateRequestAndLogs("openai")
     }
@@ -140,7 +140,7 @@ class ProviderLoggingTest {
     @Test
     fun `google stream does not log private SSE events`() = runBlocking {
         val data = """{"candidates":[{"content":{"parts":[{"text":"$responseCanary"}]}}]}"""
-        val chunks = withTimeout(5_000) { GoogleProvider(client(sse(data), sse = true)).streamText(google(), messages, params).toList() }
+        val chunks = withTimeout(5_000) { GoogleProvider(client(sse(data) + terminal("google"), sse = true)).streamText(google(), messages, params).toList() }
         assertTrue(chunks.isNotEmpty())
         assertPrivateRequestAndLogs("google")
     }
@@ -150,7 +150,7 @@ class ProviderLoggingTest {
         val start = """{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"""
         val data = """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"$responseCanary"}}"""
         val events = "event: content_block_start\n" + sse(start) + "event: content_block_delta\n" + sse(data)
-        val chunks = withTimeout(5_000) { ClaudeProvider(client(events, sse = true)).streamText(claude(), messages, params).toList() }
+        val chunks = withTimeout(5_000) { ClaudeProvider(client(events + terminal("claude"), sse = true)).streamText(claude(), messages, params).toList() }
         assertTrue(chunks.isNotEmpty())
         assertPrivateRequestAndLogs("claude")
     }
@@ -159,7 +159,7 @@ class ProviderLoggingTest {
     fun `interactions stream does not log private SSE events`() = runBlocking {
         val data = """{"event_type":"step.delta","index":0,"delta":{"type":"text","text":"$responseCanary"}}"""
         val chunks = withTimeout(5_000) {
-            GoogleProvider(client(sse(data), sse = true)).streamText(google().copy(useInteractionsApi = true), messages, params).toList()
+            GoogleProvider(client(sse(data) + terminal("google-interactions"), sse = true)).streamText(google().copy(useInteractionsApi = true), messages, params).toList()
         }
         assertTrue(chunks.isNotEmpty())
         assertPrivateRequestAndLogs("google")
@@ -220,13 +220,14 @@ class ProviderLoggingTest {
                 else -> ""
             }
             val body = (if (provider == "claude") "event: content_block_start\n" + sse(start) else "") +
-                (header + sse(data)).repeat(150)
+                (header + sse(data)).repeat(150) + terminal(provider)
             val http = client(body, sse = true)
             withTimeout(5_000) { stream(provider, http).toList() }
             assertSafeLogs(provider.substringBefore('-'))
-            val expectedEvents = if (provider == "claude") 151 else 150
+            val expectedEvents = if (provider == "claude") 152 else 151
             val expectedBytes = data.toByteArray(Charsets.UTF_8).size.toLong() * 150 +
-                if (provider == "claude") start.toByteArray(Charsets.UTF_8).size else 0
+                (if (provider == "claude") start.toByteArray(Charsets.UTF_8).size else 0) +
+                terminalPayload(provider).toByteArray(Charsets.UTF_8).size
             assertTrue("$provider event count", logs().contains("event_count=$expectedEvents "))
             assertTrue("$provider UTF-8 event bytes", logs().contains("size_bytes=$expectedBytes "))
         }
@@ -286,6 +287,19 @@ class ProviderLoggingTest {
             assertTrue(line.contains("http_code=200 "))
         }
     }
+
+    private fun terminalPayload(provider: String) = when (provider) {
+        "openai-chat" -> "[DONE]"
+        "openai-responses" -> """{"type":"response.completed","response":{"id":"reply","status":"completed"}}"""
+        "google" -> """{"candidates":[{"finishReason":"STOP"}]}"""
+        "google-interactions" -> """{"event_type":"interaction.completed","interaction":{"id":"reply","status":"completed"}}"""
+        else -> """{"type":"message_stop"}"""
+    }
+    private fun terminal(provider: String) = when (provider) {
+        "claude" -> "event: message_stop\n"
+        "openai-responses" -> "event: response.completed\n"
+        else -> ""
+    } + sse(terminalPayload(provider))
 
     private suspend fun stream(provider: String, http: OkHttpClient) = when (provider) {
         "openai-chat" -> ChatCompletionsAPI(http, KeyRoulette.default()).streamText(openAI(), messages, params)

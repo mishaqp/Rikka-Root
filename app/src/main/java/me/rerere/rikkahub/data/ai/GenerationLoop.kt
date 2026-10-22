@@ -177,6 +177,9 @@ class GenerationLoop(
         }
         fun validateArguments(tool: UIMessagePart.Tool): UIMessagePart.Tool {
             if (tool.isExecuted) return tool
+            if (!tool.providerResponseComplete) return tool.copy(output = toolError(
+                "incomplete_provider_call", "Провайдер не завершил вызов инструмента. Он не выполнен; повторите запрос для нового полного вызова."
+            ))
             val arguments = runCatching { json.parseToJsonElement(tool.input.ifBlank { "{}" }) }.getOrNull()
             if (arguments !is JsonObject) return tool.copy(output = toolError(
                 "invalid_tool_arguments", "Некорректные аргументы инструмента: ожидается корректный JSON-объект. Исправьте параметры и повторите вызов."

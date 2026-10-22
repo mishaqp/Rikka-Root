@@ -62,7 +62,7 @@ class ChatCompletionsToolIdentityRegressionTest {
     fun `пустой response id не затирает существующий`() {
         val decoder = ChatCompletionsStreamDecoder()
         decoder.accept(SseEvent(data = """{"id":"response-original","choices":[{"delta":{"content":"Первый"}}]}"""))
-        decoder.accept(SseEvent(data = """{"id":"","choices":[{"delta":{"content":"Второй"}}]}"""))
+        decoder.accept(SseEvent(data = """{"id":"","choices":[{"delta":{"content":"Второй"},"finish_reason":"stop"}]}"""))
         assertEquals("response-original", decoder.onClosed().filterIsInstance<StreamChunk.Finish>().single().responseId)
     }
 

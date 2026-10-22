@@ -118,11 +118,19 @@ class ProviderParallelToolIdentityPart2Test {
     }
 
     private fun assertSeparate(decoder: StreamChunkDecoder, events: List<SseEvent>) {
-        val chunks = events.flatMap { decoder.accept(it).chunks } + decoder.onClosed()
+        val terminal = when (decoder) {
+            is ClaudeStreamDecoder -> SseEvent(event = "message_stop", data = """{"type":"message_stop"}""")
+            is GoogleStreamDecoder -> SseEvent(data = """{"candidates":[{"finishReason":"STOP"}]}""")
+            is ResponseApiStreamDecoder -> SseEvent(data = """{"type":"response.completed","response":{"id":"response","status":"completed"}}""")
+            is InteractionsStreamDecoder -> SseEvent(data = """{"event_type":"interaction.completed","interaction":{"id":"response","status":"completed"}}""")
+            else -> error("Неизвестный протокол фикстуры")
+        }
+        val chunks = (events + terminal).flatMap { decoder.accept(it).chunks } + decoder.onClosed()
         val handler = StreamChunkHandler()
         val messages = chunks.fold(listOf(UIMessage.user("Проверь"))) { history, chunk -> handler.handle(history, chunk) }
         val calls = messages.flatMap { it.getTools() }
         assertEquals(2, calls.size)
+        assertTrue(calls.all { it.providerResponseComplete })
         assertEquals(listOf("first_tool", "second_tool"), calls.map { it.toolName })
         assertEquals(2, calls.map { it.toolCallId }.toSet().size)
         assertTrue(calls.all { it.toolCallId.isNotBlank() })

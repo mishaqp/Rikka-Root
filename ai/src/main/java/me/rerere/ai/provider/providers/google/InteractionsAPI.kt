@@ -56,7 +56,7 @@ import me.rerere.ai.util.mergeCustomHeaders
 import me.rerere.ai.util.joinUrl
 import me.rerere.ai.util.streamFailure
 import me.rerere.ai.util.stringSafe
-import me.rerere.common.http.await
+import me.rerere.common.http.awaitBody
 import me.rerere.common.http.jsonArrayOrNull
 import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.common.http.jsonPrimitiveOrNull
@@ -89,13 +89,13 @@ internal class InteractionsAPI(
         val request = buildRequest(providerSetting, params, requestBody)
         val metadata = ProviderLog.Summary(ProviderLog.Provider.GOOGLE, params.model.modelId)
         try {
-            // await() waits for the response headers; reading the body can still block.
-            client.newCall(request).await().use { response ->
+            // Cancellation remains attached through body consumption, including a stalled body.
+            client.newCall(request).awaitBody { response ->
                 metadata.response(response.code)
                 if (!response.isSuccessful) {
                     val errorBody = response.body.string()
                     metadata.bodySize(errorBody.toByteArray(Charsets.UTF_8).size.toLong())
-                    throw Exception("Failed to get response: ${response.code} ${errorBody}")
+                    throw Exception("Не удалось получить ответ: ${response.code} ${errorBody}")
                 }
                 val bodyStr = response.body.string()
                 metadata.bodySize(bodyStr.toByteArray(Charsets.UTF_8).size.toLong())
@@ -155,8 +155,12 @@ internal class InteractionsAPI(
                 }
 
                 override fun onClosed(eventSource: EventSource) {
-                    sendChunks(decoder.onClosed())
-                    close()
+                    try {
+                        sendChunks(decoder.onClosed())
+                        close()
+                    } catch (error: Throwable) {
+                        close(error)
+                    }
                 }
             }
 

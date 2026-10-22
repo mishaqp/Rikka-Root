@@ -74,7 +74,10 @@ internal class InteractionsStreamDecoder(
         }
     }
 
-    override fun onClosed(): List<StreamChunk> = finish()
+    override fun onClosed(): List<StreamChunk> {
+        if (!finished) throw java.io.IOException("Поток ответа оборвался до завершения провайдером. Повторите запрос.")
+        return finish()
+    }
 
     private fun captureInteraction(interaction: JsonObject?) {
         if (interaction == null) return

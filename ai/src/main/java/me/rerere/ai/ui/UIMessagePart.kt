@@ -187,7 +187,10 @@ sealed class UIMessagePart {
         val input: String,
         val output: List<UIMessagePart> = emptyList(),
         val approvalState: ToolApprovalState = ToolApprovalState.Auto,
-        override var metadata: JsonObject? = null
+        override var metadata: JsonObject? = null,
+        // Older/full-response calls are complete by default. A streamed call is persisted as
+        // incomplete until its entire provider response has a successful terminal event.
+        @SerialName("provider_response_complete") val providerResponseComplete: Boolean = true,
     ) : UIMessagePart() {
         /** Whether the tool has been executed (has output) */
         val isExecuted: Boolean get() = output.isNotEmpty()
@@ -211,6 +214,7 @@ sealed class UIMessagePart {
                 output = output + other.output,
                 approvalState = approvalState,
                 metadata = if (other.metadata != null) other.metadata else metadata,
+                providerResponseComplete = providerResponseComplete && other.providerResponseComplete,
             )
         }
     }

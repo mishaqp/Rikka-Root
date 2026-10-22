@@ -123,6 +123,7 @@ class GoogleToolCombinationTest {
         val handler = StreamChunkHandler(toolModel(tools = setOf(BuiltInTools.Search)))
         var messages = listOf(UIMessage.user("search and save"))
         decoder.accept(event).chunks.forEach { messages = handler.handle(messages, it) }
+        decoder.accept(SseEvent(data = """{"candidates":[{"finishReason":"STOP"}]}""")).chunks.forEach { messages = handler.handle(messages, it) }
         decoder.onClosed().forEach { messages = handler.handle(messages, it) }
 
         val assistant = messages.last()

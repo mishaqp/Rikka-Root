@@ -61,12 +61,13 @@ import me.rerere.ai.util.configureReferHeaders
 import me.rerere.ai.util.configureSessionHeaders
 import me.rerere.ai.util.encodeBase64
 import me.rerere.ai.util.json
+import me.rerere.ai.util.resolveRemoteImages
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.mergeCustomHeaders
 import me.rerere.ai.util.joinUrl
 import me.rerere.ai.util.streamFailure
 import me.rerere.ai.util.stringSafe
-import me.rerere.common.http.await
+import me.rerere.common.http.awaitBody
 import me.rerere.common.http.jsonPrimitiveOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -78,6 +79,8 @@ import okhttp3.sse.EventSourceListener
 import okhttp3.sse.EventSources
 import kotlin.time.Clock
 
+// Direct Claude API: per-image base64 payload limit; the overall request has its own limit.
+private const val CLAUDE_REMOTE_IMAGE_BASE64_LIMIT = 10L * 1024 * 1024
 private const val ANTHROPIC_VERSION = "2023-06-01"
 private const val CLAUDE_PAUSE_TURN = "pause_turn"
 private const val MAX_PAUSE_TURN_CONTINUATIONS = 5
@@ -253,12 +256,12 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 .get()
                 .build()
 
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                error("Failed to get models: ${response.code} ${response.body?.string()}")
+            val bodyStr = client.newCall(request).awaitBody { response ->
+                if (!response.isSuccessful) {
+                    error("Не удалось загрузить модели: ${response.code} ${response.body.string()}")
+                }
+                response.body.string()
             }
-
-            val bodyStr = response.body?.string() ?: ""
             val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
             val data = bodyJson["data"]?.jsonArray ?: return@withContext emptyList()
 
@@ -296,7 +299,8 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): TextGenerationResult {
-        val requestBody = buildMessageRequest(providerSetting, messages, params)
+        val requestBody = buildMessageRequest(providerSetting,
+            resolveRemoteImages(messages, client, CLAUDE_REMOTE_IMAGE_BASE64_LIMIT), params)
         val request = Request.Builder()
             .url(joinUrl(providerSetting.baseUrl, "/messages"))
             .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
@@ -309,15 +313,16 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
 
         val metadata = ProviderLog.Summary(ProviderLog.Provider.CLAUDE, params.model.modelId)
         try {
-            val response = client.newCall(request).await()
-            metadata.response(response.code)
-            if (!response.isSuccessful) {
-                val errorBody = response.body?.string()
-                metadata.bodySize(errorBody?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0)
-                throw Exception("Failed to get response: ${response.code} ${errorBody}")
-            }
+            val bodyStr = client.newCall(request).awaitBody { response ->
+                metadata.response(response.code)
+                if (!response.isSuccessful) {
+                    val errorBody = response.body?.string()
+                    metadata.bodySize(errorBody?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0)
+                    throw Exception("Не удалось получить ответ: ${response.code} ${errorBody}")
+                }
 
-            val bodyStr = response.body?.string() ?: ""
+                response.body?.string() ?: ""
+            }
             metadata.bodySize(bodyStr.toByteArray(Charsets.UTF_8).size.toLong())
             val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
 
@@ -355,7 +360,8 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
     ): Flow<StreamChunk> = callbackFlow {
         val metadata = ProviderLog.Summary(ProviderLog.Provider.CLAUDE, params.model.modelId)
         try {
-            val requestBody = buildMessageRequest(providerSetting, messages, params, stream = true)
+            val requestBody = buildMessageRequest(providerSetting,
+                resolveRemoteImages(messages, client, CLAUDE_REMOTE_IMAGE_BASE64_LIMIT), params, stream = true)
             val request = Request.Builder()
                 .url(joinUrl(providerSetting.baseUrl, "/messages"))
                 .headers(providerSetting.mergeCustomHeaders(params.customHeaders))
@@ -405,8 +411,12 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 }
 
                 override fun onClosed(eventSource: EventSource) {
-                    sendChunks(decoder.onClosed())
-                    close()
+                    try {
+                        sendChunks(decoder.onClosed())
+                        close()
+                    } catch (error: Throwable) {
+                        close(error)
+                    }
                 }
             }
 
@@ -468,10 +478,19 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             }
 
             // 处理 thinking
-            // Anthropic 新 API: adaptive 模式 + output_config.effort 控制强度
-            // 旧的 type=enabled + budget_tokens 在 Opus 4.7+ 上已不支持
+            // Claude 4/4.5 use enabled + budget_tokens; newer models retain adaptive thinking.
             if (params.model.abilities.contains(ModelAbility.REASONING)) {
-                when (params.reasoningLevel) {
+                val legacyThinking = Regex("(?i)claude[-_.](?:opus|sonnet|haiku)[-_.]4(?:[-_.]5)?(?:$|[-_.]20[0-9]{6}$)")
+                    .containsMatchIn(params.model.modelId)
+                if (legacyThinking && params.reasoningLevel != ReasoningLevel.OFF) {
+                    val maxOutput = params.maxTokens ?: 64_000
+                    require(maxOutput > 1024) { "Для рассуждения Claude укажите лимит ответа больше 1024 токенов." }
+                    val requestedBudget = params.reasoningLevel.budgetTokens.takeIf { it > 0 } ?: 8192
+                    put("thinking", buildJsonObject {
+                        put("type", "enabled")
+                        put("budget_tokens", requestedBudget.coerceIn(1024, maxOutput - 1))
+                    })
+                } else when (params.reasoningLevel) {
                     ReasoningLevel.OFF -> {
                         put("thinking", buildJsonObject { put("type", "disabled") })
                     }
@@ -811,7 +830,14 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                     }
                 }
 
-                "redacted_thinking" -> {}
+                "redacted_thinking" -> parts.add(UIMessagePart.Reasoning(
+                    reasoning = "",
+                    createdAt = Clock.System.now(),
+                    finishedAt = null,
+                    metadata = ClaudeReasoningMetadata(
+                        redactedData = block["data"]?.jsonPrimitive?.contentOrNull,
+                    ).toMetadata(),
+                ))
 
                 "tool_use" -> {
                     val id = block["id"]?.jsonPrimitive?.contentOrNull ?: ""

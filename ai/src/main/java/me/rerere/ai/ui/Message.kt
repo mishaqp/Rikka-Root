@@ -44,7 +44,9 @@ data class UIMessage(
         return if (text.length > maxLength) text.take(maxLength) + "..." else text
     }
 
-    fun toText() = parts.joinToString(separator = "\n") { part ->
+    // Пустой непрозрачный блок рассуждения хранит metadata, но не добавляет видимую строку.
+    fun toText() = parts.filterNot { it is UIMessagePart.Reasoning && it.reasoning.isEmpty() }
+        .joinToString(separator = "\n") { part ->
         when (part) {
             is UIMessagePart.Text -> part.text
             else -> ""

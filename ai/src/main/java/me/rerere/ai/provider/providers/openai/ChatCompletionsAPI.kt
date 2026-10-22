@@ -56,7 +56,7 @@ import me.rerere.ai.util.mergeCustomHeaders
 import me.rerere.ai.util.joinUrl
 import me.rerere.ai.util.streamFailure
 import me.rerere.ai.util.stringSafe
-import me.rerere.common.http.await
+import me.rerere.common.http.awaitBody
 import me.rerere.common.http.jsonArrayOrNull
 import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.common.http.jsonPrimitiveOrNull
@@ -99,15 +99,16 @@ class ChatCompletionsAPI(
 
         val metadata = ProviderLog.Summary(ProviderLog.Provider.OPENAI, params.model.modelId)
         try {
-            val response = client.newCall(request).await()
-            metadata.response(response.code)
-            if (!response.isSuccessful) {
-                val errorBody = response.body?.string()
-                metadata.bodySize(errorBody?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0)
-                throw Exception("Failed to get response: ${response.code} ${errorBody}")
-            }
+            val bodyStr = client.newCall(request).awaitBody { response ->
+                metadata.response(response.code)
+                if (!response.isSuccessful) {
+                    val errorBody = response.body?.string()
+                    metadata.bodySize(errorBody?.toByteArray(Charsets.UTF_8)?.size?.toLong() ?: 0)
+                    throw Exception("Не удалось получить ответ: ${response.code} ${errorBody}")
+                }
 
-            val bodyStr = response.body?.string() ?: ""
+                response.body?.string() ?: ""
+            }
             metadata.bodySize(bodyStr.toByteArray(Charsets.UTF_8).size.toLong())
             val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
 
@@ -198,8 +199,12 @@ class ChatCompletionsAPI(
                 }
 
                 override fun onClosed(eventSource: EventSource) {
-                    sendChunks(decoder.onClosed())
-                    close()
+                    try {
+                        sendChunks(decoder.onClosed())
+                        close()
+                    } catch (error: Throwable) {
+                        close(error)
+                    }
                 }
             }
 
@@ -701,7 +706,8 @@ class ChatCompletionsAPI(
         )
 
         // 也许支持其他模态的输出content?
-        val content = jsonObject["content"]?.jsonPrimitiveOrNull?.contentOrNull ?: ""
+        val content = jsonObject["content"]?.jsonPrimitiveOrNull?.contentOrNull?.takeIf(String::isNotEmpty)
+            ?: jsonObject["refusal"]?.jsonPrimitiveOrNull?.contentOrNull.orEmpty()
         val reasoning = jsonObject["reasoning_content"]?.jsonPrimitiveOrNull?.contentOrNull
             ?: jsonObject["reasoning"]?.jsonPrimitiveOrNull?.contentOrNull
             ?: jsonObject["content"]?.takeIf { it is JsonArray }?.let { arr ->

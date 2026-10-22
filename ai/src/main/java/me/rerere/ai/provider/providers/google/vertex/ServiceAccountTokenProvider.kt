@@ -5,6 +5,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import me.rerere.common.http.awaitBody
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -100,10 +101,10 @@ class ServiceAccountTokenProvider(
             .header("Content-Type", "application/x-www-form-urlencoded")
             .build()
 
-        http.newCall(req).execute().use { resp ->
+        http.newCall(req).awaitBody { resp ->
             if (!resp.isSuccessful) {
                 val body = resp.body.string()
-                throw IllegalStateException("Token endpoint ${resp.code}: $body")
+                throw IllegalStateException("Не удалось получить токен Google (${resp.code}): $body")
             }
             val body = resp.body.string()
             val tokenResp = json.decodeFromString(TokenResponse.serializer(), body)

@@ -163,6 +163,7 @@ class StreamChunkHandler(private val model: Model? = null) {
                     toolName = chunk.toolName,
                     input = "",
                     metadata = chunk.metadata,
+                    providerResponseComplete = false,
                 ))
             }
 
@@ -295,7 +296,14 @@ class StreamChunkHandler(private val model: Model? = null) {
             is StreamChunk.Annotations -> copy(annotations = (annotations + chunk.annotations).distinct())
             is StreamChunk.Usage -> copy(usage = usage.merge(chunk.usage))
             is StreamChunk.Finish -> copy(
-                finishedAt = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+                finishedAt = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()),
+                parts = parts.map { part ->
+                    val incomplete = chunk.finishReason.orEmpty().startsWith("incomplete") ||
+                        chunk.finishReason in setOf("length", "max_tokens", "MAX_TOKENS")
+                    if (part is UIMessagePart.Tool && part.toolCallId in toolCallIds.values && !incomplete) {
+                        part.copy(providerResponseComplete = true)
+                    } else part
+                },
             ).finishReasoning().also {
                 // Finish 同时结束尚未显式结束的 reasoning，并释放本次响应流的索引状态。
                 textPartIndexes.clear()

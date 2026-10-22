@@ -61,7 +61,10 @@ internal class GoogleStreamDecoder(
         return DecodeResult(chunks)
     }
 
-    override fun onClosed(): List<StreamChunk> = finish()
+    override fun onClosed(): List<StreamChunk> {
+        if (!finished && finishReason == null) throw java.io.IOException("Поток ответа оборвался до завершения провайдером. Повторите запрос.")
+        return finish()
+    }
 
     private fun finish(): List<StreamChunk> {
         if (finished) return emptyList()

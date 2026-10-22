@@ -57,7 +57,7 @@ import me.rerere.ai.util.mergeCustomHeaders
 import me.rerere.ai.util.joinUrl
 import me.rerere.ai.util.streamFailure
 import me.rerere.ai.util.stringSafe
-import me.rerere.common.http.await
+import me.rerere.common.http.awaitBody
 import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.common.http.jsonPrimitiveOrNull
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -101,13 +101,13 @@ class ResponseAPI(
 
         val metadata = ProviderLog.Summary(ProviderLog.Provider.OPENAI, params.model.modelId)
         try {
-            // await() waits for the response headers; reading the body can still block.
-            client.newCall(request).await().use { response ->
+            // Cancellation remains attached through body consumption, including a stalled body.
+            client.newCall(request).awaitBody { response ->
                 metadata.response(response.code)
                 if (!response.isSuccessful) {
                     val errorBody = response.body.string()
                     metadata.bodySize(errorBody.toByteArray(Charsets.UTF_8).size.toLong())
-                    throw Exception("Failed to get response: ${response.code} ${errorBody}")
+                    throw Exception("Не удалось получить ответ: ${response.code} ${errorBody}")
                 }
 
                 val bodyStr = response.body.string()
@@ -183,8 +183,12 @@ class ResponseAPI(
                 }
 
                 override fun onClosed(eventSource: EventSource) {
-                    sendChunks(decoder.onClosed())
-                    close()
+                    try {
+                        sendChunks(decoder.onClosed())
+                        close()
+                    } catch (error: Throwable) {
+                        close(error)
+                    }
                 }
             }
 
@@ -642,11 +646,23 @@ class ResponseAPI(
                                 )
                             }
 
-                            else -> error("unknown part type $partType")
+                            "refusal" -> parts.add(UIMessagePart.Text(part["refusal"]?.jsonPrimitive?.contentOrNull.orEmpty()))
+                            else -> error("Неизвестный тип содержимого ответа: $partType")
                         }
                     }
                 }
 
+                "image_generation_call" -> {
+                    val data = output["result"]?.jsonPrimitive?.contentOrNull
+                    if (!data.isNullOrEmpty() && output["status"]?.jsonPrimitive?.contentOrNull != "failed") {
+                        val mime = when (output["output_format"]?.jsonPrimitive?.contentOrNull?.lowercase()) {
+                            "jpg", "jpeg" -> "image/jpeg"
+                            "webp" -> "image/webp"
+                            else -> "image/png"
+                        }
+                        parts.add(UIMessagePart.Image("data:$mime;base64,$data"))
+                    }
+                }
                 else -> if (isOpenAIServerToolCall(type)) {
                     parts.add(output.toOpenAIServerTool())
                 }

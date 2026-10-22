@@ -16,6 +16,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
@@ -402,6 +404,79 @@ class GenerationLoopAuditRegressionTest {
                 assertTrue(fixture.latest.last().toText().contains("лимит времени"))
             }
         } finally { ToolRuntimeLimits.turnBudgetMs = original }
+    }
+
+    @Test fun `part3 incomplete streamed tool after error cannot execute on resume`() = runBlocking {
+        // This is the exact durable tool representation produced before a provider error.
+        // Persist and reload it; transport state cannot be inferred from a later in-memory decoder.
+        val handler = me.rerere.ai.ui.StreamChunkHandler(Model(modelId = "test-chat"))
+        val partial = listOf(
+            me.rerere.ai.ui.StreamChunk.ToolCallStart("partial", "read_only_tool"),
+            me.rerere.ai.ui.StreamChunk.ToolCallDelta("partial", inputDelta = "{}"),
+        ).fold(listOf(UIMessage.user("Проверь"))) { messages, chunk -> handler.handle(messages, chunk) }
+        val restored = Json.decodeFromString<List<UIMessage>>(Json.encodeToString(partial))
+        Fixture(folder.newFolder()).use { fixture ->
+            var effects = 0
+            runCatching {
+                fixture.collect(listOf(Tool("read_only_tool", "test", execute = {
+                    effects++; listOf(UIMessagePart.Text("result"))
+                })), messages = restored)
+            }
+            assertEquals("A syntactically valid prefix is not a completed provider call", 0, effects)
+        }
+    }
+
+    @Test fun `part3 incomplete streamed tool at Stop cannot become a fresh approval card on resume`() = runBlocking {
+        val handler = me.rerere.ai.ui.StreamChunkHandler(Model(modelId = "test-chat"))
+        val partial = listOf(
+            me.rerere.ai.ui.StreamChunk.ToolCallStart("partial", "approval_tool"),
+            me.rerere.ai.ui.StreamChunk.ToolCallDelta("partial", inputDelta = "{}"),
+        ).fold(listOf(UIMessage.user("Проверь"))) { messages, chunk -> handler.handle(messages, chunk) }
+        Fixture(folder.newFolder()).use { fixture ->
+            var effects = 0
+            runCatching {
+                fixture.collect(listOf(Tool("approval_tool", "test", needsApproval = { true }, execute = {
+                    effects++; listOf(UIMessagePart.Text("result"))
+                })), messages = partial, autoApproved = { _, _ -> false })
+            }
+            assertEquals(0, effects)
+            assertTrue("Incomplete provider calls must never request approval later",
+                fixture.snapshots.none { messages -> messages.any { m -> m.getTools().any { it.isPending } } })
+        }
+    }
+
+    @Test fun `part3 tool block end before failed response cannot authorize resume`() = runBlocking {
+        val handler = me.rerere.ai.ui.StreamChunkHandler(Model(modelId = "test-chat"))
+        val partial = listOf(
+            me.rerere.ai.ui.StreamChunk.ToolCallStart("partial", "read_only_tool"),
+            me.rerere.ai.ui.StreamChunk.ToolCallDelta("partial", inputDelta = "{}"),
+            me.rerere.ai.ui.StreamChunk.ToolCallEnd("partial"),
+        ).fold(listOf(UIMessage.user("Проверь"))) { messages, chunk -> handler.handle(messages, chunk) }
+        Fixture(folder.newFolder()).use { fixture ->
+            var effects = 0
+            runCatching { fixture.collect(listOf(Tool("read_only_tool", "test", execute = {
+                effects++; listOf(UIMessagePart.Text("result"))
+            })), messages = partial) }
+            assertEquals("A tool block end alone is not a successful provider response", 0, effects)
+        }
+    }
+
+    @Test fun `part3 completed streamed tool can still resume with live approval policy`() = runBlocking {
+        val handler = me.rerere.ai.ui.StreamChunkHandler(Model(modelId = "test-chat"))
+        val completed = listOf(
+            me.rerere.ai.ui.StreamChunk.ToolCallStart("complete", "approval_tool"),
+            me.rerere.ai.ui.StreamChunk.ToolCallDelta("complete", inputDelta = "{}"),
+            me.rerere.ai.ui.StreamChunk.ToolCallEnd("complete"),
+            me.rerere.ai.ui.StreamChunk.Finish("tool_calls"),
+        ).fold(listOf(UIMessage.user("Проверь"))) { messages, chunk -> handler.handle(messages, chunk) }
+        Fixture(folder.newFolder()).use { fixture ->
+            var effects = 0
+            fixture.collect(listOf(Tool("approval_tool", "test", needsApproval = { true }, execute = {
+                effects++; listOf(UIMessagePart.Text("result"))
+            })), messages = completed, autoApproved = { _, _ -> false })
+            assertEquals(0, effects)
+            assertTrue(fixture.latest.last().getTools().single().isPending)
+        }
     }
 
     // Before the provider-only notice filter existed, the model saw the unchanged history.

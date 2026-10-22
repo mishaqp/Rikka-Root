@@ -23,6 +23,7 @@ import me.rerere.common.http.jsonObjectOrNull
 
 internal class ResponseApiStreamDecoder : StreamChunkDecoder {
     private val state = ResponseStreamState()
+    private val refusalIdsWithDelta = mutableSetOf<String>()
 
     override fun accept(event: SseEvent): DecodeResult {
         if (state.finished) return DecodeResult(completed = true)
@@ -36,7 +37,10 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
         return DecodeResult(chunks, completed)
     }
 
-    override fun onClosed(): List<StreamChunk> = state.finish()
+    override fun onClosed(): List<StreamChunk> {
+        if (!state.finished) throw java.io.IOException("Поток ответа оборвался до завершения провайдером. Повторите запрос.")
+        return state.finish()
+    }
 
     private fun parseEvent(payload: JsonObject): List<StreamChunk> {
         val chunkType = payload["type"]?.jsonPrimitive?.content ?: error("chunk type not found")
@@ -53,6 +57,20 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
                 textId ?: error("item_id not found"),
                 payload["delta"]?.jsonPrimitive?.contentOrNull ?: "",
             )
+            "response.refusal.delta" -> {
+                val id = textId ?: error("item_id not found")
+                refusalIdsWithDelta += id
+                state.textDelta(id, payload["delta"]?.jsonPrimitive?.contentOrNull.orEmpty())
+            }
+            "response.refusal.done" -> {
+                val id = textId ?: error("item_id not found")
+                buildList {
+                    if (id !in refusalIdsWithDelta) {
+                        addAll(state.textDelta(id, payload["refusal"]?.jsonPrimitive?.contentOrNull.orEmpty()))
+                    }
+                    addAll(state.endText(id))
+                }
+            }
             "response.reasoning_summary_text.delta" -> state.reasoningDelta(
                 summaryReasoningId ?: error("item_id not found"),
                 payload["delta"]?.jsonPrimitive?.contentOrNull ?: "",
