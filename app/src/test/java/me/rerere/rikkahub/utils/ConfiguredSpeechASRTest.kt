@@ -86,14 +86,20 @@ class ConfiguredSpeechASRTest {
         assertEquals(SpeechCaptureOutcome.Transcript("Системный результат"), result)
     }
 
-    @Test fun androidTimeoutLeavesTimeForConfiguredCapture() = runBlocking {
-        val result = captureSpeechWithFallback(120,
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun androidTimeoutLeavesTimeForConfiguredCapture() = runTest {
+        // Advance coroutine deadlines virtually. A 120 ms wall-clock budget also expired
+        // under CI scheduling delays, before the fallback could be resumed.
+        // Keep a realistic budget for the production monotonic remaining-time check.
+        val timeoutMs = 30_000L
+        val result = captureSpeechWithFallback(timeoutMs,
             systemCapture = { awaitCancellation() },
             configuredCapture = { remaining ->
-                assertTrue("Должно остаться время на резервный движок", remaining > 0)
+                assertTrue("Должно остаться время на резервный движок", remaining in 1..timeoutMs)
                 SpeechCaptureOutcome.Transcript("Резервный результат")
             },
         )
+        assertEquals(10_000L, testScheduler.currentTime)
         assertEquals(SpeechCaptureOutcome.Transcript("Резервный результат"), result)
     }
 
