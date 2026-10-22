@@ -2,6 +2,7 @@ package me.rerere.document
 
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
+import java.util.concurrent.CancellationException
 import java.io.File
 import java.io.InputStream
 import java.util.zip.ZipFile
@@ -19,14 +20,16 @@ private data class ParagraphProperties(
 )
 
 object DocxParser {
-    fun parse(file: File): String {
+    fun parse(file: File, checkActive: () -> Unit = {}): String {
+        checkActive()
         return try {
             file.inputStream().use { fileInputStream ->
                 ZipInputStream(fileInputStream).use { zipStream ->
                     var entry = zipStream.nextEntry
                     while (entry != null) {
+                        checkActive()
                         if (entry.name == "word/document.xml") {
-                            return parseDocumentXml(zipStream)
+                            return parseDocumentXml(zipStream, checkActive)
                         }
                         entry = zipStream.nextEntry
                     }
@@ -34,25 +37,28 @@ object DocxParser {
                 }
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             "Error parsing DOCX file: ${e.message}"
         }
     }
 
     /** Reads the entry the central directory lists, i.e. the one a ZipFile size check measured. */
-    fun parse(zip: ZipFile): String {
+    fun parse(zip: ZipFile, checkActive: () -> Unit = {}): String {
+        checkActive()
         val entry = zip.getEntry("word/document.xml") ?: return "Unable to find document content in DOCX file"
         return try {
-            zip.getInputStream(entry).use(::parseDocumentXml)
+            zip.getInputStream(entry).use { parseDocumentXml(it, checkActive) }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             "Error parsing DOCX file: ${e.message}"
         }
     }
 
-    private fun parseDocumentXml(inputStream: InputStream): String {
+    private fun parseDocumentXml(inputStream: InputStream, checkActive: () -> Unit): String {
         return try {
             val factory = XmlPullParserFactory.newInstance()
             factory.isNamespaceAware = true
-            val parser = factory.newPullParser()
+            val parser = factory.newPullParser().withCancellation(checkActive)
             parser.setInput(inputStream, "UTF-8")
 
             val result = StringBuilder()
@@ -76,6 +82,7 @@ object DocxParser {
 
             result.toString().trim()
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             "Error parsing document XML: ${e.message}"
         }
     }

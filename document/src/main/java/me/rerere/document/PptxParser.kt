@@ -2,6 +2,7 @@ package me.rerere.document
 
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
+import java.util.concurrent.CancellationException
 import java.io.File
 import java.io.InputStream
 import java.util.zip.ZipEntry
@@ -14,7 +15,8 @@ private data class SlideContent(
 )
 
 object PptxParser {
-    fun parse(file: File): String {
+    fun parse(file: File, checkActive: () -> Unit = {}): String {
+        checkActive()
         return try {
             ZipFile(file).use { zipFile ->
                 val slides = mutableListOf<SlideContent>()
@@ -32,16 +34,17 @@ object PptxParser {
 
                 // Parse each slide
                 slideEntries.forEachIndexed { index, entry ->
+                    checkActive()
                     val slideNumber = index + 1
                     val slideContent = zipFile.getInputStream(entry).use { stream ->
-                        parseSlideXml(stream)
+                        parseSlideXml(stream, checkActive)
                     }
 
                     // Try to get notes for this slide
                     val notesEntry = zipFile.getEntry("ppt/notesSlides/notesSlide${slideNumber}.xml")
                     val notes = if (notesEntry != null) {
                         zipFile.getInputStream(notesEntry).use { stream ->
-                            parseNotesXml(stream)
+                            parseNotesXml(stream, checkActive)
                         }
                     } else ""
 
@@ -49,17 +52,19 @@ object PptxParser {
                 }
 
                 // Format output
-                formatOutput(slides)
+                formatOutput(slides, checkActive)
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             "Error parsing PPTX file: ${e.message}"
         }
     }
 
-    private fun formatOutput(slides: List<SlideContent>): String {
+    private fun formatOutput(slides: List<SlideContent>, checkActive: () -> Unit): String {
         val result = StringBuilder()
 
         slides.forEach { slide ->
+            checkActive()
             result.append("## Slide ${slide.slideNumber}\n\n")
             result.append(slide.content)
 
@@ -74,11 +79,11 @@ object PptxParser {
         return result.toString().trim()
     }
 
-    private fun parseSlideXml(inputStream: InputStream): String {
+    private fun parseSlideXml(inputStream: InputStream, checkActive: () -> Unit): String {
         return try {
             val factory = XmlPullParserFactory.newInstance()
             factory.isNamespaceAware = true
-            val parser = factory.newPullParser()
+            val parser = factory.newPullParser().withCancellation(checkActive)
             parser.setInput(inputStream, "UTF-8")
 
             val result = StringBuilder()
@@ -97,6 +102,7 @@ object PptxParser {
 
             result.toString()
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             "Error parsing slide XML: ${e.message}\n"
         }
     }
@@ -368,11 +374,11 @@ object PptxParser {
         return result.toString().trim()
     }
 
-    private fun parseNotesXml(inputStream: InputStream): String {
+    private fun parseNotesXml(inputStream: InputStream, checkActive: () -> Unit): String {
         return try {
             val factory = XmlPullParserFactory.newInstance()
             factory.isNamespaceAware = true
-            val parser = factory.newPullParser()
+            val parser = factory.newPullParser().withCancellation(checkActive)
             parser.setInput(inputStream, "UTF-8")
 
             val result = StringBuilder()
@@ -397,6 +403,7 @@ object PptxParser {
 
             result.toString().trim()
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             ""
         }
     }

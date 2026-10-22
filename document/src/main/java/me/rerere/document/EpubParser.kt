@@ -2,6 +2,7 @@ package me.rerere.document
 
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
+import java.util.concurrent.CancellationException
 import java.io.File
 import java.io.InputStream
 import java.util.zip.ZipFile
@@ -13,25 +14,27 @@ private data class ManifestItem(
 )
 
 object EpubParser {
-    fun parse(file: File): String {
+    fun parse(file: File, checkActive: () -> Unit = {}): String {
+        checkActive()
         return try {
             ZipFile(file).use { zip ->
-                val opfPath = findOpfPath(zip)
+                val opfPath = findOpfPath(zip, checkActive)
                     ?: return "Unable to find OPF file in EPUB"
                 val opfDir = opfPath.substringBeforeLast('/', "")
 
                 val opfEntry = zip.getEntry(opfPath)
                     ?: return "Unable to read OPF file in EPUB"
-                val (manifest, spine) = zip.getInputStream(opfEntry).use { parseOpf(it) }
+                val (manifest, spine) = zip.getInputStream(opfEntry).use { parseOpf(it, checkActive) }
 
                 val result = StringBuilder()
                 for (itemId in spine) {
+                    checkActive()
                     val item = manifest[itemId] ?: continue
                     if (!item.mediaType.contains("html")) continue
 
                     val itemPath = if (opfDir.isEmpty()) item.href else "$opfDir/${item.href}"
                     val entry = zip.getEntry(itemPath) ?: continue
-                    val content = zip.getInputStream(entry).use { parseXhtml(it) }
+                    val content = zip.getInputStream(entry).use { parseXhtml(it, checkActive) }
                     if (content.isNotBlank()) {
                         result.append(content)
                         result.append("\n\n")
@@ -41,16 +44,17 @@ object EpubParser {
                 result.toString().trim().ifEmpty { "No readable content found in EPUB file" }
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             "Error parsing EPUB file: ${e.message}"
         }
     }
 
-    private fun findOpfPath(zip: ZipFile): String? {
+    private fun findOpfPath(zip: ZipFile, checkActive: () -> Unit): String? {
         val containerEntry = zip.getEntry("META-INF/container.xml") ?: return null
         return zip.getInputStream(containerEntry).use { stream ->
             val factory = XmlPullParserFactory.newInstance()
             factory.isNamespaceAware = true
-            val parser = factory.newPullParser()
+            val parser = factory.newPullParser().withCancellation(checkActive)
             parser.setInput(stream, "UTF-8")
 
             while (parser.eventType != XmlPullParser.END_DOCUMENT) {
@@ -63,10 +67,10 @@ object EpubParser {
         }
     }
 
-    private fun parseOpf(inputStream: InputStream): Pair<Map<String, ManifestItem>, List<String>> {
+    private fun parseOpf(inputStream: InputStream, checkActive: () -> Unit): Pair<Map<String, ManifestItem>, List<String>> {
         val factory = XmlPullParserFactory.newInstance()
         factory.isNamespaceAware = true
-        val parser = factory.newPullParser()
+        val parser = factory.newPullParser().withCancellation(checkActive)
         parser.setInput(inputStream, "UTF-8")
 
         val manifest = mutableMapOf<String, ManifestItem>()
@@ -98,11 +102,11 @@ object EpubParser {
         return manifest to spine
     }
 
-    private fun parseXhtml(inputStream: InputStream): String {
+    private fun parseXhtml(inputStream: InputStream, checkActive: () -> Unit): String {
         return try {
             val factory = XmlPullParserFactory.newInstance()
             factory.isNamespaceAware = false
-            val parser = factory.newPullParser()
+            val parser = factory.newPullParser().withCancellation(checkActive)
             parser.setFeature(XmlPullParser.FEATURE_PROCESS_DOCDECL, false)
             parser.setInput(inputStream, "UTF-8")
 
@@ -216,7 +220,8 @@ object EpubParser {
                 }
                 try {
                     parser.next()
-                } catch (_: Exception) {
+                } catch (error: Exception) {
+                    if (error is CancellationException) throw error
                     break
                 }
             }
@@ -225,6 +230,7 @@ object EpubParser {
                 .replace(Regex("\n{3,}"), "\n\n")
                 .trim()
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             ""
         }
     }

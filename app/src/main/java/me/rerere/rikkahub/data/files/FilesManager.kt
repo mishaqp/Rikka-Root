@@ -9,6 +9,10 @@ import androidx.core.net.toUri
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -107,50 +111,70 @@ class FilesManager(
     fun createChatFilesByContents(uris: List<Uri>): List<Uri> =
         importChatFiles(uris).map { it.localUri }
 
-    fun importChatFiles(uris: List<Uri>): List<ImportedChatFile> {
+    fun importChatFiles(uris: List<Uri>): List<ImportedChatFile> = importChatFilesInternal(uris)
+
+    /** Copies under the caller's lifetime; no managed records are published for cancelled imports. */
+    suspend fun importChatFilesAsync(uris: List<Uri>): List<ImportedChatFile> {
+        val created = mutableListOf<File>()
+        return try {
+            val imported = withContext(Dispatchers.IO) {
+                val coroutine = currentCoroutineContext()
+                importChatFilesInternal(uris, { coroutine.ensureActive() }, created, track = false)
+            }
+            // There is no suspension between metadata registration and handing the files to UI.
+            imported.forEach { file ->
+                trackManagedFile(FileFolders.UPLOAD, file.localUri.toFile(), file.displayName, file.mimeType)
+            }
+            imported
+        } catch (cancelled: CancellationException) {
+            withContext(NonCancellable + Dispatchers.IO) { created.forEach { it.delete() } }
+            throw cancelled
+        }
+    }
+
+    private fun importChatFilesInternal(
+        uris: List<Uri>,
+        checkActive: () -> Unit = {},
+        created: MutableList<File>? = null,
+        track: Boolean = true,
+    ): List<ImportedChatFile> {
         val importedFiles = mutableListOf<ImportedChatFile>()
         val dir = context.filesDir.resolve(FileFolders.UPLOAD)
-        if (!dir.exists()) {
-            dir.mkdirs()
-        }
+        if (!dir.exists()) dir.mkdirs()
         uris.forEach { uri ->
-            runCatching {
+            var target: File? = null
+            try {
+                checkActive()
                 val sourceName = getFileNameFromUri(uri) ?: uri.lastPathSegment ?: "file"
                 val sourceMime = getFileMimeType(uri)
-                val fileName = buildUuidFileName(displayName = sourceName, mimeType = sourceMime)
-                val file = dir.resolve(fileName)
-                if (!file.exists()) {
-                    file.createNewFile()
-                }
+                checkActive()
+                val file = dir.resolve(buildUuidFileName(displayName = sourceName, mimeType = sourceMime))
+                target = file
+                if (!file.exists()) file.createNewFile()
+                created?.add(file)
                 val inputStream = context.contentResolver.openInputStream(uri)
-                    ?: error("Failed to open input stream for $uri")
+                    ?: error("Не удалось открыть поток вложения.")
                 inputStream.use { input ->
                     file.outputStream().use { output ->
-                        input.copyTo(output)
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            checkActive()
+                            val size = input.read(buffer)
+                            if (size < 0) break
+                            checkActive()
+                            output.write(buffer, 0, size)
+                        }
                     }
                 }
+                checkActive()
                 val guessedMime = sourceMime ?: guessMimeType(file, sourceName)
-                trackManagedFile(
-                    folder = FileFolders.UPLOAD,
-                    file = file,
-                    displayName = sourceName,
-                    mimeType = guessedMime
-                )
-                importedFiles.add(
-                    ImportedChatFile(
-                        sourceUri = uri,
-                        localUri = file.toUri(),
-                        displayName = sourceName,
-                        mimeType = guessedMime,
-                    )
-                )
-            }.onFailure {
-                it.printStackTrace()
-                Log.e(TAG, "createChatFilesByContents: Failed to save file from $uri", it)
-                Logging.log(
-                    TAG,
-                    "createChatFilesByContents: Failed to save file from $uri ${it.message} | ${it.stackTraceToString()}"
-                )
+                if (track) trackManagedFile(FileFolders.UPLOAD, file, sourceName, guessedMime)
+                importedFiles.add(ImportedChatFile(uri, file.toUri(), sourceName, guessedMime))
+            } catch (error: Exception) {
+                target?.delete()
+                if (error is CancellationException) throw error
+                Log.e(TAG, "createChatFilesByContents: Failed to save file from $uri", error)
+                Logging.log(TAG, "createChatFilesByContents: Failed to save file from $uri ${error.message} | ${error.stackTraceToString()}")
             }
         }
         return importedFiles
@@ -215,8 +239,8 @@ class FilesManager(
         }
 
     /**
-     * Writes a known image format as is, with its real type; only unknown formats are re-encoded
-     * as PNG. Returns null when the data cannot be decoded as an image.
+     * Keeps original encoded bytes and metadata, including formats recognized by Android
+     * through a bounds-only inspection. Never allocates a full-resolution bitmap.
      */
     private fun saveBase64Image(dataUrl: String): Uri? {
         val bytes = runCatching { Base64.Mime.decode(dataUrl.substringAfter("base64,")) }.getOrNull()
@@ -226,13 +250,11 @@ class FilesManager(
             val extension = sniffed.substringAfter('/')
             return createChatFilesByByteArrays(listOf(bytes), displayName = "image.$extension", mimeType = sniffed).first()
         }
-        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
-        val png = try {
-            FileUtils.compressBitmapToPng(bitmap)
-        } finally {
-            bitmap.recycle()
-        }
-        return createChatFilesByByteArrays(listOf(png)).first()
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        val mime = bounds.outMimeType?.takeIf { it.startsWith("image/") } ?: return null
+        return createChatFilesByByteArrays(listOf(bytes), displayName = "image.${mime.substringAfter('/')}", mimeType = mime).first()
     }
 
     fun deleteChatFiles(uris: List<Uri>) {

@@ -21,10 +21,10 @@ import java.io.FilterInputStream
 import java.nio.file.Files
 import java.util.zip.ZipFile
 
-private const val MAX_DOCUMENT_BYTES = 32L * 1024 * 1024
+internal const val MAX_DOCUMENT_BYTES = 32L * 1024 * 1024
 private const val MAX_DOCUMENT_EXPANDED_BYTES = 64L * 1024 * 1024
 private const val MAX_DOCUMENT_ENTRIES = 10_000
-private const val MAX_PDF_TEXT_CHARS = 4_000_000
+internal const val MAX_PDF_TEXT_CHARS = 4_000_000
 
 internal data class ReadDocumentExtraction(val text: String, val pages: Int? = null, val limited: Boolean = false)
 
@@ -132,11 +132,23 @@ private val defaultReadDocumentBackend = ReadDocumentBackend { file, extension, 
         "pdf" -> PdfParser.parseRange(file, pageFrom ?: 1, pageTo, { coroutine.ensureActive() }, MAX_PDF_TEXT_CHARS)
             .let { ReadDocumentExtraction(it.text, it.pages, it.limited) }
         // Parse the same central-directory entry that preflightDocumentArchive measured.
-        "docx" -> ReadDocumentExtraction(ZipFile(file).use(DocxParser::parse))
-        "pptx" -> ReadDocumentExtraction(PptxParser.parse(file))
-        "epub" -> ReadDocumentExtraction(EpubParser.parse(file))
+        "docx" -> ReadDocumentExtraction(ZipFile(file).use { DocxParser.parse(it) { coroutine.ensureActive() } })
+        "pptx" -> ReadDocumentExtraction(PptxParser.parse(file) { coroutine.ensureActive() })
+        "epub" -> ReadDocumentExtraction(EpubParser.parse(file) { coroutine.ensureActive() })
         else -> error("Неподдерживаемый формат документа.")
     }
+}
+
+/** Shared extraction bounds for private chat uploads; does not grant tool file access. */
+internal suspend fun extractAttachmentDocument(file: File, extension: String): ReadDocumentExtraction {
+    currentCoroutineContext().ensureActive()
+    require(file.length() <= MAX_DOCUMENT_BYTES) { "Документ превышает ограничение 32 МиБ. Исходный файл сохранён." }
+    if (extension != "pdf") preflightDocumentArchive(file, extension)
+    currentCoroutineContext().ensureActive()
+    val result = defaultReadDocumentBackend.extract(file, extension, null, null)
+    currentCoroutineContext().ensureActive()
+    checkDocumentParserOutcome(result.text)
+    return result
 }
 
 private fun checkDocumentParserOutcome(text: String) {
@@ -146,7 +158,7 @@ private fun checkDocumentParserOutcome(text: String) {
     require(!knownFailure.containsMatchIn(text)) { "Не удалось прочитать содержимое документа. Проверьте формат и целостность файла." }
 }
 
-/** Opt-in validation for this tool; attachment parsers retain their previous behavior. */
+/** Validate bounded ZIP expansion before parsing either a tool snapshot or a private attachment. */
 private suspend fun preflightDocumentArchive(file: File, extension: String) {
     val coroutine = currentCoroutineContext()
     var expanded = 0L

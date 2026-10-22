@@ -10,6 +10,9 @@ import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import androidx.paging.map
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -34,6 +37,7 @@ import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.repository.GenMediaRepository
 import java.io.File
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.uuid.Uuid
 
 @Serializable
 data class GeneratedImage(
@@ -156,10 +160,10 @@ class ImgGenVM(
 
                 val settings = settingsStore.settingsFlow.first()
                 val model = settings.findModelById(settings.imageGenerationModelId)
-                    ?: throw IllegalStateException("No model selected")
+                    ?: throw IllegalStateException("Не выбрана модель генерации изображений.")
 
                 val provider = model.findProvider(settings.providers)
-                    ?: throw IllegalStateException("Provider not found")
+                    ?: throw IllegalStateException("Не найден провайдер модели.")
 
                 val requestPrompt = _prompt.value
                 val params = ImageGenerationParams(
@@ -182,7 +186,7 @@ class ImgGenVM(
             } catch (e: Exception) {
                 if(e is CancellationException) return@launch
                 Log.e(TAG, "Failed to generate image", e)
-                _error.value = e.message ?: "Unknown error occurred"
+                _error.value = e.message ?: "Не удалось обработать изображение."
             } finally {
                 _isGenerating.value = false
             }
@@ -200,10 +204,10 @@ class ImgGenVM(
 
                 val settings = settingsStore.settingsFlow.first()
                 val model = settings.findModelById(settings.imageGenerationModelId)
-                    ?: throw IllegalStateException("No model selected")
+                    ?: throw IllegalStateException("Не выбрана модель генерации изображений.")
 
                 val provider = model.findProvider(settings.providers)
-                    ?: throw IllegalStateException("Provider not found")
+                    ?: throw IllegalStateException("Не найден провайдер модели.")
 
                 val requestPrompt = _prompt.value
                 val sourceImages = _referenceImages.value
@@ -230,7 +234,7 @@ class ImgGenVM(
             } catch (e: Exception) {
                 if (e is CancellationException) return@launch
                 Log.e(TAG, "Failed to edit image", e)
-                _error.value = e.message ?: "Unknown error occurred"
+                _error.value = e.message ?: "Не удалось обработать изображение."
             } finally {
                 _isGenerating.value = false
             }
@@ -252,59 +256,88 @@ class ImgGenVM(
         var previewFile: File? = null
         var finalIndex = 0
 
-        images.collect { item ->
-            if (item.partial) {
-                previewFile?.delete()
-                val imageFile = saveImagePreview(
-                    item = item,
-                    modelName = modelName,
-                    index = item.partialImageIndex ?: finalIndex,
-                )
-                previewFile = imageFile
-                _currentGeneratedImages.value = finalImages + GeneratedImage(
-                    id = 0,
-                    prompt = prompt,
-                    filePath = imageFile.absolutePath,
-                    timestamp = System.currentTimeMillis(),
-                    model = modelName
-                )
-            } else {
-                previewFile?.delete()
+        try {
+            images.collect { item ->
+                previewFile?.let { previous ->
+                    _currentGeneratedImages.value = _currentGeneratedImages.value.filterNot {
+                        it.filePath == previous.absolutePath
+                    }
+                }
+                deletePreviewFile(previewFile)
                 previewFile = null
-                val imageFile = saveImageToStorage(
-                    item = item,
-                    prompt = prompt,
-                    modelName = modelName,
-                    index = finalIndex,
-                    type = type,
-                    sourcePaths = sourcePaths,
-                )
-                finalImages.add(
-                    GeneratedImage(
-                        id = 0, // Will be updated after database insertion
+                if (item.partial) {
+                    val imageFile = saveImagePreview(
+                        item = item,
+                        modelName = modelName,
+                        index = item.partialImageIndex ?: finalIndex,
+                    )
+                    previewFile = imageFile
+                    _currentGeneratedImages.value = finalImages + GeneratedImage(
+                        id = 0,
                         prompt = prompt,
                         filePath = imageFile.absolutePath,
                         timestamp = System.currentTimeMillis(),
                         model = modelName
                     )
-                )
-                finalIndex++
-                _currentGeneratedImages.value = finalImages.toList()
+                } else {
+                    val imageFile = saveImageToStorage(
+                        item = item,
+                        prompt = prompt,
+                        modelName = modelName,
+                        index = finalIndex,
+                        type = type,
+                        sourcePaths = sourcePaths,
+                    )
+                    finalImages.add(
+                        GeneratedImage(
+                            id = 0, // Will be updated after database insertion
+                            prompt = prompt,
+                            filePath = imageFile.absolutePath,
+                            timestamp = System.currentTimeMillis(),
+                            model = modelName
+                        )
+                    )
+                    finalIndex++
+                    _currentGeneratedImages.value = finalImages.toList()
+                }
+            }
+        } finally {
+            val unfinishedPreview = previewFile
+            if (unfinishedPreview != null) {
+                // Retain completed media, but do not leave a draft pointing at deleted preview bytes.
+                _currentGeneratedImages.value = _currentGeneratedImages.value.filterNot {
+                    it.filePath == unfinishedPreview.absolutePath
+                }
+                deletePreviewFile(unfinishedPreview)
             }
         }
     }
 
-    private fun saveImagePreview(
+    private suspend fun deletePreviewFile(file: File?) {
+        if (file != null) withContext(NonCancellable + Dispatchers.IO) { file.delete() }
+    }
+
+    private suspend fun saveImagePreview(
         item: ImageGenerationItem,
         modelName: String,
         index: Int,
     ): File {
-        val timestamp = System.currentTimeMillis()
-        val imageFile = File(
-            getApplication<Application>().appTempFolder,
-            "imggen_${timestamp}_${modelName.toFileNamePart()}_$index.png"
-        )
-        return filesManager.createImageFileFromBase64(item.data, imageFile.absolutePath)
+        var target: File? = null
+        return try {
+            withContext(Dispatchers.IO) {
+                val timestamp = System.currentTimeMillis()
+                val imageFile = File(
+                    getApplication<Application>().appTempFolder,
+                    "imggen_${timestamp}_${modelName.toFileNamePart()}_${index}_${Uuid.random()}.png"
+                )
+                target = imageFile
+                filesManager.createImageFileFromBase64(item.data, imageFile.absolutePath)
+            }
+        } catch (error: Throwable) {
+            // Also clean a completed IO write whose result lost the cancellation race.
+            deletePreviewFile(target)
+            throw error
+        }
     }
 
     private suspend fun saveImageToStorage(
@@ -315,27 +348,37 @@ class ImgGenVM(
         type: String = GenMediaEntity.TYPE_IMAGE_GENERATION,
         sourcePaths: String? = null,
     ): File {
-        val imagesDir = filesManager.getImagesDir()
-
-        val timestamp = System.currentTimeMillis()
-        val filename = "${timestamp}_${modelName.toFileNamePart()}_$index.png"
-        val imageFile = File(imagesDir, filename)
-
-        val createdFile = filesManager.createImageFileFromBase64(item.data, imageFile.absolutePath)
-
-        // Save to database with relative path
-        val relativePath = "images/${imageFile.name}"
-        val entity = GenMediaEntity(
-            path = relativePath,
-            modelId = modelName,
-            prompt = prompt,
-            createAt = timestamp,
-            type = type,
-            sourcePaths = sourcePaths,
-        )
-        genMediaRepository.insertMedia(entity)
-
-        return createdFile
+        var target: File? = null
+        var committed = false
+        return try {
+            withContext(Dispatchers.IO) {
+                val imagesDir = filesManager.getImagesDir()
+                val timestamp = System.currentTimeMillis()
+                val filename = "${timestamp}_${modelName.toFileNamePart()}_${index}_${Uuid.random()}.png"
+                val imageFile = File(imagesDir, filename)
+                target = imageFile
+                val createdFile = filesManager.createImageFileFromBase64(item.data, imageFile.absolutePath)
+                currentCoroutineContext().ensureActive()
+                val entity = GenMediaEntity(
+                    path = "images/${imageFile.name}",
+                    modelId = modelName,
+                    prompt = prompt,
+                    createAt = timestamp,
+                    type = type,
+                    sourcePaths = sourcePaths,
+                )
+                // Complete this short publication once begun. Cancellation must not remove
+                // bytes after Room may have committed the corresponding media record.
+                withContext(NonCancellable) {
+                    genMediaRepository.insertMedia(entity)
+                    committed = true
+                }
+                createdFile
+            }
+        } catch (error: Throwable) {
+            if (!committed) deletePreviewFile(target)
+            throw error
+        }
     }
 
     fun deleteImage(image: GeneratedImage) {

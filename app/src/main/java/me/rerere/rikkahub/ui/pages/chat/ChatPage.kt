@@ -61,6 +61,8 @@ import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
@@ -163,25 +165,27 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     // 初始化输入状态（处理传入的 files 和 text 参数）
     LaunchedEffect(files, text, conversation.historyLoadState) {
         if (conversation.historyLoadState != HistoryLoadState.COMPLETE) return@LaunchedEffect
-        if (files.isNotEmpty()) {
-            val parts = filesManager.importChatFiles(files).map { file ->
-                val url = file.localUri.toString()
-                when {
-                    file.mimeType.startsWith("image/") -> UIMessagePart.Image(url = url)
-                    file.mimeType.startsWith("video/") -> UIMessagePart.Video(url = url)
-                    file.mimeType.startsWith("audio/") -> UIMessagePart.Audio(url = url)
-                    else -> UIMessagePart.Document(
-                        url = url,
-                        fileName = file.displayName,
-                        mime = file.mimeType,
-                    )
+        withContext(Dispatchers.Main.immediate) {
+            if (files.isNotEmpty()) {
+                val parts = filesManager.importChatFilesAsync(files).map { file ->
+                    val url = file.localUri.toString()
+                    when {
+                        file.mimeType.startsWith("image/") -> UIMessagePart.Image(url = url)
+                        file.mimeType.startsWith("video/") -> UIMessagePart.Video(url = url)
+                        file.mimeType.startsWith("audio/") -> UIMessagePart.Audio(url = url)
+                        else -> UIMessagePart.Document(
+                            url = url,
+                            fileName = file.displayName,
+                            mime = file.mimeType,
+                        )
+                    }
                 }
+                inputState.messageContent = parts
             }
-            inputState.messageContent = parts
-        }
-        text?.base64Decode()?.let { decodedText ->
-            if (decodedText.isNotEmpty()) {
-                inputState.setMessageText(decodedText)
+            text?.base64Decode()?.let { decodedText ->
+                if (decodedText.isNotEmpty()) {
+                    inputState.setMessageText(decodedText)
+                }
             }
         }
     }

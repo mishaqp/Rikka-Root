@@ -113,7 +113,7 @@ class ChatPageAttachmentImportTest {
         assertTrue(filesManager.getFileMimeType(missing)?.startsWith("audio/") == true)
         assertEquals("image/png", filesManager.getFileMimeType(png))
 
-        val parts = importDraft(listOf(missing, png))
+        val parts = importDraft(listOf(missing, png), expectedImports = 1)
 
         assertEquals(1, parts.size)
         assertTrue("The successfully copied PNG must stay Image, got ${parts.single()}", parts.single() is UIMessagePart.Image)
@@ -154,7 +154,7 @@ class ChatPageAttachmentImportTest {
         val txt = sourceFile("last.txt", "Последний файл".toByteArray())
         val text = "Порядок сохраняется"
 
-        val parts = importDraft(listOf(fileUri(video), missing, fileUri(image), fileUri(audio), fileUri(txt)), text)
+        val parts = importDraft(listOf(fileUri(video), missing, fileUri(image), fileUri(audio), fileUri(txt)), text, expectedImports = 4)
 
         assertEquals(UIMessagePart.Text(text), parts.first())
         assertEquals(5, parts.size)
@@ -189,9 +189,9 @@ class ChatPageAttachmentImportTest {
         assertArrayEquals(image.readBytes(), copied.single().toFile().readBytes())
     }
 
-    private fun importDraft(files: List<Uri>, text: String? = null): List<UIMessagePart> {
+    private fun importDraft(files: List<Uri>, text: String? = null, expectedImports: Int = files.size): List<UIMessagePart> {
         compose.setContent { ScreenshotTheme { fixture.Content(text?.base64Encode(), files) } }
-        compose.waitForIdle()
+        compose.waitUntil { fixture.vm.inputState.messageContent.size == expectedImports }
         var contents = emptyList<UIMessagePart>()
         compose.runOnIdle { contents = fixture.vm.inputState.getContents() }
         return contents
