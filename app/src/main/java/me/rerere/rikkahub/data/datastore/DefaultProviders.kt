@@ -18,7 +18,10 @@ val DEFAULT_AUTO_MODEL_ID = Uuid.parse("b7055fb4-39f9-4042-a88a-0d80ed76cf08")
 
 val DEFAULT_CODEX_PROVIDER_ID = Uuid.parse("7ce7e322-b995-4b0c-9d48-42e08dcfcdda")
 
+val DEFAULT_KIMI_PROVIDER_ID = Uuid.parse("57d461f9-95b3-4c89-a332-1962c0d365b1")
+
 val DEFAULT_PROVIDERS = listOf(
+    ProviderSetting.KimiCode(id = DEFAULT_KIMI_PROVIDER_ID),
     ProviderSetting.Codex(
         id = DEFAULT_CODEX_PROVIDER_ID,
         name = "Codex",

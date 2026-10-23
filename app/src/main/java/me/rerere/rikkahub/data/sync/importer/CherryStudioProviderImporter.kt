@@ -127,6 +127,7 @@ object CherryStudioProviderImporter {
             is ProviderSetting.Google -> "google|${provider.baseUrl}|${provider.apiKey}"
             is ProviderSetting.Claude -> "claude|${provider.baseUrl}|${provider.apiKey}"
             is ProviderSetting.Codex -> "codex|${provider.id}"
+            is ProviderSetting.KimiCode -> "kimi_code|${provider.id}"
         }
     }
 }

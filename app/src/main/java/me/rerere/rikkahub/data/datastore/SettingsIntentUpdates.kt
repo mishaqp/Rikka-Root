@@ -88,6 +88,7 @@ fun applyProviderDraft(current: ProviderSetting, before: ProviderSetting, reques
             is ProviderSetting.Google -> common.copy(apiKey = key ?: common.apiKey, baseUrl = url ?: common.baseUrl)
             is ProviderSetting.Claude -> common.copy(apiKey = key ?: common.apiKey, baseUrl = url ?: common.baseUrl)
             is ProviderSetting.Codex -> common
+            is ProviderSetting.KimiCode -> common
         }
     }
     return when (current) {
@@ -152,6 +153,19 @@ fun applyProviderDraft(current: ProviderSetting, before: ProviderSetting, reques
         is ProviderSetting.Codex -> {
             before as ProviderSetting.Codex
             requested as ProviderSetting.Codex
+            current.copy(
+                enabled = dirty(current.enabled, before.enabled, requested.enabled),
+                name = dirty(current.name, before.name, requested.name),
+                balanceOption = current.balanceOption.copy(
+                    enabled = dirty(current.balanceOption.enabled, before.balanceOption.enabled, requested.balanceOption.enabled),
+                    apiPath = dirty(current.balanceOption.apiPath, before.balanceOption.apiPath, requested.balanceOption.apiPath),
+                    resultPath = dirty(current.balanceOption.resultPath, before.balanceOption.resultPath, requested.balanceOption.resultPath),
+                ),
+            )
+        }
+        is ProviderSetting.KimiCode -> {
+            before as ProviderSetting.KimiCode
+            requested as ProviderSetting.KimiCode
             current.copy(
                 enabled = dirty(current.enabled, before.enabled, requested.enabled),
                 name = dirty(current.name, before.name, requested.name),
@@ -601,12 +615,14 @@ private fun providerDraftKey(provider: ProviderSetting): String? = when (provide
     is ProviderSetting.Google -> provider.apiKey
     is ProviderSetting.Claude -> provider.apiKey
     is ProviderSetting.Codex -> null
+    is ProviderSetting.KimiCode -> null
 }
 private fun providerDraftUrl(provider: ProviderSetting): String? = when (provider) {
     is ProviderSetting.OpenAI -> provider.baseUrl
     is ProviderSetting.Google -> provider.baseUrl
     is ProviderSetting.Claude -> provider.baseUrl
     is ProviderSetting.Codex -> null
+    is ProviderSetting.KimiCode -> null
 }
 
 private fun <T> applyDraftMembership(current: Collection<T>, before: Collection<T>, requested: Collection<T>): List<T> =

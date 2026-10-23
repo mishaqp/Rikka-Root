@@ -1,6 +1,11 @@
 package me.rerere.rikkahub.di
 
 import android.content.Context
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import me.rerere.oauth.CustomTabsOAuthAuthorizationLauncher
+import me.rerere.oauth.withOAuthForegroundSession
+import me.rerere.rikkahub.data.kimi.*
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.pebbletemplates.pebble.PebbleEngine
@@ -221,9 +226,29 @@ val dataSourceModule = module {
         )
     }
 
+    single<OkHttpClient>(named("kimi")) { kimiHttpClient(get()) }
+
+    single {
+        val context: Context = get()
+        val identity by lazy { kimiAndroidIdentity(context) }
+        KimiApi(client = get(named("kimi")), json = get(), identity = { identity })
+    }
+    single {
+        KimiAccountRepository(store = KimiCredentialStore(context = get(), json = get()),
+            api = get<KimiApi>(), refreshScope = get<AppScope>())
+    }
+    single {
+        val context: Context = get()
+        KimiOAuthManager(scope = get<AppScope>(), api = get<KimiApi>(), repository = get(), openBrowser = { url ->
+            withContext(Dispatchers.Main.immediate) { CustomTabsOAuthAuthorizationLauncher.launch(context, url) }
+        }, keepAlive = { operation -> withOAuthForegroundSession(context, operation) })
+    }
+    single { KimiProvider(client = get(named("kimi")), repository = get(), api = get(), json = get()) }
+
     single {
         ProviderManager(client = get(), context = get()).also {
             it.registerProvider("codex", get<CodexProvider>())
+            it.registerProvider("kimi_code", get<KimiProvider>())
         }
     }
 

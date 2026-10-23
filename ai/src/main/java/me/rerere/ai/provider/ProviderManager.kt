@@ -53,6 +53,7 @@ class ProviderManager(client: OkHttpClient, context: Context) {
             is ProviderSetting.Google -> getProvider("google")
             is ProviderSetting.Claude -> getProvider("claude")
             is ProviderSetting.Codex -> getProvider("codex")
+            is ProviderSetting.KimiCode -> getProvider("kimi_code")
         } as Provider<T>
     }
 }

@@ -127,6 +127,8 @@ import me.rerere.rikkahub.ui.pages.assistant.detail.CustomBodies
 import me.rerere.rikkahub.ui.pages.assistant.detail.CustomHeaders
 import me.rerere.rikkahub.ui.pages.setting.components.withRefreshedCodexModels
 import me.rerere.rikkahub.ui.pages.setting.components.CodexProviderConfigure
+import me.rerere.rikkahub.ui.pages.setting.components.KimiProviderConfigure
+import me.rerere.rikkahub.ui.pages.setting.components.withRefreshedKimiModels
 import me.rerere.rikkahub.ui.pages.setting.components.ProviderConfigure
 import me.rerere.rikkahub.ui.pages.setting.components.ProviderConnectionTester
 import me.rerere.rikkahub.ui.pages.setting.components.SettingProviderBalanceOption
@@ -253,7 +255,10 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                         },
                         onCodexModelsRefreshed = { models, afterLogin ->
                             // Merge the response with the current persisted row inside the transaction.
-                            vm.updateSettings { it.withRefreshedCodexModels(id, models, afterLogin) }
+                            vm.updateSettings { settings ->
+                                if (provider is ProviderSetting.KimiCode) settings.withRefreshedKimiModels(id, models, afterLogin)
+                                else settings.withRefreshedCodexModels(id, models, afterLogin)
+                            }
                         },
                     )
                 }
@@ -293,6 +298,16 @@ private fun SettingProviderConfigPage(
                 provider = provider, onEdit = { requested -> onEdit { current -> applyProviderDraft(current, provider, requested) } },
                 onModelsRefreshed = onCodexModelsRefreshed,
             )
+        }
+        return
+    }
+
+    if (provider is ProviderSetting.KimiCode) {
+        Column(modifier = Modifier.fillMaxSize().imePadding()
+            .verticalScroll(rememberScrollState()).padding(16.dp)) {
+            KimiProviderConfigure(provider = provider,
+                onEdit = { requested -> onEdit { current -> applyProviderDraft(current, provider, requested) } },
+                onModelsRefreshed = onCodexModelsRefreshed)
         }
         return
     }

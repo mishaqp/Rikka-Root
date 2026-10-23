@@ -675,6 +675,7 @@ object ChatboxImporter {
         is ProviderSetting.Google -> "google|${provider.baseUrl.trimEnd('/')}|${provider.apiKey}"
         is ProviderSetting.Claude -> "claude|${provider.baseUrl.trimEnd('/')}|${provider.apiKey}"
         is ProviderSetting.Codex -> "codex|${provider.id}"
+            is ProviderSetting.KimiCode -> "kimi_code|${provider.id}"
     }
 
     private fun ProviderSetting.providerTypeName(): String = when (this) {
@@ -682,6 +683,7 @@ object ChatboxImporter {
         is ProviderSetting.Google -> "gemini"
         is ProviderSetting.Claude -> "claude"
         is ProviderSetting.Codex -> "codex"
+        is ProviderSetting.KimiCode -> "kimi_code"
     }
 
     private fun String.toMessageRole(): MessageRole? = when (this) {

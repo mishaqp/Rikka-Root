@@ -484,6 +484,9 @@ class SettingsStore(
                         is ProviderSetting.Codex -> provider.copy(
                             models = provider.models.distinctBy { model -> model.id }
                         )
+                        is ProviderSetting.KimiCode -> provider.copy(
+                            models = provider.models.distinctBy { model -> model.id }
+                        )
                     }
                 },
                 assistants = settings.assistants.distinctBy { it.id }.map { assistant ->
