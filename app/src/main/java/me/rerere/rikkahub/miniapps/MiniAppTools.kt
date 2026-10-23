@@ -65,8 +65,15 @@ fun miniAppsTool(store: () -> MiniAppStore = { getKoin().get() }): Tool = Tool(
     parameters = { InputSchema.Obj(buildJsonObject {
         put("action", buildJsonObject { put("type", "string"); put("enum", JsonArray(listOf("list", "read", "write", "remove").map(::JsonPrimitive))); put("description", "list: приложения; read: ключ или все данные app_id; write: записать value в key; remove: удалить key.") })
         put("app_id", buildJsonObject { put("type", "string"); put("description", "id приложения из list.") })
-        put("key", buildJsonObject { put("type", "string") })
-        put("value", buildJsonObject { put("description", "JSON-значение для записи.") })
+        put("key", buildJsonObject { put("type", "string"); put("description", "Ключ хранилища приложения из list или keys; обязателен для write и remove, необязателен для read.") })
+        put("value", buildJsonObject {
+            put("description", "JSON-значение для записи: строка, число, boolean, null, массив или объект. Сохраняйте исходный тип и формат данных приложения.")
+            put("anyOf", buildJsonArray {
+                for (type in listOf("string", "number", "boolean", "null")) add(buildJsonObject { put("type", type) })
+                add(buildJsonObject { put("type", "array"); put("items", buildJsonObject {}) })
+                add(buildJsonObject { put("type", "object"); put("additionalProperties", true) })
+            })
+        })
     }, listOf("action")) },
     execute = { args -> listOf(UIMessagePart.Text(MiniAppDataTool(store()).execute(args.jsonObject).toString())) },
 )

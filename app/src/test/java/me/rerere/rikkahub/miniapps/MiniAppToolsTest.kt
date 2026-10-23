@@ -58,6 +58,14 @@ class MiniAppToolsTest {
             })
             assertEquals(JsonPrimitive("counter"), call("write", "counter", JsonPrimitive(3))["written"])
             assertEquals(JsonPrimitive(3), call("read", "counter")["value"])
+            val values = listOf(JsonPrimitive("a b"), JsonPrimitive(-0.25), JsonPrimitive(true), JsonNull,
+                Json.parseToJsonElement("""[1,null,{"nested":[false,"text"]}]"""),
+                Json.parseToJsonElement("""{"empty":[],"object":{},"value":null}"""))
+            values.forEachIndexed { index, value ->
+                val key = "json-$index"
+                assertEquals(JsonPrimitive(key), call("write", key, value)["written"])
+                assertEquals(value, call("read", key)["value"])
+            }
             call("write", "large", JsonPrimitive("a".repeat(20001)))
             assertTrue(call("read").containsKey("keys"))
             assertFalse(call("read").containsKey("data"))
