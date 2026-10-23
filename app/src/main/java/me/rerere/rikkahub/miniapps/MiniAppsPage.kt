@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -34,6 +35,7 @@ import org.koin.compose.koinInject
 fun MiniAppsPage(store: MiniAppStore = koinInject()) {
     val apps by store.apps.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val resources by rememberUpdatedState(LocalResources.current)
     val scope = rememberCoroutineScope()
     var loaded by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -51,7 +53,7 @@ fun MiniAppsPage(store: MiniAppStore = koinInject()) {
         scope.launch {
             try { block() }
             catch (e: CancellationException) { throw e }
-            catch (e: Exception) { error = e.message ?: context.getString(R.string.mini_apps_operation_failed) }
+            catch (e: Exception) { error = e.message ?: resources.getString(R.string.mini_apps_operation_failed) }
             finally { busy = false }
         }
     }
@@ -70,7 +72,7 @@ fun MiniAppsPage(store: MiniAppStore = koinInject()) {
     LaunchedEffect(store) {
         try { store.load(); loaded = true }
         catch (e: CancellationException) { throw e }
-        catch (e: Exception) { error = e.message ?: context.getString(R.string.mini_apps_operation_failed); loaded = true }
+        catch (e: Exception) { error = e.message ?: resources.getString(R.string.mini_apps_operation_failed); loaded = true }
     }
 
     MiniAppsPageContent(apps, loaded, busy, error, message,
@@ -88,7 +90,7 @@ fun MiniAppsPage(store: MiniAppStore = koinInject()) {
                         TextButton(onClick = {
                             dialog = null
                             runAction {
-                                message = context.getString(if (MiniAppLauncher.pin(context, selected)) R.string.mini_apps_pin_requested else R.string.mini_apps_pin_unsupported)
+                                message = resources.getString(if (MiniAppLauncher.pin(context, selected)) R.string.mini_apps_pin_requested else R.string.mini_apps_pin_unsupported)
                             }
                         }) { Text(stringResource(R.string.mini_apps_pin)) }
                         TextButton(onClick = {
