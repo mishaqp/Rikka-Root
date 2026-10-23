@@ -252,21 +252,21 @@ class ChatActionAvailabilityTest {
             TestTheme { ChatMessageBranchSelector(node.value, onUpdate = { updates += it; node.value = it }) }
         }
         compose.onNodeWithText("1/3").assertExists()
-        compose.onNodeWithContentDescription("Prev").performClick()
+        compose.onNodeWithContentDescription(label(R.string.chat_message_previous_branch)).assertIsNotEnabled()
         assertEquals(0, updates.size)
-        compose.onNodeWithContentDescription("Next").performClick()
+        compose.onNodeWithContentDescription(label(R.string.chat_message_next_branch)).performClick()
         compose.onNodeWithText("2/3").assertExists()
-        compose.onNodeWithContentDescription("Next").performClick()
+        compose.onNodeWithContentDescription(label(R.string.chat_message_next_branch)).performClick()
         compose.onNodeWithText("3/3").assertExists()
-        compose.onNodeWithContentDescription("Next").performClick()
+        compose.onNodeWithContentDescription(label(R.string.chat_message_next_branch)).assertIsNotEnabled()
         assertEquals(2, updates.size)
-        compose.onNodeWithContentDescription("Prev").performClick()
+        compose.onNodeWithContentDescription(label(R.string.chat_message_previous_branch)).performClick()
         assertEquals(listOf(1, 2, 1), updates.map { it.selectIndex })
         assertEquals(listOf(node.value.id, node.value.id, node.value.id), updates.map { it.id })
         assertEquals(listOf(messages, messages, messages), updates.map { it.messages })
         compose.runOnIdle { node.value = MessageNode.of(messages.first()) }
-        compose.onNodeWithContentDescription("Prev").assertDoesNotExist()
-        compose.onNodeWithContentDescription("Next").assertDoesNotExist()
+        compose.onNodeWithContentDescription(label(R.string.chat_message_previous_branch)).assertDoesNotExist()
+        compose.onNodeWithContentDescription(label(R.string.chat_message_next_branch)).assertDoesNotExist()
     }
 
     @Test fun errorControlsDismissByIdentityAndOnlyOfferClearAllForMultipleErrors() {
@@ -341,7 +341,7 @@ class ChatActionAvailabilityTest {
         listOf(R.string.copy, R.string.regenerate, R.string.tts, R.string.more_options).forEach { resource ->
             compose.onNodeWithContentDescription(label(resource)).assertWidthIsEqualTo(28.dp).assertHeightIsEqualTo(28.dp)
         }
-        compose.onNodeWithContentDescription("Next").assertWidthIsEqualTo(28.dp)
+        compose.onNodeWithContentDescription(label(R.string.chat_message_next_branch)).assertWidthIsEqualTo(28.dp)
         compose.onNodeWithText("1/2").assertExists()
     }
 
@@ -354,13 +354,22 @@ class ChatActionAvailabilityTest {
     private class RecordingTts : CustomTtsState {
         override val isAvailable = MutableStateFlow(true)
         override val isSpeaking = MutableStateFlow(false)
+        override val speakingMessageId = MutableStateFlow<kotlin.uuid.Uuid?>(null)
         override val error = MutableStateFlow<String?>(null)
         override val currentChunk = MutableStateFlow(0)
         override val totalChunks = MutableStateFlow(0)
         override val playbackState = MutableStateFlow(PlaybackState())
         val invocations = mutableListOf<String>()
-        override fun speak(text: String, flushCalled: Boolean) { invocations += "speak:$text"; isSpeaking.value = true }
-        override fun stop() { invocations += "stop"; isSpeaking.value = false }
+        override fun speak(text: String, flushCalled: Boolean) {
+            speakingMessageId.value = null
+            invocations += "speak:$text"
+            isSpeaking.value = true
+        }
+        override fun speakMessage(messageId: kotlin.uuid.Uuid, text: String) {
+            speak(text)
+            speakingMessageId.value = messageId
+        }
+        override fun stop() { invocations += "stop"; isSpeaking.value = false; speakingMessageId.value = null }
         override fun pause() = Unit
         override fun resume() = Unit
         override fun skipNext() = Unit

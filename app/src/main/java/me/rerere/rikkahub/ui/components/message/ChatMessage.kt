@@ -420,14 +420,14 @@ private fun MessagePartsBlock(
                     is UIMessagePart.Video -> {
                         ChatMessageMediaTile(
                             icon = HugeIcons.Video01,
-                            onClick = { context.openLocalFile(part.url) },
+                            onClick = { context.openLocalFile(part.url, "video/*") },
                         )
                     }
 
                     is UIMessagePart.Audio -> {
                         ChatMessageMediaTile(
                             icon = HugeIcons.MusicNote03,
-                            onClick = { context.openLocalFile(part.url) },
+                            onClick = { context.openLocalFile(part.url, "audio/*") },
                         )
                     }
 
@@ -456,7 +456,7 @@ private fun MessagePartsBlock(
                     is UIMessagePart.Document -> {
                         ChatMessageFileChip(
                             text = part.fileName,
-                            onClick = { context.openLocalFile(part.url) },
+                            onClick = { context.openLocalFile(part.url, part.mime) },
                             icon = {
                                 when (part.mime) {
                                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> {

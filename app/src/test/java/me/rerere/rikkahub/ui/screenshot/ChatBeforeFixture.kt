@@ -206,6 +206,7 @@ internal class ChatBeforeFixture(
         every { asr.state } returns MutableStateFlow(ASRState())
         every { tts.isAvailable } returns MutableStateFlow(false)
         every { tts.isSpeaking } returns MutableStateFlow(false)
+        every { tts.speakingMessageId } returns MutableStateFlow<kotlin.uuid.Uuid?>(null)
         application = startKoin { modules(module {
             single { vm }; single { drawer }
             single { filesManager ?: mockk<FilesManager>(relaxed = true) }

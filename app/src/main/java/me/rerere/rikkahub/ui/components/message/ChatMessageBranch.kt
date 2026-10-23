@@ -18,12 +18,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowLeft01
 import me.rerere.hugeicons.stroke.ArrowRight01
+import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.MessageNode
 
 @Composable
@@ -43,12 +45,13 @@ fun ChatMessageBranchSelector(
 
             Icon(
                 imageVector = HugeIcons.ArrowLeft01,
-                contentDescription = "Prev",
+                contentDescription = stringResource(R.string.chat_message_previous_branch),
                 modifier = Modifier
                     .clip(CircleShape)
                     .alpha(if (node.selectIndex == 0) 0.5f else 1f)
                     .clickable(
-                        enabled = enabled,                        interactionSource = remember { MutableInteractionSource() },
+                        enabled = enabled && node.selectIndex > 0,
+                        interactionSource = remember { MutableInteractionSource() },
                         indication = LocalIndication.current,
                         onClick = {
                             if (node.selectIndex > 0) {
@@ -79,12 +82,13 @@ fun ChatMessageBranchSelector(
 
             Icon(
                 imageVector = HugeIcons.ArrowRight01,
-                contentDescription = "Next",
+                contentDescription = stringResource(R.string.chat_message_next_branch),
                 modifier = Modifier
                     .clip(CircleShape)
                     .alpha(if (node.selectIndex == node.messages.lastIndex) 0.5f else 1f)
                     .clickable(
-                        enabled = enabled,                        interactionSource = remember { MutableInteractionSource() },
+                        enabled = enabled && node.selectIndex < node.messages.lastIndex,
+                        interactionSource = remember { MutableInteractionSource() },
                         indication = LocalIndication.current,
                         onClick = {
                             if (node.selectIndex < node.messages.lastIndex) {

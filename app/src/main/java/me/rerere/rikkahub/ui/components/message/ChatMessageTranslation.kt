@@ -71,6 +71,7 @@ fun LanguageSelectionDialog(
     // 支持的语言列表
     val languages = remember {
         listOf(
+            Locale.forLanguageTag("ru"),
             Locale.SIMPLIFIED_CHINESE,
             Locale.ENGLISH,
             Locale.TRADITIONAL_CHINESE,
@@ -88,6 +89,7 @@ fun LanguageSelectionDialog(
     fun getLanguageDisplayName(locale: Locale): String {
         val displayLocale = LocalConfiguration.current.locales[0]
         return when (locale) {
+            Locale.forLanguageTag("ru") -> stringResource(R.string.language_russian)
             Locale.SIMPLIFIED_CHINESE -> stringResource(R.string.language_simplified_chinese)
             Locale.ENGLISH -> stringResource(R.string.language_english)
             Locale.TRADITIONAL_CHINESE -> stringResource(R.string.language_traditional_chinese)

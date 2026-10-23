@@ -125,11 +125,13 @@ fun ColumnScope.ChatMessageActionButtons(
         if (presentation.showTts) {
             val tts = LocalTTSState.current
             val isSpeaking by tts.isSpeaking.collectAsState()
+            val speakingMessageId by tts.speakingMessageId.collectAsState()
             val isAvailable by tts.isAvailable.collectAsState()
+            val isSpeakingThisMessage = isSpeaking && speakingMessageId == message.id
             // 朗读中换成带底色的方角按钮
             CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
                 IconToggleButton(
-                    checked = isSpeaking,
+                    checked = isSpeakingThisMessage,
                     onCheckedChange = { speak ->
                         if (speak) {
                             val text = message.toText()
@@ -140,7 +142,7 @@ fun ColumnScope.ChatMessageActionButtons(
                             if (settings.displaySetting.ttsOnlyReadOutsideBrackets) {
                                 textToSpeak = textToSpeak.removeBracketedContent() ?: textToSpeak
                             }
-                            tts.speak(textToSpeak)
+                            tts.speakMessage(message.id, textToSpeak)
                         } else {
                             tts.stop()
                         }
@@ -155,7 +157,7 @@ fun ColumnScope.ChatMessageActionButtons(
                     ),
                 ) {
                     Icon(
-                        imageVector = if (isSpeaking) HugeIcons.StopCircle else HugeIcons.VolumeHigh,
+                        imageVector = if (isSpeakingThisMessage) HugeIcons.StopCircle else HugeIcons.VolumeHigh,
                         contentDescription = stringResource(R.string.tts),
                         modifier = Modifier.size(ActionIconSize),
                     )

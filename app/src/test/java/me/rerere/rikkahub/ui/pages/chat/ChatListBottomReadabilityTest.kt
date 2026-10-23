@@ -115,6 +115,7 @@ class ChatListBottomReadabilityTest internal constructor(
         val tts = mockk<CustomTtsState>(relaxed = true)
         every { tts.isAvailable } returns MutableStateFlow(false)
         every { tts.isSpeaking } returns MutableStateFlow(false)
+        every { tts.speakingMessageId } returns MutableStateFlow<kotlin.uuid.Uuid?>(null)
         val composerHeight = mutableStateOf(100.dp)
         val imeHeight = mutableStateOf(0.dp)
         lateinit var state: LazyListState

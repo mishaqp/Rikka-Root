@@ -34,7 +34,7 @@ fun TTSAutoPlay(vm: ChatVM, setting: Settings, conversation: Conversation) {
                         textToSpeak = textToSpeak.removeBracketedContent() ?: textToSpeak
                     }
                     if (textToSpeak.isNotBlank()) {
-                        tts.speak(textToSpeak)
+                        tts.speakMessage(lastMessage.id, textToSpeak)
                     }
                 }
             }

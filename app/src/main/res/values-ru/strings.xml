@@ -407,9 +407,10 @@
   <string name="language_italian">🇮🇹 Итальянский</string>
   <string name="language_japanese">🇯🇵 Японский</string>
   <string name="language_korean">🇰🇷 Корейский</string>
-  <string name="language_simplified_chinese">🇷🇺 Упрощённый китайский</string>
+  <string name="language_russian">🇷🇺 Русский</string>
+  <string name="language_simplified_chinese">🇨🇳 Упрощённый китайский</string>
   <string name="language_spanish">🇪🇸 Испанский</string>
-  <string name="language_traditional_chinese">🇨🇳 繁體中文</string>
+  <string name="language_traditional_chinese">🇨🇳 Традиционный китайский</string>
   <string name="mcp_picker_syncing">Синхронизация MCP-серверов…</string>
   <string name="mcp_picker_title">Серверы MCP</string>
   <string name="menu">Меню</string>
@@ -1575,4 +1576,10 @@
   <string name="assistant_page_delete_failed">Не удалось завершить удаление ассистента. Обновите список и проверьте связанные данные.</string>
   <string name="assistant_page_delete_cleanup_failed">Ассистент удалён, но очистка чатов или памяти не завершена. Проверьте связанные данные.</string>
   <string name="history_page_undo_into_assistant">Восстановить в «%1$s»</string>
+  <string name="chat_attachment_file_unavailable">Вложение недоступно: файл удалён или нет доступа к чтению.</string>
+  <string name="chat_attachment_invalid_uri">Не удалось открыть вложение: неподдерживаемая ссылка.</string>
+  <string name="chat_attachment_no_viewer">Нет приложения для открытия этого вложения.</string>
+  <string name="chat_attachment_open_failed">Не удалось открыть вложение. Проверьте доступ к файлу.</string>
+  <string name="chat_message_previous_branch">Предыдущая ветка</string>
+  <string name="chat_message_next_branch">Следующая ветка</string>
 </resources>

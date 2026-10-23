@@ -411,6 +411,7 @@
   <string name="language_italian">🇮🇹 Italiano</string>
   <string name="language_japanese">🇯🇵 日本語</string>
   <string name="language_korean">🇰🇷 한국어</string>
+  <string name="language_russian">🇷🇺 Русский</string>
   <string name="language_simplified_chinese">🇨🇳 简体中文</string>
   <string name="language_spanish">🇪🇸 Español</string>
   <string name="language_traditional_chinese">🇨🇳 繁體中文</string>
@@ -1573,4 +1574,10 @@
   <string name="assistant_page_delete_failed">Не удалось завершить удаление ассистента. Обновите список и проверьте связанные данные.</string>
   <string name="assistant_page_delete_cleanup_failed">Ассистент удалён, но очистка чатов или памяти не завершена. Проверьте связанные данные.</string>
   <string name="history_page_undo_into_assistant">Восстановить в «%1$s»</string>
+  <string name="chat_attachment_file_unavailable">Вложение недоступно: файл удалён или нет доступа к чтению.</string>
+  <string name="chat_attachment_invalid_uri">Не удалось открыть вложение: неподдерживаемая ссылка.</string>
+  <string name="chat_attachment_no_viewer">Нет приложения для открытия этого вложения.</string>
+  <string name="chat_attachment_open_failed">Не удалось открыть вложение. Проверьте доступ к файлу.</string>
+  <string name="chat_message_previous_branch">Предыдущая ветка</string>
+  <string name="chat_message_next_branch">Следующая ветка</string>
 </resources>

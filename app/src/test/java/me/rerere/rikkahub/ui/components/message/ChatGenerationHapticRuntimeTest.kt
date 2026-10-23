@@ -45,6 +45,7 @@ class ChatGenerationHapticRuntimeTest {
         val tts = mockk<CustomTtsState>(relaxed = true)
         every { tts.isAvailable } returns MutableStateFlow(false)
         every { tts.isSpeaking } returns MutableStateFlow(false)
+        every { tts.speakingMessageId } returns MutableStateFlow<kotlin.uuid.Uuid?>(null)
         val source = UIMessage.assistant("")
         val settings = ScreenshotFixtures.settings.copy(displaySetting = ScreenshotFixtures.settings.displaySetting.copy(
             hapticsEnabled = true, enableMessageGenerationHapticEffect = true, enableAssistantMarkdown = false,

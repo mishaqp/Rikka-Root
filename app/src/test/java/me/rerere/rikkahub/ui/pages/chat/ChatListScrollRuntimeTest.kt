@@ -78,6 +78,7 @@ class ChatListScrollRuntimeTest {
         val tts = mockk<CustomTtsState>(relaxed = true)
         every { tts.isAvailable } returns MutableStateFlow(false)
         every { tts.isSpeaking } returns MutableStateFlow(false)
+        every { tts.speakingMessageId } returns MutableStateFlow<kotlin.uuid.Uuid?>(null)
         compose.setContent {
             ScreenshotTheme {
                 state = rememberLazyListState()

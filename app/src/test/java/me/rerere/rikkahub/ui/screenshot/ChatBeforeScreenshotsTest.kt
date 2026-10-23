@@ -686,8 +686,8 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         mountStage2(settings, job, listOf(branches))
         val context = RuntimeEnvironment.getApplication()
         compose.onNodeWithContentDescription(context.getString(R.string.copy)).assertDoesNotExist()
-        compose.onAllNodesWithContentDescription("Next").assertCountEquals(1)
-        compose.onNodeWithContentDescription("Next").performClick()
+        compose.onAllNodesWithContentDescription(context.getString(R.string.chat_message_next_branch)).assertCountEquals(1)
+        compose.onNodeWithContentDescription(context.getString(R.string.chat_message_next_branch)).performClick()
         settleNativeRipple()
         assertEquals("The actual ChatPage callback persists the chosen message alternative", 1,
             fixture.conversationFlow.value.messageNodes.single().selectIndex)
@@ -703,7 +703,7 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
 
         showStage2(settings, DisplaySetting(showUserMessageActions = true), fixture.conversationFlow.value.messageNodes)
         compose.onNodeWithContentDescription(context.getString(R.string.copy)).assertIsDisplayed()
-        compose.onAllNodesWithContentDescription("Next").assertCountEquals(1)
+        compose.onAllNodesWithContentDescription(context.getString(R.string.chat_message_next_branch)).assertCountEquals(1)
 
         val longText = (1..13).joinToString("\n") { "Строка ${it.toString().padStart(2, '0')}: заметка" }
         val readOnlyNode = stage2Message(32, MessageRole.USER, longText).copy(
@@ -714,7 +714,7 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
             fixture.conversationFlow.value = fixture.conversationFlow.value.copy(historyLoadState = HistoryLoadState.INCOMPLETE)
         }
         compose.waitForIdle()
-        compose.onNodeWithContentDescription("Next").assertIsNotEnabled()
+        compose.onNodeWithContentDescription(context.getString(R.string.chat_message_next_branch)).assertIsNotEnabled()
         compose.onNodeWithTag("chat_message_user_collapse_toggle").performClick()
         settleNativeRipple()
         compose.onNodeWithTag("chat_message_user_collapse_toggle")
@@ -731,7 +731,7 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         }
         compose.mainClock.advanceTimeBy(300)
         compose.waitForIdle()
-        compose.onNodeWithContentDescription("Next").assertDoesNotExist()
+        compose.onNodeWithContentDescription(context.getString(R.string.chat_message_next_branch)).assertDoesNotExist()
         compose.onNodeWithContentDescription(context.getString(R.string.copy)).assertDoesNotExist()
         compose.runOnIdle { job.value?.cancel(); job.value = null }
         compose.mainClock.advanceTimeByFrame()

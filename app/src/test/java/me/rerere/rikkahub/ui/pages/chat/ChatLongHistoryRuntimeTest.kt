@@ -84,6 +84,7 @@ class ChatLongHistoryRuntimeTest {
         val tts = mockk<CustomTtsState>(relaxed = true)
         every { tts.isAvailable } returns MutableStateFlow(false)
         every { tts.isSpeaking } returns MutableStateFlow(false)
+        every { tts.speakingMessageId } returns MutableStateFlow<kotlin.uuid.Uuid?>(null)
         lateinit var state: LazyListState
         compose.setContent {
             ScreenshotTheme {

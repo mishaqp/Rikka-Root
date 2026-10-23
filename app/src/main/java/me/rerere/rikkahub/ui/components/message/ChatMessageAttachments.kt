@@ -1,7 +1,11 @@
 package me.rerere.rikkahub.ui.components.message
 
+import android.content.ActivityNotFoundException
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
+import android.webkit.MimeTypeMap
+import android.widget.Toast
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -32,6 +36,9 @@ import androidx.compose.ui.util.lerp
 import androidx.core.content.FileProvider
 import androidx.core.net.toFile
 import androidx.core.net.toUri
+import me.rerere.rikkahub.R
+import me.rerere.rikkahub.utils.getActivity
+import java.util.Locale
 
 /**
  * 按压进度：按下趋向 1，松开回到 0，用来让容器的圆角在按下时收紧。
@@ -47,11 +54,61 @@ internal fun animatePressProgress(interactionSource: InteractionSource): State<F
     )
 }
 
-internal fun Context.openLocalFile(url: String) {
-    val intent = Intent(Intent.ACTION_VIEW)
-    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    intent.data = FileProvider.getUriForFile(this, "$packageName.fileprovider", url.toUri().toFile())
-    startActivity(Intent.createChooser(intent, null))
+internal fun Context.openLocalFile(url: String, mimeType: String? = null) {
+    fun explain(message: Int) = Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+
+    try {
+        val source = url.toUri()
+        val uri = when (source.scheme?.lowercase(Locale.ROOT)) {
+            "file" -> {
+                val file = source.toFile()
+                if (!file.isFile || !file.canRead()) {
+                    explain(R.string.chat_attachment_file_unavailable)
+                    return
+                }
+                FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+            }
+            "content" -> source
+            "http", "https" -> {
+                if (source.host.isNullOrBlank()) {
+                    explain(R.string.chat_attachment_invalid_uri)
+                    return
+                }
+                source
+            }
+            else -> {
+                explain(R.string.chat_attachment_invalid_uri)
+                return
+            }
+        }
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            if (uri.scheme == "content") {
+                val declaredType = mimeType?.takeIf { it.isNotBlank() }
+                val inferredType = if (source.scheme == "content") contentResolver.getType(source) else {
+                    val extension = source.lastPathSegment?.substringAfterLast('.', "")?.lowercase(Locale.ROOT)
+                    MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
+                }
+                val resolvedType = declaredType?.takeUnless { it.endsWith("/*") || it == "application/octet-stream" }
+                    ?: inferredType ?: declaredType ?: "application/octet-stream"
+                setDataAndType(uri, resolvedType)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                clipData = ClipData.newRawUri("attachment", uri)
+            } else {
+                // HTTP(S) browser filters accept the URI without a local-file MIME constraint.
+                data = uri
+            }
+        }
+        val chooser = Intent.createChooser(intent, null).apply {
+            if (getActivity() == null) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(chooser)
+    } catch (_: ActivityNotFoundException) {
+        explain(R.string.chat_attachment_no_viewer)
+    } catch (_: SecurityException) {
+        explain(R.string.chat_attachment_open_failed)
+    } catch (_: IllegalArgumentException) {
+        explain(R.string.chat_attachment_open_failed)
+    }
 }
 
 // 视频、音频附件：和图片缩略图等高的色块
