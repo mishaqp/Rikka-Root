@@ -5,9 +5,11 @@ import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import me.rerere.ai.core.Tool
 import me.rerere.rikkahub.costguards.TokenBudgetLedger
@@ -19,6 +21,8 @@ import me.rerere.rikkahub.data.ai.tools.local.smsOutcomeJson
 import me.rerere.rikkahub.data.ai.tools.local.buildRootTool
 import me.rerere.rikkahub.root.RootShellManager
 import me.rerere.rikkahub.root.RootProcessResult
+import me.rerere.rikkahub.root.RootStatus
+import java.io.File
 import me.rerere.workspace.WorkspaceCommandResult
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
@@ -233,6 +237,96 @@ class HeadlessTaskRunnerTest {
         assertEquals("root_interaction_required", result.errorCode)
     }
 
+    @Test(timeout = 20_000) fun `failed direct Root command retains actual streams and exit code without another effect`() = runBlocking {
+        withRootSession { manager, directory ->
+            val effect = File(directory, "effect")
+            var followingEffects = 0
+            val fixture = Fixture(toolsOverride = listOf(buildRootTool(manager), Tool("write_text_file", "fixture", execute = {
+                followingEffects++
+                listOf(UIMessagePart.Text("unexpected"))
+            })))
+            val result = fixture.runner.run(HeadlessTaskRequest.DirectActions(listOf(
+                HeadlessToolAction("root_exec", buildJsonObject {
+                    put("command", "printf '[%s]\\n' 'a b'; printf 'actual failure\\n' >&2; printf once >> ${shellQuote(effect.path)}; exit 7")
+                }), HeadlessToolAction("write_text_file", buildJsonObject {}),
+            )), fixture.context)
+
+            assertEquals(HeadlessTaskStatus.FAILED, result.status)
+            assertEquals("tool_failed", result.errorCode)
+            assertNotNull("The background result must retain the received Root diagnostics", result.output)
+            val output = Json.parseToJsonElement(result.output!!).jsonObject
+            assertEquals("[a b]\n", output["stdout"]!!.jsonPrimitive.content)
+            assertEquals("actual failure\n", output["stderr"]!!.jsonPrimitive.content)
+            assertEquals(JsonPrimitive(7), output["exit_code"])
+            assertEquals(JsonPrimitive(false), output["success"])
+            assertEquals("once", effect.readText())
+            assertEquals(0, followingEffects)
+        }
+    }
+
+    @Test(timeout = 20_000) fun `timed out direct Root command retains partial output and remains indeterminate`() = runBlocking {
+        withRootSession { manager, directory ->
+            val after = File(directory, "after")
+            val fixture = Fixture(toolsOverride = listOf(buildRootTool(manager)))
+            val result = fixture.runner.run(HeadlessTaskRequest.DirectActions(listOf(
+                HeadlessToolAction("root_exec", buildJsonObject {
+                    put("command", "printf 'BEFORE\\n'; printf 'partial error\\n' >&2; sleep 5; touch ${shellQuote(after.path)}")
+                    put("timeout_ms", 1000)
+                }),
+            )), fixture.context)
+
+            assertEquals(HeadlessTaskStatus.INDETERMINATE, result.status)
+            assertEquals("command_timeout", result.errorCode)
+            assertNotNull("A timeout must keep partial streams from the native result", result.output)
+            val output = Json.parseToJsonElement(result.output!!).jsonObject
+            assertEquals("BEFORE\n", output["stdout"]!!.jsonPrimitive.content)
+            assertTrue(output["stderr"]!!.jsonPrimitive.content.startsWith("partial error\n"))
+            assertEquals("command_timeout", output["error"]!!.jsonPrimitive.content)
+            assertFalse(output.containsKey("exit_code"))
+            assertFalse(after.exists())
+        }
+    }
+
+    @Test(timeout = 20_000) fun `Root failure during actual generation reaches the caller with no further model request`() = runBlocking {
+        withRootSession { manager, directory ->
+            val effect = File(directory, "prompt-effect")
+            val arguments = buildJsonObject {
+                put("command", "printf 'prompt output\\n'; printf 'prompt error\\n' >&2; printf once >> ${shellQuote(effect.path)}; exit 9")
+            }
+            val toolResponse = """{"id":"fixture","model":"test-chat","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"root-failure","type":"function","function":{"name":"root_exec","arguments":${JsonPrimitive(arguments.toString())}}}]},"finish_reason":"tool_calls"}]}"""
+            val fixture = Fixture(toolsOverride = listOf(buildRootTool(manager)), firstResponse = toolResponse)
+
+            val result = fixture.runner.run(HeadlessTaskRequest.Prompt("Run the diagnostic once"), fixture.context)
+
+            assertEquals(HeadlessTaskStatus.FAILED, result.status)
+            assertEquals("tool_failed", result.errorCode)
+            assertNotNull("GenerationLoop must not discard a failed tool's actual output", result.output)
+            val output = Json.parseToJsonElement(result.output!!).jsonObject
+            assertEquals("prompt output\n", output["stdout"]!!.jsonPrimitive.content)
+            assertEquals("prompt error\n", output["stderr"]!!.jsonPrimitive.content)
+            assertEquals(JsonPrimitive(9), output["exit_code"])
+            assertEquals("once", effect.readText())
+            assertEquals(1, fixture.requestCount)
+        }
+    }
+
+    private suspend fun withRootSession(block: suspend (RootShellManager, File) -> Unit) {
+        val directory = folder.newFolder()
+        val bin = File(directory, "bin").apply { mkdir() }
+        File(bin, "id").apply { writeText("#!/bin/sh\nprintf '0\\n'\n"); check(setExecutable(true)) }
+        val su = File(directory, "su").apply {
+            writeText("#!/bin/sh\nPATH=${shellQuote(bin.path)}:\"\$PATH\"\nexport PATH\nexec /bin/sh -c \"\$2\"\n")
+            check(setExecutable(true))
+        }
+        val manager = RootShellManager(suExecutable = su.path, controlDirectory = directory)
+        try {
+            assertEquals(RootStatus.READY, manager.verifyRoot(prepareHeadless = true))
+            block(manager, directory)
+        } finally { manager.close() }
+    }
+
+    private fun shellQuote(value: String) = "'" + value.replace("'", "'\"'\"'") + "'"
+
     @Test fun workspaceNativeResultDistinguishesTimeoutFailureAndOpaqueStdout() {
         fun envelope(result: WorkspaceCommandResult) = listOf(UIMessagePart.Text(buildJsonObject {
             put("exitCode", result.exitCode)
@@ -322,12 +416,14 @@ class HeadlessTaskRunnerTest {
         private val standaloneBudget: TokenBudgetLedger? = null,
         private val toolsOverride: List<Tool>? = null,
         private val disableExternalAtCheckpoint: Boolean = false,
+        private val firstResponse: String? = null,
     ) {
         val events = mutableListOf<String>()
         var effects = 0
         var allowed = true
         var permission = true
         var requestBody = ""
+        var requestCount = 0
         var effectiveAssistant: Assistant? = null
         var builtContext: RunExecutionContext? = null
         var runAllowed = true
@@ -341,8 +437,9 @@ class HeadlessTaskRunnerTest {
         val context = RunExecutionContext(Uuid.random(), owner.id, RunOrigin.SUB_AGENT, modelId = model.id.toString(), runStillAllowed = { runAllowed })
         private val client = OkHttpClient.Builder().addInterceptor { chain ->
             requestBody = Buffer().also { chain.request().body?.writeTo(it) }.readUtf8()
+            requestCount++
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
-                .body("""{"id":"response","object":"chat.completion","model":"test-chat","choices":[{"index":0,"message":{"role":"assistant","content":"side result"},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":3,"total_tokens":11}}"""
+                .body((firstResponse?.takeIf { requestCount == 1 } ?: """{"id":"response","object":"chat.completion","model":"test-chat","choices":[{"index":0,"message":{"role":"assistant","content":"side result"},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":3,"total_tokens":11}}""")
                     .toResponseBody("application/json".toMediaType())).build()
         }.build()
         private val androidContext = object : ContextWrapper(null) {}

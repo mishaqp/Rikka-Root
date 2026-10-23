@@ -272,13 +272,16 @@ class WorkflowActionRunner(
         val webTaint = RunWebTaint()
         val outputs = mutableListOf<String>()
         var outputTruncated = false
+        fun finish(success: Boolean, error: String?): RunResult {
+            val summary = outputs.joinToString("\n")
+            return RunResult(success, error, workflowSummaryPrefix(summary, 2000),
+                outputTruncated || summary.length > 2000)
+        }
         for ((idx, action) in actions.withIndex()) {
             val hardlineReason = HeadlessToolPolicy.blockReason(action.tool, action.args)
             if (hardlineReason != null) {
                 logSafe("workflow hardline-blocked action $idx tool=${action.tool}: $hardlineReason")
-                return RunResult(success = false,
-                    error = "action $idx: hardline:$hardlineReason",
-                    summary = outputs.joinToString("\n"), summaryTruncated = outputTruncated)
+                return finish(success = false, error = "action $idx: hardline:$hardlineReason")
             }
             val out = try {
                 withTimeoutOrNull(action.timeoutSeconds * 1000L) { runAction(definition, action, webTaint) }
@@ -289,25 +292,22 @@ class WorkflowActionRunner(
                 throw c
             } catch (t: Throwable) {
                 logSafe("workflow action $idx tool=${action.tool} threw: ${t::class.simpleName}")
-                return RunResult(false,
-                    "action $idx: ${t::class.simpleName}",
-                    outputs.joinToString("\n"), summaryTruncated = outputTruncated)
+                return finish(false, "action $idx: ${t::class.simpleName}")
             }
             if (out == null) {
-                return RunResult(false,
-                    "action $idx: ${action.tool} exceeded ${action.timeoutSeconds}s",
-                    outputs.joinToString("\n"), summaryTruncated = outputTruncated)
+                return finish(false, "action $idx: ${action.tool} exceeded ${action.timeoutSeconds}s")
+            }
+            // Include an actual failed result before stopping; no output is invented for preflight rejection.
+            if (out.status == HeadlessTaskStatus.SUCCEEDED || out.output != null) {
+                val text = out.output.orEmpty()
+                outputTruncated = outputTruncated || text.length > 200
+                outputs += "[$idx] ${action.tool}: ${workflowSummaryPrefix(text, 200)}"
             }
             if (out.status != HeadlessTaskStatus.SUCCEEDED) {
-                return RunResult(false, "action $idx: ${out.errorCode ?: out.status.name}", outputs.joinToString("\n"), summaryTruncated = outputTruncated)
+                return finish(false, "action $idx: ${out.errorCode ?: out.status.name}")
             }
-            // The normal headless runner applies fresh permissions, private side-context and HARDLINE.
-            val text = out.output.orEmpty()
-            outputTruncated = outputTruncated || text.length > 200
-            outputs += "[$idx] ${action.tool}: ${workflowSummaryPrefix(text, 200)}"
         }
-        val summary = outputs.joinToString("\n")
-        return RunResult(true, null, workflowSummaryPrefix(summary, 2000), outputTruncated || summary.length > 2000)
+        return finish(true, null)
     }
 
     /**

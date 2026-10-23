@@ -44,6 +44,66 @@ class WorkflowRootSafetyTest {
         assertTrue(result.error.orEmpty().contains("feature_disabled"))
     }
 
+    @Test fun `failed Root action keeps its diagnostic output in the workflow summary`() = runBlocking {
+        var calls = 0
+        val runner = WorkflowActionRunner { _, _, _ ->
+            calls++
+            HeadlessTaskResult(HeadlessTaskStatus.FAILED,
+                output = "stdout=BEFORE\nstderr=permission denied\nexit_code=7", errorCode = "tool_failed")
+        }
+
+        val result = runner.run(definition(
+            WorkflowAction("root_exec", buildJsonObject { put("command", "id") }),
+            WorkflowAction("show_toast", buildJsonObject {}),
+        ))
+
+        assertFalse(result.success)
+        assertEquals("action 0: tool_failed", result.error)
+        assertEquals("[0] root_exec: stdout=BEFORE\nstderr=permission denied\nexit_code=7", result.summary)
+        assertFalse(result.summaryTruncated)
+        assertEquals(1, calls)
+    }
+
+    @Test fun `failure after completed actions still bounds the complete workflow summary`() = runBlocking {
+        var calls = 0
+        val runner = WorkflowActionRunner { _, _, _ ->
+            calls++
+            if (calls == 13) HeadlessTaskResult(HeadlessTaskStatus.INDETERMINATE,
+                output = "BEFORE", errorCode = "command_timeout")
+            else HeadlessTaskResult(HeadlessTaskStatus.SUCCEEDED, output = "🙂".repeat(100))
+        }
+
+        val result = runner.run(definition(*Array(14) {
+            WorkflowAction("root_exec", buildJsonObject { put("command", "id") })
+        }))
+
+        assertFalse(result.success)
+        assertEquals("action 12: command_timeout", result.error)
+        assertEquals(13, calls)
+        assertTrue("Early failure must respect the complete 2000-character summary cap", result.summary.length <= 2000)
+        assertTrue("Truncated early-failure summaries must say so", result.summaryTruncated)
+        assertFalse(result.summary.last().isHighSurrogate())
+    }
+
+    @Test fun `policy rejection after completed actions also bounds and marks the summary`() = runBlocking {
+        var calls = 0
+        val runner = WorkflowActionRunner { _, _, _ ->
+            calls++
+            HeadlessTaskResult(HeadlessTaskStatus.SUCCEEDED, output = "x".repeat(200))
+        }
+        val completed = List(12) { WorkflowAction("root_exec", buildJsonObject { put("command", "id") }) }
+
+        val result = runner.run(definition(*(completed + WorkflowAction("root_exec", buildJsonObject {
+            put("command", "setenforce 0")
+        })).toTypedArray()))
+
+        assertFalse(result.success)
+        assertTrue(result.error.orEmpty().contains("hardline"))
+        assertEquals(12, calls)
+        assertTrue(result.summary.length <= 2000)
+        assertTrue(result.summaryTruncated)
+    }
+
     @Test fun `unsupported special access triggers and inverted conditions remain unavailable`() {
         assertNotNull(WorkflowAvailability.triggerReason(TriggerSpec.AppLaunched("example.app")))
         assertNotNull(WorkflowAvailability.triggerReason(TriggerSpec.NotificationReceived(packageName = "example.app")))

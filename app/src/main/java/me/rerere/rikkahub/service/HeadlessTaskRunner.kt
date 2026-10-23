@@ -294,7 +294,11 @@ class HeadlessTaskRunner internal constructor(
         }
         context.executionState.effectsInFlight = false
         if (WebContentGuard.isClientReader(tool.name)) markWeb(context)
-        classifyHeadlessToolFailure(tool.name, output)?.let { failure -> stop(failure.status, failure.errorCode) }
+        classifyHeadlessToolFailure(tool.name, output)?.let { failure ->
+            // Keep the received diagnostics as result data; the status code stays whitelisted.
+            stop(failure.status, failure.errorCode,
+                output.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text })
+        }
         output
     })
     private suspend fun ensureEnabled(context: RunExecutionContext) {
