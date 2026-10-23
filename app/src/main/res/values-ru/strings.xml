@@ -1612,6 +1612,4 @@
     <string name="mini_apps_tool_title">Мини-приложения</string>
     <string name="mini_apps_tool_description">Читать и изменять данные мини-приложений без открытия</string>
     <string name="workspace_detail_tool_publish_mini_app">Публикация мини-приложения</string>
-    <string name="chat_timeline_tool_publish_mini_app">Публикация мини-приложения</string>
-    <string name="chat_timeline_tool_mini_apps">Данные мини-приложений</string>
 </resources>

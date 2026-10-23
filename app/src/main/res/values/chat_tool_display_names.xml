@@ -7,6 +7,8 @@
     <string name="chat_timeline_tool_qr_generate" translatable="false">Создание QR-кода</string>
     <string name="chat_timeline_tool_qr_scan" translatable="false">Чтение QR-кода</string>
     <string name="chat_timeline_tool_read_document" translatable="false">Чтение документа</string>
+    <string name="chat_timeline_tool_publish_mini_app" translatable="false">Публикация мини-приложения</string>
+    <string name="chat_timeline_tool_mini_apps" translatable="false">Данные мини-приложений</string>
 
     <string name="chat_timeline_tool_external_automation_add_trusted_package" translatable="false">Доверие вызывающему приложению</string>
     <string name="chat_timeline_tool_external_automation_remove_trusted_package" translatable="false">Отзыв доверия вызывающему приложению</string>
