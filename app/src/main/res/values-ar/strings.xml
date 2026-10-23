@@ -1569,4 +1569,11 @@
   <string name="chat_page_history_partial_export">يتضمن هذا التصدير الرسائل التي تم تحميلها فقط. لحفظ السجل بالكامل، استخدم نسخة احتياطية كاملة.</string>
   <string name="chat_page_history_backup_error">تعذّر حفظ النسخة الاحتياطية</string>
   <string name="history_page_undo_into_assistant">Восстановить в «%1$s»</string>
+  <string name="language_russian">🇷🇺 Русский</string>
+  <string name="chat_attachment_file_unavailable">Вложение недоступно: файл удалён или нет доступа к чтению.</string>
+  <string name="chat_attachment_invalid_uri">Не удалось открыть вложение: неподдерживаемая ссылка.</string>
+  <string name="chat_attachment_no_viewer">Нет приложения для открытия этого вложения.</string>
+  <string name="chat_attachment_open_failed">Не удалось открыть вложение. Проверьте доступ к файлу.</string>
+  <string name="chat_message_previous_branch">Предыдущая ветка</string>
+  <string name="chat_message_next_branch">Следующая ветка</string>
 </resources>
