@@ -71,6 +71,7 @@ class RootScreenService internal constructor(
     private var operationStage = "screen_action"
     private var exceptionDetail: String? = null
     private var exceptionStage: String? = null
+    private var lastCommandResult: RootProcessResult? = null
 
     internal suspend fun withService(
         treeRequired: Boolean = true,
@@ -82,6 +83,7 @@ class RootScreenService internal constructor(
             if (!mayExecute()) return@withLock denied()
             try {
                 lastFailure = null
+                lastCommandResult = null
                 exceptionDetail = null
                 exceptionStage = null
                 if (validateBeforeWake != null) {
@@ -102,7 +104,7 @@ class RootScreenService internal constructor(
                 val explained = explainScreenResult(result).let {
                     if (wakeFailed) JsonObject(it + ("wake_failed" to kotlinx.serialization.json.JsonPrimitive(true))) else it
                 }
-                if (result["error"] != null && exceptionDetail != null) JsonObject(explained + exceptionDiagnostic()) else explained
+                withRootDiagnostic(if (result["error"] != null && exceptionDetail != null) JsonObject(explained + exceptionDiagnostic()) else explained)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -115,7 +117,7 @@ class RootScreenService internal constructor(
         put("error", "screen_permission_revoked")
         put("reason", "Автоматизация экрана отключена или разрешение инструмента отозвано. Включите функцию и подтвердите новый вызов.")
     }
-    private fun failure(code: String) = buildJsonObject {
+    private fun failure(code: String) = withRootDiagnostic(buildJsonObject {
         put("error", code)
         put("reason", when (code) {
             "command_timeout" -> "Команда автоматизации экрана не завершилась вовремя; она остановлена и не повторяется."
@@ -138,6 +140,29 @@ class RootScreenService internal constructor(
         })
         exceptionDetail?.let { put("detail", it) }
         exceptionStage?.let { put("stage", it) }
+    })
+
+    /** Only the failing command's bounded result is attached; source commands are never logged. */
+    private fun withRootDiagnostic(result: JsonObject): JsonObject {
+        val command = lastCommandResult ?: return result
+        if (result["error"] == null || lastFailure == null && lastTreeError == null) return result
+        // Local validation/clipboard failures did not fail the preceding snapshot command.
+        if (command.error == null && command.exitCode == 0 && lastTreeError == null) return result
+        val diagnostic = buildJsonObject {
+            put("backend", "root")
+            put("success", command.error == null && command.exitCode == 0)
+            put("stdout", command.stdout)
+            put("stderr", command.stderr)
+            command.exitCode?.let { put("exit_code", it) }
+            command.error?.let { put("error", it) }
+            command.reason?.let { put("reason", it) }
+            if (command.stdoutTruncated || command.stderrTruncated) {
+                put("truncated", true)
+                put("stdout_truncated", command.stdoutTruncated)
+                put("stderr_truncated", command.stderrTruncated)
+            }
+        }
+        return JsonObject(result + ("root_result" to diagnostic))
     }
 
     private fun exceptionDiagnostic() = buildJsonObject {
@@ -155,9 +180,12 @@ class RootScreenService internal constructor(
     }
 
     internal suspend fun exec(command: String, timeoutMs: Int = 10_000): RootProcessResult {
-        if (RootCommandGuard.check(command) != null) return RootProcessResult(error = "root_command_blocked").also { lastFailure = it.error }
-        if (!mayExecute()) return RootProcessResult(error = "screen_permission_revoked").also { lastFailure = it.error }
-        val result = executeRoot(command, timeoutMs, currentCoroutineContext()[RunExecutionContext] != null, mayExecute)
+        val result = when {
+            RootCommandGuard.check(command) != null -> RootProcessResult(error = "root_command_blocked")
+            !mayExecute() -> RootProcessResult(error = "screen_permission_revoked")
+            else -> executeRoot(command, timeoutMs, currentCoroutineContext()[RunExecutionContext] != null, mayExecute)
+        }
+        lastCommandResult = result
         if (result.error != null) lastFailure = result.error
         else if (result.exitCode != 0) lastFailure = "root_input_failed"
         return result

@@ -227,14 +227,14 @@ private class HeadlessRootSession private constructor(
                 active.delete()
                 awaitCleanup(result)
             }
-            val outcome = acknowledgement(result, nonce) ?: return quarantine()
+            val outcome = acknowledgement(result, nonce) ?: return quarantine(request)
             return when (outcome) {
                 "timeout", "cancelled" -> capturedResult(request, error = "command_timeout",
                     reason = "Время root-команды истекло. Проверьте, что успело выполниться, перед новым вызовом; команда автоматически не повторяется.")
                 "not_root", "failed" -> { close(); interactionRequired() }
                 else -> outcome.toIntOrNull()?.takeIf { it in 0..255 }?.let { code ->
                     capturedResult(request, exitCode = code)
-                } ?: quarantine()
+                } ?: quarantine(request)
             }
         } catch (error: InterruptedException) {
             active.delete()
@@ -245,7 +245,7 @@ private class HeadlessRootSession private constructor(
             throw error
         } catch (_: java.io.IOException) {
             active.delete()
-            if (submitted) { awaitCleanup(result); return quarantine() }
+            if (submitted) { awaitCleanup(result); return quarantine(request) }
             return interactionRequired()
         } finally {
             active.delete()
@@ -267,10 +267,15 @@ private class HeadlessRootSession private constructor(
         return outcome.takeIf { it in setOf("timeout", "cancelled", "not_root", "failed") || it.toIntOrNull()?.let { code -> code in 0..255 } == true }
     }
 
-    private fun quarantine(): RootProcessResult {
+    private fun quarantine(request: File? = null): RootProcessResult {
         retainControl = true
         close()
-        return RootProcessResult(error = "root_cleanup_unconfirmed", reason = "Завершение Root-команды не подтверждено. Фоновая сессия закрыта; проверьте процессы на устройстве. Команда не повторяется.")
+        val error = "root_cleanup_unconfirmed"
+        val reason = "Завершение Root-команды не подтверждено. Фоновая сессия закрыта; проверьте процессы на устройстве. Команда не повторяется."
+        // A lost acknowledgement cannot establish an exit status, but output already captured
+        // from this request is still useful. Never lose it or infer success from its contents.
+        return request?.let { runCatching { capturedResult(it, error = error, reason = reason) }.getOrNull() }
+            ?: RootProcessResult(error = error, reason = reason)
     }
 
     private fun awaitCleanup(result: File) {

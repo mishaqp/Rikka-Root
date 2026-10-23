@@ -59,6 +59,10 @@ fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = nul
                 put("error", "invalid_arguments")
                 put("reason", "Укажите непустую команду в command, а timeout_ms — целым числом.")
             }
+            '\u0000' in command -> buildJsonObject {
+                put("error", "invalid_arguments")
+                put("reason", "Команда содержит нулевой байт (NUL), который оболочка не может передать без изменений. Команда не выполнена; передайте строку без NUL.")
+            }
             // An Approved invocation has already passed the explicit confirmation in the loop.
             (headless || invocation?.automatic == true || invocation == null && !automaticAtStart && !automaticInvocation) && RootCommandGuard.check(command) != null -> buildJsonObject {
                 put("error", "root_command_blocked")
@@ -71,7 +75,7 @@ fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = nul
                     accessStore.beginCommand(assistantId, command)
                 } else null
                 var exitCode: Int? = null
-                var status = "failed"
+                var status = "root_execution_indeterminate"
                 var journalError = false
                 val executed = try {
                     manager.exec(command, timeout.coerceIn(1_000, 300_000), headless = headless) {

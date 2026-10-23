@@ -248,7 +248,8 @@ private fun RootLocalToolDetailSettings(
                 }
             },
         )
-        if (LocalToolOption.Root in assistant.localTools &&
+        if ((assistant.rootMode || LocalToolOption.Root in assistant.localTools ||
+            LocalToolOption.ScreenAutomation in assistant.localTools) &&
             assistant.localTools.any { it in setOf(LocalToolOption.SubAgents, LocalToolOption.CronJobs,
                 LocalToolOption.Workflows, LocalToolOption.ScreenAutomation, LocalToolOption.JsSkills) }) {
             item(

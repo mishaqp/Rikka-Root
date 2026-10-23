@@ -33,6 +33,7 @@ import me.rerere.rikkahub.data.ai.tools.ChatToolFactory
 import me.rerere.rikkahub.data.ai.tools.HeadlessToolPolicy
 import me.rerere.rikkahub.data.ai.tools.RunExecutionContext
 import me.rerere.rikkahub.data.ai.tools.WebContentGuard
+import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.root.executeRootToolOnce
 import me.rerere.rikkahub.subagent.resolveSubAgentModel
@@ -351,11 +352,20 @@ internal fun classifyHeadlessToolFailure(name: String, output: List<UIMessagePar
         val failure = value["error"]?.let { it != kotlinx.serialization.json.JsonNull && it != JsonPrimitive(false) } == true ||
             value["success"] == JsonPrimitive(false)
         if (!failure) continue
-        if (name == "root_exec") {
+        val screenTool = localOptionForHeadlessTool(name) == LocalToolOption.ScreenAutomation
+        if (name == "root_exec" || screenTool) {
             // Only these native machine codes are allowed into persistent history; no source/output text.
-            val code = (value["error"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+            // The action's own native error takes precedence over auxiliary command diagnostics.
+            val codes = listOfNotNull(
+                (value["error"] as? JsonPrimitive)?.takeIf { it.isString }?.content,
+                if (screenTool) ((value["root_result"] as? JsonObject)?.get("error") as? JsonPrimitive)
+                    ?.takeIf { it.isString }?.content else null,
+            )
+            val code = codes.firstOrNull { it in rootIndeterminateErrors || it in rootBlockedErrors ||
+                screenTool && it == "screen_permission_revoked" }
             if (code in rootIndeterminateErrors) return HeadlessToolFailure(HeadlessTaskStatus.INDETERMINATE, code!!)
-            if (code in rootBlockedErrors) return HeadlessToolFailure(HeadlessTaskStatus.BLOCKED, code!!)
+            if (code in rootBlockedErrors || screenTool && code == "screen_permission_revoked")
+                return HeadlessToolFailure(HeadlessTaskStatus.BLOCKED, code!!)
         }
         if (name == "send_sms" && value["parts_total"] != null && (
                 (value["parts_sent"] as? JsonPrimitive)?.intOrNull?.let { it > 0 } == true ||
