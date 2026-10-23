@@ -1580,6 +1580,8 @@
   <string name="chat_attachment_invalid_uri">Не удалось открыть вложение: неподдерживаемая ссылка.</string>
   <string name="chat_attachment_no_viewer">Нет приложения для открытия этого вложения.</string>
   <string name="chat_attachment_open_failed">Не удалось открыть вложение. Проверьте доступ к файлу.</string>
+  <string name="chat_produced_file_export_failed">Не удалось сохранить файл. Проверьте доступ к исходному файлу и выбранному хранилищу.</string>
+  <string name="chat_produced_file_share_failed">Не удалось отправить файл. Проверьте, что он существует и доступен для чтения.</string>
   <string name="chat_message_previous_branch">Предыдущая ветка</string>
   <string name="chat_message_next_branch">Следующая ветка</string>
 </resources>

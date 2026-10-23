@@ -1,7 +1,7 @@
 package me.rerere.rikkahub.ui.components.message
 
 import android.content.Intent
-import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -31,6 +31,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,8 +44,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.FileProvider
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
@@ -53,9 +55,8 @@ import me.rerere.hugeicons.stroke.Share08
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
-import me.rerere.workspace.WorkspaceStorageArea
+import me.rerere.rikkahub.utils.getActivity
 import org.koin.compose.koinInject
-import java.io.File
 
 private const val DEFAULT_VISIBLE_COUNT = 12
 
@@ -73,24 +74,25 @@ internal fun EditedFilesList(parts: List<UIMessagePart>, assistant: Assistant?) 
     val workspaceRepository: WorkspaceRepository = koinInject()
     var selected by remember { mutableStateOf<ProducedFilePresentation?>(null) }
     var showAll by remember { mutableStateOf(false) }
+    var pendingExport by rememberSaveable(stateSaver = producedFileExportSaver) {
+        mutableStateOf<ProducedFileExportRequest?>(null)
+    }
 
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri ->
-        val entry = selected ?: return@rememberLauncherForActivityResult
+        val request = pendingExport
+        pendingExport = null
         if (uri == null) return@rememberLauncherForActivityResult
+        if (request == null) {
+            Toast.makeText(context, R.string.chat_produced_file_export_failed, Toast.LENGTH_LONG).show()
+            return@rememberLauncherForActivityResult
+        }
         scope.launch {
-            runCatching {
-                context.contentResolver.openOutputStream(uri)?.use { output ->
-                    when (val source = entry.source) {
-                        is ProducedFileSource.Workspace -> {
-                            val (area, relativePath) = resolveWorkspacePath(source.path)
-                            workspaceRepository.exportFile(workspaceId ?: return@use, area, relativePath, output)
-                        }
-                        is ProducedFileSource.Document -> {
-                            val inputUri = Uri.parse(source.uri)
-                            context.contentResolver.openInputStream(inputUri)?.use { it.copyTo(output) }
-                        }
-                    }
-                }
+            try {
+                context.exportProducedFile(request, uri, workspaceRepository)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                Toast.makeText(context, R.string.chat_produced_file_export_failed, Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -165,35 +167,42 @@ internal fun EditedFilesList(parts: List<UIMessagePart>, assistant: Assistant?) 
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (entry.source is ProducedFileSource.Document) {
                     FileActionCard(stringResource(R.string.chat_reasoning_files_open), Modifier.testTag("chat_produced_file_open")) {
-                        runCatching { context.startActivity(documentIntent(context, entry.source, Intent.ACTION_VIEW)) }
+                        scope.launch {
+                            try {
+                                context.requireReadableProducedDocument(entry.source)
+                                context.openLocalFile(entry.source.uri, entry.source.mime)
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (_: Exception) {
+                                Toast.makeText(context, R.string.chat_attachment_file_unavailable, Toast.LENGTH_LONG).show()
+                            }
+                        }
                     }
                 }
                 FileActionCard(stringResource(R.string.common_export), Modifier.testTag("chat_produced_file_export"),
                     icon = { Icon(HugeIcons.FileImport, contentDescription = null) }) {
-                    exportLauncher.launch(entry.displayName)
+                    pendingExport = ProducedFileExportRequest(entry.source, workspaceId)
+                    try {
+                        exportLauncher.launch(entry.displayName)
+                    } catch (_: Exception) {
+                        pendingExport = null
+                        Toast.makeText(context, R.string.chat_produced_file_export_failed, Toast.LENGTH_LONG).show()
+                    }
                 }
                 FileActionCard(stringResource(R.string.common_share), Modifier.testTag("chat_produced_file_share"),
                     icon = { Icon(HugeIcons.Share08, contentDescription = null) }) {
                     selected = null
                     scope.launch {
-                        runCatching {
-                            val intent = when (val source = entry.source) {
-                                is ProducedFileSource.Document -> documentIntent(context, source, Intent.ACTION_SEND)
-                                is ProducedFileSource.Workspace -> {
-                                    val id = workspaceId ?: return@runCatching
-                                    val (area, relativePath) = resolveWorkspacePath(source.path)
-                                    val dir = File(context.cacheDir, "workspace_share").apply { mkdirs() }
-                                    val file = File(dir, entry.displayName)
-                                    file.outputStream().use { workspaceRepository.exportFile(id, area, relativePath, it) }
-                                    Intent(Intent.ACTION_SEND).apply {
-                                        type = "application/octet-stream"
-                                        putExtra(Intent.EXTRA_STREAM, FileProvider.getUriForFile(
-                                            context, "${context.packageName}.fileprovider", file))
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                }
+                        try {
+                            val intent = context.createProducedFileShareIntent(entry, workspaceId, workspaceRepository)
+                            val chooser = Intent.createChooser(intent, null).apply {
+                                if (context.getActivity() == null) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             }
-                            context.startActivity(Intent.createChooser(intent, null))
+                            context.startActivity(chooser)
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (_: Exception) {
+                            Toast.makeText(context, R.string.chat_produced_file_share_failed, Toast.LENGTH_LONG).show()
                         }
                     }
                 }
@@ -238,24 +247,19 @@ private fun FileActionCard(
     }
 }
 
-private fun documentIntent(context: android.content.Context, source: ProducedFileSource.Document, action: String): Intent {
-    val parsed = Uri.parse(source.uri)
-    val uri = if (parsed.scheme == "file") {
-        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", File(parsed.path ?: ""))
-    } else parsed
-    return Intent(action).apply {
-        type = source.mime.ifBlank { "application/octet-stream" }
-        if (action == Intent.ACTION_VIEW) setDataAndType(uri, type)
-        else putExtra(Intent.EXTRA_STREAM, uri)
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    }
-}
-
-private fun resolveWorkspacePath(path: String): Pair<WorkspaceStorageArea, String> {
-    val trimmed = path.trimEnd('/')
-    return if (trimmed == "/workspace" || trimmed.startsWith("/workspace/")) {
-        WorkspaceStorageArea.FILES to trimmed.removePrefix("/workspace").trimStart('/')
-    } else {
-        WorkspaceStorageArea.LINUX to trimmed.trimStart('/')
-    }
-}
+// Android may recreate this composition while its document picker remains in the foreground.
+private val producedFileExportSaver = listSaver<ProducedFileExportRequest?, String>(
+    save = { request ->
+        if (request == null) emptyList() else when (val source = request.source) {
+            is ProducedFileSource.Workspace -> listOf("workspace", source.path, "", request.workspaceId.orEmpty())
+            is ProducedFileSource.Document -> listOf("document", source.uri, source.mime, request.workspaceId.orEmpty())
+        }
+    },
+    restore = { saved ->
+        val source = when (saved[0]) {
+            "workspace" -> ProducedFileSource.Workspace(saved[1])
+            else -> ProducedFileSource.Document(saved[1], saved[2])
+        }
+        ProducedFileExportRequest(source, saved[3].takeIf(String::isNotEmpty))
+    },
+)

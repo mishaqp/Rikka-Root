@@ -1134,7 +1134,11 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         compose.waitForIdle()
         compose.onNodeWithTag("chat_reasoning_preview").assertDoesNotExist()
         capture("reasoning_auto_preview_off")
-        compose.onNodeWithTag("chat_reasoning_step").performClick()
+        // Accessibility invokes the real click handler without a native ripple
+        // whose animation clock is independent of these frozen Compose frames.
+        // Preserve performClick's 16ms input interval to keep the baseline shimmer phase.
+        compose.mainClock.advanceTimeBy(16, ignoreFrameDuration = true)
+        compose.onNodeWithTag("chat_reasoning_step").performSemanticsAction(SemanticsActions.OnClick) { it() }
         compose.mainClock.advanceTimeBy(300)
         compose.onNodeWithTag("chat_reasoning_expanded").assertIsDisplayed()
         capture("reasoning_manual_open_when_preview_off")
@@ -1143,7 +1147,8 @@ class ChatBeforeScreenshotsTest internal constructor(private val theme: Screensh
         }
         compose.mainClock.advanceTimeBy(300)
         compose.onNodeWithTag("chat_reasoning_label", useUnmergedTree = true).performScrollTo()
-        compose.onNodeWithTag("chat_reasoning_step").performClick()
+        compose.mainClock.advanceTimeBy(16, ignoreFrameDuration = true)
+        compose.onNodeWithTag("chat_reasoning_step").performSemanticsAction(SemanticsActions.OnClick) { it() }
         compose.mainClock.advanceTimeBy(300)
         compose.onNodeWithTag("chat_reasoning_preview").assertIsDisplayed()
         val completed = active.copy(messages = listOf(active.currentMessage.copy(parts = listOf(
