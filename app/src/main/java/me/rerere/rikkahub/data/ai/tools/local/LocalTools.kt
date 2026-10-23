@@ -108,6 +108,7 @@ class LocalTools(
         })
         fun add(option: LocalToolOption, tool: Tool) { tools.add(guard(option, tool)) }
         fun addAll(option: LocalToolOption, values: List<Tool>) { values.forEach { add(option, it) } }
+        if (LocalToolOption.MiniApps in options) add(LocalToolOption.MiniApps, me.rerere.rikkahub.miniapps.miniAppsTool())
         if (LocalToolOption.ManageAssistants in options) {
             val caller = managerCaller ?: AssistantManagerCaller(
                 currentAssistantId = { callerId?.let { runCatching { Uuid.parse(it) }.getOrNull() } },

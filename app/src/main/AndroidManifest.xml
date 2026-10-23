@@ -114,6 +114,36 @@
       android:configChanges="screenSize|orientation|keyboardHidden"
       android:hardwareAccelerated="true"
       android:theme="@style/Theme.Rikkahub" />
+    <activity
+      android:name=".miniapps.MiniAppActivity"
+      android:exported="true"
+      android:hardwareAccelerated="true"
+      android:windowSoftInputMode="adjustResize"
+      android:theme="@style/Theme.Rikkahub">
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="rikkahub" android:host="app" />
+      </intent-filter>
+      <!-- Like Moru, identify .moruapp by display name after receiving the URI grant. -->
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <data android:scheme="content" />
+        <data android:scheme="file" />
+        <data android:mimeType="*/*" />
+      </intent-filter>
+    </activity>
+    <receiver android:name=".miniapps.MiniAppReminderReceiver" android:exported="false">
+      <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED" />
+        <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+        <action android:name="android.intent.action.TIME_SET" />
+        <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+        <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+      </intent-filter>
+    </receiver>
     <!-- Package F: disabled by default; requires verified Android caller and explicit trust. -->
     <activity
       android:name=".automation.ExternalAutomationActivity"

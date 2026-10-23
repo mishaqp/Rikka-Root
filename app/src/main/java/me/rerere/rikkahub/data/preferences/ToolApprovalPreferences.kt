@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import me.rerere.rikkahub.root.RootAccessStore
 
-internal fun isWorkspaceToolName(name: String): Boolean = name.startsWith("workspace_")
+internal fun isWorkspaceToolName(name: String): Boolean = name.startsWith("workspace_") || name == "publish_mini_app"
 
 internal fun migrateWorkspaceToolsFrom(stored: Set<String>): Pair<Set<String>, Set<String>> {
     val removed = stored.filterTo(mutableSetOf(), ::isWorkspaceToolName)

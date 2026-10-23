@@ -14,7 +14,7 @@ class LocalToolUiRegistryTest {
         val registered = LocalToolUiRegistry.entries.map { it.option }
         val categorized = LocalToolUiRegistry.categories.flatMap { it.options }
 
-        assertEquals(61, discovered.size)
+        assertEquals(62, discovered.size)
         assertEquals(discovered, registered.toSet())
         assertEquals(registered.size, registered.toSet().size)
         assertEquals(discovered, categorized.toSet())
@@ -39,7 +39,7 @@ class LocalToolUiRegistryTest {
             "internet" to listOf(LocalToolOption.HttpRequest, LocalToolOption.Browser, LocalToolOption.McpControl,
                 LocalToolOption.ExternalAutomation, LocalToolOption.Download),
             "files_media" to listOf(LocalToolOption.QrCodes, LocalToolOption.ReadDocument, LocalToolOption.Files, LocalToolOption.ExternalStorage,
-                LocalToolOption.Archive, LocalToolOption.MediaPlayer, LocalToolOption.MediaScanner),
+                LocalToolOption.MiniApps, LocalToolOption.Archive, LocalToolOption.MediaPlayer, LocalToolOption.MediaScanner),
             "device" to listOf(LocalToolOption.Battery, LocalToolOption.AudioInfo,
                 LocalToolOption.TelephonyInfo, LocalToolOption.WifiInfo, LocalToolOption.Sensors,
                 LocalToolOption.StorageInfo, LocalToolOption.TimeInfo, LocalToolOption.ScreenTime),

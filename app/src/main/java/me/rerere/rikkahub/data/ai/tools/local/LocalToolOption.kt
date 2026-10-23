@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 sealed class LocalToolOption {
+    @Serializable @SerialName("mini_apps") data object MiniApps : LocalToolOption()
     @Serializable @SerialName("http_request") data object HttpRequest : LocalToolOption()
     @Serializable @SerialName("alarm_clock") data object AlarmClock : LocalToolOption()
     @Serializable @SerialName("qr_codes") data object QrCodes : LocalToolOption()

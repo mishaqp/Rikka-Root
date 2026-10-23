@@ -58,13 +58,14 @@ class LocalToolMetadataProviderTest {
         val definitions = metadata.toolsForAssistant(Assistant(localTools = emptyList()), Model())
 
         assertEquals(LocalToolUiRegistry.entries.map { it.option }.toSet(), definitions.keys)
-        assertEquals(61, definitions.size)
+        assertEquals(62, definitions.size)
         assertTrue(definitions.values.all { it.isNotEmpty() })
         for ((serialName, expected) in mapOf(
             "http_request" to listOf("http_request"),
             "alarm_clock" to listOf("set_alarm", "set_timer", "show_alarms"),
             "qr_codes" to listOf("qr_generate", "qr_scan"),
             "read_document" to listOf("read_document"),
+            "mini_apps" to listOf("mini_apps"),
         )) {
             val option = Json.decodeFromString<LocalToolOption>("""{"type":"$serialName"}""")
             val actual = definitions.getValue(option).map { it.name }

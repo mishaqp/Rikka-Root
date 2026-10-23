@@ -18,8 +18,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -27,6 +33,10 @@ import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import me.rerere.rikkahub.miniapps.MiniAppActivity
+import me.rerere.rikkahub.miniapps.MiniAppLauncher
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.utils.base64Encode
@@ -37,6 +47,28 @@ import org.koin.core.parameter.parametersOf
 
 @Composable
 fun ShareHandlerPage(text: String, streamUris: List<String>) {
+    val context = LocalContext.current
+    val navigator = LocalNavController.current
+    var checkingArchive by remember(streamUris) { mutableStateOf(streamUris.size == 1) }
+    LaunchedEffect(streamUris) {
+        val archive = if (streamUris.size == 1) withContext(Dispatchers.IO) {
+            val uri = streamUris.single().toUri()
+            runCatching { MiniAppLauncher.archiveName(context, uri)?.let(MiniAppLauncher::isArchiveName) == true }.getOrDefault(false)
+        } else false
+        if (archive) {
+            context.startActivity(android.content.Intent(context, MiniAppActivity::class.java).apply {
+                action = android.content.Intent.ACTION_SEND
+                putExtra(android.content.Intent.EXTRA_STREAM, streamUris.single().toUri())
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            })
+            navigator.popBackStack()
+        }
+        checkingArchive = false
+    }
+    if (checkingArchive) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { androidx.compose.material3.CircularProgressIndicator() }
+        return
+    }
     val vm: ShareHandlerVM = koinViewModel(parameters = { parametersOf(text) })
     val settings by vm.settings.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()

@@ -33,6 +33,7 @@ private const val WORKSPACE_EXISTS_ERROR = "Файл уже существует
 private const val WORKSPACE_NOT_FILE_ERROR = "Это папка, а нужен файл. Укажите путь к файлу."
 
 val WorkspaceToolDefaultApprovals: Map<String, Boolean> = mapOf(
+    "publish_mini_app" to false,
     "workspace_read_file" to false,
     "workspace_write_file" to false,
     "workspace_edit_file" to false,
@@ -57,7 +58,8 @@ suspend fun createWorkspaceTools(
     cwd: String? = null,
 ): List<Tool> {
     if (workspaceId.isNullOrBlank()) return emptyList()
-    val approvalOverrides = workspaceRepository.getById(workspaceId)?.toolApprovalOverrides().orEmpty()
+    val workspace = workspaceRepository.getById(workspaceId)
+    val approvalOverrides = workspace?.toolApprovalOverrides().orEmpty()
     fun needsApproval(name: String) = resolveWorkspaceToolApproval(name, approvalOverrides)
 
     val shellCwd = cwd
@@ -67,7 +69,9 @@ suspend fun createWorkspaceTools(
         createWriteFileTool(workspaceId, ::needsApproval, workspaceRepository),
         createEditFileTool(workspaceId, ::needsApproval, workspaceRepository),
         createShellTool(workspaceId, ::needsApproval, workspaceRepository, shellCwd),
-    ) + createBackgroundTools(workspaceId, workspaceRepository, shellCwd)).map { tool ->
+    ) + (if (workspace?.shellStatus == me.rerere.workspace.WorkspaceShellStatus.READY.name) listOf(
+        me.rerere.rikkahub.miniapps.publishMiniAppTool(workspaceId, workspaceRepository, cwd) { needsApproval("publish_mini_app") }
+    ) else emptyList()) + createBackgroundTools(workspaceId, workspaceRepository, shellCwd)).map { tool ->
         tool.copy(execute = { input -> deviceToolParts { tool.execute(input) } })
     }
 }

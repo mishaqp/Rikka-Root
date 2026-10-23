@@ -25,6 +25,7 @@ import me.rerere.hugeicons.stroke.LookTop
 import me.rerere.hugeicons.stroke.McpServer
 import me.rerere.hugeicons.stroke.Megaphone01
 import me.rerere.hugeicons.stroke.Package
+import me.rerere.hugeicons.stroke.Package01
 import me.rerere.hugeicons.stroke.ServerStack01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Share04
@@ -184,6 +185,12 @@ object SettingsCatalog {
             "cron", "Задания по расписанию", "Расписания Cron и работа в фоне",
             HugeIcons.Calendar03, SettingsSection.Tools, SettingsTarget.Route(Screen.SettingSchedules),
             "cron schedules расписание таймер задания батарея battery doze энергосбережение",
+        ),
+        SettingsCatalogItem(
+            "mini_apps", "Мои приложения", "Мини-приложения из чата, импорт и ярлыки",
+            HugeIcons.Package01, SettingsSection.Tools, SettingsTarget.Route(Screen.MiniApps),
+            "mini apps мини приложения moru mora мору мора html javascript трекер ярлыки импорт экспорт",
+            titleRes = R.string.mini_apps_title, descriptionRes = R.string.mini_apps_catalog_description,
         ),
         SettingsCatalogItem(
             "web", "Веб-сервер", "Веб-интерфейс и доступ через браузер",

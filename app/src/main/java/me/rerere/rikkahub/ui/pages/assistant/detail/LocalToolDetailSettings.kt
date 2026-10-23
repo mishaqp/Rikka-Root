@@ -50,7 +50,7 @@ internal fun LocalToolDetailSettings(
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             when (option) {
                 LocalToolOption.HttpRequest, LocalToolOption.AlarmClock,
-                LocalToolOption.QrCodes, LocalToolOption.ReadDocument -> Unit
+                LocalToolOption.QrCodes, LocalToolOption.ReadDocument, LocalToolOption.MiniApps -> Unit
                 LocalToolOption.Root -> RootLocalToolDetailSettings(assistant, onUpdate, onEnabledChange, controlsEnabled)
                 LocalToolOption.JavascriptEngine, LocalToolOption.TimeInfo,
                 LocalToolOption.Clipboard, LocalToolOption.Tts, LocalToolOption.AskUser,
@@ -93,6 +93,11 @@ internal fun LocalToolDetailSettings(
 
             val nav = LocalNavController.current
             when (option) {
+                LocalToolOption.MiniApps -> {
+                    TextButton(onClick = { nav.navigate(Screen.MiniApps) }) {
+                        Text(stringResource(R.string.mini_apps_title))
+                    }
+                }
                 LocalToolOption.ManageAssistants -> {
                     TextButton(onClick = { nav.navigate(Screen.Assistant) }) {
                         Text(stringResource(R.string.assistant_page_local_tools_manage_assistants_open))

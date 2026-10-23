@@ -18,6 +18,8 @@ object ToolPermissionPolicy {
             tool.toolName != "ask_user"
 
     val registry: Map<String, String> = linkedMapOf(
+        "mini_apps" to "данные мини-приложений",
+        "publish_mini_app" to "публикация мини-приложений",
         "http_request" to "HTTP-запросы",
         "set_alarm" to "создание будильника",
         "set_timer" to "создание таймера",

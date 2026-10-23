@@ -627,6 +627,10 @@ class RouteActivity : ComponentActivity() {
                                 me.rerere.rikkahub.ui.pages.setting.SettingSchedulesPage()
                             }
 
+                            entry<Screen.MiniApps> {
+                                me.rerere.rikkahub.miniapps.MiniAppsPage()
+                            }
+
                             entry<Screen.SettingSearch> {
                                 SettingSearchPage()
                             }
@@ -949,6 +953,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingSchedules : Screen
+
+    @Serializable
+    data object MiniApps : Screen
 
     @Serializable
     data object SettingSearch : Screen

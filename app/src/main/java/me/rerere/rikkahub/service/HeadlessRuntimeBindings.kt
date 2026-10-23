@@ -121,7 +121,7 @@ class HeadlessRuntimeBindings(
             name == "calendar_create" && (!granted(Manifest.permission.READ_CALENDAR) || !granted(Manifest.permission.WRITE_CALENDAR)) -> return "android_permission_required"
             name == "set_brightness" && !android.provider.Settings.System.canWrite(androidContext) -> return "android_permission_required"
             name == "post_notification" && !androidx.core.app.NotificationManagerCompat.from(androidContext).areNotificationsEnabled() -> return "android_permission_required"
-            name.startsWith("workspace_") -> {
+            (name.startsWith("workspace_") || name == "publish_mini_app") -> {
                 val workspaceId = if (config != null) config.workspaceId else assistant.workspaceId
                 val workspace = workspaceId?.let { workspaceRepository.getById(it.toString()) }
                 if (workspace?.shellStatus != WorkspaceShellStatus.READY.name) return "workspace_unavailable"
@@ -206,6 +206,7 @@ internal fun localOptionForHeadlessTool(name: String): LocalToolOption? = when (
     "list_files", "read_file", "write_binary_file", "delete_file", "move_file", "copy_file", "create_directory",
     "file_info", "find_files", "show_image", "open_file", "batch_copy", "batch_move", "batch_delete" -> LocalToolOption.Files
     "list_storage_volumes", "list_granted_directories", "grant_directory_access", "revoke_directory_access" -> LocalToolOption.ExternalStorage
+    "mini_apps" -> LocalToolOption.MiniApps
     "zip_files", "unzip_file", "list_zip_contents" -> LocalToolOption.Archive
     "play_media", "stop_media", "pause_media", "resume_media", "seek_media", "get_media_status" -> LocalToolOption.MediaPlayer
     "scan_media" -> LocalToolOption.MediaScanner

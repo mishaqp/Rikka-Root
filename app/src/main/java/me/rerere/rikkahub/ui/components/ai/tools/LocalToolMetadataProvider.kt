@@ -217,6 +217,7 @@ class LocalToolMetadata(context: Context) {
                     ),
                 ))
                 LocalToolOption.ManageAppSettings -> listOf(buildManageAppSettingsTool(settings, context))
+                LocalToolOption.MiniApps -> listOf(me.rerere.rikkahub.miniapps.miniAppsTool())
                 LocalToolOption.Files -> fileManagerTools(access, context, canReadImages)
                 LocalToolOption.ExternalStorage -> listOf(listStorageVolumesTool(context), listGrantedDirectoriesTool(context),
                     grantDirectoryAccessTool(context), revokeDirectoryAccessTool(context))

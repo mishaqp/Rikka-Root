@@ -328,6 +328,7 @@ internal data class HeadlessToolFailure(val status: HeadlessTaskStatus, val erro
 private val rootIndeterminateErrors = setOf("command_timeout", "root_cleanup_unconfirmed", "root_execution_indeterminate")
 private val rootBlockedErrors = setOf("root_interaction_required", "root_approval_required", "root_not_granted", "root_command_blocked")
 private val nativeEnvelopeTools = setOf(
+    "mini_apps", "publish_mini_app",
     "workspace_read_file", "workspace_write_file", "workspace_edit_file", "workspace_shell",
     "workspace_background_start", "workspace_background_stop", "workspace_background_list", "workspace_background_output",
     "memory_tool", "recent_chats", "conversation_search", "use_skill",

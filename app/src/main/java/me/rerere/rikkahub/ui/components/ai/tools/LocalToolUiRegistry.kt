@@ -127,6 +127,7 @@ object LocalToolUiRegistry {
         tool(Category.FilesMedia, LocalToolOption.ReadDocument, R.string.new_local_tools_document_title, R.string.new_local_tools_document_desc, HugeIcons.Files02, background = true),
         tool(Category.FilesMedia, LocalToolOption.Files, R.string.tool_ui_files_title, R.string.file_tools_files_desc, HugeIcons.Files02),
         tool(Category.FilesMedia, LocalToolOption.ExternalStorage, R.string.tool_ui_storage_title, R.string.file_tools_storage_desc, HugeIcons.Folder01),
+        tool(Category.FilesMedia, LocalToolOption.MiniApps, R.string.mini_apps_tool_title, R.string.mini_apps_tool_description, HugeIcons.Package01, background = true),
         tool(Category.FilesMedia, LocalToolOption.Archive, R.string.file_tools_archive_title, R.string.file_tools_archive_desc, HugeIcons.Package01),
         tool(Category.FilesMedia, LocalToolOption.MediaPlayer, R.string.file_tools_player_title, R.string.file_tools_player_desc, HugeIcons.MusicNote03),
         tool(Category.FilesMedia, LocalToolOption.MediaScanner, R.string.file_tools_scanner_title, R.string.file_tools_scanner_desc, HugeIcons.Image02),

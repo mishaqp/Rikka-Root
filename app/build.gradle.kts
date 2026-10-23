@@ -296,6 +296,8 @@ dependencies {
     implementation(libs.coil.gif)
     implementation(libs.coil.okhttp)
     implementation(libs.coil.svg)
+    // The existing Coil runtime decoder is also used directly for pinned mini-app icons.
+    implementation("com.caverock:androidsvg-aar:1.4")
     implementation(libs.coil.cache.control)
 
     // serialization

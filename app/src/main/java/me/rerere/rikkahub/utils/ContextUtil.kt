@@ -117,6 +117,10 @@ fun Context.openUsageAccessSettings() {
  * Open a url
  */
 fun Context.openUrl(url: String) {
+    me.rerere.rikkahub.miniapps.MiniAppStore.idFromLink(url)?.let { id ->
+        me.rerere.rikkahub.miniapps.MiniAppLauncher.open(this, id)
+        return
+    }
     Log.i(TAG, "openUrl: $url")
     runCatching {
         val intent = CustomTabsIntent.Builder()

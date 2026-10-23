@@ -14,12 +14,12 @@ class SettingsCatalogTest {
             listOf(
                 "color_scheme", "appearance", "assistants", "extensions",
                 "default_model_prompt", "providers", "search", "voice", "media",
-                "permissions_access", "approvals", "root", "termux", "ssh", "browser", "mcp", "workflows", "cron", "web",
+                "permissions_access", "approvals", "root", "termux", "ssh", "browser", "mcp", "workflows", "cron", "mini_apps", "web",
                 "backup", "files", "log", "about", "docs", "share",
             ),
             SettingsCatalog.items.map { it.id },
         )
-        assertEquals(listOf(4, 5, 10, 3, 3), SettingsCatalog.sections.map { section ->
+        assertEquals(listOf(4, 5, 11, 3, 3), SettingsCatalog.sections.map { section ->
             SettingsCatalog.items.count { it.section == section }
         })
         assertEquals(SettingsCatalog.sections, SettingsCatalog.items.map { it.section }.distinct())
@@ -35,9 +35,9 @@ class SettingsCatalogTest {
     }
 
     @Test fun `every dashboard item provides visible metadata and a usable action`() {
-        assertEquals(25, SettingsCatalog.items.size)
-        assertEquals(25, SettingsCatalog.items.map { it.id }.distinct().size)
-        assertEquals(25, SettingsCatalog.items.map { it.title }.distinct().size)
+        assertEquals(26, SettingsCatalog.items.size)
+        assertEquals(26, SettingsCatalog.items.map { it.id }.distinct().size)
+        assertEquals(26, SettingsCatalog.items.map { it.title }.distinct().size)
         SettingsCatalog.items.forEach { item ->
             assertTrue(item.id, item.title.isNotBlank())
             assertTrue(item.id, item.description.isNotBlank())
@@ -57,6 +57,7 @@ class SettingsCatalogTest {
         assertEquals(SettingsTarget.Route(Screen.SettingPreferences), target("appearance"))
         assertEquals(SettingsTarget.Route(Screen.SettingRoot), target("root"))
         assertEquals(SettingsTarget.Route(Screen.SettingSchedules), target("cron"))
+        assertEquals(SettingsTarget.Route(Screen.MiniApps), target("mini_apps"))
         assertEquals(SettingsTarget.Route(Screen.Workflows), target("workflows"))
         assertEquals("Сценарии", SettingsCatalog.items.single { it.id == "workflows" }.title)
         assertEquals("Хранилище", SettingsCatalog.items.single { it.id == "files" }.title)
@@ -65,8 +66,8 @@ class SettingsCatalogTest {
     }
 
     @Test fun `every main settings destination has a distinct icon`() {
-        assertEquals(25, SettingsCatalog.items.map { it.icon.name }.distinct().size)
-        assertEquals(25, SettingsCatalog.items.map { it.icon }.distinct().size)
+        assertEquals(26, SettingsCatalog.items.map { it.icon.name }.distinct().size)
+        assertEquals(26, SettingsCatalog.items.map { it.icon }.distinct().size)
         val root = SettingsCatalog.items.single { it.id == "root" }
         val termux = SettingsCatalog.items.single { it.id == "termux" }
         val ssh = SettingsCatalog.items.single { it.id == "ssh" }

@@ -1584,4 +1584,34 @@
   <string name="chat_produced_file_share_failed">Не удалось отправить файл. Проверьте, что он существует и доступен для чтения.</string>
   <string name="chat_message_previous_branch">Предыдущая ветка</string>
   <string name="chat_message_next_branch">Следующая ветка</string>
+
+    <!-- Moru-compatible mini apps. -->
+    <string name="mini_apps_title">Мои приложения</string>
+    <string name="mini_apps_catalog_description">Мини-приложения из чата, импорт и ярлыки</string>
+    <string name="mini_apps_notifications">Мини-приложения</string>
+    <string name="mini_apps_not_found">Мини-приложение не найдено. Возможно, оно удалено; опубликуйте или импортируйте его снова.</string>
+    <string name="mini_apps_open_failed">Не удалось открыть мини-приложение.</string>
+    <string name="mini_apps_link_failed">Не удалось открыть ссылку. Проверьте, установлено ли подходящее приложение.</string>
+    <string name="mini_apps_operation_failed">Не удалось выполнить действие с мини-приложением.</string>
+    <string name="mini_apps_open">Открыть</string>
+    <string name="mini_apps_reload">Перезагрузить</string>
+    <string name="mini_apps_pin">На главный экран</string>
+    <string name="mini_apps_pin_requested">Запрос на добавление ярлыка передан рабочему столу.</string>
+    <string name="mini_apps_pin_unsupported">Этот рабочий стол не поддерживает добавление ярлыков.</string>
+    <string name="mini_apps_import">Импортировать .moruapp</string>
+    <string name="mini_apps_share">Поделиться приложением</string>
+    <string name="mini_apps_share_detail">Можно отправить только приложение или добавить его сохранённые данные. Данные могут содержать личные записи. Напоминания не переносятся.</string>
+    <string name="mini_apps_share_code">Только приложение</string>
+    <string name="mini_apps_share_data">Приложение и данные</string>
+    <string name="mini_apps_delete">Удалить</string>
+    <string name="mini_apps_delete_title">Удалить «%1$s»?</string>
+    <string name="mini_apps_delete_detail">Приложение, его данные и напоминания будут удалены с этого устройства.</string>
+    <string name="mini_apps_empty">Здесь появятся мини-приложения, созданные в чате. Попросите ассистента сделать приложение в рабочей среде и опубликовать его или импортируйте файл .moruapp.</string>
+    <string name="mini_apps_actions">Действия: %1$s</string>
+    <string name="mini_apps_footer">Приложения сохраняют свои данные между обновлениями. В чате можно включить инструмент «Мини-приложения» для работы с этими данными. Доступ к календарю и уведомлениям Android запрашивается при первом использовании.</string>
+    <string name="mini_apps_tool_title">Мини-приложения</string>
+    <string name="mini_apps_tool_description">Читать и изменять данные мини-приложений без открытия</string>
+    <string name="workspace_detail_tool_publish_mini_app">Публикация мини-приложения</string>
+    <string name="chat_timeline_tool_publish_mini_app">Публикация мини-приложения</string>
+    <string name="chat_timeline_tool_mini_apps">Данные мини-приложений</string>
 </resources>

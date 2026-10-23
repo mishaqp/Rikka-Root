@@ -80,6 +80,8 @@ private val nativeTimelineToolNames = mapOf(
     "workspace_background_output" to R.string.chat_timeline_tool_workspace_background_output,
     "workspace_background_start" to R.string.chat_timeline_tool_workspace_background_start,
     "workspace_background_stop" to R.string.chat_timeline_tool_workspace_background_stop,
+    "publish_mini_app" to R.string.chat_timeline_tool_publish_mini_app,
+    "mini_apps" to R.string.chat_timeline_tool_mini_apps,
     "workspace_edit_file" to R.string.chat_timeline_tool_workspace_edit_file,
     "workspace_read_file" to R.string.chat_timeline_tool_workspace_read_file,
     "workspace_shell" to R.string.chat_timeline_tool_workspace_shell,

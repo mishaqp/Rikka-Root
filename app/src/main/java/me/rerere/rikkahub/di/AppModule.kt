@@ -1,6 +1,10 @@
 package me.rerere.rikkahub.di
 
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import me.rerere.rikkahub.miniapps.*
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.costguards.TokenBudgetStore
 import me.rerere.rikkahub.data.datastore.SettingsStore
@@ -35,6 +39,19 @@ import org.koin.dsl.module
 
 val appModule = module {
     includes(workflowModule)
+    single { MiniAppStore(java.io.File(get<android.content.Context>().filesDir, "mini_apps")) }
+    single { MiniAppFetch() }
+    single { MiniAppChecker(get(), get(), get()) }
+    single(createdAtStart = true) {
+        MiniAppAndroidReminders(get(), get()).also { scheduler ->
+            get<AppScope>().launch(Dispatchers.IO) {
+                try { scheduler.restore() }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) { android.util.Log.e("MiniAppReminders", "Не удалось восстановить напоминания", e) }
+            }
+        }
+    }
+    single { MiniAppNativeHost(get(), get(), get(), get(), get()) }
     single { me.rerere.rikkahub.browser.BrowserPreferences(get()) }
     single { me.rerere.rikkahub.skills.SkillUrlImporter(skillManager = get<me.rerere.rikkahub.data.files.SkillManager>()) }
     single { me.rerere.rikkahub.skills.js.JsSkillRunner(get()) }
