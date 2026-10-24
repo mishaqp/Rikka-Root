@@ -5,7 +5,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -304,6 +306,7 @@ class ConversationSession(
 internal suspend fun afterPreviousGeneration(previous: Job?, block: suspend () -> Unit) {
     try {
         previous?.join()
+        currentCoroutineContext().ensureActive()
         block()
     } catch (e: CancellationException) {
         previous?.cancel()

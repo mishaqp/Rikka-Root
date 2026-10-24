@@ -4,11 +4,13 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.launch
@@ -360,6 +362,20 @@ class ConversationSessionTest {
             session.cleanup()
             scope.cancel()
         }
+    }
+
+    @Test
+    fun `cancelled waiter does not resume after already completed predecessor`() = runBlocking {
+        val previous = Job().apply { complete() }
+        var resumed = false
+        val waiter = launch(Dispatchers.Unconfined, start = CoroutineStart.ATOMIC) {
+            currentCoroutineContext()[Job]?.cancel()
+            afterPreviousGeneration(previous) { resumed = true }
+        }
+
+        waiter.join()
+        assertTrue(waiter.isCancelled)
+        assertFalse(resumed)
     }
 
     @Test
