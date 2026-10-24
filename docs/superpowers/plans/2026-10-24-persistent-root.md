@@ -47,6 +47,7 @@ Interface: existing RootProcessResult and literal command unchanged.
 - [x] Reproduce delayed completion and failed auxiliary watchdog cleanup. Use native timed FIFO read when supported, otherwise original polling; no auxiliary watchdog. Recheck active after notification and preserve bounded group cleanup.
 - [x] Reproduce proc checks depending on spawned cat; replace them with shell builtin read while retaining identity validation.
 - [x] Update affected fixture resource ownership and command capture to cover persistent plus fallback paths; preserve assertions.
+- [x] Compare explicit foreground background launches against the real one-shot fallback; retain them after normal exit, preserve strict headless/timeout cleanup, and keep private release/completion descriptors out of user shells.
 - [x] Run all affected Root classes and GenerationLoopRootCommandPreservationTest with existing CI flags; compare launch counts/timings without promising phone speed.
 - [x] Request independent review; reproduce and fix substantive findings with tests.
 - [ ] Commit/push the tested tree, await Daily Build test/lint/APK, inspect/fix any failure, verify APK certificate and provide the Russian report.

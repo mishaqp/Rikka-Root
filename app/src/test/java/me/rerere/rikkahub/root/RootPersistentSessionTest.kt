@@ -326,6 +326,43 @@ class RootPersistentSessionTest(private val brokerShell: String) {
 
     private suspend fun awaitFile(file: File) = withTimeout(3_000) { while (!file.isFile) delay(10) }
 
+    @Test(timeout = 20_000) fun `completed foreground launch preserves detached children like the one shot transport`() = runBlocking {
+        for (fallback in listOf(true, false)) for (code in listOf(0, 7)) {
+            Fixture(folder.newFolder(), brokerShell).use { fixture ->
+                if (fallback) fixture.executable("mkfifo", "exit 1")
+                val pid = File(fixture.directory, "detached-pid")
+                try {
+                    val result = fixture.manager.exec("sleep 30 >/dev/null 2>&1 & echo \$! > ${q(pid.path)}; printf launched; exit $code", 3_000)
+                    assertNull(result.error)
+                    assertEquals(code, result.exitCode)
+                    assertEquals("launched", result.stdout)
+                    fixture.manager.close()
+                    val stat = File("/proc/${pid.readText().trim()}/stat")
+                    val alive = stat.isFile && !stat.readText().substringAfterLast(") ").startsWith("Z")
+                    println("Completed foreground fallback=$fallback exit=$code detached child alive=$alive")
+                    assertTrue("Transport reuse must preserve an explicitly launched background process", alive)
+                } finally {
+                    if (pid.isFile) ProcessHandle.of(pid.readText().trim().toLong()).ifPresent { it.destroyForcibly() }
+                }
+            }
+        }
+    }
+
+    @Test(timeout = 15_000) fun `completed headless command still cleans up its ordinary background children`() = runBlocking {
+        Fixture(folder.newFolder(), brokerShell).use { fixture ->
+            fixture.manager.verifyRoot(prepareHeadless = true)
+            val pid = File(fixture.directory, "headless-child")
+            try {
+                val result = fixture.manager.exec("sleep 30 >/dev/null 2>&1 & echo \$! > ${q(pid.path)}", 3_000, headless = true)
+                assertEquals(0, result.exitCode)
+                val stat = File("/proc/${pid.readText().trim()}/stat")
+                assertFalse(stat.isFile && !stat.readText().substringAfterLast(") ").startsWith("Z"))
+            } finally {
+                if (pid.isFile) ProcessHandle.of(pid.readText().trim().toLong()).ifPresent { it.destroyForcibly() }
+            }
+        }
+    }
+
     @Test(timeout = 15_000) fun `foreground preserves sh c argv zero and su umask without changing headless defaults`() = runBlocking {
         Fixture(folder.newFolder(), brokerShell).use { fixture ->
             fixture.beforeBroker = "umask 022"
@@ -338,6 +375,17 @@ class RootPersistentSessionTest(private val brokerShell: String) {
             assertEquals("0022\n", fixture.manager.exec("umask", 3_000).stdout)
             assertEquals("0077\n", fixture.manager.exec("umask", 3_000, headless = true).stdout)
             assertEquals(2, fixture.calls.readLines().size)
+        }
+    }
+
+    @Test(timeout = 15_000) fun `commands cannot inherit either private completion or release descriptor`() = runBlocking {
+        Fixture(folder.newFolder(), brokerShell).use { fixture ->
+            fixture.manager.verifyRoot(prepareHeadless = true)
+            for (headless in listOf(false, true)) {
+                val result = fixture.manager.exec("if ( : >&3 ) 2>/dev/null; then exit 31; fi; if ( : >&4 ) 2>/dev/null; then exit 41; fi; printf private", 3_000, headless = headless)
+                assertEquals(0, result.exitCode)
+                assertEquals("private", result.stdout)
+            }
         }
     }
 

@@ -458,16 +458,26 @@ private class HeadlessRootSession private constructor(
                 [ "${'$'}1" != Z ] || return 1
                 shift 19; [ "${'$'}1" = "${'$'}check_started" ]
             }
-            stop_group() {
+            owned_group() {
                 identity=${'$'}1
                 [ -s "${'$'}identity" ] || return 1
                 read -r group_pid group_started < "${'$'}identity"
                 IFS= read -r group_stat 2>/dev/null < "/proc/${'$'}group_pid/stat" || return 1
                 group_rest=${'$'}{group_stat##*) }; set -- ${'$'}group_rest
                 [ "${'$'}3" = "${'$'}group_pid" ] && [ "${'$'}4" = "${'$'}group_pid" ] || return 1
-                group_state=${'$'}1; shift 19
+                shift 19
                 [ "${'$'}1" = "${'$'}group_started" ] || return 1
+            }
+            stop_group() {
+                owned_group "${'$'}1" || return 1
                 kill -KILL -"${'$'}group_pid" 2>/dev/null || return 1
+                count=20
+                while same_process "${'$'}group_pid" "${'$'}group_started" && [ "${'$'}count" -gt 0 ]; do sleep 0.01; count=${'$'}((count - 1)); done
+                ! same_process "${'$'}group_pid" "${'$'}group_started"
+            }
+            release_group() {
+                owned_group "${'$'}1" || return 1
+                printf 'release\n' >&4 || return 1
                 count=20
                 while same_process "${'$'}group_pid" "${'$'}group_started" && [ "${'$'}count" -gt 0 ]; do sleep 0.01; count=${'$'}((count - 1)); done
                 ! same_process "${'$'}group_pid" "${'$'}group_started"
@@ -483,9 +493,10 @@ private class HeadlessRootSession private constructor(
                     [ "${'$'}(id -u)" = 0 ] || { finish not_root; exit; }
                     [ -f "${'$'}request/active" ] || { finish cancelled; exit; }
                     same_process "${'$'}broker" "${'$'}broker_started" && same_process "${'$'}app_pid" "${'$'}app_started" || { finish cancelled; exit; }
-                    mkfifo "${'$'}request/out.pipe" "${'$'}request/err.pipe" "${'$'}request/completed.pipe" || { finish failed; exit; }
+                    mkfifo "${'$'}request/out.pipe" "${'$'}request/err.pipe" "${'$'}request/completed.pipe" "${'$'}request/release.pipe" || { finish failed; exit; }
                     # A dedicated completion FIFO wakes the guardian immediately. It never contains stdout.
                     exec 3<> "${'$'}request/completed.pipe"
+                    exec 4<> "${'$'}request/release.pipe"
                     # Independent drain groups can be stopped even if an escaped command retains a FIFO.
                     for channel in out err; do
                         case "${'$'}channel" in out) cap=8004; target=stdout;; err) cap=2004; target=stderr;; esac
@@ -507,7 +518,7 @@ private class HeadlessRootSession private constructor(
                             fi
                             cat >/dev/null
                             printf done > "${'$'}request/${'$'}channel.done"
-                        ' sh "${'$'}request" "${'$'}channel" "${'$'}cap" "${'$'}capture_mode" "${'$'}target" 3>&- < "${'$'}request/${'$'}channel.pipe" > "${'$'}request/${'$'}target" &
+                        ' sh "${'$'}request" "${'$'}channel" "${'$'}cap" "${'$'}capture_mode" "${'$'}target" 3>&- 4>&- < "${'$'}request/${'$'}channel.pipe" > "${'$'}request/${'$'}target" &
                     done
                     setsid sh -c '
                         request=${'$'}1; foreground_umask=${'$'}2
@@ -523,13 +534,18 @@ private class HeadlessRootSession private constructor(
                             payload=${'$'}(cat "${'$'}request/command" && printf .) || exit 125
                             payload=${'$'}{payload%.}
                             [ -f "${'$'}request/active" ] || exit 125
-                            sh -c "${'$'}payload" 3>&-
-                        else sh "${'$'}request/command" 3>&-
+                            sh -c "${'$'}payload" 3>&- 4>&-
+                        else sh "${'$'}request/command" 3>&- 4>&-
                         fi
                         exit_code=${'$'}?
                         printf "%s\n" "${'$'}exit_code" > "${'$'}request/exit"
                         printf "%s\n" "${'$'}exit_code" >&3
-                        while :; do sleep 1; done
+                        if [ "${'$'}foreground" = 1 ]; then
+                            # Retain group identity until the guardian chooses normal release or cancellation.
+                            IFS= read -r released <&4
+                            exit "${'$'}exit_code"
+                        else while :; do sleep 1; done
+                        fi
                     ' sh "${'$'}request" "${'$'}original_umask" > "${'$'}request/out.pipe" 2> "${'$'}request/err.pipe" &
                     IFS= read -r ticks < "${'$'}request/ticks"
                     outcome=timeout
@@ -550,15 +566,21 @@ private class HeadlessRootSession private constructor(
                     # A late leader cannot run after active is removed. Allow bounded publication.
                     count=20
                     while [ ! -s "${'$'}request/pid" ] && [ "${'$'}count" -gt 0 ]; do sleep 0.01; count=${'$'}((count - 1)); done
-                    stop_group "${'$'}request/pid" || outcome=cleanup_unconfirmed
+                    IFS= read -r foreground < "${'$'}request/foreground"
+                    if [ "${'$'}foreground" = 1 ] && [ "${'$'}outcome" -ge 0 ] 2>/dev/null && [ "${'$'}outcome" -le 255 ] 2>/dev/null; then
+                        # Ordinary sh -c historically leaves explicit background launches alive after exit.
+                        release_group "${'$'}request/pid" || { stop_group "${'$'}request/pid"; outcome=cleanup_unconfirmed; }
+                    else stop_group "${'$'}request/pid" || outcome=cleanup_unconfirmed
+                    fi
                     exec 3>&-
+                    exec 4>&-
                     # Let finite queued output drain, then kill exact drain groups; never use an unbounded wait.
                     count=20
                     while { [ ! -f "${'$'}request/out.done" ] || [ ! -f "${'$'}request/err.done" ]; } && [ "${'$'}count" -gt 0 ]; do sleep 0.01; count=${'$'}((count - 1)); done
                     for channel in out err; do
                         [ -f "${'$'}request/${'$'}channel.done" ] || stop_group "${'$'}request/${'$'}channel.pid" || outcome=cleanup_unconfirmed
                     done
-                    rm -f "${'$'}request/out.pipe" "${'$'}request/err.pipe" "${'$'}request/completed.pipe"
+                    rm -f "${'$'}request/out.pipe" "${'$'}request/err.pipe" "${'$'}request/completed.pipe" "${'$'}request/release.pipe"
                     finish "${'$'}outcome"
                 ) </dev/null >/dev/null 2>&1 & guardian=${'$'}!
                 wait "${'$'}guardian"
