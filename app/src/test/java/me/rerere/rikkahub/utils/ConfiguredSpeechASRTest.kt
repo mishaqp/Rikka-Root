@@ -134,10 +134,30 @@ class ConfiguredSpeechASRTest {
         assertTrue(controller.disposed)
     }
 
-    @Test fun unfinishedFinalizationTimesOutAndReleasesController() = runBlocking {
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun unfinishedFinalizationTimesOutAndReleasesController() = runTest {
         val controller = TestController(this) { awaitCancellation() }
-        val result = withTimeout(1000) { captureConfiguredAsr(controller, "ASR чата — Step", 80, true) }
-        assertTrue(result is SpeechCaptureOutcome.Error)
+        val capture = async {
+            captureConfiguredAsr(controller, "ASR чата — Step", 80, true)
+        }
+        runCurrent()
+        assertEquals(ASRStatus.Listening, controller.state.value.status)
+        assertEquals(0, controller.stopCount)
+        assertFalse(controller.disposed)
+
+        // Keep the real 40/80 ms deadlines, without depending on CI thread scheduling.
+        advanceTimeBy(40)
+        runCurrent()
+        assertEquals(ASRStatus.Stopping, controller.state.value.status)
+        assertEquals(1, controller.stopCount)
+        assertFalse(capture.isCompleted)
+        assertFalse(controller.disposed)
+
+        advanceTimeBy(40)
+        runCurrent()
+        assertEquals(80L, testScheduler.currentTime)
+        assertTrue(capture.isCompleted)
+        assertEquals(SpeechCaptureOutcome.Error("ASR чата — Step: время ожидания окончательного текста истекло."), capture.await())
         assertEquals(1, controller.stopCount)
         assertTrue(controller.disposed)
     }
