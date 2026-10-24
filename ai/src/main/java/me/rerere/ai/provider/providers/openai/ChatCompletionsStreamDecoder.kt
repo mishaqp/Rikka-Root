@@ -67,8 +67,8 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
                                 ?: indexlessToolIndex(fallbackIndex, rawId)
                             // Index owns identity for the whole stream. Later blank/changed IDs
                             // cannot erase an emitted identity or merge another parallel index.
+                            if (rawId != null && index !in rawToolIdsByIndex) rawToolIdsByIndex[index] = rawId
                             val toolId = toolIdsByIndex.getOrPut(index) {
-                                rawId?.let { rawToolIdsByIndex[index] = it }
                                 uniqueToolCallId(rawId, usedToolIds)
                             }
                             val function = toolCall["function"]?.jsonObjectOrNull
@@ -263,7 +263,7 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
                     }
                     is UIMessagePart.Image -> {
                         // Каждый элемент images — целая картинка, поэтому предыдущая закрывается.
-                        addAll(closeText()); addAll(closeReasoning()); addAll(closeImage()); addAll(closeTools())
+                        addAll(closeText()); addAll(closeReasoning()); addAll(closeTools())
                         val id = nextId(sourceId, "image").also { imageId = it }
                         val mimeType = part.url.substringAfter("data:", "").substringBefore(";base64,", "")
                             .ifBlank { "image/png" }

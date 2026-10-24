@@ -53,6 +53,17 @@ class ChatCompletionsToolIdentityRegressionTest {
     }
 
     @Test
+    fun `поздний id без index отделяет следующий вызов Kimi`() {
+        val decoder = ChatCompletionsStreamDecoder()
+        decoder.accept(event("""{"function":{"name":"first","arguments":"{"}}"""))
+        val identified = decoder.accept(event("""{"id":"call-first","function":{"arguments":"\"value\":1"}}""")).chunks
+        val next = decoder.accept(event("""{"id":"call-second","function":{"name":"second","arguments":"}"}}""")).chunks
+
+        assertTrue(identified.none { it is StreamChunk.ToolCallStart })
+        assertEquals("call-second", next.filterIsInstance<StreamChunk.ToolCallStart>().single().id)
+    }
+
+    @Test
     fun `потоковые arguments в виде объекта принимаются как JSON`() {
         val chunks = ChatCompletionsStreamDecoder().accept(event("""{"index":0,"id":"call","function":{"name":"test","arguments":{"value":42}}}""")).chunks
         assertEquals("""{"value":42}""", chunks.filterIsInstance<StreamChunk.ToolCallDelta>().single().inputDelta)
