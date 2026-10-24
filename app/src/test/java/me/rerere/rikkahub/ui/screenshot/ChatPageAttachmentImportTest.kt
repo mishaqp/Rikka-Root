@@ -8,6 +8,7 @@ import android.database.MatrixCursor
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import android.os.Looper
 import android.provider.OpenableColumns
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.core.content.FileProvider
@@ -53,6 +54,8 @@ import org.robolectric.annotation.GraphicsMode
 import org.robolectric.util.ReflectionHelpers
 import ru.noties.jlatexmath.JLatexMathAndroid
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /** The real page imports real provider streams; only VM/services and the database DAO are replaced. */
 @RunWith(RobolectricTestRunner::class)
@@ -67,6 +70,7 @@ class ChatPageAttachmentImportTest {
     private lateinit var fixture: ChatBeforeFixture
     private lateinit var imageLoader: ImageLoader
     private lateinit var image: File
+    private lateinit var nullMimeProvider: NullMimeAttachmentProvider
 
     @OptIn(DelicateCoilApi::class)
     @Before fun installBoundaries() {
@@ -95,12 +99,13 @@ class ChatPageAttachmentImportTest {
         fixture = ChatBeforeFixture(image, filesManager = filesManager)
         fixture.conversationFlow.value = fixture.conversation.copy(messageNodes = emptyList())
         fixture.install()
-        Robolectric.buildContentProvider(NullMimeAttachmentProvider::class.java)
+        nullMimeProvider = Robolectric.buildContentProvider(NullMimeAttachmentProvider::class.java)
             .create(NULL_MIME_AUTHORITY).get()
     }
 
     @OptIn(DelicateCoilApi::class)
     @After fun close() {
+        if (::nullMimeProvider.isInitialized) nullMimeProvider.slowStart.countDown()
         if (::fixture.isInitialized) fixture.close()
         if (::appScope.isInitialized) appScope.cancel()
         if (::imageLoader.isInitialized) imageLoader.shutdown()
@@ -189,9 +194,28 @@ class ChatPageAttachmentImportTest {
         assertArrayEquals(image.readBytes(), copied.single().toFile().readBytes())
     }
 
+    @Test fun `slow provider import completes off main and preserves shared text and bytes`() {
+        val source = nullMimeFile("slow-provider", byteArrayOf(0, 1, 2, 3, 4))
+        val uri = source.second.buildUpon().appendQueryParameter("slow", "true").build()
+        val text = "Текст рядом с медленным вложением"
+
+        val parts = importDraft(listOf(uri), text)
+
+        assertEquals(2, parts.size)
+        assertEquals(UIMessagePart.Text(text), parts[0])
+        assertDocument(parts[1], source.first, "application/octet-stream")
+        assertFalse("Slow provider IO must stay off the UI thread",
+            requireNotNull(nullMimeProvider.slowOpenThread) === Looper.getMainLooper().thread)
+    }
+
     private fun importDraft(files: List<Uri>, text: String? = null, expectedImports: Int = files.size): List<UIMessagePart> {
         compose.setContent { ScreenshotTheme { fixture.Content(text?.base64Encode(), files) } }
-        compose.waitUntil { fixture.vm.inputState.messageContent.size == expectedImports }
+        // Real IO/SAF completion has no one-second performance contract; keep all content assertions.
+        compose.waitUntil(timeoutMillis = 10_000) {
+            // Begin the provider delay after initial composition, when completion waiting starts.
+            nullMimeProvider.slowStart.countDown()
+            compose.runOnIdle { fixture.vm.inputState.messageContent.size == expectedImports }
+        }
         var contents = emptyList<UIMessagePart>()
         compose.runOnIdle { contents = fixture.vm.inputState.getContents() }
         return contents
@@ -232,12 +256,21 @@ class ChatPageAttachmentImportTest {
 
 /** A provider with genuinely absent MIME metadata and a real openFile stream. */
 class NullMimeAttachmentProvider : ContentProvider() {
+    val slowStart = CountDownLatch(1)
+    @Volatile var slowOpenThread: Thread? = null
     override fun onCreate() = true
     override fun getType(uri: Uri): String? = null
     override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor =
         MatrixCursor(arrayOf(OpenableColumns.DISPLAY_NAME)).apply { addRow(arrayOf(requireNotNull(uri.lastPathSegment))) }
-    override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor =
-        ParcelFileDescriptor.open(File(requireNotNull(context).cacheDir, requireNotNull(uri.lastPathSegment)), ParcelFileDescriptor.MODE_READ_ONLY)
+    override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
+        if (uri.getQueryParameter("slow") == "true") {
+            slowOpenThread = Thread.currentThread()
+            check(slowStart.await(10, TimeUnit.SECONDS)) { "Test provider was not released" }
+            Thread.sleep(1_500) // A valid SAF provider may take longer than Compose's default 1s wait.
+        }
+        return ParcelFileDescriptor.open(File(requireNotNull(context).cacheDir,
+            requireNotNull(uri.lastPathSegment)), ParcelFileDescriptor.MODE_READ_ONLY)
+    }
     override fun insert(uri: Uri, values: ContentValues?): Uri? = error("Read only provider")
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = error("Read only provider")
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int = error("Read only provider")
