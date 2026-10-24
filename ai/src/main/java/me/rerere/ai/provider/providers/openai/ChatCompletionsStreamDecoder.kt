@@ -263,7 +263,7 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
                     }
                     is UIMessagePart.Image -> {
                         // Каждый элемент images — целая картинка, поэтому предыдущая закрывается.
-                        addAll(closeText()); addAll(closeReasoning()); addAll(closeTools())
+                        addAll(closeText()); addAll(closeReasoning()); addAll(closeImage()); addAll(closeTools())
                         val id = nextId(sourceId, "image").also { imageId = it }
                         val mimeType = part.url.substringAfter("data:", "").substringBefore(";base64,", "")
                             .ifBlank { "image/png" }
