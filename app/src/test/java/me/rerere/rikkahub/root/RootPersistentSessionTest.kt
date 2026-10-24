@@ -38,6 +38,30 @@ class RootPersistentSessionTest(private val brokerShell: String) {
         }
     }
 
+    @Test(timeout = 20_000) fun `immediate printf and id are acknowledged without waiting for their timeout`() = runBlocking {
+        Fixture(folder.newFolder(), brokerShell).use { fixture ->
+            val timeoutMs = 2_000
+            val printfStarted = System.nanoTime()
+            val printf = fixture.manager.exec("printf immediate", timeoutMs)
+            val printfMs = (System.nanoTime() - printfStarted) / 1_000_000
+            val idStarted = System.nanoTime()
+            val id = fixture.manager.exec("/usr/bin/id", timeoutMs)
+            val idMs = (System.nanoTime() - idStarted) / 1_000_000
+            println("Root immediate broker=$brokerShell printfMs=$printfMs idMs=$idMs")
+            assertNull("stdout=${printf.stdout}; stderr=${printf.stderr}", printf.error)
+            assertEquals(0, printf.exitCode)
+            assertEquals("immediate", printf.stdout)
+            assertEquals("", printf.stderr)
+            assertTrue("printf waited for its $timeoutMs ms timeout: $printfMs ms", printfMs < 1_500)
+            assertNull("stdout=${id.stdout}; stderr=${id.stderr}", id.error)
+            assertEquals(0, id.exitCode)
+            assertTrue(id.stdout.contains("uid="))
+            assertEquals("", id.stderr)
+            assertTrue("id waited for its $timeoutMs ms timeout: $idMs ms", idMs < 1_500)
+            assertEquals("One UID probe and one persistent su", 2, fixture.calls.readLines().size)
+        }
+    }
+
     @Test(timeout = 15_000) fun `prepared transport is shared by foreground and background after probe TTL`() = runBlocking {
         Fixture(folder.newFolder(), brokerShell).use { fixture ->
             fixture.manager.verifyRoot(prepareHeadless = true)
@@ -415,7 +439,15 @@ class RootPersistentSessionTest(private val brokerShell: String) {
     companion object {
         @JvmStatic
         @Parameterized.Parameters(name = "broker shell={0}")
-        fun cases(): List<Array<Any>> = listOf(arrayOf("/bin/sh"), arrayOf("/bin/bash"))
+        fun cases(): List<Array<Any>> = buildList {
+            add(arrayOf("/bin/sh"))
+            add(arrayOf("/bin/bash"))
+            // Opt in to a real mksh binary; no Android or shell behaviour is emulated.
+            System.getenv("RIKKA_TEST_MKSH")?.let { path ->
+                val executable = File(path)
+                if (executable.isFile && executable.canExecute()) add(arrayOf(executable.absolutePath))
+            }
+        }
 
         private fun q(value: String) = "'" + value.replace("'", "'\"'\"'") + "'"
     }

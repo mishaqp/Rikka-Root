@@ -546,7 +546,7 @@ private class HeadlessRootSession private constructor(
                             exit "${'$'}exit_code"
                         else while :; do sleep 1; done
                         fi
-                    ' sh "${'$'}request" "${'$'}original_umask" > "${'$'}request/out.pipe" 2> "${'$'}request/err.pipe" &
+                    ' sh "${'$'}request" "${'$'}original_umask" 3<&3 4<&4 > "${'$'}request/out.pipe" 2> "${'$'}request/err.pipe" &
                     IFS= read -r ticks < "${'$'}request/ticks"
                     outcome=timeout
                     while [ "${'$'}ticks" -gt 0 ]; do
