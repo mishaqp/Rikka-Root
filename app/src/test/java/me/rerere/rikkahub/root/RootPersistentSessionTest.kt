@@ -394,10 +394,14 @@ class RootPersistentSessionTest(private val brokerShell: String) {
             assertEquals(RootStatus.READY, fixture.manager.verifyRoot(prepareHeadless = true))
             val result = fixture.manager.exec("printf '%s\\n' \"\$0\"; umask", 3_000)
             assertEquals(0, result.exitCode)
-            assertEquals("sh\n0022\n", result.stdout)
+            val argvAndMask = result.stdout.trimEnd().lines()
+            assertEquals(2, argvAndMask.size)
+            assertEquals("sh", argvAndMask[0])
+            // mksh prints 022, while dash/bash print 0022; compare the actual permission bits.
+            assertEquals("022".toInt(8), argvAndMask[1].toInt(8))
             assertEquals(0, fixture.manager.exec("umask 0077; cd /; exit 0", 3_000).exitCode)
-            assertEquals("0022\n", fixture.manager.exec("umask", 3_000).stdout)
-            assertEquals("0077\n", fixture.manager.exec("umask", 3_000, headless = true).stdout)
+            assertEquals("022".toInt(8), fixture.manager.exec("umask", 3_000).stdout.trim().toInt(8))
+            assertEquals("077".toInt(8), fixture.manager.exec("umask", 3_000, headless = true).stdout.trim().toInt(8))
             assertEquals(2, fixture.calls.readLines().size)
         }
     }
