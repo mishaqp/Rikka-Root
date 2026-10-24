@@ -306,6 +306,7 @@ class ConversationSession(
 internal suspend fun afterPreviousGeneration(previous: Job?, block: suspend () -> Unit) {
     try {
         previous?.join()
+        // With no predecessor, join is skipped and cannot check this coroutine's cancellation.
         currentCoroutineContext().ensureActive()
         block()
     } catch (e: CancellationException) {

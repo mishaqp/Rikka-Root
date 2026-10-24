@@ -379,6 +379,19 @@ class ConversationSessionTest {
     }
 
     @Test
+    fun `cancelled approval does not resume when there is no predecessor`() = runBlocking {
+        var resumed = false
+        val waiter = launch(Dispatchers.Unconfined, start = CoroutineStart.ATOMIC) {
+            currentCoroutineContext()[Job]?.cancel()
+            afterPreviousGeneration(null) { resumed = true }
+        }
+
+        waiter.join()
+        assertTrue(waiter.isCancelled)
+        assertFalse(resumed)
+    }
+
+    @Test
     fun `queued approvals preserve a decision while its save is suspended`() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val id = Uuid.random()

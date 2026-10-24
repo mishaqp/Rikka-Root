@@ -1324,21 +1324,15 @@ class ChatService(
     }
 
     private suspend fun finishInterruptedPendingTools(conversationId: Uuid) {
-        val currentConversation = getConversationFlow(conversationId).value
-        // A regenerated earlier reply can hold unfinished tools too; close them in every node of the
-        // current path, otherwise a pending card there keeps blocking the queue.
-        val updatedNodes = currentConversation.messageNodes.map { node ->
-            val message = node.currentMessage
-            val updatedMessage = message.finishPendingTools(::cancelToolByUser)
-            if (updatedMessage == message) node else node.copy(
-                messages = node.messages.map { if (it.id == message.id) updatedMessage else it }
-            )
+        // Derive all saved versions under the persistence lock so a concurrent selection/edit survives.
+        saveConversationAtomically(conversationId) { currentConversation ->
+            val updatedNodes = currentConversation.messageNodes.map { node ->
+                val updatedMessages = node.messages.map { it.finishPendingTools(::cancelToolByUser) }
+                if (updatedMessages == node.messages) node else node.copy(messages = updatedMessages)
+            }
+            if (updatedNodes == currentConversation.messageNodes) null
+            else currentConversation.copy(messageNodes = updatedNodes)
         }
-        if (updatedNodes == currentConversation.messageNodes) {
-            return
-        }
-
-        saveConversation(conversationId, currentConversation.copy(messageNodes = updatedNodes))
     }
 
     // ---- 生成标题 ----
