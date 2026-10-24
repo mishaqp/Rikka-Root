@@ -41,6 +41,80 @@ class KimiProviderTest {
     }.build()
     private fun event(value: JsonObject) = "data: $value\n\n"
 
+    private fun temperatureReply(protocol: String, modelId: String): String = when (protocol) {
+        "anthropic" -> listOf(
+            """{"type":"message_start","message":{"id":"m","model":"$modelId","usage":{"input_tokens":1,"output_tokens":0}}}""",
+            """{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}""",
+            """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"OK"}}""",
+            """{"type":"content_block_stop","index":0}""",
+            """{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}""",
+            """{"type":"message_stop"}""",
+        ).joinToString("") { frame ->
+            val type = json.parseToJsonElement(frame).jsonObject["type"]!!.jsonPrimitive.content
+            "event: $type\ndata: $frame\n\n"
+        }
+        "response" -> "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg\",\"delta\":\"OK\"}\n\n" +
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r\",\"model\":\"$modelId\",\"status\":\"completed\"}}\n\n"
+        else -> "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+    }
+
+    @Test fun `Pro configured temperatures use the supported server value across native protocols`() = runBlocking {
+        for (id in listOf("k3.1-pro", "k3.1-pro-highspeed", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed", "KIMI-K3.1-PRO")) {
+            for (protocol in listOf("chat_completions", "response", "anthropic")) {
+                for (configured in listOf(0.6f, 1f, null)) {
+                    val request = AtomicReference<Request>()
+                    val client = client { outgoing ->
+                        request.set(outgoing)
+                        val body = json.parseToJsonElement(Buffer().also { outgoing.body!!.writeTo(it) }.readUtf8()).jsonObject
+                        val temperature = body["temperature"]?.jsonPrimitive?.doubleOrNull
+                        if (temperature != null && temperature != 1.0) {
+                            400 to """{"error":{"message":"invalid temperature: only 1 is allowed for this model"}}"""
+                        } else 200 to temperatureReply(protocol, id)
+                    }
+                    try {
+                        val info = KimiModelInfo(id, protocol = protocol, reasoning = true, thinkingType = "only")
+                        val result = provider(client, info).generateText(ProviderSetting.KimiCode(), listOf(UIMessage.user("Привет")),
+                            TextGenerationParams(info.toModel(), temperature = configured, reasoningLevel = ReasoningLevel.HIGH))
+                        assertEquals("OK", result.message.parts.filterIsInstance<UIMessagePart.Text>().single().text)
+                        val body = json.parseToJsonElement(Buffer().also { request.get().body!!.writeTo(it) }.readUtf8()).jsonObject
+                        assertEquals(id, body["model"]!!.jsonPrimitive.content)
+                        assertTrue("$id/$protocol sent ${body["temperature"]}",
+                            body["temperature"] == null || body["temperature"]!!.jsonPrimitive.double == 1.0)
+                    } finally { client.dispatcher.executorService.shutdownNow() }
+                }
+            }
+        }
+    }
+
+    @Test fun `Pro custom body cannot reintroduce a rejected temperature`() = runBlocking {
+        for (id in listOf("k3.1-pro", "k3.1-pro-highspeed", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed", "KIMI-K3.1-PRO")) {
+            for (protocol in listOf("chat_completions", "response", "anthropic")) {
+                val client = client { outgoing ->
+                    val body = json.parseToJsonElement(Buffer().also { outgoing.body!!.writeTo(it) }.readUtf8()).jsonObject
+                    val temperature = body["temperature"]?.jsonPrimitive?.doubleOrNull
+                    if (temperature != null && temperature != 1.0) {
+                        400 to """{"error":{"message":"invalid temperature: only 1 is allowed for this model"}}"""
+                    } else 200 to temperatureReply(protocol, id)
+                }
+                try {
+                    val info = KimiModelInfo(id, protocol = protocol, reasoning = true, thinkingType = "only")
+                    val result = provider(client, info).generateText(ProviderSetting.KimiCode(), listOf(UIMessage.user("Привет")),
+                        TextGenerationParams(info.toModel(), temperature = 1f, reasoningLevel = ReasoningLevel.HIGH,
+                            customBody = listOf(CustomBody("temperature", JsonPrimitive(0.2)))))
+                    assertEquals("OK", result.message.parts.filterIsInstance<UIMessagePart.Text>().single().text)
+                } finally { client.dispatcher.executorService.shutdownNow() }
+            }
+        }
+    }
+
+    @Test fun `non Pro models keep configured sampling and literal message contents`() {
+        val original = buildJsonObject {
+            put("temperature", 0.6); put("top_p", 0.8)
+            putJsonArray("messages") { addJsonObject { put("role", "user"); put("content", "temperature=0.6\n'a b' 2>/dev/null") } }
+        }
+        assertEquals(original, adaptKimiBody(original, KimiModelInfo("other-model"), ReasoningLevel.OFF))
+    }
+
     @Test fun `catalog discovery uses OAuth despite exhausted generation quota`() = runBlocking {
         val request = AtomicReference<Request>()
         val client = client { request.set(it); 200 to """{"data":[{"id":"kimi-for-coding","supports_tool_use":true}]}""" }

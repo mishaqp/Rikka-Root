@@ -204,6 +204,8 @@ internal fun isKimiGenerationRequest(request: Request, region: KimiRegion, proto
 
 internal fun adaptKimiBody(original: JsonObject, info: KimiModelInfo, level: ReasoningLevel): JsonObject {
     val body = original.toMutableMap()
+    // Pro uses the server's fixed temperature 1; assistant/custom-body overrides are invalid.
+    if (info.hasFixedTemperature) body.remove("temperature")
     listOf("thinking", "reasoning", "reasoning_effort", "output_config").forEach(body::remove)
     if (!info.reasoning && !info.requiresThinking) return JsonObject(body)
     val enabled = info.requiresThinking || level != ReasoningLevel.OFF

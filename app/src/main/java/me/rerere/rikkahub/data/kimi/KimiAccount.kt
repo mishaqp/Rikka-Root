@@ -54,6 +54,7 @@ data class KimiModelInfo(
 ) {
     // The documented Pro contract remains mandatory even with old/incomplete catalog metadata.
     internal val requiresThinking get() = thinkingType == "only" || id in KIMI_PRO_MODELS
+    internal val hasFixedTemperature get() = id.lowercase().removePrefix("kimi-") in KIMI_PRO_MODELS
     internal val effectiveEfforts get() = efforts.ifEmpty { if (id in KIMI_PRO_MODELS) listOf("low", "high", "max") else emptyList() }
     internal val effectiveDefaultEffort get() = defaultEffort ?: if (id in KIMI_PRO_MODELS) {
         "max".takeIf { it in effectiveEfforts } ?: effectiveEfforts.firstOrNull()
