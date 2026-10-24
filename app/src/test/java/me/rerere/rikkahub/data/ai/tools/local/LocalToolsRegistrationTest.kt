@@ -26,6 +26,7 @@ import me.rerere.rikkahub.data.ai.mcp.control.McpControlSecretStore
 import me.rerere.rikkahub.data.ai.mcp.control.McpToolSecretSanitizer
 import me.rerere.rikkahub.data.ai.tools.ToolApprovalDefaults
 import me.rerere.rikkahub.data.ai.tools.ToolPermissionPolicy
+import me.rerere.rikkahub.data.ai.limits.ToolRuntimeLimits
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.dao.ManagedFileDAO
@@ -39,6 +40,7 @@ import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.ConversationConfig
 import me.rerere.rikkahub.data.model.getAssistantOf
 import me.rerere.rikkahub.data.preferences.TermuxPreferences
+import me.rerere.rikkahub.data.preferences.TermuxPreferencesTestStore
 import me.rerere.rikkahub.data.repository.FilesRepository
 import me.rerere.rikkahub.data.repository.SshHostRepository
 import me.rerere.rikkahub.data.ssh.SshCredentialStore
@@ -48,6 +50,7 @@ import me.rerere.tts.provider.TTSManager
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNotNull
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -133,7 +136,7 @@ class LocalToolsRegistrationTest {
 
     /** Real registration dependencies; neither execution, network nor the application startup runs. */
     @OptIn(ExperimentalCoroutinesApi::class)
-    private fun withLocalTools(check: (LocalTools) -> Unit) {
+    private fun withLocalTools(afterCreate: (TermuxPreferences) -> Unit = {}, check: (LocalTools) -> Unit) {
         Dispatchers.setMain(UnconfinedTestDispatcher())
         val scope = AppScope().apply { cancel() }
         var koinStarted = false
@@ -161,8 +164,11 @@ class LocalToolsRegistrationTest {
                 })
             }
             koinStarted = true
-            check(LocalTools(appContext, AppEventBus(), TTSManager(appContext), settings, RootShellManager(),
-                RootAccessStore(appContext.noBackupFilesDir), files, TermuxPreferences(appContext), ssh))
+            TermuxPreferencesTestStore(File(appContext.noBackupFilesDir, "termux")).use { termux ->
+                afterCreate(termux.preferences)
+                check(LocalTools(appContext, AppEventBus(), TTSManager(appContext), settings, RootShellManager(),
+                    RootAccessStore(appContext.noBackupFilesDir), files, termux.preferences, ssh))
+            }
         } finally {
             try {
                 if (koinStarted) stopKoin()
@@ -172,6 +178,19 @@ class LocalToolsRegistrationTest {
                 Dispatchers.resetMain()
             }
         }
+    }
+
+    @Test fun closedRegistrationCannotChangeTheRuntimeOfTheNextTest() {
+        val original = ToolRuntimeLimits.maxToolSteps
+        lateinit var retired: TermuxPreferences
+        try {
+            withLocalTools(afterCreate = { retired = it }) {}
+            // Simulate a subsequent test/app instance publishing its own saved numeric limit.
+            ToolRuntimeLimits.maxToolSteps = 147
+            val failure = runCatching { runBlocking { retired.setMaxToolSteps(51) } }.exceptionOrNull()
+            assertNotNull("Registration teardown must close its real DataStore and collectors", failure)
+            assertEquals(147, ToolRuntimeLimits.maxToolSteps)
+        } finally { ToolRuntimeLimits.maxToolSteps = original }
     }
 
     private class NoManagedFilesDao : ManagedFileDAO {

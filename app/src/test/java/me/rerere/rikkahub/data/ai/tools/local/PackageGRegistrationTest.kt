@@ -24,7 +24,7 @@ import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.model.Assistant
-import me.rerere.rikkahub.data.preferences.TermuxPreferences
+import me.rerere.rikkahub.data.preferences.TermuxPreferencesTestStore
 import me.rerere.rikkahub.data.repository.FilesRepository
 import me.rerere.rikkahub.data.repository.SshHostRepository
 import me.rerere.rikkahub.data.ssh.SshCredentialStore
@@ -184,8 +184,10 @@ class PackageGRegistrationTest {
                 single { engine }
             }) }
             started = true
-            check(LocalTools(context, AppEventBus(), TTSManager(context), settings, RootShellManager(),
-                RootAccessStore(context.noBackupFilesDir), files, TermuxPreferences(context), ssh, browser), browser)
+            TermuxPreferencesTestStore(File(context.noBackupFilesDir, "termux")).use { termux ->
+                check(LocalTools(context, AppEventBus(), TTSManager(context), settings, RootShellManager(),
+                    RootAccessStore(context.noBackupFilesDir), files, termux.preferences, ssh, browser), browser)
+            }
         } finally {
             if (started) stopKoin()
             scope.cancel()

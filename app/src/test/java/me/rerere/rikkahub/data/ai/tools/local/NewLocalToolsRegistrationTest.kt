@@ -20,7 +20,7 @@ import me.rerere.rikkahub.data.db.dao.SshHostDao
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
-import me.rerere.rikkahub.data.preferences.TermuxPreferences
+import me.rerere.rikkahub.data.preferences.TermuxPreferencesTestStore
 import me.rerere.rikkahub.data.repository.FilesRepository
 import me.rerere.rikkahub.data.repository.SshHostRepository
 import me.rerere.rikkahub.data.ssh.SshCredentialStore
@@ -140,8 +140,10 @@ class NewLocalToolsRegistrationTest {
             val ssh = SshHostRepository(rejectCalls(SshHostDao::class.java),
                 SshCredentialStore(File(context.noBackupFilesDir, "ssh.enc"), Json) { key })
             startKoin { modules(module { single { OkHttpClient() } }) }
-            check(LocalTools(context, AppEventBus(), TTSManager(context), settings, RootShellManager(),
-                RootAccessStore(context.noBackupFilesDir), files, TermuxPreferences(context), ssh))
+            TermuxPreferencesTestStore(File(context.noBackupFilesDir, "termux")).use { termux ->
+                check(LocalTools(context, AppEventBus(), TTSManager(context), settings, RootShellManager(),
+                    RootAccessStore(context.noBackupFilesDir), files, termux.preferences, ssh))
+            }
         } finally {
             stopKoin()
             scope.cancel()
