@@ -7,6 +7,9 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.runInterruptible
@@ -29,10 +32,11 @@ class RootShellManager(
     private val probeLock = Mutex()
     private var cachedStatus: RootStatus? = null
     private var verifiedAtMs = 0L
-    private val headlessLock = Mutex()
+    private val commandLock = Mutex()
     private val sessionStateLock = Any()
     private var sessionEpoch = 0L
-    @Volatile private var headlessSession: HeadlessRootSession? = null
+    private data class PreparedSession(val transport: HeadlessRootSession, val headlessAllowed: Boolean)
+    @Volatile private var sharedSession: PreparedSession? = null
 
     /** May open the root manager's consent dialog. UI calls this only after a user tap. */
     suspend fun verifyRoot(force: Boolean = false, prepareHeadless: Boolean = false): RootStatus {
@@ -42,30 +46,9 @@ class RootShellManager(
         if (prepareHeadless && verified == RootStatus.READY) {
             var prepared = false
             try {
-                headlessLock.withLock {
-                    // This opt-in is reserved for the foreground verification button. exec never prepares it.
-                    val old = synchronized(sessionStateLock) {
-                        if (epoch != sessionEpoch) return@withLock
-                        headlessSession.also { headlessSession = null }
-                    }
-                    old?.close()
-                    var candidate: HeadlessRootSession? = null
-                    var installed = false
-                    try {
-                        runInterruptible(Dispatchers.IO) {
-                            candidate = HeadlessRootSession.open(suExecutable, controlDirectory, probeTimeoutMs)
-                        }
-                        installed = synchronized(sessionStateLock) {
-                            if (epoch == sessionEpoch && candidate?.isAlive() == true) {
-                                headlessSession = candidate
-                                true
-                            } else false
-                        }
-                        prepared = installed
-                    } finally {
-                        // Cancellation on dispatcher handoff must not leak a newly authenticated root shell.
-                        if (!installed) candidate?.close()
-                    }
+                commandLock.withLock {
+                    // Only this explicit foreground action grants background access.
+                    prepared = prepareSession(epoch, headlessAllowed = true) != null
                 }
             } catch (error: CancellationException) {
                 throw error
@@ -112,18 +95,23 @@ class RootShellManager(
         }
     }
 
-    internal suspend fun exec(command: String, timeoutMs: Int, headless: Boolean = false, mayExecute: suspend () -> Boolean = { true }): RootProcessResult {
-        if (headless) return headlessLock.withLock {
+    /** Commands share one cancellable queue; each request still owns a separate shell and group. */
+    internal suspend fun exec(command: String, timeoutMs: Int, headless: Boolean = false, mayExecute: suspend () -> Boolean = { true }): RootProcessResult = commandLock.withLock {
+        if (headless) {
             if (!mayExecute()) return@withLock approvalRequired()
-            val session = headlessSession ?: return@withLock interactionRequired()
-            withContext(Dispatchers.IO) {
-                if (!mayExecute()) return@withContext approvalRequired()
-                runInterruptible { session.execute(command, timeoutMs) }
-            }
+            val session = sharedSession?.takeIf { it.headlessAllowed }?.transport
+                ?: return@withLock interactionRequired()
+            return@withLock executePrepared(session, command, timeoutMs, mayExecute)
         }
+        sharedSession?.transport?.takeIf { it.isAlive() }?.let { session ->
+            if (!mayExecute()) return@withLock approvalRequired()
+            // The broker checks UID for each request; a live transport needs no new su probe.
+            return@withLock executePrepared(session, command, timeoutMs, mayExecute, foreground = true)
+        }
+        val epoch = synchronized(sessionStateLock) { sessionEpoch }
         val verified = verifyRoot()
         if (verified != RootStatus.READY) {
-            return RootProcessResult(
+            return@withLock RootProcessResult(
                 error = when (verified) {
                     RootStatus.UNAVAILABLE -> "su_not_available"
                     RootStatus.TIMED_OUT -> "root_verification_timeout"
@@ -132,11 +120,26 @@ class RootShellManager(
                 reason = "Root не подтверждён. Разрешите доступ Rikka-Root в менеджере root и повторите проверку Root в настройках.",
             )
         }
-        if (!mayExecute()) return approvalRequired()
-        // The original command is shell-quoted as one argument inside the owned process-group wrapper.
-        // Even an unsuccessful/timed-out launch is returned once, never replayed/fallen back.
+        if (!mayExecute()) return@withLock approvalRequired()
         val result = withContext(Dispatchers.IO) {
             if (!mayExecute()) return@withContext approvalRequired()
+            val session = try {
+                // Foreground reuse does not grant background eligibility.
+                prepareSession(epoch, headlessAllowed = false)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                null
+            }
+            currentCoroutineContext().ensureActive()
+            // Closing root during authentication wins, including over the one-shot fallback.
+            if (synchronized(sessionStateLock) { epoch != sessionEpoch }) return@withContext interactionRequired()
+            if (!mayExecute()) return@withContext approvalRequired()
+            if (session != null) {
+                // Never fall back after execute: a lost response does not mean no side effects.
+                return@withContext runInterruptible { session.execute(command, timeoutMs, foreground = true) }
+            }
+            // Preparation failed before any user command was submitted. Keep the legacy path.
             runInterruptible {
                 RootCommandSession(suExecutable, controlDirectory).use { session ->
                     val result = RootProcessRunner.run(
@@ -159,18 +162,51 @@ class RootShellManager(
             verifiedAtMs = clockMs()
             _status.value = RootStatus.NOT_ROOT
         }
-        return result
+        result
     }
 
-    fun isHeadlessReady(): Boolean = headlessSession?.isAlive() == true
+    private suspend fun executePrepared(session: HeadlessRootSession, command: String, timeoutMs: Int, mayExecute: suspend () -> Boolean, foreground: Boolean = false): RootProcessResult = withContext(Dispatchers.IO) {
+        if (!mayExecute()) return@withContext approvalRequired()
+        currentCoroutineContext().ensureActive()
+        runInterruptible { session.execute(command, timeoutMs, foreground) }
+    }
 
-    /** Drop the foreground-authenticated transport; headless calls never reconnect it. */
+    /** Called under commandLock; epoch prevents a concurrent close from resurrecting root. */
+    private suspend fun prepareSession(epoch: Long, headlessAllowed: Boolean): HeadlessRootSession? {
+        val old = synchronized(sessionStateLock) {
+            if (epoch != sessionEpoch) return null
+            sharedSession.also { sharedSession = null }
+        }
+        var candidate: HeadlessRootSession? = null
+        var installed = false
+        try {
+            withContext(NonCancellable + Dispatchers.IO) { old?.transport?.close() }
+            runInterruptible(Dispatchers.IO) {
+                candidate = HeadlessRootSession.open(suExecutable, controlDirectory, probeTimeoutMs)
+            }
+            currentCoroutineContext().ensureActive()
+            installed = synchronized(sessionStateLock) {
+                if (epoch == sessionEpoch && candidate?.isAlive() == true) {
+                    sharedSession = PreparedSession(candidate!!, headlessAllowed)
+                    true
+                } else false
+            }
+            return candidate.takeIf { installed }
+        } finally {
+            // Covers cancellation on the IO handoff, before the caller can own the new shell.
+            if (!installed) withContext(NonCancellable + Dispatchers.IO) { candidate?.close() }
+        }
+    }
+
+    fun isHeadlessReady(): Boolean = sharedSession?.let { it.headlessAllowed && it.transport.isAlive() } == true
+
+    /** Drop the shared transport and its background eligibility; headless never reconnects. */
     fun close() {
         val old = synchronized(sessionStateLock) {
             sessionEpoch++
-            headlessSession.also { headlessSession = null }
+            sharedSession.also { sharedSession = null }
         }
-        old?.close()
+        old?.transport?.close()
     }
 
     private fun interactionRequired() = RootProcessResult(
@@ -200,7 +236,7 @@ private class HeadlessRootSession private constructor(
 
     fun isAlive(): Boolean = !closed && process.isAlive
 
-    fun execute(command: String, timeoutMs: Int): RootProcessResult {
+    fun execute(command: String, timeoutMs: Int, foreground: Boolean = false): RootProcessResult {
         require(timeoutMs > 0)
         if (closed || !process.isAlive) return interactionRequired()
         val nonce = UUID.randomUUID().toString().replace("-", "")
@@ -214,6 +250,7 @@ private class HeadlessRootSession private constructor(
             // Root redirection preserves these app-owned0600 inodes, including result.new on rename.
             listOf("stdout", "stderr", "result.new").forEach { privateFile(request, it, "") }
             privateFile(request, "command", command)
+            privateFile(request, "foreground", if (foreground) "1\n" else "0\n")
             privateFile(request, "ticks", ((timeoutMs.toLong() + 49) / 50).toString())
             privateFile(request, "active", nonce)
             if (closed || !process.isAlive) return interactionRequired()
@@ -389,18 +426,34 @@ private class HeadlessRootSession private constructor(
             val appPid = stat.substringBefore(' ').toLong()
             val appStarted = stat.substringAfterLast(") ").split(' ')[19].toLong()
             return """
+            original_umask=${'$'}(umask)
             umask 077
             base=${quote(directory.path)}
             app_pid=$appPid
             app_started=$appStarted
             [ "${'$'}(id -u)" = 0 ] || exit 126
             for capability in setsid mkfifo dd cat sleep mv rm; do command -v "${'$'}capability" >/dev/null 2>&1 || exit 127; done
+            # Detect storage/capability failure before accepting any user command.
+            mkfifo "${'$'}base/probe.pipe" || exit 127
+            timed_read=no
+            # Android shells supporting fractional read timeouts can wait for completion events.
+            # Keep the original polling guardian on other shells, with no auxiliary watchdog to fail.
+            if printf 'ready\n' | (IFS= read -r -t 0.05 probe_value && [ "${'$'}probe_value" = ready ]) 2>/dev/null; then
+                exec 3<> "${'$'}base/probe.pipe"
+                if IFS= read -r -t 0.01 probe_value <&3 2>/dev/null; then exit 127; fi
+                exec 3>&-
+                timed_read=yes
+            fi
+            rm -f "${'$'}base/probe.pipe"
+            # Count actual bytes after each short block read, never records (dd count_bytes can stop early).
+            capture_mode=bytes
+            [ "${'$'}(printf x | wc -c 2>/dev/null)" != 1 ] || capture_mode=blocks
             broker=${'$'}${'$'}
-            stat=${'$'}(cat /proc/${'$'}${'$'}/stat) || exit 125
+            IFS= read -r stat < /proc/${'$'}${'$'}/stat || exit 125
             rest=${'$'}{stat##*) }; set -- ${'$'}rest; shift 19; broker_started=${'$'}1
             same_process() {
                 check_pid=${'$'}1; check_started=${'$'}2
-                check_stat=${'$'}(cat "/proc/${'$'}check_pid/stat" 2>/dev/null) || return 1
+                IFS= read -r check_stat 2>/dev/null < "/proc/${'$'}check_pid/stat" || return 1
                 check_rest=${'$'}{check_stat##*) }; set -- ${'$'}check_rest
                 [ "${'$'}1" != Z ] || return 1
                 shift 19; [ "${'$'}1" = "${'$'}check_started" ]
@@ -409,7 +462,7 @@ private class HeadlessRootSession private constructor(
                 identity=${'$'}1
                 [ -s "${'$'}identity" ] || return 1
                 read -r group_pid group_started < "${'$'}identity"
-                group_stat=${'$'}(cat "/proc/${'$'}group_pid/stat" 2>/dev/null) || return 1
+                IFS= read -r group_stat 2>/dev/null < "/proc/${'$'}group_pid/stat" || return 1
                 group_rest=${'$'}{group_stat##*) }; set -- ${'$'}group_rest
                 [ "${'$'}3" = "${'$'}group_pid" ] && [ "${'$'}4" = "${'$'}group_pid" ] || return 1
                 group_state=${'$'}1; shift 19
@@ -430,50 +483,82 @@ private class HeadlessRootSession private constructor(
                     [ "${'$'}(id -u)" = 0 ] || { finish not_root; exit; }
                     [ -f "${'$'}request/active" ] || { finish cancelled; exit; }
                     same_process "${'$'}broker" "${'$'}broker_started" && same_process "${'$'}app_pid" "${'$'}app_started" || { finish cancelled; exit; }
-                    mkfifo "${'$'}request/out.pipe" "${'$'}request/err.pipe" || { finish failed; exit; }
+                    mkfifo "${'$'}request/out.pipe" "${'$'}request/err.pipe" "${'$'}request/completed.pipe" || { finish failed; exit; }
+                    # A dedicated completion FIFO wakes the guardian immediately. It never contains stdout.
+                    exec 3<> "${'$'}request/completed.pipe"
                     # Independent drain groups can be stopped even if an escaped command retains a FIFO.
                     for channel in out err; do
                         case "${'$'}channel" in out) cap=8004; target=stdout;; err) cap=2004; target=stderr;; esac
                         setsid sh -c '
-                            request=${'$'}1; channel=${'$'}2; cap=${'$'}3
-                            stat=${'$'}(cat /proc/${'$'}${'$'}/stat) || exit 125
+                            request=${'$'}1; channel=${'$'}2; cap=${'$'}3; capture_mode=${'$'}4; target=${'$'}5
+                            IFS= read -r stat < /proc/${'$'}${'$'}/stat || exit 125
                             rest=${'$'}{stat##*) }; set -- ${'$'}rest; shift 19
                             printf "%s %s\n" "${'$'}${'$'}" "${'$'}1" > "${'$'}request/${'$'}channel.pid"
-                            dd bs=1 count="${'$'}cap" 2>/dev/null; cat >/dev/null
+                            if [ "${'$'}capture_mode" = blocks ]; then
+                                copied=0
+                                while [ "${'$'}copied" -lt "${'$'}cap" ]; do
+                                    block=${'$'}((cap - copied)); [ "${'$'}block" -le 4096 ] || block=4096
+                                    dd bs="${'$'}block" count=1 2>/dev/null
+                                    size=${'$'}(wc -c < "${'$'}request/${'$'}target") || exit 125
+                                    [ "${'$'}size" -gt "${'$'}copied" ] || break
+                                    copied=${'$'}size
+                                done
+                            else dd bs=1 count="${'$'}cap" 2>/dev/null
+                            fi
+                            cat >/dev/null
                             printf done > "${'$'}request/${'$'}channel.done"
-                        ' sh "${'$'}request" "${'$'}channel" "${'$'}cap" < "${'$'}request/${'$'}channel.pipe" > "${'$'}request/${'$'}target" &
+                        ' sh "${'$'}request" "${'$'}channel" "${'$'}cap" "${'$'}capture_mode" "${'$'}target" 3>&- < "${'$'}request/${'$'}channel.pipe" > "${'$'}request/${'$'}target" &
                     done
                     setsid sh -c '
-                        request=${'$'}1
-                        stat=${'$'}(cat /proc/${'$'}${'$'}/stat) || exit 125
+                        request=${'$'}1; foreground_umask=${'$'}2
+                        IFS= read -r stat < /proc/${'$'}${'$'}/stat || exit 125
                         rest=${'$'}{stat##*) }; set -- ${'$'}rest; shift 19
                         printf "%s %s\n" "${'$'}${'$'}" "${'$'}1" > "${'$'}request/pid"
                         [ -f "${'$'}request/active" ] || exit 125
-                        sh "${'$'}request/command"
-                        printf "%s" "${'$'}?" > "${'$'}request/exit"
+                        IFS= read -r foreground < "${'$'}request/foreground" || exit 125
+                        # Preserve foreground sh -c/umask semantics and every trailing newline.
+                        # User commands cannot inherit or keep the control FIFO open.
+                        if [ "${'$'}foreground" = 1 ]; then
+                            umask "${'$'}foreground_umask"
+                            payload=${'$'}(cat "${'$'}request/command" && printf .) || exit 125
+                            payload=${'$'}{payload%.}
+                            [ -f "${'$'}request/active" ] || exit 125
+                            sh -c "${'$'}payload" 3>&-
+                        else sh "${'$'}request/command" 3>&-
+                        fi
+                        exit_code=${'$'}?
+                        printf "%s\n" "${'$'}exit_code" > "${'$'}request/exit"
+                        printf "%s\n" "${'$'}exit_code" >&3
                         while :; do sleep 1; done
-                    ' sh "${'$'}request" > "${'$'}request/out.pipe" 2> "${'$'}request/err.pipe" &
-                    ticks=${'$'}(cat "${'$'}request/ticks")
+                    ' sh "${'$'}request" "${'$'}original_umask" > "${'$'}request/out.pipe" 2> "${'$'}request/err.pipe" &
+                    IFS= read -r ticks < "${'$'}request/ticks"
                     outcome=timeout
                     while [ "${'$'}ticks" -gt 0 ]; do
                         [ -f "${'$'}request/active" ] || { outcome=cancelled; break; }
                         same_process "${'$'}broker" "${'$'}broker_started" && same_process "${'$'}app_pid" "${'$'}app_started" || { outcome=cancelled; break; }
-                        if [ -s "${'$'}request/exit" ]; then outcome=${'$'}(cat "${'$'}request/exit"); break; fi
+                        if [ "${'$'}timed_read" = yes ]; then
+                            if IFS= read -r -t 0.05 completed <&3; then outcome=${'$'}completed; break; fi
+                        else
+                            if [ -s "${'$'}request/exit" ]; then IFS= read -r outcome < "${'$'}request/exit" || outcome=cleanup_unconfirmed; break; fi
+                            sleep 0.05
+                        fi
                         ticks=${'$'}((ticks - 1))
-                        sleep 0.05
                     done
+                    # A late completion cannot override cancellation/the app's expired deadline.
+                    [ -f "${'$'}request/active" ] || outcome=cancelled
                     rm -f "${'$'}request/active"
-                    # A late leader cannot run the command after active is removed. Allow bounded publication.
+                    # A late leader cannot run after active is removed. Allow bounded publication.
                     count=20
                     while [ ! -s "${'$'}request/pid" ] && [ "${'$'}count" -gt 0 ]; do sleep 0.01; count=${'$'}((count - 1)); done
                     stop_group "${'$'}request/pid" || outcome=cleanup_unconfirmed
+                    exec 3>&-
                     # Let finite queued output drain, then kill exact drain groups; never use an unbounded wait.
                     count=20
                     while { [ ! -f "${'$'}request/out.done" ] || [ ! -f "${'$'}request/err.done" ]; } && [ "${'$'}count" -gt 0 ]; do sleep 0.01; count=${'$'}((count - 1)); done
                     for channel in out err; do
                         [ -f "${'$'}request/${'$'}channel.done" ] || stop_group "${'$'}request/${'$'}channel.pid" || outcome=cleanup_unconfirmed
                     done
-                    rm -f "${'$'}request/out.pipe" "${'$'}request/err.pipe"
+                    rm -f "${'$'}request/out.pipe" "${'$'}request/err.pipe" "${'$'}request/completed.pipe"
                     finish "${'$'}outcome"
                 ) </dev/null >/dev/null 2>&1 & guardian=${'$'}!
                 wait "${'$'}guardian"

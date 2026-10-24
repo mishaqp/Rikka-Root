@@ -17,6 +17,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.tools.local.buildRootTool
 import me.rerere.rikkahub.data.preferences.ToolApprovalTestStore
 import org.junit.Assert.*
+import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -24,10 +25,22 @@ import org.junit.rules.TemporaryFolder
 class RootAutomaticToolTest {
     @get:Rule val temp = TemporaryFolder()
 
+    private val managers = mutableListOf<RootShellManager>()
+
+    @After fun closeOwnedRootTransports() = managers.forEach { it.close() }
+
+    private fun trackedManager(
+        suExecutable: String = "su",
+        probeTimeoutMs: Int = 30_000,
+        controlDirectory: File = temp.root,
+        clockMs: () -> Long = { System.nanoTime() / 1_000_000L },
+    ): RootShellManager = RootShellManager(suExecutable, probeTimeoutMs, controlDirectory, clockMs)
+        .also { managers += it }
+
     @Test fun trustedDataStorePermissionExecutesRootAndRevocationIgnoresLegacyFlag() = runBlocking {
         ToolApprovalTestStore(temp.newFolder()).use { fixture ->
             val store = RootAccessStore(temp.newFolder())
-            val tool = buildRootTool(RootShellManager(suExecutable = fakeSu().path), store, "assistant")
+            val tool = buildRootTool(trackedManager(suExecutable = fakeSu().path), store, "assistant")
             val first = File(temp.root, "allowed-by-new-preferences")
             fixture.preferences.setYolo(true)
             val allowed = withContext(RootInvocation(automatic = true, automaticAllowed = { fixture.preferences.currentYolo() })) {
@@ -49,7 +62,7 @@ class RootAutomaticToolTest {
     @Test fun webGuardProvenancePreventsLaunchEvenWhenGlobalPermissionStaysEnabled() = runBlocking {
         val store = RootAccessStore(temp.newFolder())
         store.setAutoApprove(true)
-        val tool = buildRootTool(RootShellManager(suExecutable = fakeSu().path), store, "assistant-a")
+        val tool = buildRootTool(trackedManager(suExecutable = fakeSu().path), store, "assistant-a")
         val target = File(temp.root, "web-guard-must-not-launch")
         store.markWebContent("web-chat")
         val output = withContext(RootInvocation(automatic = true, automaticAllowed = { !store.isWebTainted("web-chat") })) {
@@ -74,7 +87,7 @@ class RootAutomaticToolTest {
         val store = RootAccessStore(directory)
         store.setAutoApprove(true)
         val target = File(temp.root, "cancelled-begin-must-not-launch")
-        val tool = buildRootTool(RootShellManager(suExecutable = fakeSu().path), store, "assistant-a")
+        val tool = buildRootTool(trackedManager(suExecutable = fakeSu().path), store, "assistant-a")
         val executor = Executors.newSingleThreadExecutor()
         val dispatcher = executor.asCoroutineDispatcher()
         val blockerEntered = CountDownLatch(1)
@@ -108,7 +121,7 @@ class RootAutomaticToolTest {
         val store = RootAccessStore(temp.newFolder())
         store.setAutoApprove(true)
         val target = File(temp.root, "revoked-command-must-not-run")
-        val tool = buildRootTool(RootShellManager(suExecutable = fakeSu().path), store, "assistant-a")
+        val tool = buildRootTool(trackedManager(suExecutable = fakeSu().path), store, "assistant-a")
         val output = withContext(RootInvocation(automatic = true)) {
             store.setAutoApprove(false)
             tool.execute(buildJsonObject { put("command", "touch '${target.path}'") })
@@ -121,7 +134,7 @@ class RootAutomaticToolTest {
     @Test fun nonzeroExitIsLoggedAsFailedWithoutOutputSecrets() = runBlocking {
         val store = RootAccessStore(temp.newFolder())
         store.setAutoApprove(true)
-        val tool = buildRootTool(RootShellManager(suExecutable = fakeSu().path), store, "assistant-a")
+        val tool = buildRootTool(trackedManager(suExecutable = fakeSu().path), store, "assistant-a")
         val output = tool.execute(buildJsonObject { put("command", "printf private-failed-output; exit 9") })
         val result = Json.parseToJsonElement((output.single() as UIMessagePart.Text).text).jsonObject
         assertEquals(9, result["exit_code"]!!.jsonPrimitive.int)
@@ -138,7 +151,7 @@ class RootAutomaticToolTest {
         store.setAutoApprove(true)
         val started = File(temp.root, "journal-failure-started")
         val finish = File(temp.root, "journal-failure-finish")
-        val tool = buildRootTool(RootShellManager(suExecutable = fakeSu().path), store, "assistant-a")
+        val tool = buildRootTool(trackedManager(suExecutable = fakeSu().path), store, "assistant-a")
         val job = async {
             tool.execute(buildJsonObject {
                 put("command", "printf private-completed-output; touch '${started.path}'; while [ ! -f '${finish.path}' ]; do sleep 0.01; done; exit 9")
@@ -166,7 +179,7 @@ class RootAutomaticToolTest {
         val store = RootAccessStore(directory)
         store.setAutoApprove(true)
         val started = File(temp.root, "journal-failure-cancel-started")
-        val tool = buildRootTool(RootShellManager(suExecutable = fakeSu().path), store, "assistant-a")
+        val tool = buildRootTool(trackedManager(suExecutable = fakeSu().path), store, "assistant-a")
         val job = async {
             tool.execute(buildJsonObject { put("command", "touch '${started.path}'; sleep 30") })
         }
@@ -187,7 +200,7 @@ class RootAutomaticToolTest {
 
     @Test fun modeIsGlobalAndLiveAndDangerousCallsStillNeedApproval() = runBlocking {
         val store = RootAccessStore(temp.newFolder())
-        val manager = RootShellManager(suExecutable = "/nonexistent/root-su")
+        val manager = trackedManager(suExecutable = "/nonexistent/root-su")
         val tool = buildRootTool(manager, store, "assistant-a")
         val args = buildJsonObject { put("command", "id") }
         assertTrue(tool.needsApproval(args))
@@ -205,7 +218,7 @@ class RootAutomaticToolTest {
     @Test fun automaticUsesVisiblePolicyWhileOrdinaryRetainsGuard() = runBlocking {
         val directory = temp.newFolder()
         val store = RootAccessStore(directory)
-        val manager = RootShellManager(suExecutable = fakeSu().path)
+        val manager = trackedManager(suExecutable = fakeSu().path)
         val tool = buildRootTool(manager, store, "assistant-a")
         val args = buildJsonObject { put("command", "echo 'rm -rf /system'") }
         val blocked = Json.parseToJsonElement((tool.execute(args).single() as UIMessagePart.Text).text).jsonObject
@@ -222,7 +235,7 @@ class RootAutomaticToolTest {
         val directory = temp.newFolder()
         val store = RootAccessStore(directory)
         store.setAutoApprove(true)
-        val tool = buildRootTool(RootShellManager(suExecutable = fakeSu().path), store, "assistant-a")
+        val tool = buildRootTool(trackedManager(suExecutable = fakeSu().path), store, "assistant-a")
         val started = File(temp.root, "command-started")
         val args = buildJsonObject { put("command", "printf private-output; touch '${started.path}'; sleep 30") }
         val job = async { tool.execute(args) }

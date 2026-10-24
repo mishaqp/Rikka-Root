@@ -6,6 +6,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.*
+import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -14,9 +15,21 @@ import java.io.File
 class RootShellManagerTest {
     @get:Rule val temp = TemporaryFolder()
 
+    private val managers = mutableListOf<RootShellManager>()
+
+    @After fun closeOwnedRootTransports() = managers.forEach { it.close() }
+
+    private fun trackedManager(
+        suExecutable: String = "su",
+        probeTimeoutMs: Int = 30_000,
+        controlDirectory: File = temp.root,
+        clockMs: () -> Long = { System.nanoTime() / 1_000_000L },
+    ): RootShellManager = RootShellManager(suExecutable, probeTimeoutMs, controlDirectory, clockMs)
+        .also { managers += it }
+
     @Test fun revocationAfterProbePreventsLaunch() = runBlocking {
         val (su, log) = fakeSu()
-        val result = RootShellManager(suExecutable = su.path).exec("printf should-not-run", 2_000) { false }
+        val result = trackedManager(suExecutable = su.path).exec("printf should-not-run", 2_000) { false }
         assertEquals("root_approval_required", result.error)
         assertEquals("Автоматический доступ Root отключён до запуска. Подтвердите новый вызов команды.", result.reason)
         assertEquals(listOf("called"), log.readLines())
@@ -26,7 +39,7 @@ class RootShellManagerTest {
     @Test fun revocationAtFinalIOCheckPreventsLaunch() = runBlocking {
         val (su, log) = fakeSu()
         var checks = 0
-        val result = RootShellManager(suExecutable = su.path).exec("printf should-not-run", 2_000) { ++checks == 1 }
+        val result = trackedManager(suExecutable = su.path).exec("printf should-not-run", 2_000) { ++checks == 1 }
         assertEquals("root_approval_required", result.error)
         assertEquals(2, checks)
         assertEquals(listOf("called"), log.readLines())
@@ -34,7 +47,7 @@ class RootShellManagerTest {
 
     @Test fun `headless without explicit preparation never launches su`() = runBlocking {
         val (su, log) = fakeSu()
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
         val result = manager.exec("printf forbidden", 1_000, headless = true)
         assertEquals("root_interaction_required", result.error)
         assertTrue(log.readText().isEmpty())
@@ -42,7 +55,7 @@ class RootShellManagerTest {
 
     @Test fun `cached verification alone does not authorize headless transport`() = runBlocking {
         val (su, log) = fakeSu()
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
         assertEquals(RootStatus.READY, manager.verifyRoot())
         assertEquals("root_interaction_required", manager.exec("printf forbidden", 1_000, headless = true).error)
         assertEquals(1, log.readLines().size)
@@ -51,7 +64,7 @@ class RootShellManagerTest {
     @Test fun `prepared headless transport survives verification TTL without fresh su`() = runBlocking {
         val (su, log) = fakeSu()
         var now = 1_000L
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root, clockMs = { now })
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root, clockMs = { now })
         try {
             assertEquals(RootStatus.READY, manager.verifyRoot(prepareHeadless = true))
             val calls = log.readLines().size
@@ -65,7 +78,7 @@ class RootShellManagerTest {
 
     @Test fun `headless approval revocation prevents dispatch without new su`() = runBlocking {
         val (su, log) = fakeSu()
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
         val effect = File(temp.root, "revoked-headless")
         try {
             manager.verifyRoot(prepareHeadless = true)
@@ -80,7 +93,7 @@ class RootShellManagerTest {
 
     @Test fun `headless failing command is never replayed`() = runBlocking {
         val (su, log) = fakeSu()
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
         val effect = File(temp.root, "once-headless")
         try {
             manager.verifyRoot(prepareHeadless = true)
@@ -95,7 +108,7 @@ class RootShellManagerTest {
 
     @Test fun `headless timeout stops TERM ignoring descendants with no cleanup su`() = runBlocking {
         val (su, log) = fakeSu()
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
         val pid = File(temp.root, "headless-timeout-pid")
         try {
             manager.verifyRoot(prepareHeadless = true)
@@ -110,7 +123,7 @@ class RootShellManagerTest {
 
     @Test fun `headless cancellation stops command without fresh su`() = runBlocking {
         val (su, log) = fakeSu()
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
         val pid = File(temp.root, "headless-cancel-pid")
         manager.verifyRoot(prepareHeadless = true)
         val calls = log.readLines().size
@@ -126,7 +139,7 @@ class RootShellManagerTest {
 
     @Test fun `headless stdout and stderr are bounded and concurrent calls are isolated`() = runBlocking {
         val (su, log) = fakeSu()
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
         try {
             manager.verifyRoot(prepareHeadless = true)
             val calls = log.readLines().size
@@ -143,7 +156,7 @@ class RootShellManagerTest {
 
     @Test fun `closed transport requires foreground interaction and does not replay`() = runBlocking {
         val (su, log) = fakeSu()
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
         manager.verifyRoot(prepareHeadless = true)
         manager.close()
         val calls = log.readLines().size
@@ -153,7 +166,7 @@ class RootShellManagerTest {
 
     @Test fun `headless readiness is a pure transport check`() = runBlocking {
         val (su, log) = fakeSu()
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
         try {
             assertFalse(manager.isHeadlessReady())
             assertTrue(log.readText().isEmpty())
@@ -172,7 +185,7 @@ class RootShellManagerTest {
         val (su, log) = fakeSu()
         val brokerPid = File(temp.root, "broker-process")
         su.writeText(su.readText().replace("exec /bin/sh -c", "echo \$\$ > '${brokerPid.path}'\nexec /bin/sh -c"))
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
         try {
             manager.verifyRoot(prepareHeadless = true)
             val calls = log.readLines().size
@@ -187,7 +200,7 @@ class RootShellManagerTest {
 
     @Test fun `broker rechecks uid and invalidates transport before a revoked execution`() = runBlocking {
         val (su, log) = fakeSu()
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
         try {
             manager.verifyRoot(prepareHeadless = true)
             val calls = log.readLines().size
@@ -205,7 +218,7 @@ class RootShellManagerTest {
         val (su, log) = fakeSu()
         val brokerPid = File(temp.root, "dying-broker-process")
         su.writeText(su.readText().replace("exec /bin/sh -c", "echo \$\$ > '${brokerPid.path}'\nexec /bin/sh -c"))
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
         val childPid = File(temp.root, "dying-broker-child")
         manager.verifyRoot(prepareHeadless = true)
         val calls = log.readLines().size
@@ -223,7 +236,7 @@ class RootShellManagerTest {
         val (su, _) = fakeSu()
         val opening = File(temp.root, "opening-broker")
         su.writeText(su.readText().replace("exec /bin/sh -c", "touch '${opening.path}'; sleep 0.2\nexec /bin/sh -c"))
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
         val preparation = async { manager.verifyRoot(prepareHeadless = true) }
         try {
             withTimeout(2_000) { while (!opening.exists()) delay(10) }
@@ -235,7 +248,7 @@ class RootShellManagerTest {
 
     @Test fun `all headless request control files are owner only`() = runBlocking {
         val (su, _) = fakeSu()
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
         manager.verifyRoot(prepareHeadless = true)
         val started = File(temp.root, "private-command-started")
         val job = async { manager.exec("touch '${started.path}'; sleep 30", 30_000, headless = true) }
@@ -253,7 +266,7 @@ class RootShellManagerTest {
 
     @Test fun `escaped FIFO writer cannot stall broker or leak drain processes`() = runBlocking {
         val (su, log) = fakeSu()
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
         val escapedPid = File(temp.root, "escaped-output-holder")
         try {
             manager.verifyRoot(prepareHeadless = true)
@@ -274,7 +287,7 @@ class RootShellManagerTest {
 
     @Test fun `killed group leader cannot leave ordinary descendants behind a successful cleanup ack`() = runBlocking {
         val (su, _) = fakeSu()
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
         val pid = File(temp.root, "leader-killed-child")
         try {
             manager.verifyRoot(prepareHeadless = true)
@@ -294,7 +307,7 @@ class RootShellManagerTest {
             writeText("#!/bin/sh\nread nonce outcome < \"\$1\"\nprintf '%s unknown' \"\$nonce\" > \"\$2\"\n")
             setExecutable(true)
         }
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
         val effect = File(temp.root, "unknown-ack-effect")
         try {
             manager.verifyRoot(prepareHeadless = true)
@@ -314,7 +327,7 @@ class RootShellManagerTest {
             writeText("#!/bin/sh\nread nonce outcome < \"\$1\"\nprintf '%s cleanup_unconfirmed' \"\$nonce\" > \"\$2\"\n")
             setExecutable(true)
         }
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
         val pid = File(temp.root, "cancel-unconfirmed-child")
         manager.verifyRoot(prepareHeadless = true)
         val job = async { manager.exec("echo \$\$ > '${pid.path}'; sleep 30", 30_000, headless = true) }
@@ -334,7 +347,7 @@ class RootShellManagerTest {
             writeText("#!/bin/sh\nsleep 1\nexec /usr/bin/setsid \"\$@\"\n")
             setExecutable(true)
         }
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
         val effect = File(temp.root, "late-headless-effect")
         try {
             manager.verifyRoot(prepareHeadless = true)
@@ -352,7 +365,7 @@ class RootShellManagerTest {
         val (su, log) = fakeSu()
         val bin = temp.root.listFiles()!!.single { it.isDirectory && it.name.startsWith("root-bin-") }
         File(bin, "mv").apply { writeText("#!/bin/sh\nexit 1\n"); setExecutable(true) }
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
         val effect = File(temp.root, "missing-ack-once")
         try {
             manager.verifyRoot(prepareHeadless = true)
@@ -372,7 +385,7 @@ class RootShellManagerTest {
         val (su, _) = fakeSu()
         val opening = File(temp.root, "ownership-opening")
         su.writeText(su.readText().replace("exec /bin/sh -c", "touch '${opening.path}'; sleep 0.3\nexec /bin/sh -c"))
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
         val preparation = async { manager.verifyRoot(prepareHeadless = true) }
         try {
             withTimeout(2_000) { while (!opening.exists()) delay(10) }
@@ -392,13 +405,14 @@ class RootShellManagerTest {
         File(bin, "mkfifo").apply {
             writeText("""
                 #!/bin/sh
+                case "${'$'}1" in */probe.pipe) exec /usr/bin/mkfifo "${'$'}@";; esac
                 request=${'$'}(dirname "${'$'}1")
                 for file in stdout stderr result.new; do [ -f "${'$'}request/${'$'}file" ] || exit 1; done
                 exec /usr/bin/mkfifo "${'$'}@"
             """.trimIndent() + "\n")
             setExecutable(true)
         }
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
         try {
             manager.verifyRoot(prepareHeadless = true)
             val result = manager.exec("printf owned; printf private >&2", 1_000, headless = true)
@@ -410,7 +424,7 @@ class RootShellManagerTest {
 
     @Test fun `unavailable preparation reports failure and clears cached ready`() = runBlocking {
         val (su, log) = fakeSu()
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.newFile("not-a-directory"))
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.newFile("not-a-directory"))
         try {
             assertEquals(RootStatus.DENIED_OR_FAILED, manager.verifyRoot(prepareHeadless = true))
             assertEquals(RootStatus.DENIED_OR_FAILED, manager.status.value)
@@ -426,7 +440,7 @@ class RootShellManagerTest {
         val inaccessible = object : File(temp.root.path) {
             override fun toPath(): java.nio.file.Path = throw SecurityException("denied control storage")
         }
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = inaccessible)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = inaccessible)
         try {
             assertEquals(RootStatus.DENIED_OR_FAILED, manager.verifyRoot(prepareHeadless = true))
             assertEquals(RootStatus.DENIED_OR_FAILED, manager.status.value)
@@ -441,7 +455,7 @@ class RootShellManagerTest {
         val (su, _) = fakeSu()
         val brokerPid = File(temp.root, "failed-ready-pid")
         su.writeText(su.readText().replace("exec /bin/sh -c", "echo \$\$ > '${brokerPid.path}'; exec sleep 30\nexec /bin/sh -c"))
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root, probeTimeoutMs = 300)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root, probeTimeoutMs = 300)
         val preparation = async { manager.verifyRoot(prepareHeadless = true) }
         try {
             withTimeout(2_000) { while (!brokerPid.exists()) delay(10) }
@@ -482,7 +496,7 @@ class RootShellManagerTest {
 
     @Test fun `starts unchecked and verifies uid zero before command`() = runBlocking {
         val (su, log) = fakeSu()
-        val manager = RootShellManager(suExecutable = su.path)
+        val manager = trackedManager(suExecutable = su.path)
         assertEquals(RootStatus.UNCHECKED, manager.status.value)
         val result = manager.exec("printf executed", 2_000)
         assertEquals("executed", result.stdout)
@@ -493,7 +507,7 @@ class RootShellManagerTest {
 
     @Test fun `rejects a nonroot uid without executing requested command`() = runBlocking {
         val (su, log) = fakeSu("2000")
-        val manager = RootShellManager(suExecutable = su.path)
+        val manager = trackedManager(suExecutable = su.path)
         val result = manager.exec("printf should-not-run", 2_000)
         assertEquals("root_not_granted", result.error)
         assertEquals(listOf("called"), log.readLines())
@@ -502,13 +516,13 @@ class RootShellManagerTest {
 
     @Test fun `rejects failed probe even when output says uid zero`() = runBlocking {
         val (su, log) = fakeSu("0", 1)
-        val manager = RootShellManager(suExecutable = su.path)
+        val manager = trackedManager(suExecutable = su.path)
         assertEquals(RootStatus.DENIED_OR_FAILED, manager.verifyRoot())
         assertEquals(listOf("called"), log.readLines())
     }
 
     @Test fun `missing su reports unavailable`() = runBlocking {
-        val manager = RootShellManager(suExecutable = "/nonexistent/root-su")
+        val manager = trackedManager(suExecutable = "/nonexistent/root-su")
         assertEquals(RootStatus.UNAVAILABLE, manager.verifyRoot())
         assertEquals("su_not_available", manager.exec("printf nope", 2_000).error)
     }
@@ -516,7 +530,7 @@ class RootShellManagerTest {
     @Test fun `successful probe cache expires and forced verification bypasses cache`() = runBlocking {
         val (su, log) = fakeSu()
         var now = 1_000L
-        val manager = RootShellManager(suExecutable = su.path, clockMs = { now })
+        val manager = trackedManager(suExecutable = su.path, clockMs = { now })
         assertEquals(RootStatus.READY, manager.verifyRoot())
         manager.verifyRoot()
         assertEquals(1, log.readLines().size)
@@ -530,7 +544,7 @@ class RootShellManagerTest {
     @Test fun `failed probe is retried after short cache expires`() = runBlocking {
         val (su, log) = fakeSu("2000")
         var now = 1_000L
-        val manager = RootShellManager(suExecutable = su.path, clockMs = { now })
+        val manager = trackedManager(suExecutable = su.path, clockMs = { now })
         manager.verifyRoot()
         manager.verifyRoot()
         assertEquals(1, log.readLines().size)
@@ -541,7 +555,7 @@ class RootShellManagerTest {
 
     @Test fun `launched failing command is executed once`() = runBlocking {
         val (su, log) = fakeSu()
-        val result = RootShellManager(suExecutable = su.path).exec("printf failed; exit 9", 2_000)
+        val result = trackedManager(suExecutable = su.path).exec("printf failed; exit 9", 2_000)
         assertEquals(9, result.exitCode)
         assertEquals("failed", result.stdout)
         assertEquals(2, log.readLines().size)
@@ -550,19 +564,19 @@ class RootShellManagerTest {
     @Test fun `launched timed out command is executed once`() = runBlocking {
         val (su, log) = fakeSu()
         val command = "printf started; exec sleep 30"
-        val result = RootShellManager(suExecutable = su.path).exec(command, 100)
+        val result = trackedManager(suExecutable = su.path).exec(command, 100)
         assertEquals("command_timeout", result.error)
-        assertEquals(3, log.readLines().size)
+        assertEquals("The persistent guardian stops the command without another su", 2, log.readLines().size)
     }
 
     @Test fun `accepts a root manager banner only when final uid is zero`() = runBlocking {
         val (su, _) = fakeSu("KernelSU\n0")
-        assertEquals(RootStatus.READY, RootShellManager(suExecutable = su.path).verifyRoot())
+        assertEquals(RootStatus.READY, trackedManager(suExecutable = su.path).verifyRoot())
     }
 
     @Test fun `concurrent root checks share a successful probe`() = runBlocking {
         val (su, log) = fakeSu()
-        val manager = RootShellManager(suExecutable = su.path)
+        val manager = trackedManager(suExecutable = su.path)
         val jobs = List(10) { async { manager.verifyRoot() } }
         jobs.forEach { assertEquals(RootStatus.READY, it.await()) }
         assertEquals(1, log.readLines().size)
@@ -573,7 +587,7 @@ class RootShellManagerTest {
         val script = temp.newFile("slow-su")
         script.writeText("#!/bin/sh\necho \$\$ > '${pid.path}'\nexec sleep 30\n")
         assertTrue(script.setExecutable(true))
-        val manager = RootShellManager(suExecutable = script.path)
+        val manager = trackedManager(suExecutable = script.path)
         val job = async { manager.verifyRoot() }
         withTimeout(2_000) { while (pid.readText().isBlank()) delay(10) }
         val processId = pid.readText().trim().toLong()
@@ -590,7 +604,7 @@ class RootShellManagerTest {
         val script = temp.newFile("probe-timeout-su")
         script.writeText("#!/bin/sh\nexec sleep 30\n")
         assertTrue(script.setExecutable(true))
-        val manager = RootShellManager(suExecutable = script.path, probeTimeoutMs = 100)
+        val manager = trackedManager(suExecutable = script.path, probeTimeoutMs = 100)
         val started = System.nanoTime()
         assertEquals(RootStatus.TIMED_OUT, manager.verifyRoot())
         assertTrue("probe timeout must bound verification", (System.nanoTime() - started) / 1_000_000 < 2_000)
@@ -600,7 +614,7 @@ class RootShellManagerTest {
     @Test fun `timeout terminates ordinary shell children before they can continue`() = runBlocking {
         val (su, _) = fakeSu()
         val pid = File(temp.root, "timed-child-pid")
-        val manager = RootShellManager(suExecutable = su.path)
+        val manager = trackedManager(suExecutable = su.path)
         val command = "sleep 30 & child=\$!; echo \$child > '${pid.path}'; wait"
         try {
             assertEquals("command_timeout", manager.exec(command, 150).error)
@@ -615,7 +629,7 @@ class RootShellManagerTest {
     @Test fun `cancellation terminates ordinary shell children`() = runBlocking {
         val (su, _) = fakeSu()
         val pid = File(temp.root, "cancelled-child-pid")
-        val manager = RootShellManager(suExecutable = su.path)
+        val manager = trackedManager(suExecutable = su.path)
         val command = "sleep 30 & child=\$!; echo \$child > '${pid.path}'; wait"
         val job = async { manager.exec(command, 30_000) }
         try {
@@ -636,7 +650,7 @@ class RootShellManagerTest {
         File(bin, "id").apply { writeText("#!/bin/sh\nprintf '2000\\n'\n"); setExecutable(true) }
         su.writeText(su.readText().replace("exec /bin/sh -c", "PATH='${bin.path}':\$PATH exec /bin/sh -c"))
         val sideEffect = File(temp.root, "must-not-exist")
-        val manager = RootShellManager(suExecutable = su.path)
+        val manager = trackedManager(suExecutable = su.path)
         assertEquals(RootStatus.READY, manager.verifyRoot())
         assertEquals("root_not_granted", manager.exec("touch '${sideEffect.path}'", 2_000).error)
         assertFalse(sideEffect.exists())
@@ -648,7 +662,7 @@ class RootShellManagerTest {
         File(bin, "id").apply { writeText("#!/bin/sh\nprintf '0\\n'\n"); setExecutable(true) }
         su.writeText(su.readText().replace("exec /bin/sh -c", "PATH='${bin.path}' exec /bin/sh -c"))
         val sideEffect = File(temp.root, "no-setsid-must-not-exist")
-        val manager = RootShellManager(suExecutable = su.path)
+        val manager = trackedManager(suExecutable = su.path)
         assertEquals("root_cleanup_unavailable", manager.exec("touch '${sideEffect.path}'", 2_000).error)
         assertFalse(sideEffect.exists())
     }
@@ -658,7 +672,7 @@ class RootShellManagerTest {
         val pid = File(temp.root, "ignoring-grandchild-pid")
         val sideEffect = File(temp.root, "ignoring-grandchild-side-effect")
         val nested = "trap \"\" TERM; echo \$\$ > ${pid.path}; sleep 30; printf survived > ${sideEffect.path}"
-        val manager = RootShellManager(suExecutable = su.path)
+        val manager = trackedManager(suExecutable = su.path)
         try {
             assertEquals("command_timeout", manager.exec("sh -c '$nested' & wait", 150).error)
             assertTrue(pid.exists())
@@ -682,7 +696,7 @@ class RootShellManagerTest {
     private fun assertRootClipping(headless: Boolean) = runBlocking {
         run {
             val (su, _) = fakeSu()
-            val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+            val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
             try {
                 if (headless) assertEquals(RootStatus.READY, manager.verifyRoot(prepareHeadless = true))
                 val tool = me.rerere.rikkahub.data.ai.tools.local.buildRootTool(manager)
@@ -708,7 +722,7 @@ class RootShellManagerTest {
 
     @Test fun `root printed truncation marker cannot manufacture actual clipping metadata`() = runBlocking {
         val (su, _) = fakeSu()
-        val manager = RootShellManager(suExecutable = su.path, controlDirectory = temp.root)
+        val manager = trackedManager(suExecutable = su.path, controlDirectory = temp.root)
         try {
             val tool = me.rerere.rikkahub.data.ai.tools.local.buildRootTool(manager)
             val parts = kotlinx.coroutines.withContext(RootInvocation(automatic = false, automaticAllowed = { true })) {

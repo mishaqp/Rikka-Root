@@ -77,7 +77,7 @@ class GenerationLoopRootCommandPreservationTest {
         val shellInput = File(bin, "received-command")
         File(bin, "id").apply { writeText("#!/bin/sh\nprintf '0\\n'\n"); check(setExecutable(true)) }
         File(bin, "sh").apply {
-            writeText("#!/bin/sh\nif [ \"\$1\" = '-c' ]; then printf '%s' \"\$2\" > '${shellInput.path}'; fi\nexec /bin/sh \"\$@\"\n")
+            writeText("#!/bin/sh\nif [ \"\$#\" -eq 2 ] && [ \"\$1\" = -c ]; then printf '%s' \"\$2\" > '${shellInput.path}'; fi\nexec /bin/sh \"\$@\"\n")
             check(setExecutable(true))
         }
         val su = folder.newFile().apply {
@@ -136,7 +136,7 @@ class GenerationLoopRootCommandPreservationTest {
                     }
                 } }
             assertEquals(if (resume) 1 else 2, requests)
-            assertEquals("The original command must be the exact argument of inner sh -c", command, shellInput.readText())
+            assertEquals("The original command must be the exact script received by sh", command, shellInput.readText())
             return latest.flatMap { it.getTools() }.single()
         } finally {
             manager.close(); client.dispatcher.executorService.shutdownNow(); client.connectionPool.evictAll()

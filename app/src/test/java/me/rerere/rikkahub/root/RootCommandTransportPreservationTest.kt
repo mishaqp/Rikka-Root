@@ -16,6 +16,7 @@ class RootCommandTransportPreservationTest(
     private val headless: Boolean,
     private val command: String,
     private val expectedOutput: String,
+    private val fallback: Boolean,
 ) {
     @get:Rule val folder = TemporaryFolder()
 
@@ -29,9 +30,10 @@ class RootCommandTransportPreservationTest(
             "if [ \"\$#\" -eq 1 ] && [ \"\${1##*/}\" = command ]; then cat \"\$1\" > ${quote(received.path)}; fi"
         } else {
             // The supervisor reaches this shim first; the inner command replaces that capture.
-            "if [ \"\$1\" = -c ]; then printf '%s' \"\$2\" > ${quote(received.path)}; fi"
+            "if [ \"\$#\" -eq 2 ] && [ \"\$1\" = -c ]; then printf '%s' \"\$2\" > ${quote(received.path)}; fi"
         }
         executable(File(bin, "sh"), "#!/bin/sh\n$capture\nexec /bin/sh \"\$@\"\n")
+        if (fallback) executable(File(bin, "mkfifo"), "#!/bin/sh\nexit 1\n")
         val su = folder.newFile("su")
         executable(su, "#!/bin/sh\nPATH=${quote(bin.path)}:\"\$PATH\"\nexport PATH\nexec /bin/sh -c \"\$2\"\n")
         val manager = RootShellManager(suExecutable = su.path, controlDirectory = folder.root)
@@ -59,7 +61,7 @@ class RootCommandTransportPreservationTest(
 
     companion object {
         @JvmStatic
-        @Parameterized.Parameters(name = "{0}, headless={1}")
+        @Parameterized.Parameters(name = "{0}, headless={1}, fallback={4}")
         fun cases(): List<Array<Any>> {
             val commands = listOf(
                 Triple(
@@ -88,8 +90,8 @@ class RootCommandTransportPreservationTest(
                     "line one\n    line \"two\"\n\tline three\n",
                 ),
             )
-            return listOf(false, true).flatMap { headless ->
-                commands.map { (name, command, output) -> arrayOf<Any>(name, headless, command, output) }
+            return listOf(false to false, true to false, false to true).flatMap { (headless, fallback) ->
+                commands.map { (name, command, output) -> arrayOf<Any>(name, headless, command, output, fallback) }
             }
         }
     }
