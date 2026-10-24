@@ -38,14 +38,15 @@ sealed interface KimiPollResult {
 private val TERMINAL_KIMI_CODES = setOf("invalid_grant", "invalid_token", "token_revoked")
 private fun invalidKimiCredentials(status: Int, code: String) = status in setOf(400, 401, 403) && code in TERMINAL_KIMI_CODES
 
-class KimiApiException(val status: Int, val code: String = "") : IOException(when {
+class KimiApiException(val status: Int, val code: String = "", detail: String? = null) : IOException((when {
     invalidKimiCredentials(status, code) -> "Сессия Kimi недействительна. Войдите снова."
     status == 401 -> "Kimi отклонил сессию (HTTP 401). Повторите вход."
     status == 402 || status == 403 -> "Kimi отклонил доступ (HTTP $status). Проверьте подписку Kimi Code и доступность модели для этого клиента."
     status == 429 -> "Квота или частота запросов Kimi исчерпана (HTTP 429). Попробуйте позже."
     status >= 500 -> "Сервис Kimi временно недоступен (HTTP $status). Попробуйте позже."
+    status == 400 -> "Kimi отклонил параметры запроса (HTTP 400)."
     else -> "Не удалось выполнить запрос Kimi (HTTP $status)."
-}) {
+}) + detail?.takeIf(String::isNotBlank)?.let { "\nПричина Kimi: $it" }.orEmpty()) {
     val retryable get() = status == 429 || status in 500..599
     val reauthenticationRequired get() = invalidKimiCredentials(status, code)
 }

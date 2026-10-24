@@ -165,6 +165,7 @@ class KimiProviderTest {
         val original = buildJsonObject {
             putJsonArray("messages") { addJsonObject {
                 put("role", "assistant")
+                put("reasoning_content", "Existing reasoning")
                 putJsonArray("tool_calls") { addJsonObject {
                     put("id", "call-1"); putJsonObject("function") { put("name", "root_exec"); put("arguments", arguments) }
                 } }

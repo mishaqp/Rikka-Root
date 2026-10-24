@@ -4,6 +4,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.serialization.json.*
 import me.rerere.ai.core.MessageRole
@@ -12,6 +13,7 @@ import me.rerere.ai.provider.*
 import me.rerere.ai.provider.providers.claude.ClaudeProvider
 import me.rerere.ai.provider.providers.openai.OpenAIProvider
 import me.rerere.ai.ui.*
+import me.rerere.ai.util.HttpException
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -125,6 +127,13 @@ class KimiProvider(
                 retried = true
             }
         }
+    }.catch { error ->
+        if (error is CancellationException) throw error
+        val responseError = generateSequence<Throwable>(error) { it.cause }.filterIsInstance<KimiApiException>().firstOrNull()
+        // OkHttp callbacks require IOException; outside that boundary an HTTP response is
+        // a provider failure, so GenerationLoop must not label/retry it as a lost connection.
+        if (responseError != null) throw HttpException(responseError.message.orEmpty())
+        throw error
     }.flowOn(Dispatchers.IO)
 
     private suspend fun transport(
@@ -159,9 +168,7 @@ class KimiProvider(
                 }
                 val response = chain.proceed(builder.build())
                 if (!response.isSuccessful) {
-                    val status = response.code
-                    response.close()
-                    throw KimiApiException(status)
+                    response.use { throw kimiGenerationError(it, account.tokens, json) }
                 }
                 response
             })
@@ -198,10 +205,10 @@ internal fun isKimiGenerationRequest(request: Request, region: KimiRegion, proto
 internal fun adaptKimiBody(original: JsonObject, info: KimiModelInfo, level: ReasoningLevel): JsonObject {
     val body = original.toMutableMap()
     listOf("thinking", "reasoning", "reasoning_effort", "output_config").forEach(body::remove)
-    if (!info.reasoning) return JsonObject(body)
-    val enabled = info.thinkingType == "only" || level != ReasoningLevel.OFF
-    val effort = level.effort.takeIf { level !in setOf(ReasoningLevel.AUTO, ReasoningLevel.OFF) && it in info.efforts }
-        ?: info.defaultEffort
+    if (!info.reasoning && !info.requiresThinking) return JsonObject(body)
+    val enabled = info.requiresThinking || level != ReasoningLevel.OFF
+    val effort = level.effort.takeIf { level !in setOf(ReasoningLevel.AUTO, ReasoningLevel.OFF) && it in info.effectiveEfforts }
+        ?: info.effectiveDefaultEffort
     when (info.protocol) {
         "anthropic" -> {
             body["thinking"] = buildJsonObject { put("type", if (enabled) "adaptive" else "disabled") }
@@ -211,6 +218,18 @@ internal fun adaptKimiBody(original: JsonObject, info: KimiModelInfo, level: Rea
             body["reasoning"] = buildJsonObject { if (effort != null) put("effort", effort) }
         }
         else -> {
+            if (enabled) (body["messages"] as? JsonArray)?.let { messages ->
+                body["messages"] = JsonArray(messages.map { element ->
+                    val message = element as? JsonObject
+                    if (message?.text("role") == "assistant" &&
+                        (message["tool_calls"] as? JsonArray)?.isNotEmpty() == true &&
+                        !message.containsKey("reasoning_content")) {
+                        // An explicitly empty field is meaningful to Kimi; never invent thinking
+                        // text or touch the original tool argument strings.
+                        JsonObject(message + ("reasoning_content" to JsonPrimitive("")))
+                    } else element
+                })
+            }
             body["thinking"] = buildJsonObject {
                 put("type", if (enabled) "enabled" else "disabled")
                 if (enabled && Regex("(?i)kimi[-_.]?k2[._-]6").containsMatchIn(info.id)) put("keep", "all")

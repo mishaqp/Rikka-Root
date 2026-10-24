@@ -52,14 +52,23 @@ data class KimiModelInfo(
     val efforts: List<String> = emptyList(),
     val defaultEffort: String? = null,
 ) {
+    // The documented Pro contract remains mandatory even with old/incomplete catalog metadata.
+    internal val requiresThinking get() = thinkingType == "only" || id in KIMI_PRO_MODELS
+    internal val effectiveEfforts get() = efforts.ifEmpty { if (id in KIMI_PRO_MODELS) listOf("low", "high", "max") else emptyList() }
+    internal val effectiveDefaultEffort get() = defaultEffort ?: if (id in KIMI_PRO_MODELS) {
+        "max".takeIf { it in effectiveEfforts } ?: effectiveEfforts.firstOrNull()
+    } else null
+
     fun toModel() = Model(modelId = id, displayName = displayName,
         abilities = buildList {
             if (tools) add(ModelAbility.TOOL)
-            if (reasoning) add(ModelAbility.REASONING)
+            if (reasoning || requiresThinking) add(ModelAbility.REASONING)
         },
         inputModalities = if (images) listOf(Modality.TEXT, Modality.IMAGE) else listOf(Modality.TEXT),
-        supportedReasoningEfforts = efforts)
+        supportedReasoningEfforts = effectiveEfforts)
 }
+
+private val KIMI_PRO_MODELS = setOf("k3.1-pro", "k3.1-pro-highspeed")
 
 internal fun parseKimiModels(payload: JsonObject): List<KimiModelInfo> {
     val data = payload["data"] as? JsonArray ?: error("Kimi вернул некорректный каталог моделей.")
