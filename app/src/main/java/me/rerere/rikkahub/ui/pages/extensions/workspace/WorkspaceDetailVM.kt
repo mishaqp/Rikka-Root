@@ -19,20 +19,24 @@ import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
+import me.rerere.rikkahub.data.repository.WorkspaceProfileCoordinator
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.workspace.RootfsInstallProgress
 import me.rerere.workspace.RootfsInstallStage
 import me.rerere.workspace.WorkspaceFileEntry
 import me.rerere.workspace.WorkspaceCommandResult
+import me.rerere.workspace.WorkspaceProfileKind
 import me.rerere.workspace.WorkspaceStorageArea
 
 class WorkspaceDetailVM(
     private val id: String,
     private val repository: WorkspaceRepository,
     private val terminalSessionManager: WorkspaceTerminalSessionManager,
+    private val profileCoordinator: WorkspaceProfileCoordinator,
 ) : ViewModel() {
     private val _state = MutableStateFlow(WorkspaceDetailState())
     val state = _state.asStateFlow()
+    val profiles = profileCoordinator.states(id)
 
     private var pendingExport: Pair<WorkspaceStorageArea, List<WorkspaceFileEntry>>? = null
 
@@ -149,6 +153,7 @@ class WorkspaceDetailVM(
     }
 
     fun refresh() {
+        profileCoordinator.refresh(id)
         viewModelScope.launch {
             _state.update { it.copy(loading = true, error = null) }
             runCatching {
@@ -270,6 +275,18 @@ class WorkspaceDetailVM(
             repository.setToolApproval(workspace.id, toolName, needsApproval)
             loadWorkspace()
         }
+    }
+
+    fun prepareProfile(kind: WorkspaceProfileKind) {
+        profileCoordinator.prepare(id, kind)
+    }
+
+    fun verifyProfile(kind: WorkspaceProfileKind) {
+        profileCoordinator.verify(id, kind)
+    }
+
+    fun cancelProfile() {
+        profileCoordinator.cancel(id)
     }
 
     fun installRootfs(url: String) {

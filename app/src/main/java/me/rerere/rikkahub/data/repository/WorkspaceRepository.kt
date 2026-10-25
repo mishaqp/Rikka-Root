@@ -19,6 +19,10 @@ import me.rerere.workspace.WorkspaceCommandResult
 import me.rerere.workspace.BackgroundStatus
 import me.rerere.workspace.WorkspaceFileEntry
 import me.rerere.workspace.WorkspaceManager
+import me.rerere.workspace.WorkspaceProfileKind
+import me.rerere.workspace.WorkspaceProfileService
+import me.rerere.workspace.WorkspaceProfileState
+import me.rerere.workspace.WorkspaceProfilesSnapshot
 import me.rerere.workspace.WorkspaceShellStatus
 import me.rerere.workspace.WorkspaceStorageArea
 import java.io.ByteArrayOutputStream
@@ -31,6 +35,7 @@ class WorkspaceRepository(
     private val manager: WorkspaceManager,
     private val rootfsInstaller: RootfsInstaller,
     private val settingsStore: SettingsStore,
+    private val profileService: WorkspaceProfileService = WorkspaceProfileService(manager),
 ) {
     private val toolApprovalMutex = Mutex()
     fun listFlow(): Flow<List<WorkspaceEntity>> = dao.listFlow()
@@ -38,6 +43,8 @@ class WorkspaceRepository(
     suspend fun checkIntegrity() = withContext(Dispatchers.IO) {
         val workspaces = dao.getAll()
         for (workspace in workspaces) {
+            // Reading states also invalidates READY when Rootfs was replaced or removed.
+            profileService.states(workspace.root)
             val dir = manager.workspaceDir(workspace.root)
             if (!dir.exists()) {
                 // 目录缺失时不删除记录(例如恢复备份后工作区文件未随数据库一起恢复),
@@ -59,6 +66,43 @@ class WorkspaceRepository(
     }
 
     suspend fun getById(id: String): WorkspaceEntity? = dao.getById(id)
+
+    suspend fun profileStates(id: String): WorkspaceProfilesSnapshot {
+        val workspace = dao.getById(id) ?: return WorkspaceProfilesSnapshot.empty()
+        return withContext(Dispatchers.IO) { profileService.states(workspace.root) }
+    }
+
+    suspend fun prepareProfile(id: String, kind: WorkspaceProfileKind): WorkspaceProfileState {
+        val workspace = profileWorkspace(id)
+        return runInterruptible(Dispatchers.IO) {
+            profileService.prepare(workspace.root, kind, workspace.shellCompatibilityMode)
+        }
+    }
+
+    suspend fun verifyProfile(id: String, kind: WorkspaceProfileKind): WorkspaceProfileState {
+        val workspace = profileWorkspace(id)
+        return runInterruptible(Dispatchers.IO) {
+            profileService.verify(workspace.root, kind, workspace.shellCompatibilityMode)
+        }
+    }
+
+    suspend fun cancelProfile(id: String, kind: WorkspaceProfileKind): WorkspaceProfileState? {
+        val workspace = dao.getById(id) ?: return null
+        return withContext(Dispatchers.IO) { profileService.markCancelled(workspace.root, kind) }
+    }
+
+    suspend fun interruptProfile(id: String, kind: WorkspaceProfileKind): WorkspaceProfileState? {
+        val workspace = dao.getById(id) ?: return null
+        return withContext(Dispatchers.IO) { profileService.markInterrupted(workspace.root, kind) }
+    }
+
+    suspend fun failProfile(id: String, kind: WorkspaceProfileKind, reason: String): WorkspaceProfileState? {
+        val workspace = dao.getById(id) ?: return null
+        return withContext(Dispatchers.IO) { profileService.markFailed(workspace.root, kind, reason) }
+    }
+
+    private suspend fun profileWorkspace(id: String): WorkspaceEntity =
+        dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
 
     suspend fun create(name: String): WorkspaceEntity {
         val id = Uuid.random().toString()
@@ -136,6 +180,10 @@ class WorkspaceRepository(
             Log.e(TAG, "installRootfs failed: workspace=${workspace.id}, root=${workspace.root}, url=$url", e)
             updateShellState(workspace, WorkspaceShellStatus.BROKEN.name)
             throw e
+        } finally {
+            withContext(NonCancellable + Dispatchers.IO) {
+                profileService.reset(workspace.root)
+            }
         }
     }
 
