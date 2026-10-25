@@ -1,119 +1,143 @@
 package me.rerere.rikkahub.root
 
-import android.content.Context
-import android.content.SharedPreferences
-import android.content.pm.PackageManager
-import android.os.Build
-import android.system.Os
-import android.util.Log
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.runInterruptible
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
-/** Root execution with a shared, explicitly prepared transport for background calls. */
+/** Last explicit verification result; READY is not a permanent grant from the root manager. */
+enum class RootStatus { UNCHECKED, CHECKING, READY, UNAVAILABLE, DENIED_OR_FAILED, NOT_ROOT, TIMED_OUT }
+
+/** Real Android root only. No adb/shell-UID or external-app fallback is used. */
 class RootShellManager(
     private val suExecutable: String = "su",
     private val probeTimeoutMs: Int = 30_000,
-    private val controlDirectory: File,
-    private val clockMs: () -> Long = { System.currentTimeMillis() },
+    private val controlDirectory: File = File(System.getProperty("java.io.tmpdir") ?: "."),
+    private val clockMs: () -> Long = { System.nanoTime() / 1_000_000L },
 ) {
     private val _status = MutableStateFlow(RootStatus.UNCHECKED)
-    val status: StateFlow<RootStatus> = _status
+    val status = _status.asStateFlow()
     private val probeLock = Mutex()
+    private var cachedStatus: RootStatus? = null
+    private var verifiedAtMs = 0L
     private val commandLock = Mutex()
     private val sessionStateLock = Any()
-    private var sharedSession: PreparedSession? = null
     private var sessionEpoch = 0L
-    private var cachedStatus = RootStatus.UNCHECKED
-    private var verifiedAtMs = 0L
-
     private data class PreparedSession(val transport: HeadlessRootSession, val headlessAllowed: Boolean)
+    @Volatile private var sharedSession: PreparedSession? = null
 
-    suspend fun verifyRoot(force: Boolean = false, prepareHeadless: Boolean = false): RootStatus = probeLock.withLock {
-        val now = clockMs()
-        if (!force && !prepareHeadless && cachedStatus == RootStatus.READY && now - verifiedAtMs < 60_000) {
-            _status.value = RootStatus.READY
-            return@withLock RootStatus.READY
-        }
-        _status.value = RootStatus.CHECKING
-        val result = withContext(Dispatchers.IO) {
-            val process = try {
-                RootProcessRunner.run(listOf(suExecutable, "-c", "id -u"), probeTimeoutMs)
-            } catch (_: java.io.IOException) {
-                RootProcessResult(error = "root_unavailable", reason = "Не найден su или не удалось запустить проверку Root.")
+    /** May open the root manager's consent dialog. UI calls this only after a user tap. */
+    suspend fun verifyRoot(force: Boolean = false, prepareHeadless: Boolean = false): RootStatus {
+        val epoch = synchronized(sessionStateLock) { sessionEpoch }
+        val verified = verifyRootProbe(force)
+        if (verified != RootStatus.READY) close()
+        if (prepareHeadless && verified == RootStatus.READY) {
+            var prepared = false
+            try {
+                commandLock.withLock {
+                    // Only this explicit foreground action grants background access.
+                    prepared = prepareSession(epoch, headlessAllowed = true) != null
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // The foreground button must fail closed on storage/capability/preparation errors.
+                // Do not expose exception text, or let it escape the UI coroutine.
             }
-            when {
-                process.error == "command_timeout" -> RootProcessResult(error = "root_probe_timeout",
-                    reason = "Проверка Root не завершилась: дождитесь диалога root-менеджера и повторите. Команда не выполнялась.")
-                process.exitCode == 0 && process.stdout.trim() == "0" -> process
-                process.error != null -> process
-                else -> RootProcessResult(error = "root_not_granted", reason = "Root не предоставлен. Проверьте настройки root-менеджера.")
-            }
-        }
-        val status = when (result.error) {
-            null -> RootStatus.READY
-            "root_not_granted" -> RootStatus.NOT_ROOT
-            else -> RootStatus.UNAVAILABLE
-        }
-        if (status == RootStatus.READY && prepareHeadless) {
-            commandLock.withLock {
-                val epoch = synchronized(sessionStateLock) { sessionEpoch }
-                val existing = synchronized(sessionStateLock) { sharedSession }
-                val ready = existing?.transport?.isAlive() == true
-                if (!ready) prepareSession(epoch, headlessAllowed = true)
-                else synchronized(sessionStateLock) { sharedSession = existing.copy(headlessAllowed = true) }
+            if (!prepared) return probeLock.withLock {
+                cachedStatus = null
+                verifiedAtMs = 0L
+                _status.value = RootStatus.DENIED_OR_FAILED
+                RootStatus.DENIED_OR_FAILED
             }
         }
-        cachedStatus = status
-        verifiedAtMs = clockMs()
-        _status.value = status
-        return@withLock status
+        return verified
     }
 
-    suspend fun exec(command: String, timeoutMs: Int, headless: Boolean = false, mayExecute: suspend () -> Boolean = { true }): RootProcessResult {
-        require(timeoutMs > 0)
-        if (command.any { it.code > 0xFF }) return RootProcessResult(error = "invalid_arguments", reason = "Root-команда содержит неподдерживаемые символы.")
-        if (headless) {
-            val session = synchronized(sessionStateLock) { sharedSession?.takeIf { it.headlessAllowed }?.transport }
-                ?: return interactionRequired()
-            if (!session.isAlive()) return interactionRequired()
-            return commandLock.withLock {
-                val current = synchronized(sessionStateLock) { sharedSession?.takeIf { it.headlessAllowed }?.transport }
-                if (current !== session || !session.isAlive()) return@withLock interactionRequired()
-                executePrepared(session, command, timeoutMs, mayExecute)
-            }
+    private suspend fun verifyRootProbe(force: Boolean): RootStatus = probeLock.withLock {
+        cachedStatus?.let { cached ->
+            val ttl = if (cached == RootStatus.READY) 60_000 else 15_000
+            if (!force && clockMs() - verifiedAtMs < ttl) return@withLock cached
         }
-        val result = commandLock.withLock {
-            if (cachedStatus != RootStatus.READY) {
-                val probe = verifyRoot()
-                if (probe != RootStatus.READY) return@withLock RootProcessResult(error = "root_not_granted",
-                    reason = "Сначала подтвердите Root в настройках. Команда не выполнялась.")
+        _status.value = RootStatus.CHECKING
+        try {
+            val probe = runInterruptible(Dispatchers.IO) {
+                RootProcessRunner.run(listOf(suExecutable, "-c", "id -u"), probeTimeoutMs, 512, 1_024)
             }
+            val verified = when {
+                probe.error == "exec_failed" -> RootStatus.UNAVAILABLE
+                probe.error == "command_timeout" -> RootStatus.TIMED_OUT
+                probe.exitCode != 0 -> RootStatus.DENIED_OR_FAILED
+                probe.stdout.lineSequence().map(String::trim).filter(String::isNotEmpty).lastOrNull() != "0" -> RootStatus.NOT_ROOT
+                else -> RootStatus.READY
+            }
+            cachedStatus = verified
+            verifiedAtMs = clockMs()
+            _status.value = verified
+            verified
+        } catch (error: CancellationException) {
+            // A cancelled verification must neither leave a spinner nor cache a failed grant.
+            cachedStatus = null
+            _status.value = RootStatus.UNCHECKED
+            throw error
+        }
+    }
+
+    /** Commands share one cancellable queue; each request still owns a separate shell and group. */
+    internal suspend fun exec(command: String, timeoutMs: Int, headless: Boolean = false, mayExecute: suspend () -> Boolean = { true }): RootProcessResult = commandLock.withLock {
+        if (headless) {
             if (!mayExecute()) return@withLock approvalRequired()
-            currentCoroutineContext().ensureActive()
-            val epoch: Long
-            val existing: PreparedSession?
-            synchronized(sessionStateLock) { epoch = sessionEpoch; existing = sharedSession }
-            val session = existing?.transport?.takeIf { it.isAlive() } ?: prepareSession(epoch, headlessAllowed = false)
+            val session = sharedSession?.takeIf { it.headlessAllowed }?.transport
+                ?: return@withLock interactionRequired()
+            return@withLock executePrepared(session, command, timeoutMs, mayExecute)
+        }
+        sharedSession?.transport?.takeIf { it.isAlive() }?.let { session ->
+            if (!mayExecute()) return@withLock approvalRequired()
+            // The broker checks UID for each request; a live transport needs no new su probe.
+            return@withLock executePrepared(session, command, timeoutMs, mayExecute, foreground = true)
+        }
+        val epoch = synchronized(sessionStateLock) { sessionEpoch }
+        val verified = verifyRoot()
+        if (verified != RootStatus.READY) {
+            return@withLock RootProcessResult(
+                error = when (verified) {
+                    RootStatus.UNAVAILABLE -> "su_not_available"
+                    RootStatus.TIMED_OUT -> "root_verification_timeout"
+                    else -> "root_not_granted"
+                },
+                reason = "Root не подтверждён. Разрешите доступ Rikka-Root в менеджере root и повторите проверку Root в настройках.",
+            )
+        }
+        if (!mayExecute()) return@withLock approvalRequired()
+        val result = withContext(Dispatchers.IO) {
+            if (!mayExecute()) return@withContext approvalRequired()
+            val session = try {
+                // Foreground reuse does not grant background eligibility.
+                prepareSession(epoch, headlessAllowed = false)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                null
+            }
             currentCoroutineContext().ensureActive()
             // Closing root during authentication wins, including over the one-shot fallback.
-            if (synchronized(sessionStateLock) { epoch != sessionEpoch }) return@withLock interactionRequired()
-            if (!mayExecute()) return@withLock approvalRequired()
+            if (synchronized(sessionStateLock) { epoch != sessionEpoch }) return@withContext interactionRequired()
+            if (!mayExecute()) return@withContext approvalRequired()
             if (session != null) {
                 // Never fall back after execute: a lost response does not mean no side effects.
-                return@withLock runInterruptible { session.execute(command, timeoutMs, foreground = true) }
+                return@withContext runInterruptible { session.execute(command, timeoutMs, foreground = true) }
             }
             // Preparation failed before any user command was submitted. Keep the legacy path.
             runInterruptible {
@@ -568,4 +592,3 @@ private class HeadlessRootSession private constructor(
         }
     }
 }
-
