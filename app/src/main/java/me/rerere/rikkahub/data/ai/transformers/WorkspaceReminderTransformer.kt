@@ -7,6 +7,10 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
+import me.rerere.workspace.WorkspaceProfileKind
+import me.rerere.workspace.WorkspaceProfileState
+import me.rerere.workspace.WorkspaceProfilesSnapshot
+import me.rerere.workspace.WorkspaceProfileStatus
 import me.rerere.workspace.WorkspaceShellStatus
 import java.io.ByteArrayOutputStream
 import java.nio.file.Paths
@@ -36,6 +40,7 @@ class WorkspaceReminderTransformer(
             shell = workspaceRepository.rootfsShell(workspaceId),
             distro = readDistroName(workspaceId),
             cwd = ctx.workspaceCwd,
+            profiles = workspaceRepository.profileStates(workspaceId),
         ) + buildAgentsPrompt(workspaceId, ctx.workspaceCwd)
 
         // 追加到第一条 system 消息; 若不存在则插入一条
@@ -129,6 +134,7 @@ private fun buildWorkspacePrompt(
     shell: String,
     distro: String?,
     cwd: String? = null,
+    profiles: WorkspaceProfilesSnapshot,
 ): String = buildString {
     appendLine("<workspace>")
     appendLine("Вам доступна постоянная рабочая папка Linux \"${workspace.name}\" в изолированном окружении proot Rootfs.")
@@ -153,8 +159,41 @@ private fun buildWorkspacePrompt(
     if (!cwd.isNullOrBlank()) {
         appendLine("- Текущий рабочий каталог: `$cwd`. Используйте его по умолчанию для файловых операций и команд оболочки.")
     }
+    appendLine("- Фактические профили разработки этой рабочей папки:")
+    WorkspaceProfileKind.entries.forEach { kind ->
+        val profile = profiles.get(kind)
+        val label = if (kind == WorkspaceProfileKind.PYTHON) "Python" else "Node.js"
+        val facts = buildList {
+            add("состояние=${profile.status}")
+            profile.version?.let { add("версия=${it.promptValue()}") }
+            profile.packageManagerVersion?.let {
+                add("${if (kind == WorkspaceProfileKind.PYTHON) "pip" else "npm"}=${it.promptValue()}")
+            }
+            profile.executablePath?.let { add("запуск=`${it.promptValue()}`") }
+            profile.packageManagerPath?.let {
+                add("${if (kind == WorkspaceProfileKind.PYTHON) "pip" else "npm"} путь=`${it.promptValue()}`")
+            }
+        }
+        appendLine("  - $label: ${facts.joinToString("; ")}.")
+    }
+    if (profiles.python.status == WorkspaceProfileStatus.READY) {
+        appendLine("- Python: зависимости каждого проекта устанавливайте только в его отдельный `.venv`, не перезаписывая существующее окружение.")
+        appendLine("  Активация venv в одном `workspace_shell` НЕ сохраняется для следующего вызова. Используйте явные пути `/workspace/<проект>/.venv/bin/python` и `/workspace/<проект>/.venv/bin/python -m pip install ...`.")
+    }
+    if (profiles.node.status == WorkspaceProfileStatus.READY) {
+        appendLine("- Node.js: зависимости устанавливайте только локально в проект через `npm install`; `npm install -g` запрещён. Не изменяйте Root PATH.")
+        profiles.node.executablePath
+            ?.takeIf { it.startsWith("/opt/rikkahub/") }
+            ?.substringBeforeLast('/', missingDelimiterValue = "")
+            ?.takeIf { it.isNotBlank() }
+            ?.let { binDir ->
+                appendLine("  Для официальной отдельной сборки задавайте PATH только текущей команде: `PATH=${binDir.promptValue()}:\$PATH <команда>`; не экспортируйте его глобально.")
+            }
+    }
     append("</workspace>")
 }
+
+private fun String.promptValue(): String = filterNot { it.isISOControl() }.trim().take(240)
 
 private fun UIMessage.appendText(extra: String): UIMessage {
     val updatedParts = parts.toMutableList()

@@ -94,6 +94,10 @@ import me.rerere.ui.components.RikkaConfirmDialog
 import me.rerere.workspace.RootfsInstallProgress
 import me.rerere.workspace.RootfsInstallStage
 import me.rerere.workspace.WorkspaceFileEntry
+import me.rerere.workspace.WorkspaceProfileKind
+import me.rerere.workspace.WorkspaceProfileState
+import me.rerere.workspace.WorkspaceProfileStatus
+import me.rerere.workspace.WorkspaceProfilesSnapshot
 import me.rerere.workspace.WorkspaceShellStatus
 import me.rerere.workspace.WorkspaceStorageArea
 import org.koin.androidx.compose.koinViewModel
@@ -106,6 +110,7 @@ fun WorkspaceDetailPage(id: String, openFiles: Boolean = false) {
     val vm: WorkspaceDetailVM = koinViewModel(parameters = { parametersOf(id) })
     val state by vm.state.collectAsStateWithLifecycle()
     val installProgress by vm.installProgress.collectAsStateWithLifecycle()
+    val profiles by vm.profiles.collectAsStateWithLifecycle()
     val installError by vm.installError.collectAsStateWithLifecycle()
     val settingsError by vm.settingsError.collectAsStateWithLifecycle()
     val pagerState = rememberPagerState(initialPage = if (openFiles) 1 else 0) { 3 }
@@ -213,7 +218,11 @@ fun WorkspaceDetailPage(id: String, openFiles: Boolean = false) {
                 0 -> WorkspaceBasicPage(
                     workspace = state.workspace,
                     installProgress = installProgress,
+                    profiles = profiles,
                     onInstallRootfs = { showInstallDialog = true },
+                    onPrepareProfile = vm::prepareProfile,
+                    onVerifyProfile = vm::verifyProfile,
+                    onCancelProfile = vm::cancelProfile,
                     onToolApprovalChange = vm::setToolApproval,
                     onShellCompatibilityModeChange = vm::setShellCompatibilityMode,
                 )
@@ -371,13 +380,18 @@ fun WorkspaceDetailPage(id: String, openFiles: Boolean = false) {
 private fun WorkspaceBasicPage(
     workspace: WorkspaceEntity?,
     installProgress: RootfsInstallProgress?,
+    profiles: WorkspaceProfilesSnapshot,
     onInstallRootfs: () -> Unit,
+    onPrepareProfile: (WorkspaceProfileKind) -> Unit,
+    onVerifyProfile: (WorkspaceProfileKind) -> Unit,
+    onCancelProfile: () -> Unit,
     onToolApprovalChange: (String, Boolean) -> Unit,
     onShellCompatibilityModeChange: (Boolean) -> Unit,
 ) {
     val shellStatus = workspace?.shellStatus
     val installing = installProgress != null || shellStatus == WorkspaceShellStatus.INSTALLING.name
     val rootfsReady = shellStatus == WorkspaceShellStatus.READY.name
+    val profilesBusy = listOf(profiles.python, profiles.node).any { it.status in PROFILE_ACTIVE_STATUSES }
     val installButtonText = when {
         installing -> stringResource(R.string.workspace_detail_installing)
         rootfsReady -> stringResource(R.string.workspace_detail_reinstall_rootfs)
@@ -421,7 +435,7 @@ private fun WorkspaceBasicPage(
                         ) {
                             Button(
                                 onClick = onInstallRootfs,
-                                enabled = workspace != null && !installing,
+                                enabled = workspace != null && !installing && !profilesBusy,
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 Icon(HugeIcons.Bash, contentDescription = null)
@@ -435,6 +449,17 @@ private fun WorkspaceBasicPage(
                     },
                 )
             }
+        }
+
+        item {
+            DevelopmentProfilesCard(
+                profiles = profiles,
+                rootfsReady = rootfsReady,
+                busy = profilesBusy,
+                onPrepare = onPrepareProfile,
+                onVerify = onVerifyProfile,
+                onCancel = onCancelProfile,
+            )
         }
 
         item {
@@ -989,3 +1014,109 @@ internal fun String.toShellStatusLabel(): String = when (this) {
 
 private const val DEFAULT_ROOTFS_URL =
     "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.3-base-arm64.tar.gz"
+
+
+private val PROFILE_ACTIVE_STATUSES = setOf(
+    WorkspaceProfileStatus.PREPARING,
+    WorkspaceProfileStatus.CHECKING,
+)
+
+@Composable
+private fun DevelopmentProfilesCard(
+    profiles: WorkspaceProfilesSnapshot,
+    rootfsReady: Boolean,
+    busy: Boolean,
+    onPrepare: (WorkspaceProfileKind) -> Unit,
+    onVerify: (WorkspaceProfileKind) -> Unit,
+    onCancel: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("Профили разработки", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Python и Node.js принадлежат только этой рабочей папке. Зависимости проектов остаются локальными.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (!rootfsReady) {
+                Text(
+                    "Rootfs отсутствует или повреждён. Сначала установите или восстановите Linux кнопкой выше; автоматическая переустановка не выполняется.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            WorkspaceProfileKind.entries.forEach { kind ->
+                DevelopmentProfileBlock(
+                    state = profiles.get(kind),
+                    rootfsReady = rootfsReady,
+                    busy = busy,
+                    onPrepare = { onPrepare(kind) },
+                    onVerify = { onVerify(kind) },
+                    onCancel = onCancel,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DevelopmentProfileBlock(
+    state: WorkspaceProfileState,
+    rootfsReady: Boolean,
+    busy: Boolean,
+    onPrepare: () -> Unit,
+    onVerify: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val active = state.status in PROFILE_ACTIVE_STATUSES
+    var showDiagnostic by remember(state.kind, state.updatedAt) { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            if (state.kind == WorkspaceProfileKind.PYTHON) "Python" else "Node.js",
+            style = MaterialTheme.typography.titleSmall,
+        )
+        Text("Состояние: ${state.status.profileStatusLabel()}")
+        state.version?.let { Text("Версия: $it", style = MaterialTheme.typography.bodySmall) }
+        state.packageManagerVersion?.let {
+            Text("${if (state.kind == WorkspaceProfileKind.PYTHON) "pip" else "npm"}: $it", style = MaterialTheme.typography.bodySmall)
+        }
+        state.executablePath?.let { Text("Запуск: $it", style = MaterialTheme.typography.bodySmall) }
+        state.packageManagerPath?.let {
+            Text("${if (state.kind == WorkspaceProfileKind.PYTHON) "pip" else "npm"} путь: $it", style = MaterialTheme.typography.bodySmall)
+        }
+        state.exitCode?.let { Text("exit_code: $it", style = MaterialTheme.typography.bodySmall) }
+        state.errorReason?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
+        if (active) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            TextButton(onClick = onPrepare, enabled = rootfsReady && !busy) { Text("Подготовить") }
+            TextButton(onClick = onVerify, enabled = rootfsReady && !busy) { Text("Проверить") }
+            TextButton(onClick = onCancel, enabled = active) { Text("Остановить") }
+        }
+        state.diagnostic?.takeUnless { it.isBlank() }?.let { diagnostic ->
+            TextButton(onClick = { showDiagnostic = !showDiagnostic }) {
+                Text(if (showDiagnostic) "Скрыть диагностику" else "Показать диагностику")
+            }
+            if (showDiagnostic) {
+                Text(diagnostic, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+private fun WorkspaceProfileStatus.profileStatusLabel(): String = when (this) {
+    WorkspaceProfileStatus.NOT_INSTALLED -> "Не установлен"
+    WorkspaceProfileStatus.PREPARING -> "Подготовка"
+    WorkspaceProfileStatus.CHECKING -> "Проверка"
+    WorkspaceProfileStatus.READY -> "Готово"
+    WorkspaceProfileStatus.ERROR -> "Ошибка"
+    WorkspaceProfileStatus.CANCELLED -> "Остановлено"
+    WorkspaceProfileStatus.INTERRUPTED -> "Прервано; требуется проверка"
+    WorkspaceProfileStatus.UNSUPPORTED -> "Дистрибутив пока не поддерживается"
+}

@@ -39,6 +39,8 @@ class RootfsInstaller(
                 "Failed to move rootfs into workspace"
             }
             patcher.patch(linuxDir)
+            File(manager.workspaceDir(root), WorkspaceManager.ROOTFS_GENERATION_FILE)
+                .writeText(java.util.UUID.randomUUID().toString())
             onProgress(RootfsInstallProgress(stage = RootfsInstallStage.INSTALLED))
         } finally {
             archive.delete()

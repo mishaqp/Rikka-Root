@@ -267,6 +267,9 @@ class WorkspaceManager(
         private const val TEMP_DIR = "tmp"
         const val DEFAULT_COMMAND_TIMEOUT_MS = 30_000L
 
+        /** Changes whenever the app installs a fresh Rootfs; invalidates profile readiness. */
+        const val ROOTFS_GENERATION_FILE = ".rootfs-generation"
+
         /** Rootfs 内工作区文件区的挂载点 */
         const val ROOTFS_WORKSPACE_DIR = "/workspace"
 

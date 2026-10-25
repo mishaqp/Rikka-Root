@@ -2,6 +2,7 @@ package me.rerere.rikkahub.di
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import me.rerere.rikkahub.AppScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.datastore.SettingsStore
@@ -16,11 +17,13 @@ import me.rerere.rikkahub.data.repository.FilesRepository
 import me.rerere.rikkahub.data.repository.GenMediaRepository
 import me.rerere.rikkahub.data.repository.MediaCreationRepository
 import me.rerere.rikkahub.data.repository.MemoryRepository
+import me.rerere.rikkahub.data.repository.WorkspaceProfileCoordinator
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.workspace.ProotShellRunner
 import me.rerere.workspace.RootfsInstaller
 import me.rerere.workspace.WorkspaceBindMount
 import me.rerere.workspace.WorkspaceManager
+import me.rerere.workspace.WorkspaceProfileService
 import org.koin.dsl.module
 import java.io.File
 
@@ -94,7 +97,15 @@ val repositoryModule = module {
     }
 
     single {
-        WorkspaceRepository(get(), get(), get(), get())
+        WorkspaceProfileService(get())
+    }
+
+    single {
+        WorkspaceRepository(get(), get(), get(), get(), get())
+    }
+
+    single {
+        WorkspaceProfileCoordinator(get(), get<AppScope>())
     }
 
     single {
