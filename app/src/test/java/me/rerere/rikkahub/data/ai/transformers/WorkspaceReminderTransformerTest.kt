@@ -13,7 +13,12 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
+import me.rerere.workspace.WorkspaceProfileKind
+import me.rerere.workspace.WorkspaceProfileState
+import me.rerere.workspace.WorkspaceProfileStatus
+import me.rerere.workspace.WorkspaceProfilesSnapshot
 import me.rerere.workspace.WorkspaceShellStatus
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import java.io.OutputStream
 import kotlin.uuid.Uuid
@@ -87,13 +92,50 @@ class WorkspaceReminderTransformerTest {
         }
     }
 
+    @Test fun realWorkspaceTransformIncludesOnlyFactualProfileStateAndLocalDependencyRules() {
+        val profiles = WorkspaceProfilesSnapshot(
+            rootfsStamp = "not-for-the-model",
+            python = WorkspaceProfileState(
+                kind = WorkspaceProfileKind.PYTHON,
+                status = WorkspaceProfileStatus.READY,
+                version = "Python 3.12.3",
+                packageManagerVersion = "pip 24.0",
+                executablePath = "/usr/bin/python3",
+                packageManagerPath = "/usr/bin/python3 -m pip",
+                diagnostic = "private diagnostic must not be injected",
+            ),
+            node = WorkspaceProfileState(
+                kind = WorkspaceProfileKind.NODE,
+                status = WorkspaceProfileStatus.READY,
+                version = "v24.22.1",
+                packageManagerVersion = "11.19.1",
+                executablePath = "/opt/rikkahub/node-v24.22.1/bin/node",
+                packageManagerPath = "/opt/rikkahub/node-v24.22.1/bin/npm",
+            ),
+        )
+        val (prompt, _) = promptProbe("/bin/bash", profiles)
+        for (literal in listOf(
+            "Python 3.12.3", "pip 24.0", "/usr/bin/python3", "v24.22.1", "11.19.1",
+            "/opt/rikkahub/node-v24.22.1/bin/npm", "НЕ сохраняется",
+            "/workspace/<проект>/.venv/bin/python -m pip install", "npm install -g", "Root PATH",
+            "PATH=/opt/rikkahub/node-v24.22.1/bin:\$PATH",
+        )) {
+            assertTrue("Missing profile fact or rule: $literal", prompt.contains(literal))
+        }
+        assertFalse(prompt.contains("private diagnostic"))
+        assertFalse(prompt.contains("not-for-the-model"))
+    }
+
     private val originalSystem = "Original user system prompt 中文"
     private val userInstructions = "User-authored AGENTS instruction: keep ExactIdentifier().\n用户提供的指令，保持原样。"
     private val workspaceName = "User workspace name 中文"
     private val distribution = "ExternalDistro 1.2"
 
     /** All filesystem reads are in-memory repository responses; no Rootfs or command runs. */
-    private fun promptProbe(shell: String): Pair<String, WorkspaceRepository> = runBlocking {
+    private fun promptProbe(
+        shell: String,
+        profiles: WorkspaceProfilesSnapshot = WorkspaceProfilesSnapshot.empty("rootfs"),
+    ): Pair<String, WorkspaceRepository> = runBlocking {
         val id = Uuid.parse("12345678-1111-4000-8000-000000000001")
         val files = mapOf("/etc/os-release" to "PRETTY_NAME=\"$distribution\"\n",
             "/root/.agents/AGENTS.md" to userInstructions)
@@ -101,6 +143,7 @@ class WorkspaceReminderTransformerTest {
             coEvery { getById(id.toString()) } returns WorkspaceEntity(id.toString(), workspaceName, "/not-used",
                 WorkspaceShellStatus.READY.name, 0L, 0L)
             coEvery { rootfsShell(id.toString()) } returns shell
+            coEvery { profileStates(id.toString()) } returns profiles
             coEvery { rootfsFileSize(id.toString(), any()) } coAnswers {
                 files[secondArg<String>()].orEmpty().toByteArray(Charsets.UTF_8).size.toLong()
             }
