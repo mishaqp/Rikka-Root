@@ -567,11 +567,14 @@ private class HeadlessRootSession private constructor(
                     count=20
                     while [ ! -s "${'$'}request/pid" ] && [ "${'$'}count" -gt 0 ]; do sleep 0.01; count=${'$'}((count - 1)); done
                     IFS= read -r foreground < "${'$'}request/foreground"
-                    if [ "${'$'}foreground" = 1 ] && [ "${'$'}outcome" -ge 0 ] 2>/dev/null && [ "${'$'}outcome" -le 255 ] 2>/dev/null; then
-                        # Ordinary sh -c historically leaves explicit background launches alive after exit.
-                        release_group "${'$'}request/pid" || { stop_group "${'$'}request/pid"; outcome=cleanup_unconfirmed; }
-                    else stop_group "${'$'}request/pid" || outcome=cleanup_unconfirmed
-                    fi
+                    # mksh treats symbolic numeric-test operands as arithmetic names; only release real exit codes.
+                    case "${'$'}foreground:${'$'}outcome" in
+                        1:[0-9]|1:[1-9][0-9]|1:1[0-9][0-9]|1:2[0-4][0-9]|1:25[0-5])
+                            # Ordinary sh -c historically leaves explicit background launches alive after exit.
+                            release_group "${'$'}request/pid" || { stop_group "${'$'}request/pid"; outcome=cleanup_unconfirmed; }
+                            ;;
+                        *) stop_group "${'$'}request/pid" || outcome=cleanup_unconfirmed ;;
+                    esac
                     exec 3>&-
                     exec 4>&-
                     # Let finite queued output drain, then kill exact drain groups; never use an unbounded wait.
