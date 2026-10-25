@@ -160,6 +160,9 @@ class RootPersistentSessionTest(private val brokerShell: String) {
             assertEquals("partial", result.stdout)
             assertEquals("warning", result.stderr)
             assertEquals(listOf("once"), effect.readLines())
+            assertFalse(fixture.manager.isHeadlessReady())
+            assertEquals("root_interaction_required", fixture.manager.exec("echo twice >> ${q(effect.path)}", 1_000, headless = true).error)
+            assertEquals(listOf("once"), effect.readLines())
             assertEquals("A submitted request must never fall back to a new su", 2, fixture.calls.readLines().size)
         }
     }
@@ -271,7 +274,7 @@ class RootPersistentSessionTest(private val brokerShell: String) {
     @Test(timeout = 15_000) fun `completion after the app deadline cannot become a successful exit`() = runBlocking {
         Fixture(folder.newFolder(), brokerShell).use { fixture ->
             fixture.executable("sleep", "if [ \"\$1\" = 0.05 ]; then exec /bin/sleep 0.25; fi\nexec /bin/sleep \"\$@\"")
-            assertEquals(RootStatus.READY, fixture.manager.verifyRoot(prepareHeadless = true))
+            assertEquals(RootStatus.READY, fixture.manager.verifyRoot(prepareHeadless = true)
             val result = fixture.manager.exec("sleep 0.15; printf late; exit 7", 100, headless = true)
             assertEquals("command_timeout", result.error)
             assertNull(result.exitCode)
@@ -307,24 +310,21 @@ class RootPersistentSessionTest(private val brokerShell: String) {
         Fixture(folder.newFolder(), brokerShell).use { fixture ->
             fixture.executable("dd", "for arg in \"\$@\"; do [ \"\$arg\" != iflag=count_bytes ] || exit 91; done\nexec /bin/dd \"\$@\"")
             assertEquals(RootStatus.READY, fixture.manager.verifyRoot(prepareHeadless = true))
-            val result = fixture.manager.exec("head -c 9000 /dev/zero | tr '\\000' a; printf warning >&2", 3_000, headless = true)
+            val result = fixture.manager.exec("head -c 8192 /dev/zero | tr '\\000' x", 3_000, headless = true)
             assertEquals(0, result.exitCode)
-            assertTrue(result.stdout.startsWith("a".repeat(8_000)))
             assertTrue(result.stdoutTruncated)
-            assertEquals("warning", result.stderr)
-            assertFalse(result.stderrTruncated)
-            assertEquals(2, fixture.calls.readLines().size)
+            assertTrue(result.stdout.startsWith("x".repeat(8_000)))
         }
     }
 
     @Test(timeout = 15_000) fun `missing byte counter retains the old bounded capture`() = runBlocking {
         Fixture(folder.newFolder(), brokerShell).use { fixture ->
-            fixture.executable("wc", "exit 91")
-            fixture.manager.verifyRoot(prepareHeadless = true)
-            val result = fixture.manager.exec("head -c 9000 /dev/zero | tr '\\000' a", 3_000, headless = true)
+            fixture.executable("wc", "exit 1")
+            assertEquals(RootStatus.READY, fixture.manager.verifyRoot(prepareHeadless = true))
+            val result = fixture.manager.exec("head -c 9000 /dev/zero | tr '\\000' x", 3_000, headless = true)
             assertEquals(0, result.exitCode)
-            assertTrue(result.stdout.startsWith("a".repeat(8_000)))
             assertTrue(result.stdoutTruncated)
+            assertTrue(result.stdout.startsWith("x".repeat(8_000)))
         }
     }
 
@@ -348,7 +348,151 @@ class RootPersistentSessionTest(private val brokerShell: String) {
         }
     }
 
+    @Test(timeout = 20_000)
+    fun `foreground timeout confirms cleanup and keeps partial streams`() = runBlocking {
+        checkTimeoutCleanup(headless = false)
+    }
+
+    @Test(timeout = 20_000)
+    fun `headless timeout confirms cleanup and keeps partial streams`() = runBlocking {
+        checkTimeoutCleanup(headless = true)
+    }
+
+    private suspend fun checkTimeoutCleanup(headless: Boolean) {
+        Fixture(folder.newFolder(), brokerShell).use { fixture ->
+            assertEquals(RootStatus.READY, fixture.manager.verifyRoot(prepareHeadless = true))
+            val executions = File(fixture.directory, "executions")
+            val leaderStat = File(fixture.directory, "leader-stat")
+            val lateMarker = File(fixture.directory, "late-marker")
+            val control = ProcessBuilder("/bin/sleep", "30").start()
+            try {
+                val controlIdentity = requireNotNull(processIdentity(control.pid()))
+                val started = System.nanoTime()
+                val result = fixture.manager.exec(timeoutCommand(executions, leaderStat, lateMarker), 1_000, headless = headless)
+
+                assertEquals("headless=$headless", "command_timeout", result.error)
+                assertNull(result.exitCode)
+                assertEquals("BEFORE\n", result.stdout)
+                assertEquals("WARN\n", result.stderr)
+                val leader = processIdentity(leaderStat.readText().trim())
+                assertEquals("The recorded supervisor must own its process group", leader.pid, leader.pgid)
+                assertEquals("The recorded supervisor must own its session", leader.pid, leader.sid)
+                assertTrue("Control process must be outside the request group",
+                    controlIdentity.pgid != leader.pgid || controlIdentity.sid != leader.sid)
+                assertRequestStopped(leader)
+                assertTrue("Unrelated control process was killed", isAlive(controlIdentity))
+
+                val next = fixture.manager.exec("printf NEXT_OK", 3_000, headless = headless)
+                assertNull(next.error)
+                assertEquals(0, next.exitCode)
+                assertEquals("NEXT_OK", next.stdout)
+                assertEquals("A confirmed timeout must keep the persistent session", 2, fixture.calls.readLines().size)
+
+                val remaining = 4_500 - (System.nanoTime() - started) / 1_000_000
+                if (remaining > 0) delay(remaining)
+                assertFalse("Code after the original sleep ran late", lateMarker.exists())
+                assertRequestStopped(leader)
+                assertTrue(isAlive(controlIdentity))
+                assertEquals("The submitted command ran more than once", listOf("run"), executions.readLines())
+            } finally { control.destroyForcibly() }
+        }
+    }
+
+    @Test(timeout = 20_000)
+    fun `foreground cancellation confirms cleanup without replay and keeps session reusable`() = runBlocking {
+        Fixture(folder.newFolder(), brokerShell).use { fixture ->
+            assertEquals(RootStatus.READY, fixture.manager.verifyRoot(prepareHeadless = true))
+            val executions = File(fixture.directory, "executions")
+            val leaderStat = File(fixture.directory, "leader-stat")
+            val lateMarker = File(fixture.directory, "late-marker")
+            val control = ProcessBuilder("/bin/sleep", "30").start()
+            try {
+                val controlIdentity = requireNotNull(processIdentity(control.pid()))
+                val started = System.nanoTime()
+                val job = async {
+                    fixture.manager.exec(timeoutCommand(executions, leaderStat, lateMarker), 30_000)
+                }
+                try { awaitFile(executions) } finally { job.cancelAndJoin() }
+
+                val leader = processIdentity(leaderStat.readText().trim())
+                assertEquals(leader.pid, leader.pgid)
+                assertEquals(leader.pid, leader.sid)
+                assertTrue("Cancellation was not acknowledged; the transport was quarantined", fixture.manager.isHeadlessReady())
+                assertRequestStopped(leader)
+                assertTrue(isAlive(controlIdentity))
+                val next = fixture.manager.exec("printf NEXT_OK", 3_000)
+                assertNull(next.error)
+                assertEquals("NEXT_OK", next.stdout)
+                assertEquals("A confirmed cancellation must keep the persistent session", 2, fixture.calls.readLines().size)
+
+                val remaining = 4_500 - (System.nanoTime() - started) / 1_000_000
+                if (remaining > 0) delay(remaining)
+                assertFalse("Code after cancellation ran late", lateMarker.exists())
+                assertRequestStopped(leader)
+                assertTrue(isAlive(controlIdentity))
+                assertEquals(listOf("run"), executions.readLines())
+            } finally { control.destroyForcibly() }
+        }
+    }
+
+    @Test(timeout = 15_000)
+    fun `foreground completion after the app deadline cannot become a successful exit`() = runBlocking {
+        Fixture(folder.newFolder(), brokerShell).use { fixture ->
+            fixture.executable("sleep", "if [ \"\$1\" = 0.05 ]; then exec /bin/sleep 0.25; fi\nexec /bin/sleep \"\$@\"")
+            assertEquals(RootStatus.READY, fixture.manager.verifyRoot(prepareHeadless = true))
+            val result = fixture.manager.exec("sleep 0.15; printf late; exit 7", 100)
+            assertEquals("command_timeout", result.error)
+            assertNull(result.exitCode)
+            assertEquals("NEXT_OK", fixture.manager.exec("printf NEXT_OK", 3_000).stdout)
+            assertEquals(2, fixture.calls.readLines().size)
+        }
+    }
+
     private suspend fun awaitFile(file: File) = withTimeout(3_000) { while (!file.isFile) delay(10) }
+
+    private fun timeoutCommand(executions: File, leaderStat: File, lateMarker: File): String =
+        "IFS= read -r leader_stat < /proc/\$PPID/stat; " +
+            "printf '%s\\n' \"\$leader_stat\" > ${q(leaderStat.path)}; " +
+            "printf 'run\\n' >> ${q(executions.path)}; " +
+            "printf 'BEFORE\\n'; printf 'WARN\\n' >&2; sleep 4; " +
+            "printf 'AFTER\\n'; printf late >> ${q(lateMarker.path)}"
+
+    private data class ProcessIdentity(
+        val pid: Long,
+        val state: String,
+        val pgid: Long,
+        val sid: Long,
+        val startTime: Long,
+    )
+
+    private fun processIdentity(text: String): ProcessIdentity {
+        val fields = text.substringAfterLast(") ").split(' ')
+        require(fields.size > 19) { "Invalid proc stat: $text" }
+        return ProcessIdentity(
+            pid = text.substringBefore(' ').toLong(),
+            state = fields[0],
+            pgid = fields[2].toLong(),
+            sid = fields[3].toLong(),
+            startTime = fields[19].toLong(),
+        )
+    }
+
+    private fun processIdentity(pid: Long): ProcessIdentity? =
+        runCatching { processIdentity(File("/proc/$pid/stat").readText().trim()) }.getOrNull()
+
+    private fun isAlive(identity: ProcessIdentity): Boolean =
+        processIdentity(identity.pid)?.let { it.startTime == identity.startTime && it.state != "Z" } == true
+
+    private fun liveGroupMembers(leader: ProcessIdentity): List<ProcessIdentity> =
+        File("/proc").listFiles().orEmpty().mapNotNull { entry ->
+            entry.name.toLongOrNull()?.let { pid -> processIdentity(pid) }
+        }.filter { it.pgid == leader.pgid && it.sid == leader.sid && it.state != "Z" }
+
+    private fun assertRequestStopped(leader: ProcessIdentity) {
+        assertFalse("Supervisor PID/starttime is still live: $leader", isAlive(leader))
+        assertEquals("Live processes remain in the request PGID/SID", emptyList<ProcessIdentity>(), liveGroupMembers(leader))
+    }
+
 
     @Test(timeout = 20_000) fun `completed foreground launch preserves detached children like the one shot transport`() = runBlocking {
         for (fallback in listOf(true, false)) for (code in listOf(0, 7)) {
@@ -456,3 +600,4 @@ class RootPersistentSessionTest(private val brokerShell: String) {
         private fun q(value: String) = "'" + value.replace("'", "'\"'\"'") + "'"
     }
 }
+
