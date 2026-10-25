@@ -470,4 +470,84 @@ class ChatProcessDeathTest {
             service.getGenerationJobStateFlow(source.id).first()?.join()
         }
     }
+
+    @Test(timeout = 30_000) fun completedMcpResultWithObjectCheckpointFieldSurvivesRoundTripRecovery() = runBlocking {
+        assertCompletedMcpResultSurvivesRoundTrip(
+            """{"checkpointed_before_launch":{"note":"ordinary tool data"},"value":"keep"}""")
+    }
+
+    @Test(timeout = 30_000) fun completedMcpResultWithObjectErrorFieldSurvivesRoundTripRecovery() = runBlocking {
+        assertCompletedMcpResultSurvivesRoundTrip(
+            """{"checkpointed_before_launch":true,"error":{"code":"external"},"value":"keep"}""")
+    }
+
+    private suspend fun assertCompletedMcpResultSurvivesRoundTrip(result: String) {
+        val completedTool = me.rerere.ai.ui.UIMessagePart.Tool("completed-mcp", "mcp_echo", "{}",
+            output = listOf(me.rerere.ai.ui.UIMessagePart.Text(result)))
+        val selected = UIMessage.assistant("Выбранный вариант").copy(parts = listOf(completedTool))
+        val alternative = UIMessage.assistant("Альтернативный вариант")
+        val branch = MessageNode(messages = listOf(alternative, selected), selectIndex = 1)
+        val source = Conversation(assistantId = assistant.id, title = "Завершённый MCP результат",
+            config = ConversationConfig(chatModelId = model.id), messageNodes = listOf(
+                UIMessage.user("Вопрос").toMessageNode(), branch))
+        repository.insertConversation(source)
+        recoveryFile.writeText("""{"${source.id}":"previous-process/${selected.id}"}""")
+
+        service.initializeConversation(source.id)
+
+        val restored = repository.getConversationById(source.id)!!
+        val restoredBranch = restored.messageNodes[1]
+        assertEquals("Recovery must preserve every message variant", 2, restoredBranch.messages.size)
+        assertEquals("Recovery must preserve the selected branch", 1, restoredBranch.selectIndex)
+        assertEquals(alternative, restoredBranch.messages[0])
+        assertEquals("A completed ordinary tool result must keep its exact JSON and unknown fields",
+            selected, restoredBranch.messages[1])
+        val restoredTool = restoredBranch.messages[1].getTools().single()
+        assertTrue(restoredTool.isExecuted)
+        assertEquals(result, restoredTool.output.filterIsInstance<me.rerere.ai.ui.UIMessagePart.Text>().single().text)
+        assertTrue(restored.currentMessages.last().toText().contains("Прервано: приложение было закрыто"))
+        assertTrue("Recovery must not start generation or replay the completed tool", requestedTexts.isEmpty())
+        service.initializeConversation(source.id)
+        assertEquals("Recovery must remain idempotent", restored.messageNodes,
+            repository.getConversationById(source.id)!!.messageNodes)
+        assertTrue(requestedTexts.isEmpty())
+    }
+
+    @Test(timeout = 30_000) fun recoveryJsonTypeMatrixPreservesOrdinaryResultsAndUpdatesRealCheckpoints() {
+        val ordinaryResults = listOf(
+            """{"checkpointed_before_launch":[],"value":"keep"}""",
+            """{"checkpointed_before_launch":null,"error":"root_execution_indeterminate","value":"keep"}""",
+            """{"checkpointed_before_launch":false,"error":"root_execution_indeterminate","value":"keep"}""",
+            """{"checkpointed_before_launch":true,"error":"external","value":"keep"}""",
+            """{"checkpointed_before_launch":true,"error":null,"value":"keep"}""",
+            """{"checkpointed_before_launch":true,"error":[],"value":"keep"}""",
+        )
+        val checkpointResults = listOf("root_execution_indeterminate", "tool_execution_indeterminate").map { error ->
+            """{"checkpointed_before_launch":true,"error":"$error","value":"keep","unknown":{"nested":true}}"""
+        }
+        val message = UIMessage.assistant("Завершённые инструменты").copy(
+            parts = (ordinaryResults + checkpointResults).mapIndexed { index, result ->
+                me.rerere.ai.ui.UIMessagePart.Tool("completed-$index", "mcp_echo", "{}",
+                    output = listOf(me.rerere.ai.ui.UIMessagePart.Text(result)))
+            })
+        val source = Conversation(assistantId = assistant.id, title = "Матрица JSON типов",
+            config = ConversationConfig(chatModelId = model.id), messageNodes = listOf(message.toMessageNode()))
+
+        val restored = interruptConversation(source, baselineMessageId = message.id)
+
+        val tools = restored.messageNodes.first().currentMessage.getTools()
+        assertEquals(ordinaryResults.size + checkpointResults.size, tools.size)
+        ordinaryResults.forEachIndexed { index, result ->
+            assertEquals("Ordinary structured tool data must remain byte-for-byte unchanged at index $index",
+                result, tools[index].output.filterIsInstance<me.rerere.ai.ui.UIMessagePart.Text>().single().text)
+        }
+        checkpointResults.forEachIndexed { offset, result ->
+            val original = kotlinx.serialization.json.Json.parseToJsonElement(result) as kotlinx.serialization.json.JsonObject
+            val updated = kotlinx.serialization.json.Json.parseToJsonElement(
+                tools[ordinaryResults.size + offset].output.filterIsInstance<me.rerere.ai.ui.UIMessagePart.Text>().single().text
+            ) as kotlinx.serialization.json.JsonObject
+            original.forEach { (name, value) -> assertEquals("Checkpoint field $name must be preserved", value, updated[name]) }
+            assertEquals(kotlinx.serialization.json.JsonPrimitive(PROCESS_INTERRUPTED_MESSAGE), updated["message"])
+        }
+    }
 }

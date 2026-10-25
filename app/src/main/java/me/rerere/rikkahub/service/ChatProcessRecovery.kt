@@ -206,8 +206,8 @@ internal fun interruptConversation(source: Conversation, baselineMessageId: Uuid
                     val output = part.output.map { result ->
                         if (result !is UIMessagePart.Text) result else {
                             val obj = runCatching { JsonInstant.parseToJsonElement(result.text) as? JsonObject }.getOrNull()
-                            if (obj?.get("checkpointed_before_launch")?.jsonPrimitive?.booleanOrNull == true &&
-                                obj["error"]?.jsonPrimitive?.contentOrNull in setOf("root_execution_indeterminate", "tool_execution_indeterminate")) {
+                            if ((obj?.get("checkpointed_before_launch") as? JsonPrimitive)?.booleanOrNull == true &&
+                                (obj?.get("error") as? JsonPrimitive)?.contentOrNull in setOf("root_execution_indeterminate", "tool_execution_indeterminate")) {
                                 val value = result.copy(text = JsonObject(obj + ("message" to JsonPrimitive(PROCESS_INTERRUPTED_MESSAGE))).toString())
                                 if (value != result) changed = true
                                 value
