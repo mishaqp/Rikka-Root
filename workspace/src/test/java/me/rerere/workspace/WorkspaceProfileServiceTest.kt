@@ -116,6 +116,9 @@ class WorkspaceProfileServiceTest {
         assertEquals("11.19.1", state.packageManagerVersion)
         assertFalse(downloadedArchive!!.exists())
         assertTrue(fixture.runner.commands.any { it.contains("ca-certificates") && it.contains("xz-utils") })
+        val installCommand = fixture.runner.commands.single { it.contains("tar -xJf") }
+        assertTrue(installCommand.contains("archive_root=\"node-\$version-linux-arm64\""))
+        assertTrue(installCommand.contains("mv \"\$staging/\$archive_root\" \"\$target\""))
     }
 
     @Test

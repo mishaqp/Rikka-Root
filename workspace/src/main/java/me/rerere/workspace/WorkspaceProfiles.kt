@@ -263,6 +263,7 @@ class WorkspaceProfileService(
             val command = NODE_INSTALL_COMMAND
                 .replace("__NODE_VERSION__", nodeRelease.version)
                 .replace("__NODE_ARCHIVE__", archiveName)
+                .replace("__NODE_ARCHITECTURE__", architecture)
             executeChecked(root, command, compatibility, INSTALL_TIMEOUT_MS, "распаковать Node.js")
         } finally {
             archive.delete()
@@ -635,13 +636,14 @@ base='/opt/rikkahub'
 target="$base/node-$version"
 staging="$base/.node-$version.staging"
 backup="$base/.node-$version.backup"
+archive_root="node-$version-linux-__NODE_ARCHITECTURE__"
 rm -rf "$staging" "$backup"
 mkdir -p "$staging"
 tar -xJf "$archive" -C "$staging"
 if [ -d "$target" ]; then
     mv "$target" "$backup"
 fi
-if ! mv "$staging/node-$version" "$target"; then
+if ! mv "$staging/$archive_root" "$target"; then
     if [ -d "$backup" ]; then mv "$backup" "$target"; fi
     exit 1
 fi
