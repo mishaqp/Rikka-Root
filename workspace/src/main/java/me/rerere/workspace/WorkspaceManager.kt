@@ -113,6 +113,7 @@ class WorkspaceManager(
         outputStream: OutputStream,
     ) {
         val file = fileSystem.resolve(areaDir(root, area), path)
+        require(file.exists()) { "Файл не найден. Проверьте путь: $path" }
         require(file.isFile) { "Это папка, а нужен файл. Укажите путь к файлу: $path" }
         outputStream.use { out -> file.inputStream().use { it.copyTo(out) } }
     }
