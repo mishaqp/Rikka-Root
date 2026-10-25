@@ -274,7 +274,7 @@ class RootPersistentSessionTest(private val brokerShell: String) {
     @Test(timeout = 15_000) fun `completion after the app deadline cannot become a successful exit`() = runBlocking {
         Fixture(folder.newFolder(), brokerShell).use { fixture ->
             fixture.executable("sleep", "if [ \"\$1\" = 0.05 ]; then exec /bin/sleep 0.25; fi\nexec /bin/sleep \"\$@\"")
-            assertEquals(RootStatus.READY, fixture.manager.verifyRoot(prepareHeadless = true)
+            assertEquals(RootStatus.READY, fixture.manager.verifyRoot(prepareHeadless = true))
             val result = fixture.manager.exec("sleep 0.15; printf late; exit 7", 100, headless = true)
             assertEquals("command_timeout", result.error)
             assertNull(result.exitCode)
@@ -310,21 +310,24 @@ class RootPersistentSessionTest(private val brokerShell: String) {
         Fixture(folder.newFolder(), brokerShell).use { fixture ->
             fixture.executable("dd", "for arg in \"\$@\"; do [ \"\$arg\" != iflag=count_bytes ] || exit 91; done\nexec /bin/dd \"\$@\"")
             assertEquals(RootStatus.READY, fixture.manager.verifyRoot(prepareHeadless = true))
-            val result = fixture.manager.exec("head -c 8192 /dev/zero | tr '\\000' x", 3_000, headless = true)
+            val result = fixture.manager.exec("head -c 9000 /dev/zero | tr '\\000' a; printf warning >&2", 3_000, headless = true)
             assertEquals(0, result.exitCode)
+            assertTrue(result.stdout.startsWith("a".repeat(8_000)))
             assertTrue(result.stdoutTruncated)
-            assertTrue(result.stdout.startsWith("x".repeat(8_000)))
+            assertEquals("warning", result.stderr)
+            assertFalse(result.stderrTruncated)
+            assertEquals(2, fixture.calls.readLines().size)
         }
     }
 
     @Test(timeout = 15_000) fun `missing byte counter retains the old bounded capture`() = runBlocking {
         Fixture(folder.newFolder(), brokerShell).use { fixture ->
-            fixture.executable("wc", "exit 1")
-            assertEquals(RootStatus.READY, fixture.manager.verifyRoot(prepareHeadless = true))
-            val result = fixture.manager.exec("head -c 9000 /dev/zero | tr '\\000' x", 3_000, headless = true)
+            fixture.executable("wc", "exit 91")
+            fixture.manager.verifyRoot(prepareHeadless = true)
+            val result = fixture.manager.exec("head -c 9000 /dev/zero | tr '\\000' a", 3_000, headless = true)
             assertEquals(0, result.exitCode)
+            assertTrue(result.stdout.startsWith("a".repeat(8_000)))
             assertTrue(result.stdoutTruncated)
-            assertTrue(result.stdout.startsWith("x".repeat(8_000)))
         }
     }
 
@@ -600,4 +603,3 @@ class RootPersistentSessionTest(private val brokerShell: String) {
         private fun q(value: String) = "'" + value.replace("'", "'\"'\"'") + "'"
     }
 }
-
