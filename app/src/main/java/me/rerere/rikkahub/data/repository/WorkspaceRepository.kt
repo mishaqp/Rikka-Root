@@ -321,7 +321,6 @@ class WorkspaceRepository(
         path: String,
     ): Long = withContext(Dispatchers.IO) {
         val workspace = dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
-        manager.ensureWorkspace(workspace.root)
         manager.fileSize(workspace.root, path, area)
     }
 
@@ -342,7 +341,6 @@ class WorkspaceRepository(
         outputStream: OutputStream,
     ) = withContext(Dispatchers.IO) {
         val workspace = dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
-        manager.ensureWorkspace(workspace.root)
         manager.exportFile(workspace.root, path, area, outputStream)
     }
 
@@ -365,7 +363,6 @@ class WorkspaceRepository(
     /** Rootfs 内执行命令实际使用的 shell 路径 (/bin/bash 或 /bin/sh) */
     suspend fun rootfsShell(id: String): String = withContext(Dispatchers.IO) {
         val workspace = dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
-        manager.ensureWorkspace(workspace.root)
         manager.rootfsShell(workspace.root)
     }
 
