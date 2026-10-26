@@ -1,6 +1,7 @@
 package me.rerere.workspace
 
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.nio.charset.Charset
@@ -15,6 +16,8 @@ class WorkspaceManager(
 ) {
     private val fileSystem = WorkspaceFileSystem(config)
     private val background = WorkspaceBackgroundProcesses()
+    private val activityLock = Any()
+    private val rootActivities = mutableMapOf<String, RootActivity>()
 
     // 按 target 长度降序, 保证 /a/b 优先于 /a 匹配
     private val sortedBindMounts = bindMounts.sortedByDescending { it.target.trimEnd('/').length }
@@ -202,18 +205,110 @@ class WorkspaceManager(
         timeoutMillis: Long = DEFAULT_COMMAND_TIMEOUT_MS,
         stdin: ByteArray? = null,
         shellCompatibilityMode: Boolean = false,
-    ): WorkspaceCommandResult {
-        return shellRunner.execute(commandContext(root, command, cwd, timeoutMillis, stdin, shellCompatibilityMode))
+    ): WorkspaceCommandResult = withRootfsActivity(root, RootfsActivityKind.COMMAND) {
+        shellRunner.execute(commandContext(root, command, cwd, timeoutMillis, stdin, shellCompatibilityMode))
     }
 
-    fun startBackgroundCommand(root: String, command: String, cwd: String = "", shellCompatibilityMode: Boolean = false): BackgroundStatus {
-        val context = commandContext(root, command, cwd, DEFAULT_COMMAND_TIMEOUT_MS, null, shellCompatibilityMode)
-        return background.start(context) { shellRunner.startBackground(context, it) }
-    }
+    fun startBackgroundCommand(root: String, command: String, cwd: String = "", shellCompatibilityMode: Boolean = false): BackgroundStatus =
+        withRootfsActivity(root, RootfsActivityKind.COMMAND) {
+            val context = commandContext(root, command, cwd, DEFAULT_COMMAND_TIMEOUT_MS, null, shellCompatibilityMode)
+            background.start(context) { shellRunner.startBackground(context, it) }
+        }
 
     fun backgroundProcesses(root: String): List<BackgroundStatus> = background.list(root)
     fun backgroundOutput(root: String, id: String): BackgroundStatus? = background.status(root, id)
     fun stopBackgroundProcess(root: String, id: String): Boolean = background.stop(root, id)
+
+    /** Holds a terminal session admission until its process has actually finished. */
+    fun acquireTerminalLease(root: String): WorkspaceRootfsLease = acquireActivity(root, RootfsActivityKind.TERMINAL)
+
+    internal fun <T> withRootfsActivity(root: String, kind: RootfsActivityKind, block: () -> T): T {
+        val lease = acquireActivity(root, kind)
+        return try {
+            block()
+        } finally {
+            lease.close()
+        }
+    }
+
+    internal fun <T> withRootfsReplacement(root: String, block: () -> T): T {
+        workspaceDir(root)
+        synchronized(activityLock) {
+            val state = rootActivities.getOrPut(root) { RootActivity() }
+            if (state.replacing) throw RootfsBusyException("замена Rootfs уже выполняется")
+            val active = RootfsActivityKind.entries.filter { state.count(it) > 0 }
+            val hasBackground = background.hasRunning(root)
+            if (active.isNotEmpty() || hasBackground) {
+                val diagnostics = buildList {
+                    active.forEach { add(it.diagnostic) }
+                    if (hasBackground) add("выполняется фоновый процесс")
+                }
+                throw RootfsBusyException(diagnostics.joinToString())
+            }
+            state.replacing = true
+        }
+        return try {
+            block()
+        } finally {
+            synchronized(activityLock) {
+                rootActivities[root]?.replacing = false
+            }
+        }
+    }
+
+    internal fun probeRootfsCandidate(root: String, candidate: File, temporaryDir: File) {
+        require(WorkspaceManager.isRootfsCandidate(candidate)) {
+            "Кандидат должен содержать /bin/sh и /usr/bin/env"
+        }
+        check(candidate.canonicalFile != linuxDir(root).canonicalFile) {
+            "Проверка кандидата не должна использовать действующий Rootfs"
+        }
+        filesDir(root).mkdirs()
+        temporaryDir.mkdirs()
+        val context = WorkspaceShellContext(
+            root = root,
+            command = "printf '%s\\n' '$ROOTFS_PROBE_MARKER'",
+            cwd = "",
+            filesDir = filesDir(root),
+            linuxDir = candidate,
+            tempDir = temporaryDir,
+            workingDir = filesDir(root),
+            timeoutMillis = DEFAULT_COMMAND_TIMEOUT_MS,
+            bindMounts = emptyList(),
+        )
+        val result = shellRunner.execute(context)
+        if (result.timedOut || result.exitCode != 0 || result.stdout.trim() != ROOTFS_PROBE_MARKER) {
+            throw IOException(
+                "Функциональная проверка кандидата не пройдена " +
+                    "(exit=${result.exitCode}, timeout=${result.timedOut}): ${result.stderr.take(500)}",
+            )
+        }
+    }
+
+    private fun acquireActivity(root: String, kind: RootfsActivityKind): WorkspaceRootfsLease {
+        workspaceDir(root)
+        synchronized(activityLock) {
+            val state = rootActivities.getOrPut(root) { RootActivity() }
+            if (state.replacing) {
+                throw RootfsBusyException("Rootfs заменяется; дождитесь завершения операции")
+            }
+            state.activities[kind] = state.count(kind) + 1
+        }
+        return WorkspaceRootfsLease {
+            synchronized(activityLock) {
+                val state = rootActivities[root] ?: return@WorkspaceRootfsLease
+                val remaining = state.count(kind) - 1
+                if (remaining > 0) state.activities[kind] = remaining else state.activities.remove(kind)
+            }
+        }
+    }
+
+    private fun RootActivity.count(kind: RootfsActivityKind): Int = activities[kind] ?: 0
+
+    private class RootActivity {
+        val activities = mutableMapOf<RootfsActivityKind, Int>()
+        var replacing = false
+    }
 
     private fun commandContext(root: String, command: String, cwd: String, timeoutMillis: Long,
         stdin: ByteArray?, shellCompatibilityMode: Boolean): WorkspaceShellContext {
@@ -278,9 +373,15 @@ class WorkspaceManager(
 
         private val ROOT_NAME_REGEX = Regex("[A-Za-z0-9._-]+")
 
-        /** Rootfs 是否可用, 以 /bin/sh 存在为准 */
+        private const val ROOTFS_PROBE_MARKER = "RIKKA_ROOTFS_CANDIDATE_OK"
+
+        /** Existing installations retain the historical /bin/sh integrity check. */
         fun isUsableRootfs(linuxDir: File): Boolean =
             linuxDir.isDirectory && linuxDir.hasRootfsEntry("bin/sh")
+
+        /** PRoot also enters through /usr/bin/env, so a new candidate needs both entry points. */
+        fun isRootfsCandidate(linuxDir: File): Boolean =
+            isUsableRootfs(linuxDir) && linuxDir.hasRootfsEntry("usr/bin/env")
 
         /** Rootfs 内使用的 shell: 优先 bash, 没有时 (如 Alpine minirootfs) 回退到 /bin/sh */
         fun rootfsShell(linuxDir: File): String =
@@ -292,6 +393,16 @@ class WorkspaceManager(
             val entry = File(this, path)
             return entry.isFile || Files.isSymbolicLink(entry.toPath())
         }
+    }
+}
+
+class WorkspaceRootfsLease internal constructor(
+    private val release: () -> Unit,
+) : AutoCloseable {
+    private val closed = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    override fun close() {
+        if (closed.compareAndSet(false, true)) release()
     }
 }
 
