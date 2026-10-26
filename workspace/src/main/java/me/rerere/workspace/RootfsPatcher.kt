@@ -8,6 +8,7 @@ class RootfsPatcher {
         linuxDir: File,
         options: RootfsPatchOptions = RootfsPatchOptions(),
     ) {
+        validateManagedPaths(linuxDir)
         val etcDir = File(linuxDir, "etc")
         if (!etcDir.isDirectory) return
 
@@ -17,6 +18,52 @@ class RootfsPatcher {
         ensureLocale(etcDir, options.locale)
         ensureGroupNames(etcDir, options.groupIds.ifEmpty { currentSupplementaryGroupIds() })
         ensureTempDirs(linuxDir)
+    }
+
+    private fun validateManagedPaths(linuxDir: File) {
+        check(!Files.isSymbolicLink(linuxDir.toPath())) { "Rootfs не должен быть ссылкой: ${linuxDir.name}" }
+        val root = linuxDir.canonicalFile
+        val etc = File(linuxDir, "etc")
+        if (!etc.exists() && !Files.isSymbolicLink(etc.toPath())) return
+        checkManagedDirectory(root, etc)
+        listOf("hosts", "hostname", "group").forEach { name ->
+            checkManagedFile(root, File(etc, name), allowSymlink = false)
+        }
+        // resolv.conf is replaced by unlinking the entry itself, never by following its target.
+        checkManagedFile(root, File(etc, "resolv.conf"), allowSymlink = true)
+        checkManagedDirectory(root, File(etc, "default"), allowMissing = true)
+        checkManagedFile(root, File(etc, "default/locale"), allowSymlink = false)
+        checkManagedDirectory(root, File(linuxDir, "var"), allowMissing = true)
+        listOf("tmp", "var/tmp", "root").forEach { path ->
+            checkManagedDirectory(root, File(linuxDir, path), allowMissing = true)
+        }
+    }
+
+    private fun checkManagedDirectory(root: File, directory: File, allowMissing: Boolean = false) {
+        check(!Files.isSymbolicLink(directory.toPath())) {
+            "Управляемый каталог Rootfs не должен быть ссылкой: ${directory.name}"
+        }
+        if (!directory.exists()) {
+            check(allowMissing) { "Управляемый каталог Rootfs отсутствует: ${directory.name}" }
+        } else {
+            check(directory.isDirectory) { "Управляемый путь Rootfs не является каталогом: ${directory.name}" }
+        }
+        checkContained(root, directory.parentFile ?: directory)
+        if (directory.exists()) checkContained(root, directory)
+    }
+
+    private fun checkManagedFile(root: File, file: File, allowSymlink: Boolean) {
+        val symlink = Files.isSymbolicLink(file.toPath())
+        check(allowSymlink || !symlink) { "Управляемый файл Rootfs не должен быть ссылкой: ${file.name}" }
+        checkContained(root, file.parentFile ?: file)
+        if (!symlink) checkContained(root, file)
+    }
+
+    private fun checkContained(root: File, path: File) {
+        val resolved = path.canonicalFile
+        check(resolved.path == root.path || resolved.path.startsWith(root.path + File.separator)) {
+            "Управляемый путь Rootfs выходит за пределы среды: ${path.name}"
+        }
     }
 
     private fun ensureRootfsDns(
