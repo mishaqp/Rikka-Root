@@ -179,6 +179,7 @@ val appModule = module {
             toolApprovalPreferences = get(),
             tokenBudgetStore = get(),
             subAgentRegistry = get(),
+            messageQueueStore = get(),
         )
     }
 
