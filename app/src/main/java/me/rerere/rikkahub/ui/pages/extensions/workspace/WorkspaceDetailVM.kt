@@ -109,6 +109,9 @@ class WorkspaceDetailVM(
     private val _installError = MutableStateFlow<String?>(null)
     val installError = _installError.asStateFlow()
 
+    private val _installWarning = MutableStateFlow<String?>(null)
+    val installWarning = _installWarning.asStateFlow()
+
     private val _settingsError = MutableStateFlow<String?>(null)
     val settingsError = _settingsError.asStateFlow()
 
@@ -292,13 +295,15 @@ class WorkspaceDetailVM(
     fun installRootfs(url: String) {
         viewModelScope.launch {
             _installError.value = null
+            _installWarning.value = null
             val workspace = state.value.workspace ?: return@launch
             _installProgress.value = RootfsInstallProgress(stage = RootfsInstallStage.DOWNLOADING)
             try {
                 terminalSessionManager.closeWorkspace(workspace.root)
-                repository.installRootfs(workspace.id, url) { progress ->
+                val result = repository.installRootfs(workspace.id, url) { progress ->
                     _installProgress.value = progress
                 }
+                _installWarning.value = result?.cleanupWarning
                 loadWorkspace()
                 refresh()
             } catch (e: CancellationException) {
@@ -313,6 +318,10 @@ class WorkspaceDetailVM(
 
     fun dismissInstallError() {
         _installError.value = null
+    }
+
+    fun dismissInstallWarning() {
+        _installWarning.value = null
     }
 
     fun executeTerminalCommand(command: String) {
