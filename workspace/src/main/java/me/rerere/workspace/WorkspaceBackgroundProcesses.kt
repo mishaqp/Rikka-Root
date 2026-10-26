@@ -148,6 +148,7 @@ class WorkspaceBackgroundProcesses : AutoCloseable {
     }
 
     @Synchronized fun list(root: String): List<BackgroundStatus> = entries.values.filter { it.root == root }.map { it.status() }
+    @Synchronized fun hasRunning(root: String): Boolean = entries.values.any { it.root == root && it.process.isAlive }
     @Synchronized fun status(root: String, id: String): BackgroundStatus? = entries[id]?.takeIf { it.root == root }?.status()
     @Synchronized fun stop(root: String, id: String): Boolean {
         val entry = entries[id]?.takeIf { it.root == root } ?: return false
