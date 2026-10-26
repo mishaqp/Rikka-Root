@@ -4,9 +4,11 @@ import android.content.Context
 import android.util.Log
 import com.termux.terminal.TerminalSession
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,7 +18,10 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import me.rerere.rikkahub.AppScope
+import me.rerere.workspace.RootfsBusyException
+import me.rerere.workspace.WorkspaceManager
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -29,6 +34,7 @@ import java.util.concurrent.atomic.AtomicLong
 class WorkspaceTerminalSessionManager internal constructor(
     context: Context,
     private val appScope: AppScope,
+    private val workspaceManager: WorkspaceManager,
 ) {
     private val appContext = context.applicationContext
     private val workspaceStates = MutableStateFlow<Map<String, WorkspaceTerminalTabsState>>(emptyMap())
@@ -96,6 +102,16 @@ class WorkspaceTerminalSessionManager internal constructor(
             tab.client.terminalView = null
             tab.session.finishIfRunning()
         }
+        try {
+            withTimeout(TERMINAL_STOP_TIMEOUT_MS) {
+                state.tabs.forEach { it.finishedSignal.await() }
+            }
+        } catch (error: TimeoutCancellationException) {
+            throw IllegalStateException(
+                "Остановка терминала не подтверждена. Rootfs не изменялся; закройте терминал и повторите попытку.",
+                error,
+            )
+        }
     }
 
     private fun launchCreateTab(root: String, onlyIfEmpty: Boolean, shellCompatibilityMode: Boolean) {
@@ -120,73 +136,99 @@ class WorkspaceTerminalSessionManager internal constructor(
         }
         updateState(root) { it.copy(isCreating = true) }
 
-        val prepared = if (initialState.readiness == WorkspaceTerminalReadiness.Ready) {
-            true
-        } else {
-            try {
-                withContext(Dispatchers.IO) {
-                    if (!workspaceRootfsReady(appContext, root)) {
-                        false
-                    } else {
-                        prepareWorkspaceTerminalSession(appContext, root)
-                        true
+        val lease = try {
+            workspaceManager.acquireTerminalLease(root)
+        } catch (error: RootfsBusyException) {
+            updateState(root) { it.copy(isCreating = false) }
+            Log.i(TAG, "Terminal admission rejected for workspace $root: ${error.message}")
+            return@withContext
+        }
+        val finishedSignal = CompletableDeferred<Unit>()
+        var leaseOwnedByTab = false
+        try {
+            val prepared = if (initialState.readiness == WorkspaceTerminalReadiness.Ready) {
+                true
+            } else {
+                try {
+                    withContext(Dispatchers.IO) {
+                        if (!workspaceRootfsReady(appContext, root)) {
+                            false
+                        } else {
+                            prepareWorkspaceTerminalSession(appContext, root)
+                            true
+                        }
                     }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Throwable) {
+                    Log.e(TAG, "Failed to prepare terminal for workspace $root", error)
+                    false
                 }
+            }
+
+            if (!prepared) {
+                updateState(root) {
+                    it.copy(
+                        readiness = WorkspaceTerminalReadiness.NotInstalled,
+                        isCreating = false,
+                    )
+                }
+                return@withContext
+            }
+
+            val tabId = nextTabId.getAndIncrement()
+            val tabNumber = currentState(root).nextTabNumber
+            val client = WorkspaceTerminalSessionClient(
+                context = appContext,
+                onTitleUpdated = { title -> updateTitle(root, tabId, title) },
+                onFinished = {
+                    lease.close()
+                    finishedSignal.complete(Unit)
+                    markFinished(root = root, tabId = tabId)
+                },
+            )
+            val session = try {
+                createWorkspaceTerminalSession(
+                    context = appContext,
+                    root = root,
+                    client = client,
+                    shellCompatibilityMode = shellCompatibilityMode,
+                )
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
-                Log.e(TAG, "Failed to prepare terminal for workspace $root", error)
-                false
+                Log.e(TAG, "Failed to create terminal for workspace $root", error)
+                null
             }
-        }
 
-        if (!prepared) {
-            updateState(root) {
-                it.copy(
-                    readiness = WorkspaceTerminalReadiness.NotInstalled,
+            if (session == null) {
+                updateState(root) { it.copy(isCreating = false) }
+                return@withContext
+            }
+
+            val tab = WorkspaceTerminalTab(
+                id = tabId,
+                number = tabNumber,
+                session = session,
+                client = client,
+                finishedSignal = finishedSignal,
+                finished = finishedSignal.isCompleted,
+            )
+            updateState(root) { state ->
+                state.copy(
+                    tabs = state.tabs + tab,
+                    selectedTabId = tab.id,
+                    readiness = WorkspaceTerminalReadiness.Ready,
                     isCreating = false,
+                    nextTabNumber = tabNumber + 1,
                 )
             }
-            return@withContext
-        }
-
-        val tabId = nextTabId.getAndIncrement()
-        val tabNumber = currentState(root).nextTabNumber
-        val client = WorkspaceTerminalSessionClient(
-            context = appContext,
-            onTitleUpdated = { title -> updateTitle(root, tabId, title) },
-            onFinished = { markFinished(root = root, tabId = tabId) },
-        )
-        val session = runCatching {
-            createWorkspaceTerminalSession(
-                context = appContext,
-                root = root,
-                client = client,
-                shellCompatibilityMode = shellCompatibilityMode,
-            )
-        }.onFailure { error ->
-            Log.e(TAG, "Failed to create terminal for workspace $root", error)
-        }.getOrNull()
-
-        if (session == null) {
-            updateState(root) { it.copy(isCreating = false) }
-            return@withContext
-        }
-
-        val tab = WorkspaceTerminalTab(
-            id = tabId,
-            number = tabNumber,
-            session = session,
-            client = client,
-        )
-        updateState(root) { state ->
-            state.copy(
-                tabs = state.tabs + tab,
-                selectedTabId = tab.id,
-                readiness = WorkspaceTerminalReadiness.Ready,
-                isCreating = false,
-                nextTabNumber = tabNumber + 1,
-            )
+            leaseOwnedByTab = true
+        } finally {
+            if (!leaseOwnedByTab) {
+                lease.close()
+                finishedSignal.complete(Unit)
+            }
         }
     }
 
@@ -231,6 +273,7 @@ class WorkspaceTerminalSessionManager internal constructor(
 
     private companion object {
         const val TAG = "WorkspaceTerminalManager"
+        const val TERMINAL_STOP_TIMEOUT_MS = 10_000L
     }
 }
 
@@ -247,6 +290,7 @@ internal data class WorkspaceTerminalTab(
     val number: Int,
     val session: TerminalSession,
     val client: WorkspaceTerminalSessionClient,
+    val finishedSignal: CompletableDeferred<Unit>,
     val title: String? = null,
     val finished: Boolean = false,
 )
