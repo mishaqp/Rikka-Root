@@ -112,6 +112,7 @@ fun WorkspaceDetailPage(id: String, openFiles: Boolean = false) {
     val installProgress by vm.installProgress.collectAsStateWithLifecycle()
     val profiles by vm.profiles.collectAsStateWithLifecycle()
     val installError by vm.installError.collectAsStateWithLifecycle()
+    val installWarning by vm.installWarning.collectAsStateWithLifecycle()
     val settingsError by vm.settingsError.collectAsStateWithLifecycle()
     val pagerState = rememberPagerState(initialPage = if (openFiles) 1 else 0) { 3 }
     val scope = rememberCoroutineScope()
@@ -333,6 +334,19 @@ fun WorkspaceDetailPage(id: String, openFiles: Boolean = false) {
             text = { Text(message) },
             confirmButton = {
                 TextButton(onClick = vm::dismissInstallError) {
+                    Text(stringResource(R.string.common_confirm))
+                }
+            },
+        )
+    }
+
+    installWarning?.let { message ->
+        AlertDialog(
+            onDismissRequest = vm::dismissInstallWarning,
+            title = { Text("Rootfs установлен; очистка не завершена") },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = vm::dismissInstallWarning) {
                     Text(stringResource(R.string.common_confirm))
                 }
             },
