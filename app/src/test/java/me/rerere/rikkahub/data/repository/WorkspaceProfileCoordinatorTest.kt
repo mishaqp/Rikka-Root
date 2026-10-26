@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
+import me.rerere.workspace.RootfsBusyException
 import me.rerere.workspace.WorkspaceProfileKind
 import me.rerere.workspace.WorkspaceProfileState
 import me.rerere.workspace.WorkspaceProfileStatus
@@ -259,6 +260,48 @@ class WorkspaceProfileCoordinatorTest {
         workspaces.value = emptyList()
         runCurrent()
         assertEquals(WorkspaceProfileStatus.NOT_INSTALLED, states.value.python.status)
+    }
+
+    @Test
+    fun `busy rootfs does not leave preparing or checking stuck when failure cannot be persisted`() = runTest {
+        val repository = repository("one")
+        coEvery { repository.profileStates("one") } throws RootfsBusyException("Rootfs заменяется")
+        coEvery { repository.prepareProfile("one", WorkspaceProfileKind.PYTHON) } throws
+            RootfsBusyException("Rootfs заменяется")
+        coEvery { repository.verifyProfile("one", WorkspaceProfileKind.PYTHON) } throws
+            RootfsBusyException("Rootfs заменяется")
+        coEvery { repository.failProfile("one", WorkspaceProfileKind.PYTHON, any()) } throws
+            RootfsBusyException("Rootfs заменяется")
+        val coordinator = WorkspaceProfileCoordinator(repository, backgroundScope)
+        val states = coordinator.states("one")
+        runCurrent()
+
+        assertTrue(coordinator.prepare("one", WorkspaceProfileKind.PYTHON))
+        runCurrent()
+        assertEquals(WorkspaceProfileStatus.ERROR, states.value.python.status)
+
+        assertTrue(coordinator.verify("one", WorkspaceProfileKind.PYTHON))
+        runCurrent()
+        assertEquals(WorkspaceProfileStatus.ERROR, states.value.python.status)
+    }
+
+    @Test
+    fun `cancellation during busy rootfs does not leave preparing stuck`() = runTest {
+        val repository = repository("one")
+        coEvery { repository.profileStates("one") } throws RootfsBusyException("Rootfs заменяется")
+        coEvery { repository.prepareProfile("one", WorkspaceProfileKind.NODE) } coAnswers { awaitCancellation() }
+        coEvery { repository.cancelProfile("one", WorkspaceProfileKind.NODE) } throws
+            RootfsBusyException("Rootfs заменяется")
+        val coordinator = WorkspaceProfileCoordinator(repository, backgroundScope)
+        val states = coordinator.states("one")
+        runCurrent()
+        assertTrue(coordinator.prepare("one", WorkspaceProfileKind.NODE))
+        runCurrent()
+
+        coordinator.cancel("one")
+        runCurrent()
+
+        assertEquals(WorkspaceProfileStatus.CANCELLED, states.value.node.status)
     }
 
     private fun repository(vararg ids: String): WorkspaceRepository {
