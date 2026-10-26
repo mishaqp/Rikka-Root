@@ -13,8 +13,12 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.dao.WorkspaceDAO
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.utils.JsonInstant
+import me.rerere.workspace.RootfsEnvironmentState
+import me.rerere.workspace.RootfsInstallException
 import me.rerere.workspace.RootfsInstallProgress
+import me.rerere.workspace.RootfsInstallResult
 import me.rerere.workspace.RootfsInstaller
+import me.rerere.workspace.RootfsRecoveryStatus
 import me.rerere.workspace.WorkspaceCommandResult
 import me.rerere.workspace.BackgroundStatus
 import me.rerere.workspace.WorkspaceFileEntry
@@ -43,8 +47,6 @@ class WorkspaceRepository(
     suspend fun checkIntegrity() = withContext(Dispatchers.IO) {
         val workspaces = dao.getAll()
         for (workspace in workspaces) {
-            // Reading states also invalidates READY when Rootfs was replaced or removed.
-            profileService.states(workspace.root)
             val dir = manager.workspaceDir(workspace.root)
             if (!dir.exists()) {
                 // 目录缺失时不删除记录(例如恢复备份后工作区文件未随数据库一起恢复),
@@ -55,6 +57,36 @@ class WorkspaceRepository(
                 }
                 continue
             }
+
+            val recovery = rootfsInstaller.recover(workspace.root)
+            when (recovery.status) {
+                RootfsRecoveryStatus.BUSY -> continue
+                RootfsRecoveryStatus.ROLLBACK_UNCONFIRMED -> {
+                    Log.e(TAG, "Rootfs rollback is unconfirmed for workspace ${workspace.id}: ${recovery.error}")
+                    updateShellState(workspace.id, WorkspaceShellStatus.BROKEN.name)
+                    // Do not rewrite profile metadata while the active Rootfs identity is uncertain.
+                    continue
+                }
+                RootfsRecoveryStatus.COMMITTED,
+                RootfsRecoveryStatus.CLEANUP_FAILED ->
+                    updateShellState(workspace.id, WorkspaceShellStatus.READY.name)
+                RootfsRecoveryStatus.ROLLED_BACK,
+                RootfsRecoveryStatus.ROLLBACK_CLEANUP_FAILED -> updateShellState(
+                    workspace.id,
+                    if (recovery.previousRootfsUsable && manager.hasRootfs(workspace.root)) {
+                        WorkspaceShellStatus.READY.name
+                    } else {
+                        WorkspaceShellStatus.DISABLED.name
+                    },
+                )
+                RootfsRecoveryStatus.NO_OPERATION -> Unit
+            }
+            if (recovery.error != null) {
+                Log.w(TAG, "Rootfs local recovery warning for workspace ${workspace.id}: ${recovery.error}")
+            }
+
+            // Reading states also invalidates READY when Rootfs was replaced or removed.
+            profileService.states(workspace.root)
             val statusName = workspace.shellStatus
             if ((statusName == WorkspaceShellStatus.READY.name || statusName == WorkspaceShellStatus.INSTALLING.name)
                 && !manager.hasRootfs(workspace.root)
@@ -156,33 +188,60 @@ class WorkspaceRepository(
         id: String,
         url: String,
         onProgress: (RootfsInstallProgress) -> Unit = {},
-    ): Boolean {
-        val workspace = dao.getById(id) ?: return false
+    ): RootfsInstallResult? {
+        val workspace = dao.getById(id) ?: return null
+        val previousGeneration = rootfsInstaller.generation(workspace.root)
         updateShellState(workspace, WorkspaceShellStatus.INSTALLING.name)
         try {
             // runInterruptible 让协程取消转成线程中断, 打断 install 内阻塞的下载/解压循环
-            runInterruptible(Dispatchers.IO) {
+            val result = runInterruptible(Dispatchers.IO) {
                 rootfsInstaller.install(workspace.root, url, onProgress)
             }
             updateShellState(workspace, WorkspaceShellStatus.READY.name)
-            return true
+            return result
         } catch (e: CancellationException) {
-            withContext(NonCancellable) {
-                restoreShellState(workspace)
+            withContext(NonCancellable + Dispatchers.IO) {
+                settleCancelledInstall(workspace, previousGeneration)
             }
             throw e
         } catch (e: InterruptedException) {
-            withContext(NonCancellable) {
-                restoreShellState(workspace)
+            withContext(NonCancellable + Dispatchers.IO) {
+                settleCancelledInstall(workspace, previousGeneration)
             }
             throw CancellationException("Rootfs install cancelled").also { it.initCause(e) }
+        } catch (e: RootfsInstallException) {
+            when (e.environmentState) {
+                RootfsEnvironmentState.PRESERVED,
+                RootfsEnvironmentState.RESTORED -> restoreShellState(workspace)
+                RootfsEnvironmentState.REPLACED ->
+                    updateShellState(workspace, WorkspaceShellStatus.READY.name)
+                RootfsEnvironmentState.ROLLBACK_UNCONFIRMED ->
+                    updateShellState(workspace, WorkspaceShellStatus.BROKEN.name)
+            }
+            throw e
         } catch (e: Throwable) {
             Log.e(TAG, "installRootfs failed: workspace=${workspace.id}, root=${workspace.root}, url=$url", e)
             updateShellState(workspace, WorkspaceShellStatus.BROKEN.name)
             throw e
-        } finally {
-            withContext(NonCancellable + Dispatchers.IO) {
-                profileService.reset(workspace.root)
+        }
+    }
+
+    private suspend fun settleCancelledInstall(workspace: WorkspaceEntity, previousGeneration: String?) {
+        val recovery = rootfsInstaller.recover(workspace.root)
+        when (recovery.status) {
+            RootfsRecoveryStatus.ROLLBACK_UNCONFIRMED ->
+                updateShellState(workspace.id, WorkspaceShellStatus.BROKEN.name)
+            RootfsRecoveryStatus.COMMITTED,
+            RootfsRecoveryStatus.CLEANUP_FAILED ->
+                updateShellState(workspace.id, WorkspaceShellStatus.READY.name)
+            else -> {
+                val currentGeneration = rootfsInstaller.generation(workspace.root)
+                if (currentGeneration != previousGeneration && manager.hasRootfs(workspace.root)) {
+                    // Cancellation can arrive after the durable commit even if cleanup already finished.
+                    updateShellState(workspace.id, WorkspaceShellStatus.READY.name)
+                } else {
+                    restoreShellState(workspace)
+                }
             }
         }
     }
@@ -262,6 +321,7 @@ class WorkspaceRepository(
         path: String,
     ): Long = withContext(Dispatchers.IO) {
         val workspace = dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
+        manager.ensureWorkspace(workspace.root)
         manager.fileSize(workspace.root, path, area)
     }
 
@@ -282,6 +342,7 @@ class WorkspaceRepository(
         outputStream: OutputStream,
     ) = withContext(Dispatchers.IO) {
         val workspace = dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
+        manager.ensureWorkspace(workspace.root)
         manager.exportFile(workspace.root, path, area, outputStream)
     }
 
@@ -304,6 +365,7 @@ class WorkspaceRepository(
     /** Rootfs 内执行命令实际使用的 shell 路径 (/bin/bash 或 /bin/sh) */
     suspend fun rootfsShell(id: String): String = withContext(Dispatchers.IO) {
         val workspace = dao.getById(id) ?: error("Рабочая папка не найдена. Выберите её заново.")
+        manager.ensureWorkspace(workspace.root)
         manager.rootfsShell(workspace.root)
     }
 
