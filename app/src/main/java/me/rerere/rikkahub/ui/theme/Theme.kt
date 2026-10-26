@@ -17,7 +17,6 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import kotlinx.serialization.Serializable
@@ -58,7 +57,7 @@ fun RikkahubTheme(
     }
     val amoledDarkMode by rememberAmoledDarkMode()
 
-    val colorScheme = settingsBaseColorScheme(LocalContext.current, settings, darkTheme)
+    val colorScheme = rememberSettingsBaseColorScheme(settings, darkTheme)
     // 更新状态栏图标颜色
     val view = LocalView.current
     val activity = view.context.getActivity()
