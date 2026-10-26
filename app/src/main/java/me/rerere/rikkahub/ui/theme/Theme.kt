@@ -98,19 +98,20 @@ internal fun RikkahubThemeContent(
     displaySetting: DisplaySetting = DisplaySetting(),
     typography: androidx.compose.material3.Typography = Typography,
 ) {
-    val colorSchemeConverted = remember(darkTheme, amoledDarkMode, colorScheme, displaySetting.usePureBackground,
+    val displayColors = remember(darkTheme, amoledDarkMode, colorScheme, displaySetting.usePureBackground,
         displaySetting.useLayeredSurfaces, displaySetting.useLayeredSheetTiles) {
-        effectiveDisplayColorScheme(colorScheme, darkTheme, amoledDarkMode, displaySetting)
+        effectiveDisplayColors(colorScheme, darkTheme, amoledDarkMode, displaySetting)
     }
     val extendColors = if (darkTheme) ExtendDarkColors else ExtendLightColors
     CompositionLocalProvider(
         LocalDarkMode provides darkTheme,
         LocalAmoledDarkMode provides (darkTheme && amoledDarkMode),
         LocalExtendColors provides extendColors,
+        LocalSheetTileContainerColor provides displayColors.sheetTileContainer,
         LocalOverscrollFactory provides null
     ) {
         MaterialExpressiveTheme(
-            colorScheme = colorSchemeConverted,
+            colorScheme = displayColors.colorScheme,
             typography = typography,
             content = content,
             motionScheme = MotionScheme.expressive()
@@ -122,3 +123,4 @@ val MaterialTheme.extendColors
     @Composable
     @ReadOnlyComposable
     get() = LocalExtendColors.current
+
