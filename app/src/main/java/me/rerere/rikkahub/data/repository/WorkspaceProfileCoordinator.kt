@@ -75,12 +75,16 @@ class WorkspaceProfileCoordinator(
         try {
             if (prepare) repository.prepareProfile(id, kind) else repository.verifyProfile(id, kind)
         } catch (cancelled: CancellationException) {
-            withContext(NonCancellable) { repository.cancelProfile(id, kind) }
+            settleProfile(runtime, kind, WorkspaceProfileStatus.CANCELLED, "Операция остановлена пользователем.") {
+                repository.cancelProfile(id, kind)
+            }
             throw cancelled
         } catch (interrupted: InterruptedException) {
-            withContext(NonCancellable) { repository.interruptProfile(id, kind) }
+            settleProfile(runtime, kind, WorkspaceProfileStatus.INTERRUPTED, "Операция прервана; повторите проверку.") {
+                repository.interruptProfile(id, kind)
+            }
         } catch (error: Throwable) {
-            withContext(NonCancellable) {
+            settleProfile(runtime, kind, WorkspaceProfileStatus.ERROR, error.message ?: "Операция профиля завершилась с ошибкой.") {
                 repository.failProfile(id, kind, error.message ?: "Операция профиля завершилась с ошибкой.")
             }
         } finally {
@@ -131,9 +135,17 @@ class WorkspaceProfileCoordinator(
             }
         } catch (cancelled: CancellationException) {
             withContext(NonCancellable) {
-                val snapshot = repository.profileStates(id)
+                val snapshot = try {
+                    repository.profileStates(id)
+                } catch (_: Exception) {
+                    runtime.flow.value
+                }
                 for (kind in WorkspaceProfileKind.entries) {
-                    if (snapshot.get(kind).status in ACTIVE_STATUSES) repository.cancelProfile(id, kind)
+                    if (snapshot.get(kind).status in ACTIVE_STATUSES || runtime.flow.value.get(kind).status in ACTIVE_STATUSES) {
+                        settleProfile(runtime, kind, WorkspaceProfileStatus.CANCELLED, "Проверка остановлена пользователем.") {
+                            repository.cancelProfile(id, kind)
+                        }
+                    }
                 }
             }
             throw cancelled
@@ -147,12 +159,52 @@ class WorkspaceProfileCoordinator(
     private suspend fun finishOperation(id: String, runtime: Runtime) {
         val owner = currentCoroutineContext()[Job]
         withContext(NonCancellable) {
+            val localOutcome = runtime.flow.value
             try {
                 publishSnapshot(id, runtime)
             } finally {
                 synchronized(lock) {
-                    if (runtimes[id] === runtime && runtime.job === owner) runtime.job = null
+                    if (runtimes[id] === runtime && runtime.job === owner) {
+                        if (!runtime.deleted) {
+                            var snapshot = runtime.flow.value
+                            for (kind in WorkspaceProfileKind.entries) {
+                                if (snapshot.get(kind).status !in ACTIVE_STATUSES) continue
+                                val fallback = localOutcome.get(kind).takeIf {
+                                    it.status in setOf(WorkspaceProfileStatus.CANCELLED, WorkspaceProfileStatus.INTERRUPTED, WorkspaceProfileStatus.ERROR)
+                                } ?: snapshot.get(kind).operationCopy(WorkspaceProfileStatus.ERROR).copy(
+                                    errorReason = "Операция завершилась без подтверждённого состояния. Повторите проверку профиля.",
+                                )
+                                snapshot = snapshot.with(fallback)
+                            }
+                            runtime.flow.value = snapshot
+                        }
+                        runtime.job = null
+                    }
                 }
+            }
+        }
+    }
+
+    private suspend fun settleProfile(
+        runtime: Runtime,
+        kind: WorkspaceProfileKind,
+        status: WorkspaceProfileStatus,
+        reason: String,
+        persist: suspend () -> WorkspaceProfileState?,
+    ) = withContext(NonCancellable) {
+        val persisted = try {
+            persist()
+            true
+        } catch (_: Exception) {
+            false
+        }
+        synchronized(lock) {
+            if (!runtime.deleted && runtime.flow.value.get(kind).status in ACTIVE_STATUSES) {
+                runtime.flow.value = runtime.flow.value.with(
+                    runtime.flow.value.get(kind).operationCopy(status).copy(
+                        errorReason = reason + if (persisted) "" else " Состояние не удалось сохранить; повторите проверку после завершения замены Rootfs.",
+                    ),
+                )
             }
         }
     }

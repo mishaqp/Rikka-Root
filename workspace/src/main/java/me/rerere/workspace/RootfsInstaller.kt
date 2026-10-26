@@ -12,40 +12,61 @@ import java.util.Locale
 import java.util.zip.GZIPInputStream
 import org.tukaani.xz.XZInputStream
 
-class RootfsInstaller(
+class RootfsInstaller internal constructor(
     private val manager: WorkspaceManager,
-    private val patcher: RootfsPatcher = RootfsPatcher(),
+    private val patcher: RootfsPatcher,
+    transactionIO: RootfsTransactionIO,
+    private val fault: (RootfsFaultPoint) -> Unit,
 ) {
+    constructor(
+        manager: WorkspaceManager,
+        patcher: RootfsPatcher = RootfsPatcher(),
+    ) : this(manager, patcher, RootfsTransactionIO(), {})
+
+    private val replacement = RootfsReplacement(manager, transactionIO, fault)
+
     fun install(
         root: String,
         url: String,
         onProgress: (RootfsInstallProgress) -> Unit = {},
-    ) {
-        require(url.isNotBlank()) { "Rootfs download url is required" }
-        manager.ensureWorkspace(root)
-        val format = ArchiveFormat.fromUrl(url)
-        val tempDir = manager.tempDir(root)
-        val archive = File(tempDir, "rootfs.${format.extension}")
-        val stagingDir = File(tempDir, "rootfs-staging")
-        val linuxDir = manager.linuxDir(root)
+    ): RootfsInstallResult = install(root, url, shellCompatibilityMode = false, onProgress = onProgress)
 
-        try {
-            stagingDir.deleteRecursively()
-            stagingDir.mkdirs()
+    fun install(
+        root: String,
+        url: String,
+        shellCompatibilityMode: Boolean,
+        onProgress: (RootfsInstallProgress) -> Unit = {},
+    ): RootfsInstallResult {
+        require(url.isNotBlank()) { "Rootfs download url is required" }
+        val format = ArchiveFormat.fromUrl(url)
+        val result = replacement.install(root, format.extension) { stagingDir, archive ->
             download(url, archive, onProgress)
+            fault(RootfsFaultPoint.AFTER_DOWNLOAD)
             extractTar(archive, stagingDir, format, onProgress)
-            linuxDir.deleteRecursively()
-            require(stagingDir.renameTo(linuxDir)) {
-                "Failed to move rootfs into workspace"
-            }
-            patcher.patch(linuxDir)
-            File(manager.workspaceDir(root), WorkspaceManager.ROOTFS_GENERATION_FILE)
-                .writeText(java.util.UUID.randomUUID().toString())
-            onProgress(RootfsInstallProgress(stage = RootfsInstallStage.INSTALLED))
-        } finally {
-            archive.delete()
-            stagingDir.deleteRecursively()
+            fault(RootfsFaultPoint.AFTER_EXTRACT)
+            fault(RootfsFaultPoint.BEFORE_PATCH)
+            patcher.patch(stagingDir)
+            fault(RootfsFaultPoint.AFTER_PATCH)
+            fault(RootfsFaultPoint.BEFORE_CANDIDATE_PROBE)
+            manager.probeRootfsCandidate(
+                root = root,
+                candidate = stagingDir,
+                temporaryDir = File(stagingDir.parentFile, RootfsReplacement.PROOT_TEMP_DIRECTORY),
+                shellCompatibilityMode = shellCompatibilityMode,
+            )
+            fault(RootfsFaultPoint.AFTER_CANDIDATE_PROBE)
         }
+        onProgress(RootfsInstallProgress(stage = RootfsInstallStage.INSTALLED))
+        return result
+    }
+
+    /** Local, idempotent crash recovery. It never downloads or resumes a candidate installation. */
+    fun recover(root: String): RootfsRecoveryResult = replacement.recover(root)
+
+    fun generation(root: String): String? {
+        val file = File(manager.workspaceDir(root), WorkspaceManager.ROOTFS_GENERATION_FILE)
+        if (!file.isFile || Files.isSymbolicLink(file.toPath())) return null
+        return file.readText()
     }
 
     private fun download(

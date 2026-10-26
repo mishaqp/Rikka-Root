@@ -1,11 +1,14 @@
 package me.rerere.workspace
 
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 class WorkspaceManager(
     private val baseDir: File,
@@ -15,6 +18,8 @@ class WorkspaceManager(
 ) {
     private val fileSystem = WorkspaceFileSystem(config)
     private val background = WorkspaceBackgroundProcesses()
+    private val activityLock = Any()
+    private val rootActivities = mutableMapOf<String, RootActivity>()
 
     // 按 target 长度降序, 保证 /a/b 优先于 /a 匹配
     private val sortedBindMounts = bindMounts.sortedByDescending { it.target.trimEnd('/').length }
@@ -23,17 +28,19 @@ class WorkspaceManager(
         baseDir.mkdirs()
     }
 
-    fun ensureWorkspace(root: String): File {
+    fun ensureWorkspace(root: String): File = withRootfsActivity(root, RootfsActivityKind.COMMAND) {
         val dir = workspaceDir(root)
         filesDir(root).mkdirs()
         linuxDir(root).mkdirs()
         tempDir(root).mkdirs()
-        return dir
+        dir
     }
 
     fun workspaceDir(root: String): File {
         requireValidRoot(root)
-        return File(baseDir, root)
+        return File(baseDir, root).also {
+            require(!Files.isSymbolicLink(it.toPath())) { "Каталог рабочей папки не должен быть ссылкой." }
+        }
     }
 
     fun filesDir(root: String): File = File(workspaceDir(root), FILES_DIR)
@@ -44,11 +51,13 @@ class WorkspaceManager(
 
     fun hasRootfs(root: String): Boolean = isUsableRootfs(linuxDir(root))
 
-    fun rootfsShell(root: String): String = rootfsShell(linuxDir(root))
+    fun rootfsShell(root: String): String = withRootfsActivity(root, RootfsActivityKind.FILE) {
+        rootfsShell(linuxDir(root))
+    }
 
-    fun deleteWorkspace(root: String): Boolean {
+    fun deleteWorkspace(root: String): Boolean = withRootfsActivity(root, RootfsActivityKind.COMMAND) {
         background.stopAll(root)
-        return workspaceDir(root).deleteRecursively()
+        workspaceDir(root).deleteRecursively()
     }
 
     fun listFiles(
@@ -56,7 +65,7 @@ class WorkspaceManager(
         path: String = "",
         area: WorkspaceStorageArea = WorkspaceStorageArea.FILES,
     ): List<WorkspaceFileEntry> =
-        fileSystem.list(areaDir(root, area), path)
+        withStorageActivity(root, area) { fileSystem.list(areaDir(root, area), path) }
 
     fun readText(
         root: String,
@@ -78,32 +87,32 @@ class WorkspaceManager(
         area: WorkspaceStorageArea = WorkspaceStorageArea.FILES,
         fileName: String,
         inputStream: InputStream,
-    ): WorkspaceFileEntry {
+    ): WorkspaceFileEntry = withStorageActivity(root, area) {
         val areaRoot = areaDir(root, area)
         val targetPath = if (destinationPath.isBlank()) fileName else "$destinationPath/$fileName"
-        return fileSystem.importBytes(areaRoot, targetPath, inputStream)
+        fileSystem.importBytes(areaRoot, targetPath, inputStream)
     }
 
     fun fileSize(
         root: String,
         path: String,
         area: WorkspaceStorageArea = WorkspaceStorageArea.FILES,
-    ): Long {
+    ): Long = withStorageActivity(root, area) {
         val file = fileSystem.resolve(areaDir(root, area), path)
         require(file.exists()) { "Файл не найден. Проверьте путь: $path" }
         require(file.isFile) { "Это папка, а нужен файл. Укажите путь к файлу: $path" }
-        return file.length()
+        file.length()
     }
 
     fun resolveFile(
         root: String,
         path: String,
         area: WorkspaceStorageArea = WorkspaceStorageArea.FILES,
-    ): File {
+    ): File = withStorageActivity(root, area) {
         val file = fileSystem.resolve(areaDir(root, area), path)
         require(file.exists()) { "Файл не найден. Проверьте путь: $path" }
         require(file.isFile) { "Это папка, а нужен файл. Укажите путь к файлу: $path" }
-        return file
+        file
     }
 
     fun exportFile(
@@ -111,7 +120,7 @@ class WorkspaceManager(
         path: String,
         area: WorkspaceStorageArea = WorkspaceStorageArea.FILES,
         outputStream: OutputStream,
-    ) {
+    ): Unit = withStorageActivity(root, area) {
         val file = fileSystem.resolve(areaDir(root, area), path)
         require(file.exists()) { "Файл не найден. Проверьте путь: $path" }
         require(file.isFile) { "Это папка, а нужен файл. Укажите путь к файлу: $path" }
@@ -152,18 +161,19 @@ class WorkspaceManager(
         return RootfsLocation(linuxDir(root), trimmed.trimStart('/'))
     }
 
-    fun rootfsFileSize(root: String, path: String): Long =
+    fun rootfsFileSize(root: String, path: String): Long = withRootfsActivity(root, RootfsActivityKind.FILE) {
         resolveRootfsFile(root, path).also { it.requireReadableFile(path) }.length()
+    }
 
-    fun exportRootfsFile(root: String, path: String, outputStream: OutputStream) {
+    fun exportRootfsFile(root: String, path: String, outputStream: OutputStream): Unit = withRootfsActivity(root, RootfsActivityKind.FILE) {
         val file = resolveRootfsFile(root, path)
         file.requireReadableFile(path)
         outputStream.use { out -> file.inputStream().use { it.copyTo(out) } }
     }
 
-    fun resolveRootfsFile(root: String, path: String): File {
+    fun resolveRootfsFile(root: String, path: String): File = withRootfsActivity(root, RootfsActivityKind.FILE) {
         val location = resolveRootfsPath(root, path)
-        return fileSystem.resolve(location.rootDir, location.relativePath)
+        fileSystem.resolve(location.rootDir, location.relativePath)
     }
 
     private fun File.requireReadableFile(path: String) {
@@ -177,7 +187,7 @@ class WorkspaceManager(
         recursive: Boolean = false,
         area: WorkspaceStorageArea = WorkspaceStorageArea.FILES,
     ): Boolean =
-        fileSystem.delete(areaDir(root, area), path, recursive)
+        withStorageActivity(root, area) { fileSystem.delete(areaDir(root, area), path, recursive) }
 
     fun moveFile(root: String, source: String, target: String, overwrite: Boolean = false): WorkspaceFileEntry =
         fileSystem.move(filesDir(root), source, target, overwrite)
@@ -202,18 +212,163 @@ class WorkspaceManager(
         timeoutMillis: Long = DEFAULT_COMMAND_TIMEOUT_MS,
         stdin: ByteArray? = null,
         shellCompatibilityMode: Boolean = false,
-    ): WorkspaceCommandResult {
-        return shellRunner.execute(commandContext(root, command, cwd, timeoutMillis, stdin, shellCompatibilityMode))
+    ): WorkspaceCommandResult = withRootfsActivity(root, RootfsActivityKind.COMMAND) {
+        shellRunner.execute(commandContext(root, command, cwd, timeoutMillis, stdin, shellCompatibilityMode))
     }
 
-    fun startBackgroundCommand(root: String, command: String, cwd: String = "", shellCompatibilityMode: Boolean = false): BackgroundStatus {
-        val context = commandContext(root, command, cwd, DEFAULT_COMMAND_TIMEOUT_MS, null, shellCompatibilityMode)
-        return background.start(context) { shellRunner.startBackground(context, it) }
-    }
+    fun startBackgroundCommand(root: String, command: String, cwd: String = "", shellCompatibilityMode: Boolean = false): BackgroundStatus =
+        withRootfsActivity(root, RootfsActivityKind.COMMAND) {
+            val context = commandContext(root, command, cwd, DEFAULT_COMMAND_TIMEOUT_MS, null, shellCompatibilityMode)
+            background.start(context) { shellRunner.startBackground(context, it) }
+        }
 
     fun backgroundProcesses(root: String): List<BackgroundStatus> = background.list(root)
     fun backgroundOutput(root: String, id: String): BackgroundStatus? = background.status(root, id)
     fun stopBackgroundProcess(root: String, id: String): Boolean = background.stop(root, id)
+
+    /** Holds a terminal session admission until its process has actually finished. */
+    fun acquireTerminalLease(root: String): WorkspaceRootfsLease = acquireActivity(root, RootfsActivityKind.TERMINAL)
+
+    fun acquireRootfsFileLease(root: String): WorkspaceRootfsLease = acquireActivity(root, RootfsActivityKind.FILE)
+
+    internal fun <T> withRootfsActivity(root: String, kind: RootfsActivityKind, block: () -> T): T {
+        val lease = acquireActivity(root, kind)
+        return try {
+            block()
+        } finally {
+            lease.close()
+        }
+    }
+
+    internal fun <T> withRootfsReplacement(root: String, recovering: Boolean = false, block: () -> T): T {
+        val state = activityState(root)
+        if (!state.gate.tryLock()) throw RootfsBusyException("операция с Rootfs уже выполняется")
+        try {
+            if (state.replacing) throw RootfsBusyException("замена Rootfs уже выполняется")
+            val active = RootfsActivityKind.entries.filter { state.count(it) > 0 }
+            val hasBackground = background.hasRunning(root)
+            if (active.isNotEmpty() || hasBackground) {
+                val diagnostics = buildList {
+                    active.forEach { add(it.diagnostic) }
+                    if (hasBackground) add("выполняется фоновый процесс")
+                }
+                throw RootfsBusyException(diagnostics.joinToString())
+            }
+            state.lastRecovery = null
+            state.recovering = recovering
+            state.replacing = true
+        } finally {
+            state.gate.unlock()
+        }
+        return try {
+            block()
+        } finally {
+            state.gate.withLock {
+                state.replacing = false
+                state.recovering = false
+                state.settled.signalAll()
+            }
+        }
+    }
+
+    internal fun recordRootfsRecovery(root: String, result: RootfsRecoveryResult) {
+        val state = activityState(root)
+        state.gate.withLock { state.lastRecovery = result }
+    }
+
+    internal fun awaitSettledRootfsRecovery(root: String): RootfsRecoveryResult? {
+        val state = activityState(root)
+        state.gate.lockInterruptibly()
+        try {
+            // A startup scan must observe the outcome of an overlapping local recovery.
+            // A live installation remains fail-fast; its repository owns its status updates.
+            while (state.replacing && state.recovering) state.settled.await()
+            return state.lastRecovery.takeUnless { state.replacing }
+        } finally {
+            state.gate.unlock()
+        }
+    }
+
+    internal fun probeRootfsCandidate(root: String, candidate: File, temporaryDir: File, shellCompatibilityMode: Boolean) {
+        require(WorkspaceManager.isRootfsCandidate(candidate)) {
+            "Кандидат должен содержать /bin/sh и /usr/bin/env"
+        }
+        check(candidate.canonicalFile != linuxDir(root).canonicalFile) {
+            "Проверка кандидата не должна использовать действующий Rootfs"
+        }
+        filesDir(root).mkdirs()
+        temporaryDir.mkdirs()
+        val context = WorkspaceShellContext(
+            root = root,
+            command = "printf '%s\\n' '$ROOTFS_PROBE_MARKER'",
+            cwd = "",
+            filesDir = filesDir(root),
+            linuxDir = candidate,
+            tempDir = temporaryDir,
+            workingDir = filesDir(root),
+            timeoutMillis = DEFAULT_COMMAND_TIMEOUT_MS,
+            bindMounts = emptyList(),
+            shellCompatibilityMode = shellCompatibilityMode,
+        )
+        val result = shellRunner.execute(context)
+        if (result.timedOut || result.exitCode != 0 || result.stdout.trim() != ROOTFS_PROBE_MARKER) {
+            throw IOException(
+                "Функциональная проверка кандидата не пройдена " +
+                    "(exit=${result.exitCode}, timeout=${result.timedOut}): ${result.stderr.take(500)}",
+            )
+        }
+    }
+
+    private fun acquireActivity(root: String, kind: RootfsActivityKind): WorkspaceRootfsLease {
+        val state = activityState(root)
+        // Ordinary admissions serialize only their short local checks; simultaneous readers
+        // are allowed. A replacement releases this gate while keeping its busy flag set.
+        state.gate.lockInterruptibly()
+        try {
+            if (state.replacing) {
+                throw RootfsBusyException("Rootfs заменяется; дождитесь завершения операции")
+            }
+            if (state.activities.isEmpty() && !background.hasRunning(root)) {
+                // Admission and local recovery share one per-workspace gate. No command, profile
+                // read or terminal can observe the candidate before an interrupted switch settles.
+                val recovery = RootfsInstaller(this).recover(root)
+                state.lastRecovery = recovery
+                when (recovery.status) {
+                    RootfsRecoveryStatus.BUSY -> throw RootfsBusyException("Rootfs занят другой операцией")
+                    RootfsRecoveryStatus.ROLLBACK_UNCONFIRMED -> throw RootfsInstallException(
+                        recovery.error ?: "Восстановление Rootfs не подтверждено; данные сохранены.",
+                        RootfsEnvironmentState.ROLLBACK_UNCONFIRMED,
+                    )
+                    else -> Unit
+                }
+            }
+            state.activities[kind] = state.count(kind) + 1
+        } finally {
+            state.gate.unlock()
+        }
+        return WorkspaceRootfsLease {
+            state.gate.withLock {
+                val remaining = state.count(kind) - 1
+                if (remaining > 0) state.activities[kind] = remaining else state.activities.remove(kind)
+            }
+        }
+    }
+
+    private fun RootActivity.count(kind: RootfsActivityKind): Int = activities[kind] ?: 0
+
+    private fun activityState(root: String): RootActivity {
+        workspaceDir(root)
+        return synchronized(activityLock) { rootActivities.getOrPut(root) { RootActivity() } }
+    }
+
+    private class RootActivity {
+        val gate = ReentrantLock()
+        val settled = gate.newCondition()
+        val activities = mutableMapOf<RootfsActivityKind, Int>()
+        var replacing = false
+        var recovering = false
+        var lastRecovery: RootfsRecoveryResult? = null
+    }
 
     private fun commandContext(root: String, command: String, cwd: String, timeoutMillis: Long,
         stdin: ByteArray?, shellCompatibilityMode: Boolean): WorkspaceShellContext {
@@ -238,7 +393,7 @@ class WorkspaceManager(
     }
 
     private fun requireValidRoot(root: String) {
-        require(root.matches(ROOT_NAME_REGEX)) {
+        require(root != "." && root != ".." && root.matches(ROOT_NAME_REGEX)) {
             "Недопустимое имя рабочей папки. Выберите рабочую папку заново."
         }
     }
@@ -247,6 +402,9 @@ class WorkspaceManager(
         WorkspaceStorageArea.FILES -> filesDir(root)
         WorkspaceStorageArea.LINUX -> linuxDir(root)
     }
+
+    private fun <T> withStorageActivity(root: String, area: WorkspaceStorageArea, block: () -> T): T =
+        if (area == WorkspaceStorageArea.LINUX) withRootfsActivity(root, RootfsActivityKind.FILE, block) else block()
 
     fun cleanupAllTempDirs() {
         val roots = baseDir.listFiles()?.filter { it.isDirectory } ?: return
@@ -278,9 +436,15 @@ class WorkspaceManager(
 
         private val ROOT_NAME_REGEX = Regex("[A-Za-z0-9._-]+")
 
-        /** Rootfs 是否可用, 以 /bin/sh 存在为准 */
+        private const val ROOTFS_PROBE_MARKER = "RIKKA_ROOTFS_CANDIDATE_OK"
+
+        /** Existing installations retain the historical /bin/sh integrity check. */
         fun isUsableRootfs(linuxDir: File): Boolean =
             linuxDir.isDirectory && linuxDir.hasRootfsEntry("bin/sh")
+
+        /** PRoot also enters through /usr/bin/env, so a new candidate needs both entry points. */
+        fun isRootfsCandidate(linuxDir: File): Boolean =
+            isUsableRootfs(linuxDir) && linuxDir.hasRootfsEntry("usr/bin/env")
 
         /** Rootfs 内使用的 shell: 优先 bash, 没有时 (如 Alpine minirootfs) 回退到 /bin/sh */
         fun rootfsShell(linuxDir: File): String =
@@ -292,6 +456,16 @@ class WorkspaceManager(
             val entry = File(this, path)
             return entry.isFile || Files.isSymbolicLink(entry.toPath())
         }
+    }
+}
+
+class WorkspaceRootfsLease internal constructor(
+    private val release: () -> Unit,
+) : AutoCloseable {
+    private val closed = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    override fun close() {
+        if (closed.compareAndSet(false, true)) release()
     }
 }
 

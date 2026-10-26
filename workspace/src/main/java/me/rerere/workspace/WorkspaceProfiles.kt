@@ -14,6 +14,8 @@ import java.nio.file.attribute.BasicFileAttributes
 import java.security.MessageDigest
 import java.util.Locale
 
+internal const val WORKSPACE_PROFILES_STATE_FILE = ".workspace-profiles.json"
+
 /** A development runtime owned by one workspace Rootfs, never by the Android host. */
 enum class WorkspaceProfileKind { PYTHON, NODE }
 
@@ -106,8 +108,12 @@ class WorkspaceProfileService(
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
+    fun states(root: String): WorkspaceProfilesSnapshot = manager.withRootfsActivity(root, RootfsActivityKind.PROFILE) {
+        statesLocked(root)
+    }
+
     @Synchronized
-    fun states(root: String): WorkspaceProfilesSnapshot {
+    private fun statesLocked(root: String): WorkspaceProfilesSnapshot {
         val stamp = rootfsStamp(root)
         val file = stateFile(root)
         if (!file.isFile) return WorkspaceProfilesSnapshot.empty(stamp)
@@ -119,17 +125,24 @@ class WorkspaceProfileService(
         return WorkspaceProfilesSnapshot.empty(stamp).also { writeSnapshot(root, it) }
     }
 
-    @Synchronized
-    fun reset(root: String) {
+    fun reset(root: String) = manager.withRootfsActivity(root, RootfsActivityKind.PROFILE) {
         val file = stateFile(root)
         file.delete()
-        File(file.parentFile, "$PROFILE_STATE_FILE.tmp").delete()
+        File(file.parentFile, "$WORKSPACE_PROFILES_STATE_FILE.tmp").delete()
     }
 
     fun prepare(
         root: String,
         kind: WorkspaceProfileKind,
         shellCompatibilityMode: Boolean = false,
+    ): WorkspaceProfileState = manager.withRootfsActivity(root, RootfsActivityKind.PROFILE) {
+        prepareLocked(root, kind, shellCompatibilityMode)
+    }
+
+    private fun prepareLocked(
+        root: String,
+        kind: WorkspaceProfileKind,
+        shellCompatibilityMode: Boolean,
     ): WorkspaceProfileState {
         saveState(root, initialState(root, kind, WorkspaceProfileStatus.PREPARING))
         val operationStamp = rootfsStamp(root)
@@ -172,6 +185,14 @@ class WorkspaceProfileService(
         root: String,
         kind: WorkspaceProfileKind,
         shellCompatibilityMode: Boolean = false,
+    ): WorkspaceProfileState = manager.withRootfsActivity(root, RootfsActivityKind.PROFILE) {
+        verifyLocked(root, kind, shellCompatibilityMode)
+    }
+
+    private fun verifyLocked(
+        root: String,
+        kind: WorkspaceProfileKind,
+        shellCompatibilityMode: Boolean,
     ): WorkspaceProfileState {
         saveState(root, initialState(root, kind, WorkspaceProfileStatus.CHECKING))
         val operationStamp = rootfsStamp(root)
@@ -200,10 +221,11 @@ class WorkspaceProfileService(
         }
     }
 
-    fun markCancelled(root: String, kind: WorkspaceProfileKind): WorkspaceProfileState {
+    fun markCancelled(root: String, kind: WorkspaceProfileKind): WorkspaceProfileState =
+        manager.withRootfsActivity(root, RootfsActivityKind.PROFILE) {
         val current = states(root).get(kind)
-        if (current.status !in ACTIVE_STATUSES) return current
-        return saveState(
+        if (current.status !in ACTIVE_STATUSES) return@withRootfsActivity current
+        return@withRootfsActivity saveState(
             root,
             clearedState(root, kind, WorkspaceProfileStatus.CANCELLED).copy(
                 errorReason = "Операция остановлена пользователем.",
@@ -211,10 +233,11 @@ class WorkspaceProfileService(
         )
     }
 
-    fun markInterrupted(root: String, kind: WorkspaceProfileKind): WorkspaceProfileState? {
+    fun markInterrupted(root: String, kind: WorkspaceProfileKind): WorkspaceProfileState? =
+        manager.withRootfsActivity(root, RootfsActivityKind.PROFILE) {
         val current = states(root).get(kind)
-        if (current.status !in ACTIVE_STATUSES) return null
-        return saveState(
+        if (current.status !in ACTIVE_STATUSES) return@withRootfsActivity null
+        return@withRootfsActivity saveState(
             root,
             clearedState(root, kind, WorkspaceProfileStatus.INTERRUPTED).copy(
                 errorReason = "Операция прервана. Установка не возобновляется автоматически; выполняется только повторная проверка.",
@@ -223,13 +246,15 @@ class WorkspaceProfileService(
     }
 
     fun markFailed(root: String, kind: WorkspaceProfileKind, reason: String): WorkspaceProfileState =
-        saveState(
-            root,
-            clearedState(root, kind, WorkspaceProfileStatus.ERROR).copy(
-                errorReason = reason,
-                diagnostic = "Операция приложения завершилась с ошибкой.",
-            ),
-        )
+        manager.withRootfsActivity(root, RootfsActivityKind.PROFILE) {
+            saveState(
+                root,
+                clearedState(root, kind, WorkspaceProfileStatus.ERROR).copy(
+                    errorReason = reason,
+                    diagnostic = "Операция приложения завершилась с ошибкой.",
+                ),
+            )
+        }
 
     private fun preparePython(root: String, compatibility: Boolean) {
         executeChecked(
@@ -462,7 +487,7 @@ class WorkspaceProfileService(
         val target = stateFile(root)
         // A cancelled/deleted workspace must never be recreated by a late result.
         if (target.parentFile?.isDirectory != true) return
-        val temporary = File(target.parentFile, "$PROFILE_STATE_FILE.tmp")
+        val temporary = File(target.parentFile, "$WORKSPACE_PROFILES_STATE_FILE.tmp")
         temporary.writeText(json.encodeToString(WorkspaceProfilesSnapshot.serializer(), snapshot))
         try {
             Files.move(
@@ -474,7 +499,7 @@ class WorkspaceProfileService(
         }
     }
 
-    private fun stateFile(root: String) = File(manager.workspaceDir(root), PROFILE_STATE_FILE)
+    private fun stateFile(root: String) = File(manager.workspaceDir(root), WORKSPACE_PROFILES_STATE_FILE)
 
     private fun rootfsStamp(root: String): String {
         val workspace = manager.workspaceDir(root)
@@ -510,7 +535,6 @@ class WorkspaceProfileService(
     private fun String.substringBeforeWhitespace() = trim().split(Regex("\\s+")).first()
 
     companion object {
-        private const val PROFILE_STATE_FILE = ".workspace-profiles.json"
         private const val INSTALL_TIMEOUT_MS = 20 * 60_000L
         private const val VERIFY_TIMEOUT_MS = 180_000L
         private const val DETECTION_TIMEOUT_MS = 30_000L

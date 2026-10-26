@@ -262,6 +262,7 @@ private fun WorkspaceTerminalContent(
                 ) {
                     Text(
                         text = when {
+                            state.error != null && !state.isCreating -> state.error
                             root == null || state.isCreating || state.readiness == WorkspaceTerminalReadiness.Loading -> {
                                 stringResource(R.string.workspace_terminal_loading)
                             }
@@ -312,7 +313,9 @@ private fun WorkspaceTerminalTabContent(
                 .weight(1f)
                 .fillMaxWidth(),
         ) {
-            AndroidView(
+            // A closed session that never started must not be lazily initialized by a stale
+            // AndroidView update after its Rootfs lease has already been released.
+            if (!tab.finishedSignal.isCompleted || tab.session.emulator != null) AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { viewContext ->
                     TerminalView(viewContext, null).apply {

@@ -84,6 +84,7 @@ class MiniAppToolsTest {
             source.resolve("index.html").writeText("<html>First</html>")
             val repository = mockk<WorkspaceRepository>()
             coEvery { repository.getById("selected") } returns WorkspaceEntity("selected", "Selected", "/private/root", "READY", 0, 0)
+            coEvery { repository.acquireRootfsFileLease("selected") } returns mockk(relaxed = true)
             coEvery { repository.resolveRootfsFile("selected", "/mnt/apps/tracker") } returns source
             val store = MiniAppStore(root)
             var checks = 0

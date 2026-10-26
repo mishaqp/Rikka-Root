@@ -2,6 +2,8 @@ package me.rerere.rikkahub.miniapps
 
 // Moru 2101b5e457031d8adb1098dac880bdbb3019623f: mini_app_data_tool.dart and workspace_tools_service.dart.
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.*
 import me.rerere.ai.core.InputSchema
@@ -128,9 +130,16 @@ fun publishMiniAppTool(
             kotlin.check(repository.getById(workspaceId)?.shellStatus == WorkspaceShellStatus.READY.name) { "Выберите готовую рабочую папку." }
             val path = miniAppWorkspacePath(args.jsonObject.text("path"), cwd)
             // Never interpret the model path as an Android host path; resolve selected workspace mounts first.
-            val source = repository.resolveRootfsFile(workspaceId, path)
-            if (!source.isDirectory) throw MiniAppException("not_a_folder", "Укажите папку приложения в рабочей среде.")
-            val installed = store().install(source)
+            val sourceLease = repository.acquireRootfsFileLease(workspaceId)
+            val installed = try {
+                val source = repository.resolveRootfsFile(workspaceId, path)
+                withContext(Dispatchers.IO) {
+                    if (!source.isDirectory) throw MiniAppException("not_a_folder", "Укажите папку приложения в рабочей среде.")
+                }
+                store().install(source)
+            } finally {
+                sourceLease.close()
+            }
             val check = try { withTimeoutOrNull(30_000) { check(installed.app) }
                 ?: buildJsonObject { put("ok", false); put("skipped", "Время проверки истекло.") } }
             catch (e: CancellationException) { throw e }
