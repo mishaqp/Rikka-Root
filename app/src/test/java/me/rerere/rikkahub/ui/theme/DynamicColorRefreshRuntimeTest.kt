@@ -64,6 +64,7 @@ class DynamicColorRefreshRuntimeTest {
     private val settings = MutableStateFlow(initial)
     private val showTheme = mutableStateOf(true)
     private var rendered: PaletteRoles? = null
+    private var renderedSheetTile: Int? = null
 
     @Before fun installSettingsBoundary() {
         MutableSystemThemeColors.reset()
@@ -226,6 +227,23 @@ class DynamicColorRefreshRuntimeTest {
         assertEquals("Lifecycle must not rewrite user settings", initial, settings.value)
     }
 
+    @Test fun sheetTileRoleRefreshesWithDynamicPalette() {
+        val layered = initial.copy(displaySetting = initial.displaySetting.copy(useLayeredSheetTiles = true))
+        settings.value = layered
+        mount(ColorMode.LIGHT)
+        val firstSheetTile = compose.runOnIdle { requireNotNull(renderedSheetTile) }
+        compose.runOnIdle {
+            owner.registry.currentState = Lifecycle.State.CREATED
+            MutableSystemThemeColors.palette = MutableSystemThemeColors.SECOND
+            owner.registry.currentState = Lifecycle.State.RESUMED
+        }
+        compose.waitForIdle()
+        val secondSheetTile = compose.runOnIdle { requireNotNull(renderedSheetTile) }
+        assertNotEquals("The sheet-only role must refresh with the platform accent", firstSheetTile, secondSheetTile)
+        assertRendered(MutableSystemThemeColors.SECOND.light)
+        assertEquals("Palette refresh must not rewrite user settings", layered, settings.value)
+    }
+
     private fun mount(mode: ColorMode, editor: Boolean = false) {
         // Keep editor settings fixed while only platform resources and lifecycle change.
         val editorSettings = settings.value
@@ -249,7 +267,11 @@ class DynamicColorRefreshRuntimeTest {
     private fun PaletteProbe() {
         val colors = MaterialTheme.colorScheme
         val roles = PaletteRoles(colors.primary.toArgb(), colors.surface.toArgb(), colors.onSurface.toArgb())
-        SideEffect { rendered = roles }
+        val sheetTile = colors.sheetTileContainer.toArgb()
+        SideEffect {
+            rendered = roles
+            renderedSheetTile = sheetTile
+        }
         Text("System palette", color = colors.onSurface)
     }
 

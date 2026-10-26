@@ -195,10 +195,10 @@
     <string name="ui_settings_page_system_mode" translatable="false">Системная</string>
     <string name="ui_theme_advanced" translatable="false">Дополнительные настройки темы</string>
     <string name="ui_theme_advanced_settings_page_title" translatable="false">Дополнительные настройки темы</string>
-    <string name="ui_theme_advanced_settings_page_use_layered_sheet_tiles_subtitle" translatable="false">По умолчанию элементы совпадают с фоном панели.</string>
+    <string name="ui_theme_advanced_settings_page_use_layered_sheet_tiles_subtitle" translatable="false">Выделяет невыбранные элементы и действия внутри панелей, сохраняя фон панелей, обычные карточки и верхнюю панель.</string>
     <string name="ui_theme_advanced_settings_page_use_layered_sheet_tiles_title" translatable="false">Многослойные элементы панелей</string>
-    <string name="ui_theme_advanced_settings_page_use_layered_surfaces_subtitle" translatable="false">Более тёмная страница и светлые карточки с оттенком темы. Отключите, чтобы вернуть прежний вид.</string>
-    <string name="ui_theme_advanced_settings_page_use_layered_surfaces_title" translatable="false">Многослойные поверхности (экспериментально)</string>
+    <string name="ui_theme_advanced_settings_page_use_layered_surfaces_subtitle" translatable="false">Разделяет фон страницы и карточки, сохраняя оттенки выбранной палитры в светлом и тёмном режимах.</string>
+    <string name="ui_theme_advanced_settings_page_use_layered_surfaces_title" translatable="false">Многослойные поверхности</string>
     <string name="ui_theme_amoled" translatable="false">Чёрный фон AMOLED</string>
     <string name="ui_theme_color_mode" translatable="false">Цветовая схема</string>
     <string name="ui_theme_custom" translatable="false">Свои темы</string>

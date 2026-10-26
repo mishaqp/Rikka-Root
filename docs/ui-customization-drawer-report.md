@@ -27,7 +27,7 @@
 | `message_style_rows.dart` | `InterfaceSettingsWidgets.kt`, `SettingInterfaceMessageStylePage.kt` | Нативные строки, переключатели сегментов и редактор цвета ARGB. |
 | `message_style_preview.dart` | `SettingInterfaceMessageStylePage.kt::MessageStylePreview` | Настоящие `ChatMessageSurface` и фон `AssistantBackground`, источник размытия Haze; активная роль выделена в превью. |
 | `theme_settings_page.dart` | `SettingThemePage.kt`, `SettingInterfaceThemePages.kt`, `ui/theme/InterfaceColorScheme.kt` | Цветовой режим, динамическая палитра, чистый фон и AMOLED; палитры и свои темы доступны всегда, выбор палитры выключает динамические цвета. |
-| `theme_advanced_settings_page.dart` | `SettingInterfaceThemePages.kt`, `InterfaceColorScheme.kt` | Многослойные поверхности и элементы панелей; чистый фон/AMOLED имеют приоритет над оттенками карточек. |
+| `theme_advanced_settings_page.dart` | `SettingInterfaceThemePages.kt`, `InterfaceColorScheme.kt`, `LayeredSheetTile.kt` | Многослойные поверхности и отдельная роль элементов панелей; чистый фон/AMOLED имеют приоритет над оттенками карточек. |
 | `google_fonts_picker_page.dart` | `GoogleFontsRepository.kt`, `SettingInterfaceFontsPage.kt` | Публичный каталог Expo, обычное начертание TTF и лицензия, нативное превью, поиск, обновление, загрузка и применение; файлы сохраняются в хранилище приложения. |
 | `mobile_background_settings_page.dart` | `SettingPreferencesNotificationPage.kt` | Использованы только существующие уведомления и Live Update Rikka. Новый механизм фонового выполнения не переносился. |
 | `background_overlay_settings_page.dart` | — | Не переносилось: внешнее окно исключено по ответу пользователя «Только оформление и существующий фон»; спецдоступ `SYSTEM_ALERT_WINDOW` не добавлялся. |
@@ -93,8 +93,8 @@
 | chatInputBackgroundOpacityLight | `chatInputBackgroundOpacityLight: Float` | `1f` | ChatInputPresentation.kt |
 | chatInputBackgroundOpacityDark | `chatInputBackgroundOpacityDark: Float` | `1f` | ChatInputPresentation.kt |
 | usePureBackground | `usePureBackground: Boolean` | `false` | InterfaceColorScheme.kt; Theme.kt и превью |
-| useLayeredSurfaces | `useLayeredSurfaces: Boolean` | `false` | InterfaceColorScheme.kt; Theme.kt и превью |
-| useLayeredSheetTiles | `useLayeredSheetTiles: Boolean` | `false` | InterfaceColorScheme.kt; Theme.kt и превью |
+| useLayeredSurfaces | `useLayeredSurfaces: Boolean` | `false` | InterfaceColorScheme.kt; Theme.kt и превью; фон страницы и обычные поверхности |
+| useLayeredSheetTiles | `useLayeredSheetTiles: Boolean` | `false` | InterfaceColorScheme.kt; Theme.kt; LayeredSheetTile.kt; реальные ModelList.kt, AssistantPicker.kt, FilesPicker.kt и WorkspaceSelectSheet.kt, без изменения внешней ColorScheme и фона панелей |
 | glassTheme | `glassTheme: Boolean` | `false` | ChatInputPresentation.kt; Background.kt; ChatPage.kt |
 | glassEconomy | `glassEconomy: Boolean` | `false` | ChatInputPresentation.kt; ChatMessageSurface.kt; ChatPage.kt |
 | displayGlassRestoreKey | `glassPreviousMessageStyle: MessageStyleBackup?` | `null` | SettingInterfaceThemePages.kt::withGlassTheme: сохранение и восстановление пресета |
@@ -244,3 +244,12 @@
 5. Крупный шрифт, клавиатура, длинная история и поворот; затем создать/восстановить копию с выбранными обоями и шрифтами.
 
 Roborazzi проверяет нативные JVM-кадры и callbacks. Реальные IME, GPU/OEM, WebView, голос, Android-разрешения и выполнение инструментов требуют этой проверки на устройстве; показатели производительности на телефоне не заявляются.
+
+## Независимые многослойные поверхности и элементы панелей
+
+- Устранена воспроизведённая тестом утечка: `useLayeredSheetTiles` изменял общий `surfaceContainer`, тогда как невыбранные элементы реальных панелей модели и ассистента использовали `surface`.
+- `effectiveDisplayColors` возвращает общую `ColorScheme` и отдельную необязательную роль `sheetTileContainer`. `RikkahubThemeContent` передаёт её через CompositionLocal; при выключенном переключателе значение равно `null`. Тогда `sheetTileContainerOr` восстанавливает собственный default каждого компонента: `surface` у модели и ассистента, `surfaceContainerLow` у действий вложений, `surfaceContainer` у быстрых сообщений и прозрачность у невыбранной рабочей папки.
+- Общий `LayeredSheetTile` используют настоящие карточки моделей и ассистентов; отдельная роль также подключена к настоящим действиям вложений, элементам быстрых сообщений и строкам выбора рабочей папки. Selected/content-роли, disabled, формы, отступы и callbacks сохранены. Фон `ModalBottomSheet`, фон выпадающего меню, обычные карточки и верхняя панель к роли не подключены.
+- Проверены четыре комбинации переключателей, внешняя палитра, реальные Compose-компоненты и верхняя панель, собственные defaults, selected/disabled-фоны и `LocalContentColor`, контраст, AMOLED/чистый фон, системные и пользовательские палитры, превью, сериализация и обновление sheet-роли в `DynamicColorRefreshRuntimeTest`. Touch-проверка подтверждает callbacks при выключении, включении и повторном выключении эффекта, а disabled-карточка не принимает нажатие.
+- Имена сериализованных полей и выключенные по умолчанию значения сохранены. Переключение не переписывает ручные цвета сообщений, стеклянный стиль или путь фона чата; исходные настройки проходят backup round-trip.
+- JVM-проверки используют production-resolver и native-rendered Compose-компоненты. Они не заменяют проверку GPU/OEM на телефоне и не заявляют end-to-end-покрытие всей панели моделей, long-press или reorder. На устройстве проверить те же четыре комбинации, сохранность выбора и взаимодействий, обновление системной палитры и читаемость чата/настроек/панелей.

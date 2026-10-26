@@ -130,4 +130,23 @@ class MessageDisplaySerializationTest {
         assertEquals(display, restore(exported).displaySetting)
         assertEquals(display, JsonInstant.decodeFromString<DisplaySetting>(JsonInstant.encodeToString(display)))
     }
+
+    @Test fun layeredOptionsRemainIndependentAcrossBackupRoundTrips() {
+        for (layeredSurfaces in listOf(false, true)) {
+            for (layeredSheetTiles in listOf(false, true)) {
+                val original = DisplaySetting(
+                    useLayeredSurfaces = layeredSurfaces,
+                    useLayeredSheetTiles = layeredSheetTiles,
+                    userChatBubbleStyleOverrides = ChatBubbleStyleOverrides(
+                        backgroundArgbLight = 0xFF123456L, textArgbDark = 0xFFEFEFEFL,
+                    ),
+                    chatBackgroundImagePath = "file:///data/user/0/app/files/upload/wall.jpg",
+                )
+                val restored = restore(JsonInstant.encodeToString(Settings(displaySetting = original))).displaySetting
+                assertEquals(original, restored)
+                assertEquals(layeredSurfaces, restored.useLayeredSurfaces)
+                assertEquals(layeredSheetTiles, restored.useLayeredSheetTiles)
+            }
+        }
+    }
 }

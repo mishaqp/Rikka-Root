@@ -101,6 +101,7 @@ import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
+import me.rerere.rikkahub.ui.theme.sheetTileContainerOr
 import me.rerere.workspace.WorkspaceShellStatus
 import org.koin.compose.koinInject
 
@@ -486,31 +487,46 @@ private fun QuickMessagesSheetRow(
             modifier = Modifier.widthIn(min = 200.dp, max = 360.dp),
         ) {
             quickMessages.forEach { quickMessage ->
-                Surface(
+                QuickMessageSheetItem(
+                    title = quickMessage.title,
+                    message = quickMessage.content,
                     onClick = {
                         state.appendText(quickMessage.content)
                         expanded = false
                         onDismiss()
                     },
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(modifier = Modifier.padding(8.dp)) {
-                        Text(
-                            text = quickMessage.title,
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            text = quickMessage.content,
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
+                )
             }
+        }
+    }
+}
+
+@Composable
+internal fun QuickMessageSheetItem(
+    title: String,
+    message: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        onClick = onClick,
+        color = scheme.sheetTileContainerOr(scheme.surfaceContainer),
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(8.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -646,7 +662,7 @@ private val ToolsSheetPressEasing = CubicBezierEasing(0.215f, 0.61f, 0.355f, 1f)
 // Moru IosCardPress: color / optional 0.98 scale tween, 260ms easeOutCubic.
 // Sheet fills stay opaque and use the active MaterialTheme.
 @Composable
-private fun ToolsSheetSurface(
+internal fun ToolsSheetSurface(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     onClickLabel: String? = null,
@@ -656,11 +672,12 @@ private fun ToolsSheetSurface(
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val hovered by interactionSource.collectIsHoveredAsState()
-    val base = MaterialTheme.colorScheme.surfaceContainerLow
+    val scheme = MaterialTheme.colorScheme
+    val base = scheme.sheetTileContainerOr(scheme.surfaceContainerLow)
     val washStrength = if (LocalDarkMode.current) 0.14f else 0.12f
     val targetColor = when {
-        pressed -> lerp(base, MaterialTheme.colorScheme.onSurface, washStrength)
-        hovered -> lerp(base, MaterialTheme.colorScheme.onSurface, washStrength * 0.7f)
+        pressed -> lerp(base, scheme.onSurface, washStrength)
+        hovered -> lerp(base, scheme.onSurface, washStrength * 0.7f)
         else -> base
     }
     val color by animateColorAsState(

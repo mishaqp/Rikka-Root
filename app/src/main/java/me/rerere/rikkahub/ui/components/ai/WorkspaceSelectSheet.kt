@@ -33,6 +33,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.ui.pages.extensions.workspace.toShellStatusLabel
+import me.rerere.rikkahub.ui.theme.sheetTileContainerOr
 
 @Composable
 internal fun WorkspaceSelectSheet(
@@ -111,12 +112,14 @@ internal fun WorkspaceSelectSheet(
 }
 
 @Composable
-private fun WorkspaceSelectRow(
+internal fun WorkspaceSelectRow(
     title: String,
     selected: Boolean,
     onClick: () -> Unit,
     status: String? = null,
+    modifier: Modifier = Modifier,
 ) {
+    val scheme = MaterialTheme.colorScheme
     ListItem(
         leadingContent = {
             Icon(HugeIcons.Codesandbox, contentDescription = null)
@@ -150,12 +153,12 @@ private fun WorkspaceSelectRow(
         } else null,
         colors = ListItemDefaults.colors(
             containerColor = if (selected) {
-                MaterialTheme.colorScheme.surfaceContainerHigh
+                scheme.surfaceContainerHigh
             } else {
-                Color.Transparent
+                scheme.sheetTileContainerOr(Color.Transparent)
             }
         ),
-        modifier = Modifier
+        modifier = modifier
             .clip(MaterialTheme.shapes.large)
             .clickable { onClick() },
     )

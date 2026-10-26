@@ -6,6 +6,8 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -41,12 +43,30 @@ internal fun rememberSettingsBaseColorScheme(settings: Settings, dark: Boolean):
     }
 }
 
-fun effectiveDisplayColorScheme(
+/** The optional sheet-only role is deliberately outside Material's global ColorScheme. */
+data class EffectiveDisplayColors(
+    val colorScheme: ColorScheme,
+    val sheetTileContainer: Color?,
+)
+
+internal val LocalSheetTileContainerColor = compositionLocalOf<Color?> { null }
+
+/** Real sheet tiles consume this role; ordinary cards and app bars never do. */
+internal val ColorScheme.sheetTileContainer: Color
+    @Composable @ReadOnlyComposable get() = sheetTileContainerOr(surface)
+
+/** Disabled layering restores each component's own default instead of forcing a shared one. */
+@Composable
+@ReadOnlyComposable
+internal fun ColorScheme.sheetTileContainerOr(defaultColor: Color): Color =
+    LocalSheetTileContainerColor.current ?: defaultColor
+
+fun effectiveDisplayColors(
     base: ColorScheme,
     dark: Boolean,
     amoled: Boolean,
     display: DisplaySetting,
-): ColorScheme {
+): EffectiveDisplayColors {
     val pureBackground = display.usePureBackground || (dark && amoled)
     val background = if (dark) Color.Black else Color.White
     val pure = if (pureBackground) base.copy(background = background, surface = background) else base
@@ -56,10 +76,22 @@ fun effectiveDisplayColorScheme(
         surfaceContainerLow = lerp(pure.surfaceContainerLow, pure.primary, if (dark) .05f else .025f),
         surfaceContainerHigh = lerp(pure.surfaceContainerHigh, pure.primary, if (dark) .08f else .04f),
     ) else pure
-    return if (display.useLayeredSheetTiles) layered.copy(
-        surfaceContainer = lerp(layered.surfaceContainerHigh, layered.primary, if (dark) .05f else .025f),
-    ) else layered
+    return EffectiveDisplayColors(
+        colorScheme = layered,
+        sheetTileContainer = if (display.useLayeredSheetTiles) {
+            lerp(layered.surfaceContainerHigh, layered.primary, if (dark) .05f else .025f)
+        } else {
+            null
+        },
+    )
 }
+
+fun effectiveDisplayColorScheme(
+    base: ColorScheme,
+    dark: Boolean,
+    amoled: Boolean,
+    display: DisplaySetting,
+): ColorScheme = effectiveDisplayColors(base, dark, amoled, display).colorScheme
 
 @Composable
 fun effectiveInterfaceColorScheme(settings: Settings, dark: Boolean): ColorScheme {

@@ -239,7 +239,7 @@ private val appSettingFields: List<AppSettingField> by lazy {
                 listOf("default", "serif", "monospace") + if (customFont.isNotBlank()) listOf("custom") else emptyList()
             })
         }
-        for ((name, title) in listOf("usePureBackground" to "Однотонный фон", "useLayeredSurfaces" to "Многослойные поверхности", "useLayeredSheetTiles" to "Многослойные плитки меню", "glassEconomy" to "Экономичный режим стеклянной темы")) display(name, title, section = "theme")
+        for ((name, title) in listOf("usePureBackground" to "Однотонный фон", "useLayeredSurfaces" to "Многослойные поверхности", "useLayeredSheetTiles" to "Многослойные элементы панелей", "glassEconomy" to "Экономичный режим стеклянной темы")) display(name, title, section = "theme")
         for ((role, title) in listOf("user" to "Сообщение пользователя", "assistant" to "Ответ ассистента")) {
             val prefix = "${role}ChatBubbleStyleOverrides"
             for ((name, label) in listOf("backgroundArgbLight" to "фон светлой темы", "backgroundArgbDark" to "фон тёмной темы", "borderArgbLight" to "граница светлой темы", "borderArgbDark" to "граница тёмной темы", "textArgbLight" to "текст светлой темы", "textArgbDark" to "текст тёмной темы")) {
