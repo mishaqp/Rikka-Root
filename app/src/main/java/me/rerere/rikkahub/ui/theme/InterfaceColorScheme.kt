@@ -99,4 +99,3 @@ fun effectiveInterfaceColorScheme(settings: Settings, dark: Boolean): ColorSchem
     val amoled = rememberAmoledDarkMode().value
     return effectiveDisplayColorScheme(base, dark, amoled, settings.displaySetting)
 }
-
