@@ -227,12 +227,14 @@ class DynamicColorRefreshRuntimeTest {
     }
 
     private fun mount(mode: ColorMode, editor: Boolean = false) {
+        // Keep editor settings fixed while only platform resources and lifecycle change.
+        val editorSettings = settings.value
         compose.setContent {
             if (showTheme.value) {
             CompositionLocalProvider(LocalLifecycleOwner provides owner,
                 LocalConfiguration provides configuration.value) {
                 if (editor) {
-                    val scheme = effectiveInterfaceColorScheme(settings.value, dark = false)
+                    val scheme = effectiveInterfaceColorScheme(editorSettings, dark = false)
                     MaterialTheme(colorScheme = scheme) { PaletteProbe() }
                 } else {
                     RikkahubTheme(colorMode = mode) { PaletteProbe() }
