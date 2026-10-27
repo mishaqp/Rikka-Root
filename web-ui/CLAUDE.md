@@ -438,7 +438,7 @@ ChatMessage (容器)
 2. 在 Kotlin 后端同步添加 (`ai/.../ui/Message.kt`)
 3. 在 `app/components/message/parts/` 创建组件
 4. 在 `app/components/message/message-part.tsx` 添加分发逻辑
-5. 在 `app/types/helpers.ts` 添加类型守卫
+5. 根据需要在使用该类型的组件中添加类型守卫
 
 ### File URL Handling
 
@@ -598,7 +598,7 @@ web-ui/build/client/
 - [ ] 运行 `pnpm run typecheck` 确保前端类型正确
 - [ ] 在 Kotlin 端运行类型检查
 - [ ] 测试前后端数据序列化/反序列化
-- [ ] 更新相关组件的类型守卫 (`app/types/helpers.ts`)
+- [ ] 检查相关组件的类型收窄，必要时添加类型守卫
 
 ## Performance Optimization
 
