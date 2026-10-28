@@ -20,27 +20,10 @@ enum class DrawerConversationSort(val label: String) {
 enum class DrawerConversationDateGroup(val label: String) {
     TODAY("Сегодня"),
     YESTERDAY("Вчера"),
-    THIS_WEEK("На этой неделе"),
-    EARLIER("Раньше");
-
-    fun headerDate(today: LocalDate): LocalDate = when (this) {
-        TODAY -> today
-        YESTERDAY -> today.minusDays(1)
-        // A key distinct from Today/Yesterday even on Monday and Tuesday.
-        THIS_WEEK -> today.minusDays(2)
-        EARLIER -> today.minusDays(7)
-    }
 }
 
 internal fun drawerWeekStart(today: LocalDate): LocalDate =
     today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-
-fun drawerDateGroup(date: LocalDate, today: LocalDate): DrawerConversationDateGroup = when {
-    date >= today -> DrawerConversationDateGroup.TODAY
-    date == today.minusDays(1) -> DrawerConversationDateGroup.YESTERDAY
-    date >= drawerWeekStart(today) -> DrawerConversationDateGroup.THIS_WEEK
-    else -> DrawerConversationDateGroup.EARLIER
-}
 
 internal fun Conversation.drawerSortDate(sortOrder: ConversationSortOrder, zone: ZoneId): LocalDate =
     (if (sortOrder == ConversationSortOrder.CREATE_TIME) createAt else updateAt).atZone(zone).toLocalDate()
