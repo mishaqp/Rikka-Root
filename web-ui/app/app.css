@@ -1,6 +1,9 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Keep this utility available to HTML rendered from chat messages. */
+@source inline("border-none");
+
 @custom-variant dark (&:is(.dark *));
 
 :root {
