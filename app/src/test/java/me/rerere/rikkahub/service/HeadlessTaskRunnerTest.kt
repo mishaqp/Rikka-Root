@@ -240,6 +240,32 @@ class HeadlessTaskRunnerTest {
         assertEquals(HeadlessToolFailure(HeadlessTaskStatus.INDETERMINATE, "root_output_incomplete"),
             classifyHeadlessToolFailure("take_screenshot", output))
     }
+
+    @Test fun uncertainPostActionObservationStopsFollowingActions() = runBlocking {
+        var taps = 0
+        var followingEffects = 0
+        val fixture = Fixture(toolsOverride = listOf(
+            Tool("tap", "fixture", execute = {
+                taps++
+                listOf(UIMessagePart.Text(buildJsonObject {
+                    put("success", true)
+                    put("after", buildJsonObject { put("tree_error", "root_cleanup_unconfirmed") })
+                }.toString()))
+            }),
+            Tool("write_text_file", "fixture", execute = {
+                followingEffects++
+                listOf(UIMessagePart.Text("done"))
+            }),
+        ))
+        val result = fixture.runner.run(HeadlessTaskRequest.DirectActions(listOf(
+            HeadlessToolAction("tap", buildJsonObject {}),
+            HeadlessToolAction("write_text_file", buildJsonObject {}),
+        )), fixture.context)
+        assertEquals(HeadlessTaskStatus.INDETERMINATE, result.status)
+        assertEquals("root_cleanup_unconfirmed", result.errorCode)
+        assertEquals("The accepted action must not be replayed", 1, taps)
+        assertEquals("No later action may run while cleanup is uncertain", 0, followingEffects)
+    }
     @Test fun actualRootToolWithoutForegroundBrokerReportsBlockedSafeCode() = runBlocking {
         val fixture = Fixture(toolsOverride = listOf(buildRootTool(RootShellManager(suExecutable = "/nonexistent-no-launch"))))
         val result = fixture.runner.run(HeadlessTaskRequest.DirectActions(listOf(HeadlessToolAction("root_exec",

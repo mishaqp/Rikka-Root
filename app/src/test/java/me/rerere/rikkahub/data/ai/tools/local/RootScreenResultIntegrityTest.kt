@@ -158,6 +158,36 @@ class RootScreenResultIntegrityTest {
         assertTrue(result.containsKey("warning"))
     }
 
+    @Test fun `uncertain after observation retains diagnostics and stops headless follow up`() = runBlocking {
+        for (code in listOf("root_output_incomplete", "root_cleanup_unconfirmed")) {
+            commands.clear()
+            var accepted = false
+            val service = service { command ->
+                when {
+                    command.startsWith("input tap") -> { accepted = true; RootProcessResult(exitCode = 0) }
+                    accepted && command.startsWith("uiautomator dump") -> RootProcessResult(
+                        exitCode = 7, error = code, stdout = "partial observation", stderr = "warning",
+                    )
+                    else -> null
+                }
+            }
+            val result = execute(tapTool(service), buildJsonObject { put("x", 10); put("y", 20) })
+            assertEquals(true, result["success"]?.jsonPrimitive?.booleanOrNull)
+            assertFalse("The accepted tap remains a success", result.containsKey("error"))
+            assertEquals(1, commands.count { it.startsWith("input tap") })
+            val after = result["after"]!!.jsonObject
+            assertEquals(code, after["tree_error"]?.jsonPrimitive?.content)
+            val diagnostic = after["root_result"] as? JsonObject
+            assertNotNull("Observation diagnostics were lost: $result", diagnostic)
+            assertEquals(code, diagnostic?.get("error")?.jsonPrimitive?.content)
+            assertEquals("7", diagnostic?.get("exit_code")?.jsonPrimitive?.content)
+            assertEquals("partial observation", diagnostic?.get("stdout")?.jsonPrimitive?.content)
+            assertEquals("warning", diagnostic?.get("stderr")?.jsonPrimitive?.content)
+            assertEquals(HeadlessToolFailure(HeadlessTaskStatus.INDETERMINATE, code),
+                classifyHeadlessToolFailure("tap", listOf(UIMessagePart.Text(result.toString()))))
+        }
+    }
+
     @Test fun `locally blocked text does not borrow a successful snapshot as its command result`() = runBlocking {
         val service = service { null }
         val result = execute(setTextTool(service), buildJsonObject {

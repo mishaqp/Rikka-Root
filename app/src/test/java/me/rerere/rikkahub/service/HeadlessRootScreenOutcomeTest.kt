@@ -62,7 +62,10 @@ class HeadlessRootScreenOutcomeTest {
             put("success", true)
             put("after", buildJsonObject { put("tree_error", "command_timeout") })
         }.toString()))
-        assertNull(classifyHeadlessToolFailure("tap", accepted))
+        assertEquals(HeadlessToolFailure(HeadlessTaskStatus.INDETERMINATE, "command_timeout"),
+            classifyHeadlessToolFailure("tap", accepted))
+        assertNull("A native non-screen result is not an observation envelope",
+            classifyHeadlessToolFailure("workspace_read_file", accepted))
         assertNull(classifyHeadlessToolFailure("unregistered_reader", ordinary))
     }
 }

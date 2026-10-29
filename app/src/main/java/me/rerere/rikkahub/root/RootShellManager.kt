@@ -283,7 +283,9 @@ private class HeadlessRootSession private constructor(
                 "timeout", "cancelled" -> capturedResult(request, error = "command_timeout",
                     reason = "Время root-команды истекло. Вывод может быть неполным. Проверьте, что успело выполниться, перед новым вызовом; команда автоматически не повторяется.")
                 "not_root", "failed" -> { close(); interactionRequired() }
-                else -> if (outcome.startsWith("output_incomplete:")) {
+                else -> if (outcome.startsWith("cleanup_unconfirmed:")) {
+                    quarantine(request, exitCode = outcome.substringAfter(':').toInt())
+                } else if (outcome.startsWith("output_incomplete:")) {
                     val code = outcome.substringAfter(':').toInt()
                     capturedResult(request, exitCode = code, error = "root_output_incomplete",
                         reason = "Вывод Root-команды может быть неполным. Проверьте результат перед новым вызовом; команда автоматически не повторяется.")
@@ -295,7 +297,8 @@ private class HeadlessRootSession private constructor(
             active.delete()
             // runInterruptible clears interruption when it throws. Preserve it after guardian acknowledgment.
             awaitCleanup(result)
-            if (acknowledgement(result, nonce) == null) quarantine()
+            val outcome = acknowledgement(result, nonce)
+            if (outcome == null || outcome.startsWith("cleanup_unconfirmed:")) quarantine()
             Thread.currentThread().interrupt()
             throw error
         } catch (_: java.io.IOException) {
@@ -322,19 +325,24 @@ private class HeadlessRootSession private constructor(
         return outcome.takeIf {
             it in setOf("timeout", "cancelled", "not_root", "failed") ||
                 it.toIntOrNull()?.let { code -> code in 0..255 } == true ||
-                (it.startsWith("output_incomplete:") && it.substringAfter(':').toIntOrNull()?.let { code -> code in 0..255 } == true)
+                ((it.startsWith("output_incomplete:") || it.startsWith("cleanup_unconfirmed:")) &&
+                    it.substringAfter(':').toIntOrNull()?.let { code -> code in 0..255 } == true)
         }
     }
 
-    private fun quarantine(request: File? = null): RootProcessResult {
+    private fun quarantine(request: File? = null, exitCode: Int? = null): RootProcessResult {
         retainControl = true
         close()
         val error = "root_cleanup_unconfirmed"
-        val reason = "Завершение Root-команды не подтверждено. Фоновая сессия закрыта; проверьте процессы на устройстве. Команда не повторяется."
-        // A lost acknowledgement cannot establish an exit status, but output already captured
-        // from this request is still useful. Never lose it or infer success from its contents.
-        return request?.let { runCatching { capturedResult(it, error = error, reason = reason) }.getOrNull() }
-            ?: RootProcessResult(error = error, reason = reason)
+        val reason = if (exitCode == null) {
+            "Завершение Root-команды не подтверждено. Фоновая сессия закрыта; проверьте процессы на устройстве. Команда не повторяется."
+        } else {
+            "Код выхода команды получен, но остановка связанных процессов не подтверждена. Сессия закрыта; проверьте процессы на устройстве. Команда не повторяется."
+        }
+        // A lost acknowledgement cannot establish an exit status. A nonce-bound guardian
+        // acknowledgement can preserve an independently observed status despite cleanup failure.
+        return request?.let { runCatching { capturedResult(it, exitCode = exitCode, error = error, reason = reason) }.getOrNull() }
+            ?: RootProcessResult(exitCode = exitCode, error = error, reason = reason)
     }
 
     private fun awaitCleanup(result: File) {
@@ -584,6 +592,10 @@ private class HeadlessRootSession private constructor(
                     done
                     # A late completion cannot override cancellation/the app's expired deadline.
                     [ -f "${'$'}request/active" ] || outcome=cancelled
+                    known_exit=
+                    case "${'$'}outcome" in
+                        [0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5]) known_exit=${'$'}outcome ;;
+                    esac
                     rm -f "${'$'}request/active"
                     # A late leader cannot run after active is removed. Allow bounded publication.
                     count=20
@@ -634,6 +646,9 @@ private class HeadlessRootSession private constructor(
                         case "${'$'}outcome" in
                             [0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5]) outcome="output_incomplete:${'$'}outcome" ;;
                         esac
+                    fi
+                    if [ "${'$'}outcome" = cleanup_unconfirmed ] && [ -n "${'$'}known_exit" ]; then
+                        outcome="cleanup_unconfirmed:${'$'}known_exit"
                     fi
                     rm -f "${'$'}request/out.pipe" "${'$'}request/err.pipe" "${'$'}request/completed.pipe" "${'$'}request/release.pipe"
                     finish "${'$'}outcome"

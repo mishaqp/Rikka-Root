@@ -119,6 +119,7 @@ internal fun screenStateJson(svc: RootScreenService, screenChanged: Boolean?, se
         if (screenChanged != null) put("screen_changed", screenChanged)
         if (settleTimedOut) put("settle", "timeout")
         svc.lastTreeError?.let { put("tree_error", it) }
+        svc.lastObservationResult?.let { put("root_result", rootScreenDiagnostic(it)) }
     }
 }
 

@@ -354,10 +354,17 @@ internal fun classifyHeadlessToolFailure(name: String, output: List<UIMessagePar
         }
         if (name in setOf("batch_copy", "batch_move", "batch_delete") &&
             (value["failed"] as? JsonArray)?.isNotEmpty() == true) return HeadlessToolFailure(HeadlessTaskStatus.FAILED, "tool_failed")
+        val screenTool = localOptionForHeadlessTool(name) == LocalToolOption.ScreenAutomation
         val failure = value["error"]?.let { it != kotlinx.serialization.json.JsonNull && it != JsonPrimitive(false) } == true ||
             value["success"] == JsonPrimitive(false)
+        if (!failure && screenTool && value["success"] == JsonPrimitive(true)) {
+            val observationError = ((value["after"] as? JsonObject)?.get("tree_error") as? JsonPrimitive)
+                ?.takeIf { it.isString }?.content
+            if (observationError in rootIndeterminateErrors) {
+                return HeadlessToolFailure(HeadlessTaskStatus.INDETERMINATE, observationError!!)
+            }
+        }
         if (!failure) continue
-        val screenTool = localOptionForHeadlessTool(name) == LocalToolOption.ScreenAutomation
         if (name == "root_exec" || screenTool) {
             // Only these native machine codes are allowed into persistent history; no source/output text.
             // The action's own native error takes precedence over auxiliary command diagnostics.

@@ -215,6 +215,37 @@ class RootPersistentSessionTest(private val brokerShell: String) {
         }
     }
 
+    @Test(timeout = 15_000) fun `unconfirmed drain cleanup retains independently acknowledged command exit`() = runBlocking {
+        Fixture(folder.newFolder(), brokerShell).use { fixture ->
+            assertEquals(RootStatus.READY, fixture.manager.verifyRoot(prepareHeadless = true))
+            val interrupted = File(fixture.directory, "drain-interrupted")
+            fixture.executable("dd", """
+                target=${'$'}(readlink /proc/${'$'}${'$'}/fd/1)
+                case "${'$'}target" in
+                  */stdout)
+                    /bin/dd "${'$'}@"
+                    touch ${q(interrupted.path)}
+                    kill -KILL "${'$'}PPID"
+                    exit 0;;
+                esac
+                exec /bin/dd "${'$'}@"
+            """.trimIndent())
+            val effect = File(fixture.directory, "drain-cleanup-runs")
+            val result = fixture.manager.exec(
+                "echo once >> ${q(effect.path)}; printf partial; printf warning >&2; exit 7", 5_000, headless = true,
+            )
+            assertTrue("The drain process was interrupted after reading its output", interrupted.exists())
+            assertEquals("root_cleanup_unconfirmed", result.error)
+            assertEquals(7, result.exitCode)
+            assertEquals("partial", result.stdout)
+            assertEquals("warning", result.stderr)
+            assertEquals(listOf("once"), effect.readLines())
+            assertFalse("Unconfirmed cleanup must quarantine the session", fixture.manager.isHeadlessReady())
+            assertEquals("root_interaction_required", fixture.manager.exec("echo twice >> ${q(effect.path)}", 1_000, headless = true).error)
+            assertEquals(listOf("once"), effect.readLines())
+        }
+    }
+
     @Test(timeout = 15_000) fun `fallback timeout reports unconfirmed cleanup when cancellation su fails`() = runBlocking {
         Fixture(folder.newFolder(), brokerShell).use { fixture ->
             fixture.executable("mkfifo", "exit 1")

@@ -46,6 +46,21 @@ private val uncertainRootOutcomes = setOf(
     "command_timeout", "root_cleanup_unconfirmed", "root_execution_indeterminate", "root_output_incomplete",
 )
 
+internal fun rootScreenDiagnostic(command: RootProcessResult): JsonObject = buildJsonObject {
+    put("backend", "root")
+    put("success", command.error == null && command.exitCode == 0)
+    put("stdout", command.stdout)
+    put("stderr", command.stderr)
+    command.exitCode?.let { put("exit_code", it) }
+    command.error?.let { put("error", it) }
+    command.reason?.let { put("reason", it) }
+    if (command.stdoutTruncated || command.stderrTruncated) {
+        put("truncated", true)
+        put("stdout_truncated", command.stdoutTruncated)
+        put("stderr_truncated", command.stderrTruncated)
+    }
+}
+
 /** Only the transport changes: Agent tools continue to use selectors, traversal and envelopes. */
 class RootScreenService internal constructor(
     internal val context: Context,
@@ -65,6 +80,8 @@ class RootScreenService internal constructor(
     internal var lastFailure: String? = null
         private set
     internal var lastTreeError: String? = null
+        private set
+    internal var lastObservationResult: RootProcessResult? = null
         private set
     internal var currentFocus: String = ""
         private set
@@ -88,6 +105,7 @@ class RootScreenService internal constructor(
             try {
                 lastFailure = null
                 lastCommandResult = null
+                lastObservationResult = null
                 exceptionDetail = null
                 exceptionStage = null
                 if (validateBeforeWake != null) {
@@ -156,21 +174,7 @@ class RootScreenService internal constructor(
         if (result["error"] == null || lastFailure == null && lastTreeError == null) return result
         // Local validation/clipboard failures did not fail the preceding snapshot command.
         if (command.error == null && command.exitCode == 0 && lastTreeError == null) return result
-        val diagnostic = buildJsonObject {
-            put("backend", "root")
-            put("success", command.error == null && command.exitCode == 0)
-            put("stdout", command.stdout)
-            put("stderr", command.stderr)
-            command.exitCode?.let { put("exit_code", it) }
-            command.error?.let { put("error", it) }
-            command.reason?.let { put("reason", it) }
-            if (command.stdoutTruncated || command.stderrTruncated) {
-                put("truncated", true)
-                put("stdout_truncated", command.stdoutTruncated)
-                put("stderr_truncated", command.stderrTruncated)
-            }
-        }
-        return JsonObject(result + ("root_result" to diagnostic))
+        return JsonObject(result + ("root_result" to rootScreenDiagnostic(command)))
     }
 
     private fun exceptionDiagnostic() = buildJsonObject {
@@ -265,9 +269,13 @@ class RootScreenService internal constructor(
 
     internal suspend fun refreshAfterSnapshot() {
         val priorFailure = lastFailure
+        lastObservationResult = null
         refreshSnapshot(includeTree = true)
         // A failed observation after an accepted action must not report that action as failed.
         lastFailure?.let { lastTreeError = it }
+        if (lastTreeError != null) {
+            lastObservationResult = lastCommandResult?.takeIf { it.error != null || it.exitCode != 0 }
+        }
         lastFailure = priorFailure
     }
 
