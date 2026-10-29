@@ -42,7 +42,7 @@ class RootCommandTransportPreservationTest(
             if (headless) assertEquals(RootStatus.READY, manager.verifyRoot(prepareHeadless = true))
             val result = manager.exec(command, 2_000, headless = headless)
 
-            assertEquals(caseName, null, result.error)
+            assertEquals(caseName, if (fallback) "root_output_incomplete" else null, result.error)
             assertEquals(caseName, 0, result.exitCode)
             assertEquals(caseName, expectedOutput, result.stdout)
             assertEquals(caseName, "", result.stderr)

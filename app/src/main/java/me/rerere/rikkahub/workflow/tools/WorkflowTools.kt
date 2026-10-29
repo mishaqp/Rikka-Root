@@ -414,6 +414,9 @@ internal fun workflowRunMessage(status: String, error: String?): String {
     if (error?.contains("execution_interrupted") == true) {
         return "Выполнение сценария остановлено. Часть действий могла выполниться. Проверьте состояние перед повторным запуском; автоматически не повторяйте действия."
     }
+    if (error?.contains("root_output_incomplete") == true) {
+        return "Вывод Root-команды может быть неполным. Проверьте состояние перед новым запуском; автоматически не повторяйте действия."
+    }
     if (error != null && listOf("root_cleanup_unconfirmed", "root_execution_indeterminate", "tool_result_indeterminate").any { it in error }) {
         return "Часть действий могла выполниться; результат неизвестен. Проверьте состояние перед новым запуском; автоматически не повторяйте действия."
     }

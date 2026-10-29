@@ -32,6 +32,62 @@ class RootScreenResultIntegrityTest {
     private val context: Context get() = RuntimeEnvironment.getApplication()
     private val commands = mutableListOf<String>()
 
+    @Test fun `incomplete root output on tap retains exit and streams without replay`() = runBlocking {
+        shadowOf(context.getSystemService(PowerManager::class.java)).setIsInteractive(true)
+        val service = service { command ->
+            if (command.startsWith("input tap")) RootProcessResult(exitCode = 0, stdout = "partial", stderr = "warning", error = "root_output_incomplete") else null
+        }
+        val result = execute(tapTool(service), buildJsonObject { put("x", 10); put("y", 20) })
+        assertEquals("root_output_incomplete", result["error"]?.jsonPrimitive?.content)
+        assertTrue(result.toString(), result["reason"]!!.jsonPrimitive.content.contains("вывод", ignoreCase = true))
+        val diagnostic = result["root_result"]!!.jsonObject
+        assertEquals("0", diagnostic["exit_code"]?.jsonPrimitive?.content)
+        assertEquals("partial", diagnostic["stdout"]?.jsonPrimitive?.content)
+        assertEquals("warning", diagnostic["stderr"]?.jsonPrimitive?.content)
+        assertEquals(1, commands.count { it.startsWith("input tap") })
+    }
+
+    @Test fun `incomplete root output during wake stops before tap without replay`() = runBlocking {
+        shadowOf(context.getSystemService(PowerManager::class.java)).setIsInteractive(false)
+        val service = service { command ->
+            if (command == "input keyevent 224") RootProcessResult(exitCode = 0, stdout = "wake partial", error = "root_output_incomplete") else null
+        }
+        val result = execute(tapTool(service), buildJsonObject { put("x", 10); put("y", 20) })
+        assertEquals("root_output_incomplete", result["error"]?.jsonPrimitive?.content)
+        assertEquals("wake partial", result["root_result"]!!.jsonObject["stdout"]?.jsonPrimitive?.content)
+        assertEquals(1, commands.count { it == "input keyevent 224" })
+        assertFalse(commands.any { it.startsWith("input tap") })
+    }
+
+    @Test fun `incomplete root output during pre-action tree stops before tap`() = runBlocking {
+        shadowOf(context.getSystemService(PowerManager::class.java)).setIsInteractive(true)
+        val service = service { command ->
+            if (command.startsWith("uiautomator dump")) RootProcessResult(exitCode = 0, stdout = "tree partial", error = "root_output_incomplete") else null
+        }
+        val result = execute(tapTool(service), buildJsonObject { put("x", 10); put("y", 20) })
+        assertEquals("root_output_incomplete", result["error"]?.jsonPrimitive?.content)
+        assertEquals("tree partial", result["root_result"]!!.jsonObject["stdout"]?.jsonPrimitive?.content)
+        assertEquals(1, commands.count { it.startsWith("uiautomator dump") })
+        assertFalse(commands.any { it.startsWith("input tap") })
+    }
+
+    @Test fun `uncertain root wake or tree never proceeds to tap`() = runBlocking {
+        for (code in listOf("command_timeout", "root_cleanup_unconfirmed", "root_execution_indeterminate")) {
+            for (wake in listOf(true, false)) {
+                commands.clear()
+                shadowOf(context.getSystemService(PowerManager::class.java)).setIsInteractive(!wake)
+                val service = service { command ->
+                    if (wake && command == "input keyevent 224" || !wake && command.startsWith("uiautomator dump"))
+                        RootProcessResult(error = code, stdout = "partial") else null
+                }
+                val result = execute(tapTool(service), buildJsonObject { put("x", 10); put("y", 20) })
+                assertEquals("wake=$wake code=$code result=$result", code, result["error"]?.jsonPrimitive?.content)
+                assertEquals("partial", result["root_result"]!!.jsonObject["stdout"]?.jsonPrimitive?.content)
+                assertFalse("wake=$wake code=$code: $commands", commands.any { it.startsWith("input tap") })
+            }
+        }
+    }
+
     @Test fun `every failed root screen action keeps both streams and actual exit status`() = runBlocking {
         for (name in listOf("tap", "long_press", "swipe", "click_node", "set_text", "scroll", "global_action", "wake_screen", "take_screenshot")) {
             commands.clear()

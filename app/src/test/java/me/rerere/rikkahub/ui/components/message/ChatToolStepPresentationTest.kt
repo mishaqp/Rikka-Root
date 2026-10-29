@@ -159,6 +159,13 @@ class ChatToolStepPresentationTest {
         assertTrue(ssh.toString().contains("remote warning"))
     }
 
+    @Test fun incompleteRootOutputExplainsWarningAndRetainsBothStreams() {
+        val result = preview("root_exec", """{"success":false,"error":"root_output_incomplete","stdout":"partial","stderr":"warning","exit_code":0}""")
+        listOf("вывод", "неполн", "partial", "warning").forEach {
+            assertTrue("Incomplete result must be explicit and preserve output: $result", result.toString().contains(it, ignoreCase = true))
+        }
+    }
+
     @Test fun nonzeroCommandExitPreservesStreamsAndExplainsFailureInPreviewAndDetails() {
         val explanation = "Команда завершилась с ошибкой (код 7). Проверьте вывод и результат перед новым запуском."
         listOf("root_exec", "ssh_exec", "ssh_exec_saved", "termux_run_command", "workspace_shell").forEach { tool ->

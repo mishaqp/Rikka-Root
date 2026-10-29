@@ -219,6 +219,8 @@ class HeadlessTaskRunnerTest {
             assertEquals(HeadlessToolFailure(HeadlessTaskStatus.INDETERMINATE, code),
                 classifyHeadlessToolFailure("root_exec", envelope(RootProcessResult(error = code))))
         }
+        assertEquals(HeadlessToolFailure(HeadlessTaskStatus.INDETERMINATE, "root_output_incomplete"),
+            classifyHeadlessToolFailure("root_exec", envelope(RootProcessResult(exitCode = 0, stdout = "partial", error = "root_output_incomplete"))))
         for (code in listOf("root_interaction_required", "root_approval_required", "root_not_granted", "root_command_blocked")) {
             assertEquals(HeadlessToolFailure(HeadlessTaskStatus.BLOCKED, code),
                 classifyHeadlessToolFailure("root_exec", envelope(RootProcessResult(error = code))))
@@ -228,6 +230,15 @@ class HeadlessTaskRunnerTest {
         assertNull(classifyHeadlessToolFailure("unregistered_reader", arbitrary))
         assertNull(classifyHeadlessToolFailure("mcp__Reader__read", arbitrary))
         assertNull(classifyHeadlessToolFailure("root_exec", envelope(RootProcessResult(exitCode = 0, stdout = "{\"error\":\"root_cleanup_unconfirmed\"}"))))
+    }
+
+    @Test fun nestedScreenRootIncompleteOutputIsIndeterminateWithoutReplay() {
+        val output = listOf(UIMessagePart.Text(buildJsonObject {
+            put("error", "screenshot_unavailable")
+            put("root_result", buildJsonObject { put("error", "root_output_incomplete"); put("exit_code", 0); put("stdout", "partial") })
+        }.toString()))
+        assertEquals(HeadlessToolFailure(HeadlessTaskStatus.INDETERMINATE, "root_output_incomplete"),
+            classifyHeadlessToolFailure("take_screenshot", output))
     }
     @Test fun actualRootToolWithoutForegroundBrokerReportsBlockedSafeCode() = runBlocking {
         val fixture = Fixture(toolsOverride = listOf(buildRootTool(RootShellManager(suExecutable = "/nonexistent-no-launch"))))

@@ -554,6 +554,7 @@ private val knownErrors = mapOf(
     "tool_execution_indeterminate" to "Исход неизвестен: выполнение было прервано",
     "process_interrupted" to "Прервано: приложение было закрыто. Часть действий могла выполниться. Проверьте результат и запустите действие вручную.",
     "root_cleanup_unconfirmed" to "Не удалось подтвердить завершение команды",
+    "root_output_incomplete" to "Вывод команды может быть неполным — проверьте результат перед повторным запуском",
     "tool_not_found" to "Инструмент недоступен в этом ответе",
     "tool_cancelled_wall_clock" to "Истёк общий лимит времени на инструменты",
     "invalid_arguments" to "Неверные параметры вызова",

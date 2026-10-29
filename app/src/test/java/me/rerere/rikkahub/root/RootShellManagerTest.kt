@@ -273,8 +273,9 @@ class RootShellManagerTest {
             val calls = log.readLines().size
             val nested = "echo \$\$ > '${escapedPid.path}'; exec sleep 30"
             val before = System.nanoTime()
-            val result = manager.exec("setsid sh -c \"${nested.replace("$", "\\$")}\" & sleep 0.1; printf done", 300, headless = true)
-            assertTrue("guardian must bound output draining", (System.nanoTime() - before) / 1_000_000 < 2_000)
+            val result = manager.exec("setsid sh -c \"${nested.replace("$", "\\$")}\" & sleep 0.1; printf done", 1_000, headless = true)
+            assertTrue("guardian must bound output draining", (System.nanoTime() - before) / 1_000_000 < 4_000)
+            assertEquals("root_output_incomplete", result.error)
             assertEquals(0, result.exitCode)
             assertEquals("done", result.stdout)
             assertEquals("next", manager.exec("printf next", 1_000, headless = true).stdout)
@@ -482,12 +483,11 @@ class RootShellManagerTest {
         script.writeText("""
             #!/bin/sh
             printf '%s\n' called >> '${log.path}'
-            if [ "${'$'}2" = 'id -u' ]; then
-              printf '%s\n' '$uid'
-              exit $probeExit
-            fi
             PATH='${bin.path}':${'$'}PATH
             export PATH
+            case "${'$'}2" in
+              *RIKKA_ROOT_PROBE_*) id() { printf '%s\n' '$uid'; return $probeExit; }; eval "${'$'}2";;
+            esac
             exec /bin/sh -c "${'$'}2"
         """.trimIndent() + "\n")
         assertTrue(script.setExecutable(true))
@@ -570,7 +570,8 @@ class RootShellManagerTest {
     }
 
     @Test fun `accepts a root manager banner only when final uid is zero`() = runBlocking {
-        val (su, _) = fakeSu("KernelSU\n0")
+        val (su, _) = fakeSu()
+        su.writeText(su.readText().replaceFirst("#!/bin/sh\n", "#!/bin/sh\nprintf 'KernelSU\\n'\n"))
         assertEquals(RootStatus.READY, trackedManager(suExecutable = su.path).verifyRoot())
     }
 
@@ -596,7 +597,7 @@ class RootShellManagerTest {
         try { job.await() } catch (_: CancellationException) {}
         assertEquals(RootStatus.UNCHECKED, manager.status.value)
         assertFalse(ProcessHandle.of(processId).map { it.isAlive }.orElse(false))
-        script.writeText("#!/bin/sh\nprintf '0\\n'\n")
+        script.writeText("#!/bin/sh\nid() { printf '0\\n'; }\neval \"\$2\"\n")
         assertEquals(RootStatus.READY, manager.verifyRoot())
     }
 

@@ -25,6 +25,7 @@ private fun subagentErrorMessage(code: String): String = when (code) {
     "result_storage_unavailable" -> "Задача завершена, но результат не удалось сохранить. Скопируйте его из чата и проверьте свободное место."
     "process_interrupted" -> "Прервано: приложение было закрыто. Часть действий могла выполниться. Проверьте результат и запустите субагента вручную."
     "cancelled", "execution_cancelled" -> "Субагент остановлен. Проверьте выполненные действия перед повторным запуском."
+    "root_output_incomplete" -> "Вывод Root-команды может быть неполным. Проверьте результат на устройстве перед повторным запуском."
     "execution_interrupted", "deadline_exceeded", "command_timeout", "root_cleanup_unconfirmed", "root_execution_indeterminate", "tool_result_indeterminate" -> "Выполнение субагента прервано; результат действий может быть неполным. Проверьте его на устройстве перед повторным запуском."
     "root_command_blocked", "web_content_blocked" -> "Действие субагента заблокировано проверкой безопасности. Проверьте команду и источники данных."
     "workspace_unavailable" -> "Рабочая среда субагента недоступна. Откройте текущий workspace и проверьте его готовность."

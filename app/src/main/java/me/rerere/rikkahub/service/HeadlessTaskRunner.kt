@@ -325,7 +325,7 @@ class HeadlessTaskRunner internal constructor(
 
 internal data class HeadlessToolFailure(val status: HeadlessTaskStatus, val errorCode: String)
 
-private val rootIndeterminateErrors = setOf("command_timeout", "root_cleanup_unconfirmed", "root_execution_indeterminate")
+private val rootIndeterminateErrors = setOf("command_timeout", "root_cleanup_unconfirmed", "root_execution_indeterminate", "root_output_incomplete")
 private val rootBlockedErrors = setOf("root_interaction_required", "root_approval_required", "root_not_granted", "root_command_blocked")
 private val nativeEnvelopeTools = setOf(
     "mini_apps", "publish_mini_app",

@@ -28,6 +28,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WorkflowFailureMessageTest {
+    @Test fun `incomplete root output warns about effects and prohibits automatic replay`() {
+        val message = workflowRunMessage("FAILED", "action 0: root_output_incomplete")
+        assertTrue(message, message.contains("вывод", ignoreCase = true) && message.contains("неполн", ignoreCase = true))
+        assertTrue(message, message.contains("автоматически не повтор", ignoreCase = true))
+    }
     private val codes = listOf("root_cleanup_unconfirmed", "root_execution_indeterminate", "tool_result_indeterminate")
     private val definition = WorkflowDefinition(
         id = "workflow", name = "Workflow", trigger = TriggerSpec.Manual,

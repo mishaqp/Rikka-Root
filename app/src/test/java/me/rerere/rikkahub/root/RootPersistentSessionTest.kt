@@ -19,6 +19,40 @@ import org.junit.runners.Parameterized
 class RootPersistentSessionTest(private val brokerShell: String) {
     @get:Rule val folder = TemporaryFolder()
 
+    @Test(timeout = 15_000) fun `root probe accepts su banner when actual uid probe completes`() = runBlocking {
+        Fixture(folder.newFolder(), brokerShell).use { fixture ->
+            fixture.su.writeText("#!/bin/sh\nPATH=${q(fixture.bin.path)}:\"\$PATH\"\nexport PATH\nprintf 'su banner\\n'\nexec ${q(brokerShell)} -c \"\$2\"\n")
+            assertEquals(RootStatus.READY, fixture.manager.verifyRoot())
+        }
+    }
+
+    @Test(timeout = 15_000) fun `root probe accepts CRLF with su banner`() = runBlocking {
+        Fixture(folder.newFolder(), brokerShell).use { fixture ->
+            fixture.su.writeText("#!/bin/sh\nPATH=${q(fixture.bin.path)}:\"\$PATH\"\nexport PATH\nprintf 'banner\\r\\n'\n${q(brokerShell)} -c \"\$2\" | awk '{printf \"%s\\r\\n\", \$0}'\n")
+            assertEquals(RootStatus.READY, fixture.manager.verifyRoot())
+        }
+    }
+
+    @Test(timeout = 15_000) fun `root probe rejects banner zero when uid command never ran`() = runBlocking {
+        Fixture(folder.newFolder(), brokerShell).use { fixture ->
+            fixture.su.writeText("#!/bin/sh\nprintf '0\\n'\nexit 0\n")
+            assertEquals(RootStatus.DENIED_OR_FAILED, fixture.manager.verifyRoot())
+        }
+    }
+
+    @Test(timeout = 15_000) fun `root probe rejects reader failure even if uid output completed`() = runBlocking {
+        Fixture(folder.newFolder(), brokerShell).use { fixture ->
+            val completed = File(fixture.directory, "probe-completed")
+            fixture.su.writeText("#!/bin/sh\nPATH=${q(fixture.bin.path)}:\"\$PATH\"\nexport PATH\n${q(brokerShell)} -c \"\$2\"\ntouch ${q(completed.path)}\nsleep 2\n")
+            val probe = async { fixture.manager.verifyRoot() }
+            awaitFile(completed)
+            val stderrReaders = Thread.getAllStackTraces().keys.filter { it.name == "root-stderr" && it.isAlive }
+            assertEquals("one active stderr reader", 1, stderrReaders.size)
+            stderrReaders.single().interrupt()
+            assertEquals(RootStatus.DENIED_OR_FAILED, probe.await())
+        }
+    }
+
     @Test(timeout = 20_000) fun `foreground commands reuse one su and keep independent shell state`() = runBlocking {
         Fixture(folder.newFolder(), brokerShell).use { fixture ->
             val timings = mutableListOf<Long>()
@@ -174,10 +208,52 @@ class RootPersistentSessionTest(private val brokerShell: String) {
             val effect = File(fixture.directory, "fallback-once")
             val command = "echo once >> ${q(effect.path)}; printf fallback; exit 7"
             val result = fixture.manager.exec(command, 3_000)
-            assertNull(result.error)
+            assertEquals("root_output_incomplete", result.error)
             assertEquals(7, result.exitCode)
             assertEquals("fallback", result.stdout)
             assertEquals(listOf("once"), effect.readLines())
+        }
+    }
+
+    @Test(timeout = 15_000) fun `fallback timeout reports unconfirmed cleanup when cancellation su fails`() = runBlocking {
+        Fixture(folder.newFolder(), brokerShell).use { fixture ->
+            fixture.executable("mkfifo", "exit 1")
+            fixture.su.writeText("#!/bin/sh\nPATH=${q(fixture.bin.path)}:\"\$PATH\"\nexport PATH\ncase \"\$2\" in *'kill -KILL -'*) exit 126;; esac\nexec ${q(brokerShell)} -c \"\$2\"\n")
+            val leaderStat = File(fixture.directory, "fallback-leader-stat")
+            try {
+                val result = fixture.manager.exec("IFS= read -r stat < /proc/\$PPID/stat; printf '%s\\n' \"\$stat\" > ${q(leaderStat.path)}; printf BEFORE; sleep 30", 1_000)
+                assertEquals("root_cleanup_unconfirmed", result.error)
+                assertNull(result.exitCode)
+                assertTrue("cleanup warning must be explicit", result.reason.orEmpty().contains("останов"))
+            } finally {
+                if (leaderStat.isFile) {
+                    val leader = processIdentity(leaderStat.readText().trim())
+                    if (isAlive(leader) && leader.pid == leader.pgid && leader.pid == leader.sid) {
+                        ProcessBuilder("/bin/kill", "-KILL", "--", "-${leader.pid}").start().waitFor()
+                    }
+                }
+            }
+        }
+    }
+
+    @Test(timeout = 15_000) fun `fallback timeout confirms stopped group and prevents late effects`() = runBlocking {
+        Fixture(folder.newFolder(), brokerShell).use { fixture ->
+            fixture.executable("mkfifo", "exit 1")
+            val effects = File(fixture.directory, "fallback-timeout-runs")
+            val late = File(fixture.directory, "fallback-timeout-late")
+            val result = fixture.manager.exec(
+                "echo once >> ${q(effects.path)}; printf BEFORE; sleep 3; touch ${q(late.path)}", 800,
+            )
+            assertEquals("command_timeout", result.error)
+            assertNull(result.exitCode)
+            assertEquals("BEFORE", result.stdout)
+            delay(3_200)
+            assertFalse("The timed-out group must not run the late action", late.exists())
+            assertEquals(listOf("once"), effects.readLines())
+            val next = fixture.manager.exec("printf NEXT_OK", 3_000)
+            assertEquals("root_output_incomplete", next.error)
+            assertEquals(0, next.exitCode)
+            assertEquals("NEXT_OK", next.stdout)
         }
     }
 
@@ -198,6 +274,139 @@ class RootPersistentSessionTest(private val brokerShell: String) {
                 assertFalse(fixture.manager.isHeadlessReady())
                 assertEquals(2, fixture.calls.readLines().size)
             } finally { release.writeText("go"); job.cancelAndJoin() }
+        }
+    }
+
+    @Test(timeout = 30_000) fun `delayed real drains retain both streams before successful acknowledgement`() = runBlocking {
+        Fixture(folder.newFolder(), brokerShell).use { fixture ->
+            fixture.manager.verifyRoot(prepareHeadless = true)
+            val starts = File(fixture.directory, "drains-started")
+            fixture.executable("dd", "printf 'started\\n' >> ${q(starts.path)}\nsleep 0.6\nexec /bin/dd \"\$@\"")
+            for (headless in listOf(false, true)) {
+                val effects = File(fixture.directory, "effects-$headless")
+                val result = fixture.manager.exec("echo once >> ${q(effects.path)}; printf 'out\\n'; printf 'err\\n' >&2", 5_000, headless = headless)
+                assertNull("headless=$headless stdout=${result.stdout} stderr=${result.stderr}", result.error)
+                assertEquals(0, result.exitCode)
+                assertEquals("out\n", result.stdout)
+                assertEquals("err\n", result.stderr)
+                assertEquals(listOf("once"), effects.readLines())
+            }
+            assertTrue("both real drain paths must have run", starts.readLines().size >= 4)
+        }
+    }
+
+    @Test(timeout = 20_000) fun `deadline stops a sleeping command even if its drains are delayed`() = runBlocking {
+        Fixture(folder.newFolder(), brokerShell).use { fixture ->
+            fixture.manager.verifyRoot(prepareHeadless = true)
+            val effects = File(fixture.directory, "timeout-effects")
+            val late = File(fixture.directory, "timeout-late")
+            fixture.executable("dd", "sleep 0.6\nexec /bin/dd \"\$@\"")
+            val started = System.nanoTime()
+            val result = fixture.manager.exec("echo once >> ${q(effects.path)}; printf BEFORE; printf WARN >&2; sleep 2; touch ${q(late.path)}", 1_000)
+            val elapsedMs = (System.nanoTime() - started) / 1_000_000
+            assertEquals("command_timeout", result.error)
+            assertNull(result.exitCode)
+            assertEquals("BEFORE", result.stdout)
+            assertEquals("WARN", result.stderr)
+            assertEquals(listOf("once"), effects.readLines())
+            assertTrue("timeout cleanup must remain bounded: $elapsedMs ms", elapsedMs < 4_500)
+            delay(2_200)
+            assertFalse("timed out command must not write a late marker", late.exists())
+            assertEquals(listOf("once"), effects.readLines())
+        }
+    }
+
+    @Test(timeout = 30_000) fun `stalled drains return incomplete error with actual exit and partial streams without replay`() = runBlocking {
+        Fixture(folder.newFolder(), brokerShell).use { fixture ->
+            fixture.manager.verifyRoot(prepareHeadless = true)
+            val outStarted = File(fixture.directory, "out-second-read")
+            val errStarted = File(fixture.directory, "err-second-read")
+            fixture.executable("dd", """
+                target=${'$'}(readlink /proc/${'$'}${'$'}/fd/1)
+                case "${'$'}target" in
+                  */stdout) first=${q(File(fixture.directory, "out-first").path)}; second=${q(outStarted.path)};;
+                  */stderr) first=${q(File(fixture.directory, "err-first").path)}; second=${q(errStarted.path)};;
+                  *) exec /bin/dd "${'$'}@";;
+                esac
+                if [ -f "${'$'}first" ]; then touch "${'$'}second"; sleep 10; else touch "${'$'}first"; fi
+                exec /bin/dd "${'$'}@"
+            """.trimIndent())
+            val effects = File(fixture.directory, "stalled-effects")
+            val result = fixture.manager.exec("""
+                echo once >> ${q(effects.path)}
+                printf out-prefix; printf err-prefix >&2
+                while [ ! -f ${q(outStarted.path)} ] || [ ! -f ${q(errStarted.path)} ]; do sleep 0.01; done
+                printf out-tail; printf err-tail >&2
+                exit 7
+            """.trimIndent(), 5_000)
+            assertEquals("root_output_incomplete", result.error)
+            assertEquals(7, result.exitCode)
+            assertEquals("out-prefix", result.stdout)
+            assertEquals("err-prefix", result.stderr)
+            assertEquals(listOf("once"), effects.readLines())
+            fixture.executable("dd", "exec /bin/dd \"\$@\"")
+            val next = fixture.manager.exec("printf NEXT_OK", 3_000)
+            assertNull(next.error)
+            assertEquals("NEXT_OK", next.stdout)
+            assertEquals(listOf("once"), effects.readLines())
+            assertEquals(2, fixture.calls.readLines().size)
+        }
+    }
+
+    @Test(timeout = 20_000) fun `foreground inherited output fds return incomplete without stopping background child`() = runBlocking {
+        Fixture(folder.newFolder(), brokerShell).use { fixture ->
+            fixture.manager.verifyRoot(prepareHeadless = true)
+            val done = File(fixture.directory, "background-done")
+            val release = File(fixture.directory, "background-release")
+            val start = System.nanoTime()
+            try {
+                val result = fixture.manager.exec("(while [ ! -f ${q(release.path)} ]; do sleep 0.1; done; touch ${q(done.path)}) & printf foreground", 6_000)
+                val elapsedMs = (System.nanoTime() - start) / 1_000_000
+                assertEquals("root_output_incomplete", result.error)
+                assertEquals(0, result.exitCode)
+                assertEquals("foreground", result.stdout)
+                assertTrue("drain cleanup must remain bounded: $elapsedMs ms", elapsedMs < 5_000)
+                assertFalse("background child must still await its release", done.exists())
+                release.writeText("go")
+                withTimeout(6_000) { while (!done.exists()) delay(20) }
+                val next = fixture.manager.exec("printf NEXT_OK", 3_000)
+                assertNull(next.error)
+                assertEquals("NEXT_OK", next.stdout)
+            } finally { release.writeText("go") }
+        }
+    }
+
+    @Test(timeout = 15_000) fun `failed dd reports incomplete output even when drain exits`() = runBlocking {
+        checkFailedCapture("dd")
+    }
+
+    @Test(timeout = 15_000) fun `failed cat reports incomplete output even when drain exits`() = runBlocking {
+        checkFailedCapture("cat")
+    }
+
+    private suspend fun checkFailedCapture(failedTool: String) {
+        Fixture(folder.newFolder(), brokerShell).use { fixture ->
+            fixture.manager.verifyRoot(prepareHeadless = true)
+            val marker = File(fixture.directory, "failed-$failedTool")
+            val fd = if (failedTool == "dd") "1" else "0"
+            fixture.executable(failedTool, """
+                target=${'$'}(readlink /proc/${'$'}${'$'}/fd/$fd)
+                case "${'$'}target" in
+                    */stdout|*/out.pipe)
+                        /bin/$failedTool "${'$'}@"
+                        touch ${q(marker.path)}
+                        exit 91;;
+                esac
+                exec /bin/$failedTool "${'$'}@"
+            """.trimIndent())
+            val effects = File(fixture.directory, "effects-$failedTool")
+            val result = fixture.manager.exec("echo once >> ${q(effects.path)}; printf output; printf warning >&2; exit 7", 5_000)
+            assertTrue("the real $failedTool wrapper was reached", marker.exists())
+            assertEquals("failedTool=$failedTool", "root_output_incomplete", result.error)
+            assertEquals(7, result.exitCode)
+            assertEquals("output", result.stdout)
+            assertEquals("warning", result.stderr)
+            assertEquals(listOf("once"), effects.readLines())
         }
     }
 
@@ -510,7 +719,7 @@ class RootPersistentSessionTest(private val brokerShell: String) {
                 val pid = File(fixture.directory, "detached-pid")
                 try {
                     val result = fixture.manager.exec("sleep 30 >/dev/null 2>&1 & echo \$! > ${q(pid.path)}; printf launched; exit $code", 3_000)
-                    assertNull(result.error)
+                    if (fallback) assertEquals("root_output_incomplete", result.error) else assertNull(result.error)
                     assertEquals(code, result.exitCode)
                     assertEquals("launched", result.stdout)
                     fixture.manager.close()
@@ -586,7 +795,7 @@ class RootPersistentSessionTest(private val brokerShell: String) {
         }
 
         fun writeSu() {
-            su.writeText("#!/bin/sh\nprintf 'called\\n' >> ${q(calls.path)}\nPATH=${q(bin.path)}:\"\$PATH\"\nexport PATH\nif [ \"\$2\" != 'id -u' ]; then\n$beforeBroker\n:\nfi\nexec ${q(transportShell)} -c \"\$2\"\n")
+            su.writeText("#!/bin/sh\nprintf 'called\\n' >> ${q(calls.path)}\nPATH=${q(bin.path)}:\"\$PATH\"\nexport PATH\ncase \"\$2\" in *RIKKA_ROOT_PROBE_*) ;; *)\n$beforeBroker\n:\n;; esac\nexec ${q(transportShell)} -c \"\$2\"\n")
             check(su.setExecutable(true))
         }
 

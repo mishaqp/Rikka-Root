@@ -45,6 +45,7 @@ private fun scheduleJobMessage(code: String): String = when (code) {
     "model_unavailable", "unknown_or_ambiguous_model", "unknown_owner" -> "Ассистент или модель задания недоступны. Проверьте настройки текущего чата и создайте задание заново."
     "root_command_blocked", "web_content_blocked" -> "Действие задания заблокировано проверкой безопасности. Проверьте команду и источники данных задания."
     "process_interrupted" -> "Прервано: приложение было закрыто. Часть действий могла выполниться. Проверьте результат и запустите задание вручную."
+    "root_output_incomplete" -> "Вывод Root-команды может быть неполным. Проверьте результат на устройстве перед повторным запуском."
     "deadline_exceeded", "command_timeout", "execution_cancelled", "execution_interrupted", "root_cleanup_unconfirmed", "root_execution_indeterminate", "tool_result_indeterminate" -> "Выполнение прервано; результат действий может быть неполным. Проверьте его на устройстве перед повторным запуском."
     else -> "Не удалось выполнить операцию с заданием. Проверьте историю, параметры и доступность инструментов, затем повторите вызов."
 }

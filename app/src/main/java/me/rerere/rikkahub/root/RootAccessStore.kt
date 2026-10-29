@@ -167,7 +167,7 @@ class RootAccessStore(private val directory: File) {
         const val MAX_FILE_BYTES = 1_048_576L
         val STATUSES = setOf("process_interrupted", "running", "completed", "cancelled", "command_timeout", "root_approval_required",
             "su_not_available", "root_not_granted", "root_verification_timeout", "root_cleanup_unavailable", "root_interaction_required",
-            "root_cleanup_unconfirmed", "root_execution_indeterminate", "exec_failed", "failed")
+            "root_cleanup_unconfirmed", "root_execution_indeterminate", "root_output_incomplete", "exec_failed", "failed")
     }
 }
 
@@ -198,6 +198,7 @@ fun rootCommandStatusMessage(status: String): String = when (status) {
     "root_interaction_required" -> "Нет фоновой Root-сессии. Откройте настройки Root и нажмите «Открыть root-сессию»; команда не выполнена."
     "root_cleanup_unavailable" -> "Команда не выполнена: нет setsid для безопасной остановки. Проверьте системные команды root."
     "root_cleanup_unconfirmed" -> "Остановка команды не подтверждена. Проверьте процессы на устройстве перед повторным запуском."
+    "root_output_incomplete" -> "Вывод команды может быть неполным. Проверьте результат перед повторным запуском."
     "root_execution_indeterminate" -> "Результат команды неизвестен. Проверьте устройство перед повторным запуском."
     else -> "Команда завершилась с ошибкой. Проверьте её вывод перед повторным запуском."
 }

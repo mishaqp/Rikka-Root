@@ -73,14 +73,28 @@ class RootShellManager(
         }
         _status.value = RootStatus.CHECKING
         try {
+            // The nonce brackets the actual id output, so a su banner containing "0"
+            // cannot be mistaken for a completed UID probe when output is incomplete.
+            val token = "RIKKA_ROOT_PROBE_${UUID.randomUUID().toString().replace("-", "")}"
+            val begin = "${token}_BEGIN"
+            val end = "${token}_END"
+            val probeCommand = "printf '\\n%s\\n' '$begin'; id -u; probe_status=\$?; printf '%s\\n' '$end'; exit \$probe_status"
             val probe = runInterruptible(Dispatchers.IO) {
-                RootProcessRunner.run(listOf(suExecutable, "-c", "id -u"), probeTimeoutMs, 512, 1_024)
+                RootProcessRunner.run(listOf(suExecutable, "-c", probeCommand), probeTimeoutMs, 512, 1_024, requireConfirmedOutput = false)
             }
+            val output = probe.stdout.replace("\r\n", "\n")
+            val prefix = "\n$begin\n"
+            val suffix = "\n$end\n"
+            val prefixAt = output.indexOf(prefix)
+            val suffixAt = if (prefixAt >= 0) output.indexOf(suffix, prefixAt + prefix.length) else -1
+            val uid = if (suffixAt >= 0) output.substring(prefixAt + prefix.length, suffixAt) else null
             val verified = when {
                 probe.error == "exec_failed" -> RootStatus.UNAVAILABLE
                 probe.error == "command_timeout" -> RootStatus.TIMED_OUT
+                probe.error != null -> RootStatus.DENIED_OR_FAILED
                 probe.exitCode != 0 -> RootStatus.DENIED_OR_FAILED
-                probe.stdout.lineSequence().map(String::trim).filter(String::isNotEmpty).lastOrNull() != "0" -> RootStatus.NOT_ROOT
+                probe.stdoutTruncated || uid == null -> RootStatus.DENIED_OR_FAILED
+                uid != "0" -> RootStatus.NOT_ROOT
                 else -> RootStatus.READY
             }
             cachedStatus = verified
@@ -151,9 +165,9 @@ class RootShellManager(
                         result.copy(error = "root_not_granted", reason = "Команда не получила права root и не выполнена. Повторите проверку Root в настройках.")
                     } else if (session.capabilityUnavailable()) {
                         result.copy(error = "root_cleanup_unavailable", reason = "Команда не выполнена: на устройстве нет setsid для безопасной остановки. Проверьте набор системных команд root.")
-                    } else {
-                        result.copy(reason = session.cleanupError ?: result.reason)
-                    }
+                    } else if (session.cleanupError != null) {
+                        result.copy(error = "root_cleanup_unconfirmed", reason = session.cleanupError)
+                    } else result
                 }
             }
         }
@@ -267,9 +281,13 @@ private class HeadlessRootSession private constructor(
             val outcome = acknowledgement(result, nonce) ?: return quarantine(request)
             return when (outcome) {
                 "timeout", "cancelled" -> capturedResult(request, error = "command_timeout",
-                    reason = "Время root-команды истекло. Проверьте, что успело выполниться, перед новым вызовом; команда автоматически не повторяется.")
+                    reason = "Время root-команды истекло. Вывод может быть неполным. Проверьте, что успело выполниться, перед новым вызовом; команда автоматически не повторяется.")
                 "not_root", "failed" -> { close(); interactionRequired() }
-                else -> outcome.toIntOrNull()?.takeIf { it in 0..255 }?.let { code ->
+                else -> if (outcome.startsWith("output_incomplete:")) {
+                    val code = outcome.substringAfter(':').toInt()
+                    capturedResult(request, exitCode = code, error = "root_output_incomplete",
+                        reason = "Вывод Root-команды может быть неполным. Проверьте результат перед новым вызовом; команда автоматически не повторяется.")
+                } else outcome.toIntOrNull()?.takeIf { it in 0..255 }?.let { code ->
                     capturedResult(request, exitCode = code)
                 } ?: quarantine(request)
             }
@@ -301,7 +319,11 @@ private class HeadlessRootSession private constructor(
         val fields = bytes.toString(Charsets.US_ASCII).split(' ')
         if (fields.size != 2 || fields[0] != nonce) return null
         val outcome = fields[1]
-        return outcome.takeIf { it in setOf("timeout", "cancelled", "not_root", "failed") || it.toIntOrNull()?.let { code -> code in 0..255 } == true }
+        return outcome.takeIf {
+            it in setOf("timeout", "cancelled", "not_root", "failed") ||
+                it.toIntOrNull()?.let { code -> code in 0..255 } == true ||
+                (it.startsWith("output_incomplete:") && it.substringAfter(':').toIntOrNull()?.let { code -> code in 0..255 } == true)
+        }
     }
 
     private fun quarantine(request: File? = null): RootProcessResult {
@@ -509,14 +531,14 @@ private class HeadlessRootSession private constructor(
                                 copied=0
                                 while [ "${'$'}copied" -lt "${'$'}cap" ]; do
                                     block=${'$'}((cap - copied)); [ "${'$'}block" -le 4096 ] || block=4096
-                                    dd bs="${'$'}block" count=1 2>/dev/null
-                                    size=${'$'}(wc -c < "${'$'}request/${'$'}target") || exit 125
+                                    dd bs="${'$'}block" count=1 2>/dev/null || { printf failed > "${'$'}request/${'$'}channel.failed"; break; }
+                                    size=${'$'}(wc -c < "${'$'}request/${'$'}target") || { printf failed > "${'$'}request/${'$'}channel.failed"; break; }
                                     [ "${'$'}size" -gt "${'$'}copied" ] || break
                                     copied=${'$'}size
                                 done
-                            else dd bs=1 count="${'$'}cap" 2>/dev/null
+                            else dd bs=1 count="${'$'}cap" 2>/dev/null || printf failed > "${'$'}request/${'$'}channel.failed"
                             fi
-                            cat >/dev/null
+                            cat >/dev/null || printf failed > "${'$'}request/${'$'}channel.failed"
                             printf done > "${'$'}request/${'$'}channel.done"
                         ' sh "${'$'}request" "${'$'}channel" "${'$'}cap" "${'$'}capture_mode" "${'$'}target" 3>&- 4>&- < "${'$'}request/${'$'}channel.pipe" > "${'$'}request/${'$'}target" &
                     done
@@ -577,12 +599,42 @@ private class HeadlessRootSession private constructor(
                     esac
                     exec 3>&-
                     exec 4>&-
-                    # Let finite queued output drain, then kill exact drain groups; never use an unbounded wait.
-                    count=20
+                    # Allow delayed finite output to drain; descendants can hold the pipe indefinitely.
+                    count=150
                     while { [ ! -f "${'$'}request/out.done" ] || [ ! -f "${'$'}request/err.done" ]; } && [ "${'$'}count" -gt 0 ]; do sleep 0.01; count=${'$'}((count - 1)); done
+                    incomplete=no
                     for channel in out err; do
-                        [ -f "${'$'}request/${'$'}channel.done" ] || stop_group "${'$'}request/${'$'}channel.pid" || outcome=cleanup_unconfirmed
+                        if [ ! -f "${'$'}request/${'$'}channel.done" ]; then
+                            if stop_group "${'$'}request/${'$'}channel.pid"; then
+                                [ -f "${'$'}request/${'$'}channel.done" ] || incomplete=yes
+                            else
+                                # A completed drain can disappear between the marker check and
+                                # stop_group; the marker alone does not prove the leader exited.
+                                identity="${'$'}request/${'$'}channel.pid"
+                                if [ -f "${'$'}request/${'$'}channel.done" ] && [ -s "${'$'}identity" ] &&
+                                    read -r drain_pid drain_started < "${'$'}identity"; then
+                                    case "${'$'}drain_pid:${'$'}drain_started" in
+                                        *[!0-9:]*|:*) outcome=cleanup_unconfirmed ;;
+                                        *:) outcome=cleanup_unconfirmed ;;
+                                        *)
+                                            if [ "${'$'}drain_pid" -gt 1 ] 2>/dev/null && [ "${'$'}drain_started" -gt 0 ] 2>/dev/null; then
+                                                same_process "${'$'}drain_pid" "${'$'}drain_started" && outcome=cleanup_unconfirmed
+                                            else
+                                                outcome=cleanup_unconfirmed
+                                            fi ;;
+                                    esac
+                                else
+                                    outcome=cleanup_unconfirmed
+                                fi
+                            fi
+                        fi
+                        [ ! -f "${'$'}request/${'$'}channel.failed" ] || incomplete=yes
                     done
+                    if [ "${'$'}incomplete" = yes ]; then
+                        case "${'$'}outcome" in
+                            [0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5]) outcome="output_incomplete:${'$'}outcome" ;;
+                        esac
+                    fi
                     rm -f "${'$'}request/out.pipe" "${'$'}request/err.pipe" "${'$'}request/completed.pipe" "${'$'}request/release.pipe"
                     finish "${'$'}outcome"
                 ) </dev/null >/dev/null 2>&1 & guardian=${'$'}!

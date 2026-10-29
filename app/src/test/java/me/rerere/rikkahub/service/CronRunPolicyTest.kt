@@ -36,6 +36,7 @@ class CronRunPolicyTest {
     }
     @Test fun onlyFixedOutcomeCodesEnterHistory() {
         assertEquals("approval_required", CronRunPolicy.safeOutcome("approval_required"))
+        assertEquals("root_output_incomplete", CronRunPolicy.safeOutcome("root_output_incomplete"))
         assertEquals("execution_failed", CronRunPolicy.safeOutcome("password=xx"))
         assertEquals("execution_failed", CronRunPolicy.safeOutcome("ab"))
         assertNull(CronRunPolicy.safeOutcome(null))

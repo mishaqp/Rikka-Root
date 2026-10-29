@@ -77,7 +77,7 @@ class RootAutomaticToolTest {
         val bin = temp.newFolder()
         File(bin, "id").apply { writeText("#!/bin/sh\nprintf '0\\n'\n"); setExecutable(true) }
         return temp.newFile().apply {
-            writeText("#!/bin/sh\nif [ \"${'$'}2\" = 'id -u' ]; then printf '0\\n'; exit; fi\nPATH='${bin.path}':${'$'}PATH\nexport PATH\nexec /bin/sh -c \"${'$'}2\"\n")
+            writeText("#!/bin/sh\nPATH='${bin.path}':${'$'}PATH\nexport PATH\nexec /bin/sh -c \"${'$'}2\"\n")
             assertTrue(setExecutable(true))
         }
     }

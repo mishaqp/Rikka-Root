@@ -145,12 +145,38 @@ class AutomationToolErrorMessagesTest {
         assertRussianRecovery(entry, "android_permission_required", "code")
     }
 
+    @Test fun `schedule history warns incomplete root output requires checking before retry`() = runBlocking {
+        val repo = mockk<me.rerere.rikkahub.data.repository.ScheduledJobRepository>()
+        val runs = mockk<me.rerere.rikkahub.data.repository.ScheduledJobRunRepository>()
+        coEvery { repo.getOwned(any(), any()) } returns mockk()
+        coEvery { runs.recentWithLookahead(any(), any()) } returns listOf(
+            me.rerere.rikkahub.data.db.entity.ScheduledJobRunEntity("run", "job", 1, "manual", 0,
+                status = "indeterminate", outcomeCode = "root_output_incomplete"),
+        )
+        val tools = createCronJobTools(repo, runs, mockk(),
+            Conversation(assistantId = kotlin.uuid.Uuid.random(), messageNodes = emptyList()), { emptySet() })
+        val entry = execute(tools.first { it.name == "get_job_history" }, """{"id":"job"}""")["runs"]!!.jsonArray.single().jsonObject
+        assertEquals("root_output_incomplete", entry["code"]?.jsonPrimitive?.content)
+        val message = entry["message"]!!.jsonPrimitive.content
+        assertTrue(message, message.contains("вывод", ignoreCase = true) && message.contains("неполн", ignoreCase = true))
+        assertTrue(message, message.contains("Проверьте", ignoreCase = true))
+    }
+
     @Test fun `subagent unknown run and terminal failure preserve codes and explain recovery`() = runBlocking {
         val owner = SubAgentOwner("assistant", "conversation")
         val registry = SubAgentRegistry()
         assertRussianRecovery(execute(subagentGetTool(registry, owner), """{"id":"unknown"}"""), "unknown_run")
         assertRussianRecovery(execute(subagentCancelTool(registry, owner)), "unknown_run")
         assertRussianRecovery(encodeRun(SubAgentRun("id", owner, "test", "model", errorCode = "run_failed")), "run_failed")
+    }
+
+    @Test fun `subagent incomplete root output warns against automatic retry`() {
+        val run = SubAgentRun("id", SubAgentOwner("assistant", "conversation"), "test", "model", errorCode = "root_output_incomplete")
+        val encoded = encodeRun(run)
+        assertEquals("root_output_incomplete", encoded["error"]?.jsonPrimitive?.content)
+        val message = encoded["message"]!!.jsonPrimitive.content
+        assertTrue(message, message.contains("вывод", ignoreCase = true) && message.contains("неполн", ignoreCase = true))
+        assertTrue(message, message.contains("Проверьте", ignoreCase = true))
     }
 
     @Test fun `token usage unavailable chat tells user how to recover`() = runBlocking {

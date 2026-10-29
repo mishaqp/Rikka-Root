@@ -42,6 +42,10 @@ import java.util.UUID
 import kotlin.coroutines.AbstractCoroutineContextElement
 import kotlin.coroutines.CoroutineContext
 
+private val uncertainRootOutcomes = setOf(
+    "command_timeout", "root_cleanup_unconfirmed", "root_execution_indeterminate", "root_output_incomplete",
+)
+
 /** Only the transport changes: Agent tools continue to use selectors, traversal and envelopes. */
 class RootScreenService internal constructor(
     internal val context: Context,
@@ -91,9 +95,10 @@ class RootScreenService internal constructor(
                     if (lastFailure != null) return@withLock failure(lastFailure!!)
                     validateBeforeWake(this)?.let { return@withLock explainScreenResult(it) }
                 }
-                // A failed wake (AOD, refused input) must not block a screen that is already readable;
-                // report it next to the result as before.
+                // A rejected wake (AOD, refused input) need not block a readable screen.
+                // An uncertain root outcome must stop before any further action.
                 val wakeFailed = wakeBeforeSnapshot && !wakeIfNeeded()
+                if (lastFailure in uncertainRootOutcomes) return@withLock failure(lastFailure!!)
                 if (wakeFailed) lastFailure = null
                 refreshSnapshot(treeRequired)
                 if (lastFailure != null) return@withLock failure(lastFailure!!)
@@ -121,6 +126,9 @@ class RootScreenService internal constructor(
         put("error", code)
         put("reason", when (code) {
             "command_timeout" -> "Команда автоматизации экрана не завершилась вовремя; она остановлена и не повторяется."
+            "root_output_incomplete" -> "Вывод root-команды может быть неполным. Проверьте результат на устройстве; действие автоматически не повторяется."
+            "root_cleanup_unconfirmed" -> "Остановка root-команды не подтверждена. Проверьте процессы на устройстве; действие автоматически не повторяется."
+            "root_execution_indeterminate" -> "Результат root-команды неизвестен. Проверьте состояние устройства; действие автоматически не повторяется."
             "root_interaction_required" -> "Для фонового вызова сначала откройте настройки Root и явно проверьте Root."
             "su_not_available", "root_not_granted", "root_verification_timeout" -> "Root недоступен. Проверьте разрешение Rikka-Root в менеджере root и повторите проверку Root в настройках."
             "screen_permission_revoked" -> "Функция отключена или её разрешение отозвано; команда не выполнена."
@@ -222,7 +230,8 @@ class RootScreenService internal constructor(
             if (result.error != null || result.exitCode != 0 || xmlFile.length() !in 1..MAX_XML_BYTES) {
                 lastTreeError = result.error ?: "ui_tree_unavailable"
                 // Root input and screencap remain available when UIAutomator has no tree.
-                if (lastFailure !in setOf("screen_permission_revoked", "root_interaction_required", "su_not_available", "root_not_granted", "root_verification_timeout")) lastFailure = null
+                if (lastFailure !in setOf("screen_permission_revoked", "root_interaction_required", "su_not_available", "root_not_granted", "root_verification_timeout") &&
+                    lastFailure !in uncertainRootOutcomes) lastFailure = null
                 return
             }
             operationStage = "snapshot_tree_decode"

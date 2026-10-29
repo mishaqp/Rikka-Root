@@ -54,31 +54,46 @@ internal class RootCommandSession(private val suExecutable: String, directory: F
 
     /** Runs before destroying the su client, since a Magisk daemon may own the actual child. */
     fun cancel() {
+        // Keep a fail-closed result even if reading identity or launching cleanup throws.
+        cleanupError = "Не удалось подтвердить остановку root-процессов. Проверьте запущенные процессы на устройстве перед новым вызовом."
         active.delete() // A root grant that arrives late must not start the original command.
         val deadline = System.nanoTime() + 2_000_000_000L
         while (process.length() == 0L && System.nanoTime() < deadline) Thread.sleep(10)
         val fields = process.readText().trim().split(Regex("\\s+"))
-        val pid = fields.getOrNull(0)?.toLongOrNull()?.takeIf { it > 1 } ?: return
-        val started = fields.getOrNull(1)?.toLongOrNull()?.takeIf { it > 0 } ?: return
+        val pid = fields.getOrNull(0)?.toLongOrNull()?.takeIf { it > 1 }
+        val started = fields.getOrNull(1)?.toLongOrNull()?.takeIf { it > 0 }
+        if (pid == null || started == null) return
         // Check the recorded kernel start time and session/group identity; a recycled PID is not ours.
         val identityCheck = """
-            stat=${'$'}(cat /proc/$pid/stat 2>/dev/null) || exit 0
+            stat=${'$'}(cat /proc/$pid/stat 2>/dev/null) || exit 126
             rest=${'$'}{stat##*) }
             set -- ${'$'}rest
-            [ "${'$'}3" = "$pid" ] && [ "${'$'}4" = "$pid" ] || exit 0
+            [ "${'$'}3" = "$pid" ] && [ "${'$'}4" = "$pid" ] || exit 126
             shift 19
-            [ "${'$'}1" = "$started" ] || exit 0
+            [ "${'$'}1" = "$started" ] || exit 126
         """.trimIndent()
         // One KILL reaches all current group members while its leader is still identified.
         // A TERM grace period could let the leader exit and strand TERM-ignoring descendants.
         val cleanup = """
             $identityCheck
             kill -KILL -$pid 2>/dev/null || exit 126
+            count=20
+            while [ "${'$'}count" -gt 0 ]; do
+                [ -d /proc/$pid ] || exit 0
+                IFS= read -r final_stat 2>/dev/null < /proc/$pid/stat || exit 126
+                final_rest=${'$'}{final_stat##*) }
+                set -- ${'$'}final_rest
+                case "${'$'}1" in Z|X|x) exit 0;; esac
+                shift 19 || exit 126
+                [ "${'$'}1" = "$started" ] || exit 0
+                sleep 0.01 || exit 126
+                count=${'$'}((count - 1))
+            done
+            exit 126
         """.trimIndent()
-        val result = RootProcessRunner.run(listOf(suExecutable, "-c", cleanup), 3_000, 512, 512)
-        if (result.error != null || result.exitCode != 0) {
-            cleanupError = "Не удалось подтвердить остановку root-процессов. Проверьте запущенные процессы на устройстве перед новым вызовом."
-        }
+        // Cleanup only needs the completed exit status; it does not consume command output.
+        val result = RootProcessRunner.run(listOf(suExecutable, "-c", cleanup), 3_000, 512, 512, requireConfirmedOutput = false)
+        if (result.error == null && result.exitCode == 0) cleanupError = null
     }
 
     override fun close() {

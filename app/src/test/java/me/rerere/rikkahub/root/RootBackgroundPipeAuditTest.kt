@@ -60,7 +60,7 @@ class RootBackgroundPipeAuditTest {
                 // Record ownership before assertions so a RED failure cannot leak a child.
                 childPids += pidFile.readText().trim().toLong()
                 assertEquals(0, result.exitCode)
-                assertNull(result.error)
+                assertEquals("root_output_incomplete", result.error)
                 assertEquals("started", result.stdout)
                 val deadline = System.nanoTime() + 500_000_000L
                 while ((readers() - originalReaders).isNotEmpty() && System.nanoTime() < deadline) Thread.sleep(10)
@@ -83,6 +83,7 @@ class RootBackgroundPipeAuditTest {
                 "sleep 30 >/dev/null & printf '%s' \"\$!\" > ${quote(pidFile.path)}; printf warning >&2; sleep 0.1"), 2_000)
             pid = pidFile.readText().trim().toLong()
             assertEquals(0, result.exitCode)
+            assertEquals("root_output_incomplete", result.error)
             assertEquals("warning", result.stderr)
             val deadline = System.nanoTime() + 500_000_000L
             while ((readers() - originalReaders).isNotEmpty() && System.nanoTime() < deadline) Thread.sleep(10)
@@ -112,7 +113,7 @@ class RootBackgroundPipeAuditTest {
             """.trimIndent()
             val result = RootProcessRunner.run(listOf("/bin/sh", "-c", command), 2_000, 64, 64)
             assertEquals(0, result.exitCode)
-            assertNull(result.error)
+            assertEquals("root_output_incomplete", result.error)
             assertTrue("stdout must retain bytes read before shell exit", result.stdout.isNotEmpty())
             assertTrue("stderr must retain bytes read before shell exit", result.stderr.isNotEmpty())
             val deadline = System.nanoTime() + 500_000_000L
