@@ -107,7 +107,7 @@ fun buildRootTool(manager: RootShellManager, accessStore: RootAccessStore? = nul
                         put("truncated", true)
                         put("stdout_truncated", executed.stdoutTruncated)
                         put("stderr_truncated", executed.stderrTruncated)
-                        put("recovery", "Вывод сокращён. Прочитайте нужный диапазон из сохранённого файла или запросите ограниченный фрагмент отдельной командой чтения. Не повторяйте исходную root-команду вслепую: она могла изменить данные.")
+                        put("recovery", "Вывод сокращён; root_exec автоматически не сохраняет полный вывод в файл. Если он уже записан исходной командой в известный файл, прочитайте нужный диапазон из этого файла. Для проверки результата используйте отдельную команду чтения с ограниченным выводом. Не повторяйте исходную root-команду вслепую: она могла изменить данные.")
                     }
                     executed.exitCode?.let { put("exit_code", it) }
                     executed.error?.let { put("error", it) }

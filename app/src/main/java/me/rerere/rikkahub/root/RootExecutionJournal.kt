@@ -34,7 +34,7 @@ internal suspend fun executeRootToolOnce(
     val started = tool.copy(output = listOf(UIMessagePart.Text(buildJsonObject {
         put("error", "root_execution_indeterminate")
         put("checkpointed_before_launch", true)
-        put("reason", "Выполнение root-команды было прервано; результат неизвестен. Проверьте устройство перед новым вызовом. Эта команда автоматически не повторяется.")
+        put("reason", "Выполнение root-команды было прервано; результат неизвестен. Поле checkpointed_before_launch означает, что служебная отметка сохранена до попытки запуска. После её сохранения команда могла запуститься и изменить данные. Проверьте устройство перед новым вызовом. Эта команда автоматически не повторяется.")
     }.toString())))
     // The checkpoint emission must await the collector's ordered durable-write acknowledgment.
     persistStarted(started)
