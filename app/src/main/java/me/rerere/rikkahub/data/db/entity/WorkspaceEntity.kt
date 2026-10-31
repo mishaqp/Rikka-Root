@@ -5,7 +5,6 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import me.rerere.rikkahub.utils.JsonInstant
-import me.rerere.workspace.Workspace
 import me.rerere.workspace.WorkspaceShellStatus
 
 @Entity(
@@ -39,15 +38,4 @@ data class WorkspaceEntity(
     fun toolApprovalOverrides(): Map<String, Boolean> = runCatching {
         JsonInstant.decodeFromString<Map<String, Boolean>>(toolApprovals)
     }.getOrDefault(emptyMap())
-
-    fun toWorkspace(): Workspace = Workspace(
-        id = id,
-        name = name,
-        root = root,
-        shellStatus = runCatching { WorkspaceShellStatus.valueOf(shellStatus) }
-            .getOrDefault(WorkspaceShellStatus.DISABLED),
-        createdAt = createdAt,
-        updatedAt = updatedAt,
-        lastAccessAt = lastAccessAt,
-    )
 }

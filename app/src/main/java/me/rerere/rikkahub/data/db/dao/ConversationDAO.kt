@@ -25,9 +25,6 @@ interface ConversationDAO {
     @Query("SELECT * FROM conversationentity ORDER BY is_pinned DESC, update_at DESC")
     fun getAll(): Flow<List<ConversationEntity>>
 
-    @Query("SELECT * FROM conversationentity ORDER BY is_pinned DESC, update_at DESC")
-    fun getAllPaging(): PagingSource<Int, ConversationEntity>
-
     @Query("SELECT * FROM conversationentity WHERE assistant_id = :assistantId ORDER BY is_pinned DESC, update_at DESC")
     fun getConversationsOfAssistant(assistantId: String): Flow<List<ConversationEntity>>
 
@@ -46,9 +43,6 @@ interface ConversationDAO {
         sortByCreateTime: Boolean,
     ): PagingSource<Int, LightConversationEntity>
 
-    @Query("SELECT * FROM conversationentity WHERE assistant_id = :assistantId ORDER BY is_pinned DESC, update_at DESC LIMIT :limit")
-    suspend fun getRecentConversationsOfAssistant(assistantId: String, limit: Int): List<ConversationEntity>
-
     @Query("SELECT * FROM conversationentity WHERE title LIKE '%' || :searchText || '%' ORDER BY is_pinned DESC, update_at DESC")
     fun searchConversations(searchText: String): Flow<List<ConversationEntity>>
 
@@ -60,9 +54,6 @@ interface ConversationDAO {
 
     @Query("SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt, folder_id as folderId FROM conversationentity WHERE assistant_id = :assistantId AND title LIKE '%' || :searchText || '%' ORDER BY is_pinned DESC, update_at DESC")
     fun searchConversationsOfAssistantPaging(assistantId: String, searchText: String): PagingSource<Int, LightConversationEntity>
-
-    @Query("SELECT * FROM conversationentity WHERE id = :id")
-    fun getConversationFlowById(id: String): Flow<ConversationEntity?>
 
     @Query("SELECT id FROM conversationentity")
     suspend fun getAllIds(): List<String>
@@ -148,18 +139,7 @@ interface ConversationDAO {
 
     @Query("SELECT assistant_id AS assistantId, COUNT(*) AS count FROM conversationentity GROUP BY assistant_id")
     suspend fun countByAssistant(): List<AssistantConversationCount>
-
-    @Query(
-        "SELECT strftime('%Y-%m-%d', create_at/1000, 'unixepoch', 'localtime') AS day, " +
-            "COUNT(*) AS count " +
-            "FROM conversationentity " +
-            "WHERE create_at >= :startMillis " +
-            "GROUP BY day"
-    )
-    suspend fun getConversationCountPerDay(startMillis: Long): List<ConversationDayCount>
 }
-
-data class ConversationDayCount(val day: String, val count: Int)
 
 data class AssistantConversationCount(val assistantId: String, val count: Int)
 
