@@ -30,7 +30,6 @@
   <string name="setting_page_workflow_detail_stat_last_run_never" translatable="false">Последний запуск: никогда</string>
   <string name="setting_page_workflow_detail_stat_runs_today" translatable="false">Сегодня: %1$d запуск(ов)</string>
   <string name="setting_page_workflows" translatable="false">Сценарии</string>
-  <string name="setting_page_workflows_desc" translatable="false">Автоматизация на основе триггеров: когда на устройстве что-то происходит, выполняется последовательность инструментов.</string>
   <string name="setting_page_workflows_empty" translatable="false">Пока нет сценариев. Попросите ассистента создать один.</string>
   <string name="setting_page_workflows_how_it_works" translatable="false">Как работают сценарии</string>
   <string name="setting_page_workflows_how_it_works_dialog_body" translatable="false">Сценарий состоит из триггера, условий и списка действий. Триггер запускает проверку (WiFi, питание, батарея, экран, расписание или ручной запуск). Все условия должны пройти. Действия выполняются по порядку теми же инструментами, что в чате.\n\nЗапуск происходит в отдельном контексте без диалогов: действуют текущие разрешения владельца, включённые функции и запретный список root-команд. Инструменты, требующие личного подтверждения, блокируются. Результат виден в истории.\n\nТриггеры геозон, чужих уведомлений и активных приложений недоступны: специальные доступы не подключены. Условия заката/рассвета и активного приложения также отключены.</string>

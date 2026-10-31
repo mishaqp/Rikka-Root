@@ -16,8 +16,6 @@
     <string translatable="false" name="assistant_page_local_tools_termux_postgrant_copied">Команда скопирована — вставьте её в Termux.</string>
     <string translatable="false" name="assistant_page_local_tools_termux_verify_no_permission">Разрешение RUN_COMMAND не предоставлено. Выключите и включите Termux, чтобы повторить запрос Android. Без разрешения команды недоступны.</string>
     <string translatable="false" name="assistant_page_local_tools_termux_verify_unexpected">Termux вернул неожиданный результат: %1$s</string>
-    <string translatable="false" name="setting_page_termux">Termux</string>
-    <string translatable="false" name="setting_page_termux_desc">Команды оболочки, таймауты и подключение Termux.</string>
     <string translatable="false" name="setting_termux_title">Termux</string>
     <string translatable="false" name="setting_termux_section_status">Состояние</string>
     <string translatable="false" name="setting_termux_status_app">Приложение Termux</string>
