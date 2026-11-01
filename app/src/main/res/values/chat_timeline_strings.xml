@@ -20,8 +20,6 @@
     <string name="chat_timeline_status_answer" translatable="false">Ожидает ответа</string>
     <string name="chat_timeline_status_answered" translatable="false">Ответ отправлен</string>
     <string name="chat_timeline_scope_actions" translatable="false">Другие варианты разрешения</string>
-    <string name="chat_timeline_generic_title" translatable="false">Работа с инструментом</string>
-    <string name="chat_timeline_server_title" translatable="false">Инструмент сервера</string>
     <string name="chat_timeline_server_input" translatable="false">Входные данные</string>
     <string name="chat_timeline_server_output" translatable="false">Результат</string>
 </resources>
